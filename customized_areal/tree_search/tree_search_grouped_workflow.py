@@ -46,71 +46,85 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
                 type(interaction).__name__,
             )
             continue
+        # When interactions are deserialized from the proxy server (via HTTP),
+        # model_response is None but _cache contains the pre-computed tensor
+        # dict. Use to_tensor_dict() which checks _cache first.
         resp = interaction.model_response
-        if resp is None:
-            logger.warning(
-                "Skipping interaction %s: model_response is None",
-                interaction_id,
-            )
-            continue
+        if resp is not None:
+            seq_tokens = resp.input_tokens + resp.output_tokens
 
-        seq_tokens = resp.input_tokens + resp.output_tokens
+            if (
+                interaction.chat_template_type == "concat"
+                and interaction.parent is not None
+            ):
+                parent_res = interaction.parent.to_tensor_dict()
+                parent_logprobs = parent_res["logprobs"].squeeze(0).tolist()
+                parent_loss_mask = parent_res["loss_mask"].squeeze(0).tolist()
+                parent_versions = parent_res["versions"].squeeze(0).tolist()
+                parent_len = len(parent_logprobs)
+                assert parent_len == len(parent_loss_mask) == len(parent_versions)
 
-        if (
-            interaction.chat_template_type == "concat"
-            and interaction.parent is not None
-        ):
-            parent_res = interaction.parent.to_tensor_dict()
-            parent_logprobs = parent_res["logprobs"].squeeze(0).tolist()
-            parent_loss_mask = parent_res["loss_mask"].squeeze(0).tolist()
-            parent_versions = parent_res["versions"].squeeze(0).tolist()
-            parent_len = len(parent_logprobs)
-            assert parent_len == len(parent_loss_mask) == len(parent_versions)
-
-            if resp.input_len > parent_len:
-                logprobs = (
-                    parent_logprobs
-                    + [0.0] * (resp.input_len - parent_len)
-                    + resp.output_logprobs
-                )
-                loss_mask = (
-                    parent_loss_mask
-                    + [0] * (resp.input_len - parent_len)
-                    + [1] * resp.output_len
-                )
-                versions = (
-                    parent_versions
-                    + [-1] * (resp.input_len - parent_len)
-                    + resp.output_versions
-                )
+                if resp.input_len > parent_len:
+                    logprobs = (
+                        parent_logprobs
+                        + [0.0] * (resp.input_len - parent_len)
+                        + resp.output_logprobs
+                    )
+                    loss_mask = (
+                        parent_loss_mask
+                        + [0] * (resp.input_len - parent_len)
+                        + [1] * resp.output_len
+                    )
+                    versions = (
+                        parent_versions
+                        + [-1] * (resp.input_len - parent_len)
+                        + resp.output_versions
+                    )
+                else:
+                    logger.error(
+                        "concat mode: resp.input_len (%d) <= parent_len (%d) — "
+                        "expected monotonic growth. Zero-filling prompt context.",
+                        resp.input_len,
+                        parent_len,
+                    )
+                    logprobs = [0.0] * resp.input_len + resp.output_logprobs
+                    loss_mask = [0] * resp.input_len + [1] * resp.output_len
+                    versions = [-1] * resp.input_len + resp.output_versions
             else:
-                logger.error(
-                    "concat mode: resp.input_len (%d) <= parent_len (%d) — "
-                    "expected monotonic growth. Zero-filling prompt context.",
-                    resp.input_len,
-                    parent_len,
-                )
                 logprobs = [0.0] * resp.input_len + resp.output_logprobs
                 loss_mask = [0] * resp.input_len + [1] * resp.output_len
                 versions = [-1] * resp.input_len + resp.output_versions
+
+            outcome_reward = interaction.reward if interaction.reward is not None else 0.0
+
+            topk_ids: list[list[int]] = []
+            topk_logp: list[list[float]] = []
+            if resp.output_top_logprobs is not None:
+                for pos_logprobs in resp.output_top_logprobs:
+                    ids = []
+                    logps = []
+                    for token_id, lp in pos_logprobs:
+                        ids.append(token_id)
+                        logps.append(lp)
+                    topk_ids.append(ids)
+                    topk_logp.append(logps)
+        elif interaction.has_tensor_data:
+            # Deserialized from proxy server: _cache is set but model_response
+            # is None. Extract fields from the pre-computed tensor dict.
+            td = interaction.to_tensor_dict()
+            seq_tokens = td["input_ids"].squeeze(0).tolist()
+            logprobs = td["logprobs"].squeeze(0).tolist()
+            loss_mask = td["loss_mask"].squeeze(0).tolist()
+            versions = td["versions"].squeeze(0).tolist()
+            outcome_reward = interaction.reward if interaction.reward is not None else 0.0
+            topk_ids = []
+            topk_logp = []
         else:
-            logprobs = [0.0] * resp.input_len + resp.output_logprobs
-            loss_mask = [0] * resp.input_len + [1] * resp.output_len
-            versions = [-1] * resp.input_len + resp.output_versions
-
-        outcome_reward = interaction.reward if interaction.reward is not None else 0.0
-
-        topk_ids: list[list[int]] = []
-        topk_logp: list[list[float]] = []
-        if resp.output_top_logprobs is not None:
-            for pos_logprobs in resp.output_top_logprobs:
-                ids = []
-                logps = []
-                for token_id, lp in pos_logprobs:
-                    ids.append(token_id)
-                    logps.append(lp)
-                topk_ids.append(ids)
-                topk_logp.append(logps)
+            logger.warning(
+                "Skipping interaction %s: no tensor data (model_response and _cache are both None)",
+                interaction_id,
+            )
+            continue
 
         pn_id: str | None = None
         if interaction.parent is not None:
@@ -200,8 +214,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.rl_loss_weight = rl_loss_weight
         self.distill_loss_weight = distill_loss_weight
 
-        self.tree_store = MCTSTreeStore()
-        self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 
         # Load existing tree checkpoint if present (CROSS_TRAINING mode)
@@ -209,6 +221,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if self.tree_checkpoint_manager.exists():
                 self.tree_store = self.tree_checkpoint_manager.load()
                 logger.info("Loaded MCTS tree checkpoint with cached rollouts")
+            else:
+                self.tree_store = MCTSTreeStore()
+        else:
+            self.tree_store = MCTSTreeStore()
+
+        self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
 
         # Reset trained flags for a fresh training run
         self.tree_store.reset_trained_flags()
@@ -243,6 +261,27 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 node.turn_idx = turn_idx
         return nodes
 
+    async def _retry_episode(
+        self, engine, data: dict[str, Any], group_idx: int,
+        max_retries: int = 5,
+    ) -> Any:
+        """Retry a failed episode until success or max_retries exhausted."""
+        for attempt in range(1, max_retries + 1):
+            result = await self.workflow.arun_episode(engine, data)
+            if not isinstance(result, Exception) and result is not None:
+                return result
+            logger.warning(
+                "Episode %d retry %d/%d %s",
+                group_idx,
+                attempt,
+                max_retries,
+                f"failed: {result}" if isinstance(result, Exception) else "returned None",
+            )
+        logger.error(
+            "Episode %d exhausted all %d retries — skipping", group_idx, max_retries
+        )
+        return None
+
     async def arun_episode(
         self, engine, data: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -270,16 +309,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             results = await asyncio.gather(
                 *[
-                    self.workflow.arun_episode(engine, data)
-                    for _ in range(need_gen)
+                    self._retry_episode(engine, data, query_id, group_idx)
+                    for group_idx in range(need_gen)
                 ],
                 return_exceptions=True,
             )
 
             for group_idx, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.warning(
-                        "Episode %d failed: %s", group_idx, result
+                    logger.error(
+                        "Episode %d unrecoverable: %s", group_idx, result
                     )
                     continue
                 if result is None:

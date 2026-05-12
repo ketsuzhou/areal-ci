@@ -1,6 +1,8 @@
 # customized_areal/tree_search/advantage.py
 from __future__ import annotations
 
+import torch
+
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
 
 from areal.utils import logging
@@ -76,7 +78,9 @@ class TreeAdvantageComputer:
             node_id = getattr(traj, "node_id", None)
             if node_id is None:
                 continue
-            mask = self.tree_store.get_prompt_mask(query_id, node_id)
+            mask = traj.loss_mask
+            if not isinstance(mask, torch.Tensor):
+                mask = torch.tensor(mask, dtype=torch.bool)
             norm_return = self.tree_store.get_normalized_return(node_id)
             traj.advantages = mask.float() * norm_return
             traj.returns = mask.float() * norm_return

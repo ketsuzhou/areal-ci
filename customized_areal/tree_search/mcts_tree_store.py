@@ -119,9 +119,7 @@ def _node_to_tensor_dict(
         "logprobs": torch.tensor(node.logprobs, dtype=torch.float32).unsqueeze(0),
         "versions": torch.tensor(node.versions, dtype=torch.int32).unsqueeze(0),
         "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
-        "rewards": torch.tensor([node.outcome_reward], dtype=torch.float32).unsqueeze(
-            0
-        ),
+        "rewards": torch.tensor(node.outcome_reward, dtype=torch.float32).unsqueeze(0),
         "query_id": [query_id],
         "node_id": [node_id],
         "episode_id": [node.episode_id or ""],
@@ -252,24 +250,6 @@ class MCTSTreeStore:
                 else (node.query_id or "")
             )
             self._insert_single(query_id, node)
-
-    def get_advantages(self, query_id: str, node_id: str) -> torch.Tensor:
-        """Return per-token advantages: Q-value on response tokens, 0 on prompt."""
-        qid, idx = self._node_id_to_key[node_id]
-        node = self.trajectories[qid][idx]
-        q_val = self._q_values.get(node_id, 0.0)
-        seq_len = len(node.input_ids)
-        advantages = torch.zeros(seq_len, dtype=torch.float32)
-        starts, ends = _find_turn_boundaries(node.loss_mask)
-        for start, end in zip(starts, ends):
-            advantages[start:end] = q_val
-        return advantages
-
-    def get_prompt_mask(self, query_id: str, node_id: str) -> torch.Tensor:
-        """Return boolean mask: True for response tokens, False for prompt."""
-        qid, idx = self._node_id_to_key[node_id]
-        node = self.trajectories[qid][idx]
-        return torch.tensor(node.loss_mask, dtype=torch.bool)
 
     def set_trained(self, node_id: str, trained: bool = True) -> None:
         self._trained[node_id] = trained

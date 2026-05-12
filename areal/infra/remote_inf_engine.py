@@ -701,6 +701,9 @@ class RemoteInfEngine(InferenceEngine):
                 "use_TreeSearchGroupedRolloutWorkflow", "False"
             ).lower() == "true"
             if use_tree_search:
+                self.logger.warning(
+                    "use TreeSearchGroupedRolloutWorkflow"
+                )
                 from dotenv import load_dotenv
 
                 # Load .env from the project root (where customized_areal/ lives)
@@ -722,11 +725,13 @@ class RemoteInfEngine(InferenceEngine):
 
                 checkpoint_dir = os.getenv("TREE_SEARCH_CHECKPOINT_DIR", "")
                 advantage_mode = AdvantageMode(
-                    os.getenv("TREE_SEARCH_ADVANTAGE_MODE", "GAE")
+                    os.getenv("TREE_SEARCH_ADVANTAGE_MODE", "GAE").lower()
                 )
-                loss_mode = LossMode(os.getenv("TREE_SEARCH_LOSS_MODE", "GRPO"))
+                loss_mode = LossMode(
+                    os.getenv("TREE_SEARCH_LOSS_MODE", "GRPO").lower()
+                )
                 cache_mode = CacheMode(
-                    os.getenv("TREE_SEARCH_CACHE_MODE", "OFF")
+                    os.getenv("TREE_SEARCH_CACHE_MODE", "OFF").lower()
                 )
                 rl_loss_weight = float(
                     os.getenv("TREE_SEARCH_RL_LOSS_WEIGHT", "1.0")
@@ -746,6 +751,9 @@ class RemoteInfEngine(InferenceEngine):
                     distill_loss_weight=distill_loss_weight,
                 )
             else:
+                self.logger.warning(
+                    "use GroupedRolloutWorkflow"
+                )
                 resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
 
         return resolved

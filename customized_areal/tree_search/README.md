@@ -117,8 +117,6 @@ assistant markers.
 | Method                                  | Description                                                                |
 | --------------------------------------- | -------------------------------------------------------------------------- |
 | `insert_batch(trajectories)`            | Insert trajectories (Node objects) from rollout; skip already-cached nodes |
-| `get_advantages(query_id, node_id)`     | Per-token Q-value tensor expanded by turn response boundaries              |
-| `get_prompt_mask(query_id, node_id)`    | Boolean mask: True for response tokens                                     |
 | `get_q_value(node_id)`                  | Raw Q-value (mean reward) for a trajectory                                 |
 | `set_trained(node_id)` / `is_trained()` | Mark/check whether a trajectory has been used                              |
 | `get_untrained_count(query_id)`         | Count untrained trajectories for a query                                   |

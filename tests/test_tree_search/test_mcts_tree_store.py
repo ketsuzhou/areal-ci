@@ -285,44 +285,6 @@ class TestMCTSTreeStoreInsertBatch:
         assert len(store.trajectories["q1"]) == 1
 
 
-class TestMCTSTreeStoreAdvantages:
-    def test_get_advantages_single_turn(self):
-        store = MCTSTreeStore()
-        traj = _make_traj(
-            [1, 2, 3, 4, 5], [0, 0, 1, 1, 1], reward=2.0, query_id="q1", node_id="t1"
-        )
-        store.insert_batch([traj])
-        seq_id = traj.node_id
-        adv = store.get_advantages("q1", seq_id)
-        assert adv.shape == torch.Size([5])
-        assert torch.allclose(adv[:2], torch.zeros(2))
-        assert torch.allclose(adv[2:], torch.full((3,), 2.0))
-
-    def test_get_advantages_multi_turn(self):
-        store = MCTSTreeStore()
-        traj = _make_traj(
-            [1, 2, 3, 4, 5, 6, 7, 8],
-            [0, 0, 1, 1, 0, 0, 1, 1],
-            reward=0.75,
-            query_id="q1",
-            node_id="t1",
-        )
-        store.insert_batch([traj])
-        seq_id = traj.node_id
-        adv = store.get_advantages("q1", seq_id)
-        assert torch.allclose(adv[:2], torch.zeros(2))
-        assert torch.allclose(adv[2:4], torch.full((2,), 0.75))
-        assert torch.allclose(adv[4:6], torch.zeros(2))
-        assert torch.allclose(adv[6:8], torch.full((2,), 0.75))
-
-    def test_get_prompt_mask(self):
-        store = MCTSTreeStore()
-        traj = _make_traj([1, 2, 3, 4, 5], [0, 0, 1, 1, 1], query_id="q1", node_id="t1")
-        store.insert_batch([traj])
-        mask = store.get_prompt_mask("q1", traj.node_id)
-        assert mask.tolist() == [False, False, True, True, True]
-
-
 class TestMCTSTreeStoreTrainedFlag:
     def test_trained_flag_default_false(self):
         store = MCTSTreeStore()
