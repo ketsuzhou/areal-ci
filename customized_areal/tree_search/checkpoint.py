@@ -7,21 +7,10 @@ Old TrieNode-based checkpoints are incompatible and must be discarded.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-
-
-def _sanitize_filename(query_id: str) -> str:
-    """Replace characters unsafe for filenames with underscores and append a
-    hash of the original query_id to guarantee uniqueness.
-    """
-    sanitized = re.sub(r"[^\w\-.]", "_", query_id)
-    query_hash = hashlib.md5(query_id.encode()).hexdigest()[:8]
-    return f"{sanitized}_{query_hash}"
 
 
 class TreeCheckpointManager:
@@ -37,12 +26,9 @@ class TreeCheckpointManager:
         os.makedirs(self.save_dir, exist_ok=True)
 
         # Save per-query trajectory records (atomic per file)
-        query_id_to_file: dict[str, str] = {}
         for query_id, records in tree_store.trajectories.items():
             data = {"records": [self._serialize_record(r) for r in records]}
-            sanitized = _sanitize_filename(query_id)
-            query_id_to_file[query_id] = sanitized
-            filepath = os.path.join(self.save_dir, f"query_{sanitized}.json")
+            filepath = os.path.join(self.save_dir, f"query_{query_id}.json")
             tmp_path = filepath + ".tmp"
             with open(tmp_path, "w") as f:
                 json.dump(data, f)
@@ -59,7 +45,7 @@ class TreeCheckpointManager:
             "visit_counts": {k: v for k, v in tree_store._visit_counts.items()},
             "total_values": {k: v for k, v in tree_store._total_values.items()},
             "q_values": {k: v for k, v in tree_store._q_values.items()},
-            "trained": {k: v for k, v in tree_store._trained.items()},
+            "current_train_id": tree_store.current_train_id,
             "rewards": {k: v for k, v in tree_store._rewards.items()},
             "normalized_advantages": {
                 k: v for k, v in tree_store._normalized_advantages.items()
@@ -68,7 +54,6 @@ class TreeCheckpointManager:
                 k: v for k, v in tree_store._normalized_returns.items()
             },
             "turn_nodes": tree_store._turn_nodes,
-            "query_id_to_file": query_id_to_file,
         }
         meta_path = os.path.join(self.save_dir, "metadata.json")
         tmp_meta = meta_path + ".tmp"
@@ -98,7 +83,7 @@ class TreeCheckpointManager:
             k: v for k, v in metadata.get("total_values", {}).items()
         }
         store._q_values = {k: v for k, v in metadata.get("q_values", {}).items()}
-        store._trained = {k: v for k, v in metadata.get("trained", {}).items()}
+        store.current_train_id = metadata.get("current_train_id", "")
         store._rewards = {k: v for k, v in metadata.get("rewards", {}).items()}
         store._normalized_advantages = {
             k: v for k, v in metadata.get("normalized_advantages", {}).items()
@@ -108,16 +93,11 @@ class TreeCheckpointManager:
         }
         store._turn_nodes = metadata.get("turn_nodes", {})
 
-        # Build reverse mapping from sanitized filenames back to query_ids
-        query_id_to_file = metadata.get("query_id_to_file", {})
-        file_to_query = {v: k for k, v in query_id_to_file.items()}
-
         # Load per-query trajectory records
         for filename in os.listdir(self.save_dir):
             if not filename.startswith("query_") or not filename.endswith(".json"):
                 continue
-            sanitized = filename[len("query_") : -len(".json")]
-            query_id = file_to_query.get(sanitized, sanitized)
+            query_id = filename[len("query_") : -len(".json")]
             filepath = os.path.join(self.save_dir, filename)
             with open(filepath) as f:
                 data = json.load(f)
@@ -140,6 +120,7 @@ class TreeCheckpointManager:
             "episode_id": node.episode_id,
             "turn_idx": node.turn_idx,
             "query_id": node.query_id,
+            "train_id": node.train_id,
         }
         if node.topk_ids is not None:
             data["topk_ids"] = node.topk_ids
@@ -164,6 +145,7 @@ class TreeCheckpointManager:
             episode_id=data.get("episode_id", ""),
             turn_idx=data.get("turn_idx", 0),
             query_id=data.get("query_id", ""),
+            train_id=data.get("train_id", ""),
             topk_ids=data.get("topk_ids"),
             topk_logp=data.get("topk_logp"),
             distill_reward=data.get("distill_reward"),
@@ -178,8 +160,12 @@ class TreeCheckpointManager:
         trained_ids: set[str] = set()
         for query_id, records in tree_store.trajectories.items():
             for node in records:
-                if tree_store.is_trained(node.node_id):
-                    trained_ids.add(node.episode_id)
+                if isinstance(node, dict):
+                    if node.get("train_id", "") == tree_store.current_train_id:
+                        trained_ids.add(node.get("episode_id", ""))
+                else:
+                    if node.train_id == tree_store.current_train_id:
+                        trained_ids.add(node.episode_id)
         data = {"trained_episode_ids": sorted(trained_ids)}
         os.makedirs(recover_checkpoint_dir, exist_ok=True)
         filepath = os.path.join(recover_checkpoint_dir, "trained_episodes.json")
