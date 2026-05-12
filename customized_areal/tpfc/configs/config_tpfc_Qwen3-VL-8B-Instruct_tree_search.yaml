@@ -16,7 +16,6 @@ eval_workflow: ${workflow}
 
 agent:
   trial_name: ${trial_name}
-  train_id: ""
   user_id: ""
   model_name: null
   judge_model_name: null
@@ -44,7 +43,7 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 2
+  max_concurrent_rollouts: 6
   queue_size: null
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 6
@@ -168,7 +167,7 @@ vllm:
 # TPFC dataset configuration - uses generated_training_final.parquet
 # NOTE: All samples have ~1034-1366 tokens due to long system prompts
 train_dataset:
-  batch_size: 2
+  batch_size: 4
   shuffle: false
   pin_memory: true
   num_workers: 2
@@ -177,7 +176,7 @@ train_dataset:
   max_length: 15000
 
 valid_dataset:
-  batch_size: 2
+  batch_size: 4
   pin_memory: true
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
