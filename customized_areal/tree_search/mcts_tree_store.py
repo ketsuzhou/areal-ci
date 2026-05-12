@@ -13,6 +13,7 @@ discarded when it only stored assistant marker tokens as prompt_tokens.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -186,7 +187,7 @@ class MCTSTreeStore:
         self._total_values: dict[str, float] = {}
         self._q_values: dict[str, float] = {}
 
-        self._trained: dict[str, bool] = {}
+        self.current_train_id: str = os.environ.get("TRAIN_ID", "")
         self._rewards: dict[str, float] = {}
 
         # Tree-search episode metadata
@@ -230,7 +231,6 @@ class MCTSTreeStore:
             outcome_reward = node.outcome_reward
 
         self._backup(node_id, outcome_reward)
-        self._trained[node_id] = False
         self._rewards[node_id] = outcome_reward
 
         return node_id
@@ -253,10 +253,29 @@ class MCTSTreeStore:
             self._insert_single(query_id, node)
 
     def set_trained(self, node_id: str, trained: bool = True) -> None:
-        self._trained[node_id] = trained
+        """Stamp the node with current_train_id to mark it as trained."""
+        if not trained:
+            return
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return
+        query_id, idx = key
+        node = self.trajectories[query_id][idx]
+        if isinstance(node, dict):
+            node["train_id"] = self.current_train_id
+        else:
+            node.train_id = self.current_train_id
 
     def is_trained(self, node_id: str) -> bool:
-        return self._trained.get(node_id, False)
+        """A node is trained if its train_id matches the current run's train_id."""
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return False
+        query_id, idx = key
+        node = self.trajectories[query_id][idx]
+        if isinstance(node, dict):
+            return node.get("train_id", "") == self.current_train_id
+        return node.train_id == self.current_train_id
 
     def get_reward(self, node_id: str) -> float:
         return self._rewards.get(node_id, 0.0)
@@ -285,7 +304,7 @@ class MCTSTreeStore:
         return sum(
             1
             for node_id in self._query_node_ids[query_id]
-            if not self._trained.get(node_id, False)
+            if not self.is_trained(node_id)
         )
 
     def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
@@ -293,7 +312,7 @@ class MCTSTreeStore:
             return []
         result: list[str] = []
         for node_id in self._query_node_ids[query_id]:
-            if not self._trained.get(node_id, False):
+            if not self.is_trained(node_id):
                 result.append(node_id)
                 if len(result) >= n_samples:
                     break
@@ -320,23 +339,29 @@ class MCTSTreeStore:
             result.append(node)
         return result
 
-    def reset_trained_flags(self) -> None:
-        for key in self._trained:
-            self._trained[key] = False
-
     def mark_episodes_trained(self, episode_ids: set[str]) -> None:
-        """Set trained flags based on episode IDs.
+        """Set train_id based on episode IDs.
 
-        Nodes whose episode_id is in the given set are marked trained.
-        All other nodes are marked untrained. Episode IDs not present
-        in the store are silently ignored.
+        Nodes whose episode_id is in the given set are stamped with
+        current_train_id. All other nodes have train_id cleared.
+        Episode IDs not present in the store are silently ignored.
         """
-        for node_id in self._trained:
-            self._trained[node_id] = False
         for query_id, records in self.trajectories.items():
             for node in records:
-                if node.episode_id in episode_ids:
-                    self._trained[node.node_id] = True
+                if isinstance(node, dict):
+                    nid_val = node.get("episode_id", "")
+                else:
+                    nid_val = node.episode_id
+                if nid_val in episode_ids:
+                    if isinstance(node, dict):
+                        node["train_id"] = self.current_train_id
+                    else:
+                        node.train_id = self.current_train_id
+                else:
+                    if isinstance(node, dict):
+                        node["train_id"] = ""
+                    else:
+                        node.train_id = ""
 
     def clear(self) -> None:
         """Reset all trajectories, stats, and indices."""
@@ -346,7 +371,6 @@ class MCTSTreeStore:
         self._visit_counts.clear()
         self._total_values.clear()
         self._q_values.clear()
-        self._trained.clear()
         self._rewards.clear()
         self._turn_nodes.clear()
         self._normalized_advantages.clear()
