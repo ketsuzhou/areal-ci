@@ -24,6 +24,7 @@ class TestSetTrainedSignature:
 
     def test_set_trained_accepts_node_id_only(self):
         store = MCTSTreeStore()
+        store.current_train_id = "test_run"
         node = _make_node()
         store.insert_batch([node])
         node_id = node.node_id

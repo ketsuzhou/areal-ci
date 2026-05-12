@@ -285,138 +285,128 @@ class TestMCTSTreeStoreInsertBatch:
         assert len(store.trajectories["q1"]) == 1
 
 
-class TestMCTSTreeStoreTrainedFlag:
-    def test_trained_flag_default_false(self):
+class TestMCTSTreeStoreTrainId:
+    def test_train_id_default_empty(self):
         store = MCTSTreeStore()
         traj = _make_traj([1, 2, 3], [0, 0, 1], query_id="q1", node_id="t1")
         store.insert_batch([traj])
-        assert store.is_trained(traj.node_id) is False
+        assert traj.train_id == ""
 
-    def test_set_trained(self):
+    def test_set_trained_stamps_current_train_id(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         traj = _make_traj([1, 2, 3], [0, 0, 1], query_id="q1", node_id="t1")
         store.insert_batch([traj])
         store.set_trained(traj.node_id, True)
         assert store.is_trained(traj.node_id) is True
+        assert traj.train_id == "run_001"
 
-    def test_get_untrained_count(self):
+    def test_is_trained_false_when_different_train_id(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_002"
+        traj = _make_traj([1, 2, 3], [0, 0, 1], query_id="q1", node_id="t1")
+        store.insert_batch([traj])
+        traj.train_id = "run_001"  # old run
+        assert store.is_trained(traj.node_id) is False
+
+    def test_is_trained_false_when_empty_train_id(self):
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        traj = _make_traj([1, 2, 3], [0, 0, 1], query_id="q1", node_id="t1")
+        store.insert_batch([traj])
+        assert traj.train_id == ""
+        assert store.is_trained(traj.node_id) is False
+
+    def test_get_untrained_count_with_different_train_ids(self):
+        store = MCTSTreeStore()
+        store.current_train_id = "run_002"
         t1 = _make_traj([1, 2, 3], [0, 0, 1], reward=1.0, query_id="q1", node_id="t1")
         t2 = _make_traj([4, 5, 6], [0, 0, 1], reward=0.5, query_id="q1", node_id="t2")
         t3 = _make_traj([7, 8, 9], [0, 0, 1], reward=0.3, query_id="q1", node_id="t3")
         store.insert_batch([t1, t2, t3])
-        assert store.get_untrained_count("q1") == 3
-        store.set_trained(t1.node_id, True)
-        assert store.get_untrained_count("q1") == 2
-
-    def test_reset_trained_flags(self):
-        store = MCTSTreeStore()
-        traj = _make_traj([1, 2, 3], [0, 0, 1], query_id="q1", node_id="t1")
-        store.insert_batch([traj])
-        store.set_trained(traj.node_id, True)
-        store.reset_trained_flags()
-        assert store.is_trained(traj.node_id) is False
+        t1.train_id = "run_002"  # trained in current run
+        t2.train_id = "run_001"  # trained in old run
+        # t3.train_id = "" (untrained)
+        assert store.get_untrained_count("q1") == 2  # t2 and t3
+        store.set_trained(t2.node_id, True)
+        assert store.get_untrained_count("q1") == 1  # only t3
 
     def test_mark_episodes_trained(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            node_id="ep_a_1",
-            episode_id="ep_a",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2],
-            versions=[0, 0, 0],
-            node_id="ep_b_1",
-            episode_id="ep_b",
-            outcome_reward=0.5,
-            query_id="q1",
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
         )
         n3 = Node(
-            input_ids=[7, 8, 9],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.3],
-            versions=[0, 0, 0],
-            node_id="ep_a_2",
-            episode_id="ep_a",
-            outcome_reward=0.3,
-            query_id="q1",
+            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3], versions=[0, 0, 0],
+            node_id="ep_a_2", episode_id="ep_a", outcome_reward=0.3, query_id="q1",
         )
         store.insert_batch([n1, n2, n3])
         store.mark_episodes_trained({"ep_a"})
         assert store.is_trained(n1.node_id) is True
+        assert n1.train_id == "run_001"
         assert store.is_trained(n2.node_id) is False
+        assert n2.train_id == ""
         assert store.is_trained(n3.node_id) is True
+        assert n3.train_id == "run_001"
 
     def test_mark_episodes_trained_resets_others(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            node_id="ep_a_1",
-            episode_id="ep_a",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2],
-            versions=[0, 0, 0],
-            node_id="ep_b_1",
-            episode_id="ep_b",
-            outcome_reward=0.5,
-            query_id="q1",
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
         store.set_trained(n2.node_id, True)
         store.mark_episodes_trained({"ep_b"})
         assert store.is_trained(n1.node_id) is False
+        assert n1.train_id == ""
         assert store.is_trained(n2.node_id) is True
+        assert n2.train_id == "run_001"
 
     def test_mark_episodes_trained_empty_set(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            node_id="ep_a_1",
-            episode_id="ep_a",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
         )
         store.insert_batch([n1])
         store.set_trained(n1.node_id, True)
         store.mark_episodes_trained(set())
         assert store.is_trained(n1.node_id) is False
+        assert n1.train_id == ""
 
     def test_mark_episodes_trained_unknown_episode(self):
         """Episode IDs not in the store are silently ignored."""
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            node_id="ep_a_1",
-            episode_id="ep_a",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
         )
         store.insert_batch([n1])
         store.mark_episodes_trained({"nonexistent_episode"})
         assert store.is_trained(n1.node_id) is False
+        assert n1.train_id == ""
 
     def test_get_reward(self):
         store = MCTSTreeStore()
@@ -494,6 +484,7 @@ class TestMCTSTreeStoreLoadTrajectories:
 
     def test_load_trajectories_only_untrained(self):
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         t1 = _make_traj([1, 2, 3], [0, 0, 1], reward=1.0, query_id="q1", node_id="t1")
         t2 = _make_traj([4, 5, 6], [0, 0, 1], reward=0.5, query_id="q1", node_id="t2")
         store.insert_batch([t1, t2])

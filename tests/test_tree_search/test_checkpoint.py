@@ -5,6 +5,10 @@ from customized_areal.tree_search.mcts_tree_store import (
     _find_turn_boundaries,
 )
 
+import itertools
+
+_node_id_counter = itertools.count(1)
+
 
 def _make_node(
     input_ids: list[int],
@@ -12,7 +16,10 @@ def _make_node(
     *,
     reward: float = 1.0,
     query_id: str = "q1",
+    node_id: str | None = None,
 ) -> Node:
+    if node_id is None:
+        node_id = f"n{next(_node_id_counter)}"
     return Node(
         input_ids=input_ids,
         loss_mask=loss_mask,
@@ -20,6 +27,7 @@ def _make_node(
         versions=[-1] * len(input_ids),
         outcome_reward=reward,
         query_id=query_id,
+        node_id=node_id,
     )
 
 
@@ -65,7 +73,9 @@ class TestTreeCheckpointManager:
         loaded = manager.load()
         t3 = _make_node([9, 10], [0, 1], reward=1.0, query_id="q3")
         loaded.insert_batch([t3])
-        assert t3.node_id == 3  # 2 existing + 1 new
+        # Verify the node was inserted with its provider-assigned node_id
+        assert t3.node_id in loaded._node_id_to_key
+        assert "q3" in loaded.trajectories
 
     def test_load_preserves_trajectory_data(self, tmp_path):
         manager = TreeCheckpointManager(str(tmp_path))
@@ -92,14 +102,16 @@ class TestTreeCheckpointManager:
         node_ids = loaded._query_node_ids["q2"]
         assert loaded._q_values[node_ids[0]] == 0.5
 
-    def test_load_preserves_trained_flags(self, tmp_path):
+    def test_load_preserves_train_id(self, tmp_path):
         manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()
+        store.current_train_id = "run_001"
         node_ids = store._query_node_ids["q1"]
         store.set_trained(node_ids[0], True)
         manager.save(store)
 
         loaded = manager.load()
+        assert loaded.current_train_id == "run_001"
         assert loaded.is_trained(node_ids[0]) is True
 
     def test_load_preserves_turn_boundaries(self, tmp_path):
@@ -128,6 +140,7 @@ class TestTreeCheckpointManager:
             loss_mask=[0, 0, 1, 1, 1],
             logprobs=[-0.1, -0.2, -0.3, -0.4, -0.5],
             versions=[-1, -1, 1, 1, 1],
+            node_id="distill_node",
             outcome_reward=1.0,
             query_id="q1",
             topk_ids=[[10, 20], [30, 40], [50, 60], [70, 80], [90, 100]],
@@ -205,6 +218,7 @@ class TestTreeCheckpointManager:
     def test_save_and_load_trained_episodes(self, tmp_path):
         manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()
+        store.current_train_id = "run_001"
         node_ids = store._query_node_ids["q1"]
         store.set_trained(node_ids[0], True)
 
@@ -239,6 +253,7 @@ class TestTreeCheckpointManager:
 
         manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()
+        store.current_train_id = "run_001"
 
         recover_dir = str(tmp_path / "recover_checkpoint")
         TreeCheckpointManager.save_trained_episodes(recover_dir, store)
@@ -249,11 +264,13 @@ class TestTreeCheckpointManager:
     def test_save_trained_episodes_with_episode_ids(self, tmp_path):
         """Nodes with explicit episode_id should be tracked correctly."""
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
             input_ids=[1, 2, 3],
             loss_mask=[0, 0, 1],
             logprobs=[0.0, 0.0, -0.1],
             versions=[0, 0, 0],
+            node_id="ep_alpha_node",
             episode_id="ep_alpha",
             outcome_reward=1.0,
             query_id="q1",
@@ -263,6 +280,7 @@ class TestTreeCheckpointManager:
             loss_mask=[0, 0, 1],
             logprobs=[0.0, 0.0, -0.2],
             versions=[0, 0, 0],
+            node_id="ep_beta_node",
             episode_id="ep_beta",
             outcome_reward=0.5,
             query_id="q1",
@@ -281,56 +299,39 @@ class TestTreeCheckpointManager:
 
 class TestTrainedEpisodesRestoreIntegration:
     def test_save_restore_cycle(self, tmp_path):
-        """Full save → load → mark_episodes_trained cycle."""
+        """Full save -> load -> mark_episodes_trained cycle."""
         store = MCTSTreeStore()
+        store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            episode_id="ep_1",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="n1", episode_id="ep_1", outcome_reward=1.0, query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2],
-            versions=[0, 0, 0],
-            episode_id="ep_2",
-            outcome_reward=0.5,
-            query_id="q2",
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="n2", episode_id="ep_2", outcome_reward=0.5, query_id="q2",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
 
-        # Save trained episodes
         recover_dir = str(tmp_path / "recover_checkpoint")
         TreeCheckpointManager.save_trained_episodes(recover_dir, store)
 
-        # Simulate a fresh store (as if loaded from tree checkpoint)
         fresh_store = MCTSTreeStore()
+        fresh_store.current_train_id = "run_001"
         fresh_n1 = Node(
-            input_ids=[1, 2, 3],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1],
-            versions=[0, 0, 0],
-            episode_id="ep_1",
-            outcome_reward=1.0,
-            query_id="q1",
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="fn1", episode_id="ep_1", outcome_reward=1.0, query_id="q1",
         )
         fresh_n2 = Node(
-            input_ids=[4, 5, 6],
-            loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2],
-            versions=[0, 0, 0],
-            episode_id="ep_2",
-            outcome_reward=0.5,
-            query_id="q2",
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="fn2", episode_id="ep_2", outcome_reward=0.5, query_id="q2",
         )
         fresh_store.insert_batch([fresh_n1, fresh_n2])
 
-        # Restore trained flags from sidecar
         trained_episodes = TreeCheckpointManager.load_trained_episodes(recover_dir)
         assert trained_episodes is not None
         fresh_store.mark_episodes_trained(trained_episodes)
@@ -352,6 +353,7 @@ class TestTrainedEpisodesRestoreIntegration:
             loss_mask=[0, 0, 1],
             logprobs=[0.0, 0.0, -0.1],
             versions=[0, 0, 0],
+            node_id="n_trained",
             episode_id="ep_trained",
             outcome_reward=1.0,
             query_id="q1",
@@ -361,11 +363,13 @@ class TestTrainedEpisodesRestoreIntegration:
             loss_mask=[0, 0, 1],
             logprobs=[0.0, 0.0, -0.2],
             versions=[0, 0, 0],
+            node_id="n_untrained",
             episode_id="ep_untrained",
             outcome_reward=0.5,
             query_id="q1",
         )
         store.insert_batch([n1, n2])
+        store.current_train_id = "run_001"
         # n1 is trained, n2 is not
         store.set_trained(n1.node_id, True)
 
