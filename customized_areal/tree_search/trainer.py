@@ -1,39 +1,25 @@
 # customized_areal/tree_search/trainer.py
-"""MCTS Tree Backup PPOTrainer.
+"""PPOTrainer with tree-search-aware rollout via .env flag.
 
-Subclass of PPOTrainer that adds MCTS tree backup to PPO training.
+All cache logic, tree ops, and checkpoint saving happen inside
+TreeSearchGroupedRolloutWorkflow (activated by .env flag
+use_TreeSearchGroupedRolloutWorkflow=True in customized_areal/.env).
 
-Tree insert and advantage computation happen in _cache_aware_prepare_batch
-(where query_id / node_id are still available), before the
-concat_padded_tensors pipeline drops non-tensor metadata.
-
-Flow:
-1. _cache_aware_prepare_batch: insert trajectories into tree, compute tree
-   advantages/returns (TREE mode), mark trained, save checkpoint
-2. compute_advantages: GAE runs and overwrites advantages/returns; the patch
-   restores tree-computed values (saved pre-GAE in local scope)
-3. ppo_update: uses restored tree advantages/returns
+This class only overrides:
+- _create_train_engine: uses MultiCandidateFSDPPPOActor when distill loss
+  is enabled
+- train: applies/restores the distill loss PPOActor patch when loss_mode
+  != GRPO
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from customized_areal.tree_search.advantage import TreeAdvantageComputer
-from customized_areal.tree_search.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.config import (
-    AdvantageMode,
-    CacheMode,
     LossMode,
-    RolloutCacheConfig,
     TreeBackupConfig,
 )
-from customized_areal.tree_search.mcts_tree_store import (
-    MCTSTreeStore,
-    Node,
-    _node_to_tensor_dict,
-)
-from customized_areal.tree_search.patches import TreeSearchPatches
 
 from areal import PPOTrainer
 from areal.utils import logging
@@ -42,146 +28,26 @@ from areal.utils.environ import is_single_controller
 logger = logging.getLogger("TreeBackupPPOTrainer")
 
 
-def _mark_batch_trained(tree_store: MCTSTreeStore, trajectories: list[Node]) -> None:
-    """Mark all trajectories in a batch as trained after tree backup."""
-    count = 0
-    for traj in trajectories:
-        node_id = getattr(traj, "node_id", None)
-        if node_id is not None:
-            tree_store.set_trained(node_id, True)
-            count += 1
-    if count:
-        logger.debug(f"Marked {count} trajectories as trained")
-
-
-class _CacheAwareBatchBuilder:
-    """Splits prompts into cached/partially-cached/not-cached groups."""
-
-    def __init__(self, tree_store: MCTSTreeStore, n_samples: int):
-        self.tree_store = tree_store
-        self.n_samples = n_samples
-
-    def split_prompts(
-        self, prompts: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Split prompts into cached and needs-generation groups.
-
-        Query ID derivation fallback chain:
-        1. ``prompt["query_id"]`` — dataset-provided string (preferred)
-        2. Empty string (no tree lookup possible)
-
-        Returns:
-            cached: list of dicts with keys: prompt, query_id, cached_count,
-                need_gen_count
-            need_gen: list of dicts with keys: prompt, query_id
-        """
-        cached = []
-        need_gen = []
-
-        for prompt in prompts:
-            query_id = prompt.get("query_id") or ""
-
-            untrained_count = (
-                self.tree_store.get_untrained_count(query_id) if query_id else 0
-            )
-
-            logger.debug(
-                f"Prompt query_id={query_id}: {untrained_count} untrained "
-                f"(need {self.n_samples})"
-            )
-
-            if untrained_count > 0:
-                cached_count = min(untrained_count, self.n_samples)
-                need_gen_count = max(0, self.n_samples - untrained_count)
-                cached.append(
-                    {
-                        "prompt": prompt,
-                        "query_id": query_id,
-                        "cached_count": cached_count,
-                        "need_gen_count": need_gen_count,
-                    }
-                )
-            else:
-                need_gen.append({"prompt": prompt, "query_id": query_id})
-
-        return cached, need_gen
-
-    def load_cached_trajectories(
-        self, cached_prompts: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Load cached trajectories for prompts with available rollouts.
-
-        Returns: flat list of trajectory dicts (shape [1, seq_len] each)
-        """
-        all_trajs = []
-        for item in cached_prompts:
-            query_id = item["query_id"]
-            if not query_id or item["cached_count"] == 0:
-                continue
-            nodes = self.tree_store.load_trajectories(query_id, item["cached_count"])
-            for node in nodes:
-                traj_dict = _node_to_tensor_dict(
-                    node, query_id, getattr(node, "node_id", 0)
-                )
-                all_trajs.append(traj_dict)
-        return all_trajs
-
-
 class CacheAwarePPOTrainer(PPOTrainer):
-    """PPOTrainer with rollout caching and tree backup.
+    """PPOTrainer with tree-search-aware rollout via .env flag.
 
-    On each training step:
-    1. _cache_aware_prepare_batch:
-       a. Check cache / generate trajectories
-       b. Insert into MCTS tree (while query_id is available)
-       c. Compute tree advantages/returns on Node fields (TREE mode)
-       d. Mark trajectories as trained
-       e. Save tree checkpoint (CROSS_TRAINING mode)
-    2. compute_advantages:
-       a. Patch saves tree values from traj dicts
-       b. GAE runs (overwrites advantages/returns)
-       c. Patch restores saved tree values
-    3. ppo_update uses restored tree advantages/returns
-
-    Monkey-patches are managed by TreeSearchPatches, which applies them
-    at the start of train() and restores them in the finally block.
+    All cache logic, tree ops, and checkpoint saving happen inside
+    TreeSearchGroupedRolloutWorkflow (activated by .env flag).
+    This class only overrides _create_train_engine to use
+    MultiCandidateFSDPPPOActor when distill loss is enabled, and
+    applies the distill loss patch in train().
     """
 
     def __init__(
         self,
         config: Any,
-        cache_config: RolloutCacheConfig | None = None,
+        cache_config: Any | None = None,
         tree_backup_config: TreeBackupConfig | None = None,
         train_dataset: Any | None = None,
         valid_dataset: Any | None = None,
     ):
-        self.cache_config = cache_config or RolloutCacheConfig()
         self.tree_backup_config = tree_backup_config or TreeBackupConfig()
-
         super().__init__(config, train_dataset, valid_dataset)
-
-        self._patches: TreeSearchPatches | None = None
-
-        if (
-            self.cache_config.enabled
-            and self.tree_backup_config.mode != CacheMode.OFF
-        ):
-            self._init_tree_components()
-            self._patches = TreeSearchPatches(
-                rollout_engine=self.rollout,
-                advantage_mode=self.tree_backup_config.advantage_mode,
-                loss_mode=self.tree_backup_config.loss_mode,
-                group_size=self.cache_config.n_samples,
-                tree_store=self.tree_store,
-                advantage_computer=self.tree_advantage_computer,
-            )
-            logger.info(
-                f"Cache-aware training enabled "
-                f"(mode={self.tree_backup_config.mode.value}, "
-                f"advantage={self.tree_backup_config.advantage_mode.value}, "
-                f"n_samples={self.cache_config.n_samples}, "
-                f"loss_mode={self.tree_backup_config.loss_mode.value})"
-            )
 
     def _create_train_engine(self, actor_config, alloc):
         """Override to use MultiCandidateFSDPPPOActor when distill loss is enabled."""
@@ -208,224 +74,6 @@ class CacheAwarePPOTrainer(PPOTrainer):
             return actor
         return super()._create_train_engine(actor_config, alloc)
 
-    def _init_tree_components(self) -> None:
-        """Create tree store, advantage computer, and checkpoint manager."""
-        self.tree_store = MCTSTreeStore()
-        self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
-        self.tree_checkpoint_manager = TreeCheckpointManager(
-            self.cache_config.cache_dir or self.tree_backup_config.checkpoint_dir
-        )
-
-        # Load existing tree checkpoint if available (CROSS_TRAINING mode)
-        if self.tree_backup_config.mode == CacheMode.CROSS_TRAINING:
-            if self.tree_checkpoint_manager.exists():
-                self.tree_store = self.tree_checkpoint_manager.load()
-                logger.info("Loaded MCTS tree checkpoint with cached rollouts")
-
-        # Reset trained flags for a fresh training run
-        self.tree_store.reset_trained_flags()
-
-        self._batch_builder = _CacheAwareBatchBuilder(
-            self.tree_store, self.cache_config.n_samples
-        )
-
-    @staticmethod
-    def _tensor_dicts_to_nodes(
-        tensor_dicts: list[dict], prompts: list[dict]
-    ) -> list[Node]:
-        """Convert tensor dicts (from RPC/remote engine) to Node objects.
-
-        Each tensor dict may contain a batch of grouped trajectories
-        (e.g. group_size=2 means shape [2, seq_len]).  We split them
-        into individual Nodes.
-
-        ``node_id`` is read from the ``node_id`` list key (populated by
-        ``InteractionWithTokenLogpReward.to_tensor_dict``).  ``query_id``
-        is taken from the corresponding prompt dict.
-        """
-        import uuid
-
-        from areal.infra.rpc.rtensor import RTensor
-
-        nodes: list[Node] = []
-
-        for traj_idx, traj in enumerate(tensor_dicts):
-            traj = RTensor.localize(traj)
-            query_id = (
-                prompts[traj_idx].get("query_id", "")
-                if traj_idx < len(prompts)
-                else ""
-            )
-            input_ids = traj["input_ids"]  # [B, seq_len]
-            loss_mask = traj["loss_mask"]
-            logprobs = traj["logprobs"]
-            versions = traj["versions"]
-            rewards = traj["rewards"]  # [B]
-            node_ids = traj.get("node_id", [])  # list[str] or empty
-
-            batch_size = input_ids.shape[0]
-            for b in range(batch_size):
-                nid = node_ids[b] if b < len(node_ids) else uuid.uuid4().hex
-                node = Node(
-                    input_ids=input_ids[b].tolist(),
-                    loss_mask=loss_mask[b].tolist(),
-                    logprobs=logprobs[b].tolist(),
-                    versions=versions[b].tolist(),
-                    node_id=nid,
-                    query_id=str(query_id) if query_id else "",
-                    outcome_reward=(
-                        rewards[b].item()
-                        if rewards.dim() > 0
-                        else float(rewards)
-                    ),
-                    episode_id=(
-                        f"{query_id}_{b}_{uuid.uuid4().hex[:8]}"
-                        if query_id
-                        else uuid.uuid4().hex
-                    ),
-                )
-                nodes.append(node)
-
-        return nodes
-
-    def _save_recover_checkpoint(
-        self, epoch: int, epoch_step: int, global_step: int
-    ) -> None:
-        """Save recover checkpoint including MCTS tree state."""
-        super()._save_recover_checkpoint(epoch, epoch_step, global_step)
-
-        if (
-            self.cache_config.enabled
-            and self.tree_backup_config.mode == CacheMode.CROSS_TRAINING
-        ):
-            self.tree_checkpoint_manager.save(self.tree_store)
-            logger.info("Saved MCTS tree checkpoint with rollout cache")
-
-    def _cache_aware_prepare_batch(
-        self,
-        dataloader,
-        workflow,
-        workflow_kwargs=None,
-        should_accept_fn=None,
-        group_size=1,
-        dynamic_bs=False,
-    ):
-        """Cache-aware replacement for prepare_batch.
-
-        Strategy: if *all* prompts in the batch have enough cached trajectories,
-        use cache only. If *any* prompt lacks sufficient cache, regenerate all
-        prompts via rollout_batch (all-or-nothing). This avoids mixing cached
-        and freshly-generated trajectories in a single batch.
-
-        After assembling trajectories, this method also:
-        1. Inserts them into the MCTS tree (where query_id / node_id
-           are still available, before concat_padded_tensors drops them)
-        2. If advantage_mode is TREE, computes tree advantages/returns
-           on Node fields (restored post-GAE by patches.py)
-        3. Marks trajectories as trained
-        4. Saves tree checkpoint (CROSS_TRAINING mode)
-
-        Returns:
-            List of trajectory dicts from rollout_batch (may be grouped with
-            shape [group_size, seq_len]) or cache (shape [1, seq_len]),
-            carrying ``query_id`` and ``node_id`` metadata.
-        """
-        from areal.utils.data import cycle_dataloader
-
-        # Lazily initialize the dataloader iterator
-        if not hasattr(self, "_cache_dataloader_iter"):
-            self._cache_dataloader_iter = iter(cycle_dataloader(dataloader))
-
-        # Pull a batch of raw data items from the dataloader
-        raw_batch = next(self._cache_dataloader_iter)
-
-        # Split into cached / needs-generation
-        cached_items, need_gen_items = self._batch_builder.split_prompts(raw_batch)
-
-        # All prompts have enough cache -> use cache only
-        if not need_gen_items:
-            trajs = list(self._batch_builder.load_cached_trajectories(cached_items))
-            logger.info(f"Cache-aware rollout: {len(trajs)} cached (all from cache)")
-        else:
-            # Any prompt lacks cache -> regenerate all prompts via rollout_batch
-            n_samples = self.cache_config.n_samples
-            all_prompts = [item["prompt"] for item in cached_items] + [
-                item["prompt"] for item in need_gen_items
-            ]
-
-            logger.info(
-                f"Generating trajectories for {len(all_prompts)} query "
-                f"(group_size={n_samples})"
-            )
-            new_trajs = self.actor.rollout_batch(
-                all_prompts,
-                workflow=workflow,
-                workflow_kwargs=workflow_kwargs,
-                group_size=group_size,
-            )
-
-            trajs = new_trajs if new_trajs else []
-
-            # Tree ops (insert, advantage, mark-trained) happen inside
-            # QueryIDProxyWorkflow when the _wrap_openai_agent patch is
-            # active (direct engine mode). In single-controller mode the
-            # patch can't reach the remote engine, so we fall back to
-            # trainer-side conversion and tree ops.
-            if trajs and isinstance(trajs[0], dict):
-                has_metadata = isinstance(trajs[0].get("query_id"), list)
-                if not has_metadata:
-                    trajs = self._tensor_dicts_to_nodes(trajs, all_prompts)
-                    self.tree_store.insert_batch(trajs)
-                    if (
-                        self.tree_backup_config.advantage_mode
-                        == AdvantageMode.TREE
-                    ):
-                        self.tree_advantage_computer.compute(trajs)
-                    _mark_batch_trained(self.tree_store, trajs)
-            elif trajs and not isinstance(trajs[0], Node):
-                trajs = self._tensor_dicts_to_nodes(trajs, all_prompts)
-
-            logger.info(f"Cache-aware rollout: 0 cached, {len(trajs)} newly generated")
-
-        if not trajs:
-            logger.warning(
-                "No trajectories available for this step; returning empty batch"
-            )
-            return []
-
-        # --- Checkpoint save (after trajectories are generated) ---
-
-        if self.tree_backup_config.mode == CacheMode.CROSS_TRAINING:
-            self.tree_checkpoint_manager.save(self.tree_store)
-            logger.debug("Saved MCTS tree checkpoint after rollout batch")
-
-        # --- End checkpoint save ---
-
-        # Convert any remaining Node objects to tensor dicts.
-        # Cache-loaded trajectories are Nodes; rollout-generated are dicts.
-        converted: list[dict[str, Any]] = []
-        for t in trajs:
-            if isinstance(t, Node):
-                converted.append(
-                    _node_to_tensor_dict(t, t.query_id, t.node_id)
-                )
-            else:
-                converted.append(t)
-        trajs = converted
-
-        # Inject distillation loss weights into trajectory dicts
-        if self.tree_backup_config.loss_mode != LossMode.GRPO:
-            for traj in trajs:
-                if self.tree_backup_config.loss_mode == LossMode.DISTILL:
-                    traj["rl_loss_weight"] = 0.0
-                else:
-                    traj["rl_loss_weight"] = self.tree_backup_config.rl_loss_weight
-                traj["distill_loss_weight"] = (
-                    self.tree_backup_config.distill_loss_weight
-                )
-
-        return trajs
-
     def train(
         self,
         workflow=None,
@@ -435,68 +83,33 @@ class CacheAwarePPOTrainer(PPOTrainer):
         dynamic_filter_fn=None,
         total_epochs=None,
     ):
-        """Train with cache-aware rollout generation.
-
-        Monkey-patches ``self.actor.prepare_batch`` with a cache-aware version
-        and applies tree search patches via TreeSearchPatches. Both are
-        restored in the ``finally`` block, so patches never leak on error.
-        """
-        if not self.cache_config.enabled:
-            return super().train(
-                workflow=workflow,
-                eval_workflow=eval_workflow,
-                workflow_kwargs=workflow_kwargs,
-                eval_workflow_kwargs=eval_workflow_kwargs,
-                dynamic_filter_fn=dynamic_filter_fn,
-                total_epochs=total_epochs,
+        """Train with distill loss patch applied if needed."""
+        if self.tree_backup_config.loss_mode != LossMode.GRPO:
+            from customized_areal.tree_search.training.actor import (
+                patch_ppo_actor_class_to_use_distill_loss,
+                unpatch_ppo_actor_distill_loss,
             )
 
-        original_prepare_batch = self.actor.prepare_batch
-
-        def _prepare_batch_fn(
-            dataloader,
-            workflow,
-            workflow_kwargs=None,
-            should_accept_fn=None,
-            group_size=1,
-            dynamic_bs=False,
-        ):
-            return self._cache_aware_prepare_batch(
-                dataloader=dataloader,
-                workflow=workflow,
-                workflow_kwargs=workflow_kwargs,
-                should_accept_fn=should_accept_fn,
-                group_size=group_size,
-                dynamic_bs=dynamic_bs,
-            )
-
-        assert self._patches is not None
-        self._patches.apply()
-        self.actor.prepare_batch = _prepare_batch_fn
-
-        # Safety: reset stale iterator from a previous crashed train() call
-        if hasattr(self, "_cache_dataloader_iter"):
-            del self._cache_dataloader_iter
-
-        try:
-            return super().train(
-                workflow=workflow,
-                eval_workflow=eval_workflow,
-                workflow_kwargs=workflow_kwargs,
-                eval_workflow_kwargs=eval_workflow_kwargs,
-                dynamic_filter_fn=dynamic_filter_fn,
-                total_epochs=total_epochs,
-            )
-        finally:
-            self.actor.prepare_batch = original_prepare_batch
-            logger.info("Restored original prepare_batch")
-            self._patches.restore()
-            if hasattr(self, "_cache_dataloader_iter"):
-                del self._cache_dataloader_iter
+            patch_ppo_actor_class_to_use_distill_loss()
+            try:
+                return super().train(
+                    workflow=workflow,
+                    eval_workflow=eval_workflow,
+                    workflow_kwargs=workflow_kwargs,
+                    eval_workflow_kwargs=eval_workflow_kwargs,
+                    dynamic_filter_fn=dynamic_filter_fn,
+                    total_epochs=total_epochs,
+                )
+            finally:
+                unpatch_ppo_actor_distill_loss()
+        return super().train(
+            workflow=workflow,
+            eval_workflow=eval_workflow,
+            workflow_kwargs=workflow_kwargs,
+            eval_workflow_kwargs=eval_workflow_kwargs,
+            dynamic_filter_fn=dynamic_filter_fn,
+            total_epochs=total_epochs,
+        )
 
     def close(self) -> None:
-        # Safety net: restore patches if train() was never called
-        # or crashed before finally executed.
-        if self._patches is not None:
-            self._patches.restore()
         super().close()
