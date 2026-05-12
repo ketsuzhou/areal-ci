@@ -91,8 +91,34 @@ class GroupedRolloutWorkflow(RolloutWorkflow):
 
         valid_results = [r for r in results if r is not None]
 
+        # DEBUG: log what inner workflow returned
+        self.logger.warning(
+            "DEBUG GroupedRolloutWorkflow: group_size=%d, inner_results=%d, valid=%d, "
+            "first_type=%s, first_is_dict=%s",
+            self.group_size,
+            len(results),
+            len(valid_results),
+            type(valid_results[0]).__name__ if valid_results else "N/A",
+            isinstance(valid_results[0], dict) if valid_results else "N/A",
+        )
+        if valid_results and isinstance(valid_results[0], list) and valid_results[0]:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: first is list[%s] len=%d",
+                type(valid_results[0][0]).__name__,
+                len(valid_results[0]),
+            )
+        elif valid_results and isinstance(valid_results[0], dict) and valid_results[0]:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: first dict keys_sample=%s, val_types=%s",
+                list(valid_results[0].keys())[:3],
+                [type(v).__name__ for v in list(valid_results[0].values())[:3]],
+            )
+
         # All results None -> return None
         if not valid_results:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: all results None, returning None"
+            )
             return None
 
         # Some results None -> warn and continue with valid ones
@@ -115,10 +141,31 @@ class GroupedRolloutWorkflow(RolloutWorkflow):
             merged: dict[str, InteractionWithTokenLogpReward] = {}
             for result in valid_results:
                 merged.update(result)
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: returning merged dict with %d entries",
+                len(merged),
+            )
             return merged if merged else None
 
         # Otherwise, tensor dicts - concatenate
-        concatenated = concat_padded_tensors(valid_results)
+        self.logger.warning(
+            "DEBUG GroupedRolloutWorkflow: falling through to concat_padded_tensors, "
+            "valid_results[0] type=%s",
+            type(first).__name__,
+        )
+        try:
+            concatenated = concat_padded_tensors(valid_results)
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: concat_padded_tensors succeeded, "
+                "keys=%s",
+                list(concatenated.keys()) if isinstance(concatenated, dict) else "not_dict",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: concat_padded_tensors FAILED: %s",
+                exc,
+            )
+            raise
         return concatenated if concatenated else None
 
 
@@ -650,7 +697,56 @@ class RemoteInfEngine(InferenceEngine):
 
         # Wrap with GroupedRolloutWorkflow if group_size > 1
         if group_size > 1:
-            resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
+            use_tree_search = os.getenv(
+                "use_TreeSearchGroupedRolloutWorkflow", "False"
+            ).lower() == "true"
+            if use_tree_search:
+                from dotenv import load_dotenv
+
+                # Load .env from the project root (where customized_areal/ lives)
+                _project_root = os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+                _env_path = os.path.join(_project_root, "customized_areal", ".env")
+                if os.path.isfile(_env_path):
+                    load_dotenv(_env_path, override=False)
+
+                from customized_areal.tree_search.config import (
+                    AdvantageMode,
+                    CacheMode,
+                    LossMode,
+                )
+                from customized_areal.tree_search.tree_search_grouped_workflow import (
+                    TreeSearchGroupedRolloutWorkflow,
+                )
+
+                checkpoint_dir = os.getenv("TREE_SEARCH_CHECKPOINT_DIR", "")
+                advantage_mode = AdvantageMode(
+                    os.getenv("TREE_SEARCH_ADVANTAGE_MODE", "GAE")
+                )
+                loss_mode = LossMode(os.getenv("TREE_SEARCH_LOSS_MODE", "GRPO"))
+                cache_mode = CacheMode(
+                    os.getenv("TREE_SEARCH_CACHE_MODE", "OFF")
+                )
+                rl_loss_weight = float(
+                    os.getenv("TREE_SEARCH_RL_LOSS_WEIGHT", "1.0")
+                )
+                distill_loss_weight = float(
+                    os.getenv("TREE_SEARCH_DISTILL_LOSS_WEIGHT", "0.005")
+                )
+
+                resolved = TreeSearchGroupedRolloutWorkflow(
+                    resolved,
+                    group_size,
+                    checkpoint_dir=checkpoint_dir,
+                    advantage_mode=advantage_mode,
+                    loss_mode=loss_mode,
+                    cache_mode=cache_mode,
+                    rl_loss_weight=rl_loss_weight,
+                    distill_loss_weight=distill_loss_weight,
+                )
+            else:
+                resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
 
         return resolved
 
