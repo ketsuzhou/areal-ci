@@ -202,11 +202,6 @@ class InteractionWithTokenLogpReward:
             # reward
             rewards=torch.tensor([float(reward)]),
         )
-        # Preserve interaction_id as node_id for tree search (non-tensor field).
-        # Stored as a single-element list so that concat_padded_tensors
-        # concatenates across interactions rather than keeping only the first.
-        if self.interaction_id is not None:
-            result["node_id"] = [self.interaction_id]
         self._cache = result
         return result
 

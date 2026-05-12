@@ -1054,36 +1054,6 @@ class WorkflowExecutor:
                     self.inference_engine, pending_task.data
                 )
 
-                # DEBUG: log what arun_episode returned
-                if traj is not None:
-                    if isinstance(traj, dict):
-                        self.logger.warning(
-                            "DEBUG _execute_workflow: arun_episode returned dict, "
-                            "keys_sample=%s, val_types=%s, task_id=%s",
-                            list(traj.keys())[:5],
-                            [type(v).__name__ for v in list(traj.values())[:3]],
-                            pending_task.task_id,
-                        )
-                    elif isinstance(traj, list):
-                        self.logger.warning(
-                            "DEBUG _execute_workflow: arun_episode returned list, "
-                            "len=%d, elem_type=%s, task_id=%s",
-                            len(traj),
-                            type(traj[0]).__name__ if traj else "empty",
-                            pending_task.task_id,
-                        )
-                    else:
-                        self.logger.warning(
-                            "DEBUG _execute_workflow: arun_episode returned %s, task_id=%s",
-                            type(traj).__name__,
-                            pending_task.task_id,
-                        )
-                else:
-                    self.logger.warning(
-                        "DEBUG _execute_workflow: arun_episode returned None, task_id=%s",
-                        pending_task.task_id,
-                    )
-
                 # Trajectory format checking
                 if self.config.check_trajectory_format and traj is not None:
                     check_trajectory_format(
@@ -1107,30 +1077,12 @@ class WorkflowExecutor:
                 if isinstance(traj, dict) and all(
                     isinstance(v, InteractionWithTokenLogpReward) for v in traj.values()
                 ):
-                    self.logger.warning(
-                        "DEBUG _execute_workflow: converting InteractionWithTokenLogpReward dict "
-                        "(len=%d) to tensor dict, task_id=%s",
-                        len(traj),
-                        pending_task.task_id,
-                    )
                     if all(v.has_tensor_data for v in traj.values()):
                         traj = concat_padded_tensors(
                             [v.to_tensor_dict() for v in traj.values()]
                         )
-                        self.logger.warning(
-                            "DEBUG _execute_workflow: concat_padded_tensors produced "
-                            "dict keys=%s, val_types=%s, task_id=%s",
-                            list(traj.keys())[:6],
-                            [type(v).__name__ for v in list(traj.values())[:3]],
-                            pending_task.task_id,
-                        )
                     else:
                         traj = concat_string_interactions(traj)
-                        self.logger.warning(
-                            "DEBUG _execute_workflow: concat_string_interactions used, "
-                            "task_id=%s",
-                            pending_task.task_id,
-                        )
 
                 assert traj is None or isinstance(traj, dict), traj
 
