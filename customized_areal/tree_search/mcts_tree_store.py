@@ -45,6 +45,7 @@ class Node:
     episode_id: str = ""  # groups turns into a trajectory path
     turn_idx: int = 0  # 1-based turn position within episode
     query_id: str = ""  # dataset query identifier
+    train_id: str = ""  # training run that trained this node; "" means untrained
 
     # Reward
     outcome_reward: float = 0.0
