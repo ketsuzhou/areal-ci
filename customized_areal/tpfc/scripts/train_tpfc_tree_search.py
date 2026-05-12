@@ -10,8 +10,10 @@ Usage:
     uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml  2>&1 | tee training.log
 """
 
+import os
 import pathlib
 import sys
+import uuid
 
 project_root = pathlib.Path(__file__).parent.parent.parent.parent.absolute()
 sys.path.insert(0, str(project_root))
@@ -37,6 +39,11 @@ def main(args: list[str] | None = None) -> None:
         args = sys.argv[1:]
 
     logger.info("Starting TPFC tree search training")
+
+    # Generate a unique train_id for this training run
+    if "TRAIN_ID" not in os.environ:
+        os.environ["TRAIN_ID"] = uuid.uuid4().hex
+    logger.info("Train ID: %s", os.environ["TRAIN_ID"])
 
     config, _ = load_expr_config(args, TPFCConfig)
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
