@@ -12,7 +12,7 @@ from customized_areal.tree_search.distill_types import (
     PositionRewardInfo,
 )
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.proxy_workflow import QueryIDProxyWorkflow
+from customized_areal.tree_search.tree_search_grouped_workflow import TreeSearchGroupedRolloutWorkflow
 from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
 
 __all__ = [
@@ -23,7 +23,7 @@ __all__ = [
     "MCTSTreeStore",
     "Node",
     "PositionRewardInfo",
-    "QueryIDProxyWorkflow",
+    "TreeSearchGroupedRolloutWorkflow",
     "RolloutCacheConfig",
     "TreeAdvantageComputer",
     "TreeBackupConfig",
