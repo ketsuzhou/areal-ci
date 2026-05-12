@@ -243,6 +243,22 @@ class OpenAIProxyWorkflow(RolloutWorkflow):
             style=self.export_style,
         )
 
+        # DEBUG: log what export_interactions returned
+        if interactions:
+            sample_keys = list(interactions.keys())[:3]
+            sample_types = [type(v).__name__ for v in list(interactions.values())[:3]]
+            logger.warning(
+                "DEBUG arun_episode: export_interactions returned dict len=%d, "
+                "sample_keys=%s, sample_val_types=%s",
+                len(interactions),
+                sample_keys,
+                sample_types,
+            )
+        else:
+            logger.warning(
+                "DEBUG arun_episode: export_interactions returned empty dict"
+            )
+
         # Record stats
         last_id = list(interactions.keys())[-1] if interactions else None
         if last_id and interactions:

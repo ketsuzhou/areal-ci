@@ -1,24 +1,35 @@
 # Trained Episode Recover Checkpoint Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Persist trained episode IDs in the recover checkpoint so that resuming training does not retrain already-trained nodes.
+**Goal:** Persist trained episode IDs in the recover checkpoint so that resuming
+training does not retrain already-trained nodes.
 
-**Architecture:** Add `mark_episodes_trained()` to `MCTSTreeStore` for episode-level trained flag restoration. Add `save_trained_episodes()` / `load_trained_episodes()` static methods to `TreeCheckpointManager` for the `trained_episodes.json` sidecar file. Modify `CacheAwarePPOTrainer._init_tree_components()` to restore from the sidecar instead of calling `reset_trained_flags()`, and `_save_recover_checkpoint()` to write it.
+**Architecture:** Add `mark_episodes_trained()` to `MCTSTreeStore` for episode-level
+trained flag restoration. Add `save_trained_episodes()` / `load_trained_episodes()`
+static methods to `TreeCheckpointManager` for the `trained_episodes.json` sidecar file.
+Modify `CacheAwarePPOTrainer._init_tree_components()` to restore from the sidecar
+instead of calling `reset_trained_flags()`, and `_save_recover_checkpoint()` to write
+it.
 
 **Tech Stack:** Python 3.12+ | pytest | no new dependencies
 
----
+______________________________________________________________________
 
 ### Task 1: Add `mark_episodes_trained` to `MCTSTreeStore`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:319-321`
+
 - Test: `tests/test_tree_search/test_mcts_tree_store.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_tree_search/test_mcts_tree_store.py`, inside `TestMCTSTreeStoreTrainedFlag`:
+Add to `tests/test_tree_search/test_mcts_tree_store.py`, inside
+`TestMCTSTreeStoreTrainedFlag`:
 
 ```python
 def test_mark_episodes_trained(self):
@@ -129,12 +140,15 @@ def test_mark_episodes_trained_unknown_episode(self):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestMCTSTreeStoreTrainedFlag::test_mark_episodes_trained -v`
-Expected: FAIL with `AttributeError: 'MCTSTreeStore' object has no attribute 'mark_episodes_trained'`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestMCTSTreeStoreTrainedFlag::test_mark_episodes_trained -v`
+Expected: FAIL with
+`AttributeError: 'MCTSTreeStore' object has no attribute 'mark_episodes_trained'`
 
 - [ ] **Step 3: Write the implementation**
 
-Add to `customized_areal/tree_search/mcts_tree_store.py` after `reset_trained_flags` (line 321):
+Add to `customized_areal/tree_search/mcts_tree_store.py` after `reset_trained_flags`
+(line 321):
 
 ```python
 def mark_episodes_trained(self, episode_ids: set[str]) -> None:
@@ -154,7 +168,8 @@ def mark_episodes_trained(self, episode_ids: set[str]) -> None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestMCTSTreeStoreTrainedFlag -v`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestMCTSTreeStoreTrainedFlag -v`
 Expected: All 7 tests PASS (3 existing + 4 new)
 
 - [ ] **Step 5: Commit**
@@ -164,12 +179,14 @@ git add customized_areal/tree_search/mcts_tree_store.py tests/test_tree_search/t
 git commit -m "feat: add mark_episodes_trained to MCTSTreeStore for episode-level trained flag restoration"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Add `save_trained_episodes` / `load_trained_episodes` to `TreeCheckpointManager`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/checkpoint.py:22-171`
+
 - Test: `tests/test_tree_search/test_checkpoint.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -256,12 +273,16 @@ def test_save_trained_episodes_with_episode_ids(self, tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/test_tree_search/test_checkpoint.py::TestTreeCheckpointManager::test_save_and_load_trained_episodes -v`
-Expected: FAIL with `AttributeError: type object 'TreeCheckpointManager' has no attribute 'save_trained_episodes'`
+Run:
+`uv run pytest tests/test_tree_search/test_checkpoint.py::TestTreeCheckpointManager::test_save_and_load_trained_episodes -v`
+Expected: FAIL with
+`AttributeError: type object 'TreeCheckpointManager' has no attribute 'save_trained_episodes'`
 
 - [ ] **Step 3: Write the implementation**
 
-Add two static methods to `TreeCheckpointManager` in `customized_areal/tree_search/checkpoint.py`, after the `_deserialize_record` method (after line 170):
+Add two static methods to `TreeCheckpointManager` in
+`customized_areal/tree_search/checkpoint.py`, after the `_deserialize_record` method
+(after line 170):
 
 ```python
 @staticmethod
@@ -306,8 +327,8 @@ def load_trained_episodes(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_tree_search/test_checkpoint.py -v`
-Expected: All tests PASS (existing + 5 new)
+Run: `uv run pytest tests/test_tree_search/test_checkpoint.py -v` Expected: All tests
+PASS (existing + 5 new)
 
 - [ ] **Step 5: Commit**
 
@@ -316,17 +337,21 @@ git add customized_areal/tree_search/checkpoint.py tests/test_tree_search/test_c
 git commit -m "feat: add save/load_trained_episodes to TreeCheckpointManager for recover checkpoint sidecar"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Modify `_init_tree_components` to restore trained flags from recover checkpoint
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py:202-221`
+
 - Test: `tests/test_tree_search/test_checkpoint.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_tree_search/test_checkpoint.py` (top-level, not inside the class), to test the integration between `TreeCheckpointManager.load_trained_episodes` and `MCTSTreeStore.mark_episodes_trained`:
+Add to `tests/test_tree_search/test_checkpoint.py` (top-level, not inside the class), to
+test the integration between `TreeCheckpointManager.load_trained_episodes` and
+`MCTSTreeStore.mark_episodes_trained`:
 
 ```python
 class TestTrainedEpisodesRestoreIntegration:
@@ -428,8 +453,10 @@ class TestTrainedEpisodesRestoreIntegration:
 
 - [ ] **Step 2: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_tree_search/test_checkpoint.py::TestTrainedEpisodesRestoreIntegration -v`
-Expected: PASS — these tests only use `TreeCheckpointManager` and `MCTSTreeStore`, which are already implemented from Tasks 1 and 2.
+Run:
+`uv run pytest tests/test_tree_search/test_checkpoint.py::TestTrainedEpisodesRestoreIntegration -v`
+Expected: PASS — these tests only use `TreeCheckpointManager` and `MCTSTreeStore`, which
+are already implemented from Tasks 1 and 2.
 
 - [ ] **Step 3: Modify `_init_tree_components` in `trainer.py`**
 
@@ -464,8 +491,7 @@ with:
 
 - [ ] **Step 4: Run existing trainer tests to verify no regressions**
 
-Run: `uv run pytest tests/test_tree_search/ -v`
-Expected: All tests PASS
+Run: `uv run pytest tests/test_tree_search/ -v` Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
 
@@ -474,11 +500,12 @@ git add customized_areal/tree_search/trainer.py tests/test_tree_search/test_chec
 git commit -m "feat: restore trained flags from recover checkpoint on resume instead of resetting all"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Modify `_save_recover_checkpoint` to persist trained episodes
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py:223-234`
 
 - [ ] **Step 1: Modify `_save_recover_checkpoint`**
@@ -512,18 +539,21 @@ Replace the method at `customized_areal/tree_search/trainer.py:223-234`:
 
 - [ ] **Step 2: Move the `Saver` import to the top of the file**
 
-The `from areal.utils.saver import Saver` import now appears in both `_init_tree_components` and `_save_recover_checkpoint`. Move it to the file-level imports at `customized_areal/tree_search/trainer.py` (after the existing `from areal` imports around line 38-40):
+The `from areal.utils.saver import Saver` import now appears in both
+`_init_tree_components` and `_save_recover_checkpoint`. Move it to the file-level
+imports at `customized_areal/tree_search/trainer.py` (after the existing `from areal`
+imports around line 38-40):
 
 ```python
 from areal.utils.saver import Saver
 ```
 
-Then remove the inline `from areal.utils.saver import Saver` from both `_init_tree_components` and `_save_recover_checkpoint`.
+Then remove the inline `from areal.utils.saver import Saver` from both
+`_init_tree_components` and `_save_recover_checkpoint`.
 
 - [ ] **Step 3: Run all tree_search tests to verify no regressions**
 
-Run: `uv run pytest tests/test_tree_search/ -v`
-Expected: All tests PASS
+Run: `uv run pytest tests/test_tree_search/ -v` Expected: All tests PASS
 
 - [ ] **Step 4: Commit**
 
@@ -532,23 +562,34 @@ git add customized_areal/tree_search/trainer.py
 git commit -m "feat: save trained episode IDs alongside recover checkpoint"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review
 
 **1. Spec coverage:**
-- "Track trained episode IDs in `trained_episodes.json`" → Task 2 (save/load) + Task 4 (save in _save_recover_checkpoint)
-- "On resume, restore from sidecar instead of reset_trained_flags" → Task 3 (_init_tree_components)
+
+- "Track trained episode IDs in `trained_episodes.json`" → Task 2 (save/load) + Task 4
+  (save in \_save_recover_checkpoint)
+- "On resume, restore from sidecar instead of reset_trained_flags" → Task 3
+  (\_init_tree_components)
 - "`mark_episodes_trained` on MCTSTreeStore" → Task 1
-- "Error handling: missing/corrupt file → fallback to reset_trained_flags" → Task 2 (load_trained_episodes returns None) + Task 3 (falls back to reset_trained_flags)
+- "Error handling: missing/corrupt file → fallback to reset_trained_flags" → Task 2
+  (load_trained_episodes returns None) + Task 3 (falls back to reset_trained_flags)
 - "Atomic writes" → Task 2 (uses .tmp + os.replace)
-- "Recover checkpoint is single source of truth" → Task 3 (ignores tree checkpoint trained flags)
+- "Recover checkpoint is single source of truth" → Task 3 (ignores tree checkpoint
+  trained flags)
 - No changes to core `areal/` → Verified
 
-**2. Placeholder scan:** No TBD, TODO, or "implement later" patterns. All code blocks contain complete implementations.
+**2. Placeholder scan:** No TBD, TODO, or "implement later" patterns. All code blocks
+contain complete implementations.
 
 **3. Type consistency:**
-- `mark_episodes_trained(episode_ids: set[str])` — defined in Task 1, called with `set[str]` from `load_trained_episodes()` in Task 3. Consistent.
-- `save_trained_episodes(recover_checkpoint_dir: str, tree_store: MCTSTreeStore)` — defined in Task 2, called in Task 4. Consistent.
-- `load_trained_episodes(recover_checkpoint_dir: str) -> set[str] | None` — defined in Task 2, called in Task 3. Consistent.
-- `Saver.get_recover_checkpoint_path(experiment_name, trial_name, fileroot)` — matches the existing API from `areal/utils/saver.py:79-90`.
+
+- `mark_episodes_trained(episode_ids: set[str])` — defined in Task 1, called with
+  `set[str]` from `load_trained_episodes()` in Task 3. Consistent.
+- `save_trained_episodes(recover_checkpoint_dir: str, tree_store: MCTSTreeStore)` —
+  defined in Task 2, called in Task 4. Consistent.
+- `load_trained_episodes(recover_checkpoint_dir: str) -> set[str] | None` — defined in
+  Task 2, called in Task 3. Consistent.
+- `Saver.get_recover_checkpoint_path(experiment_name, trial_name, fileroot)` — matches
+  the existing API from `areal/utils/saver.py:79-90`.

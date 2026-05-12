@@ -2,17 +2,16 @@
 
 ## Problem
 
-Node has no field to indicate a node's turn position within its episode. The
-tensor dict converter `_node_to_tensor_dict` hardcodes `_turn_idx_in_episode = 0`
-and `_num_turns_in_episode = 1`, so downstream training code and MCTS tree logic
-cannot determine turn ordering.
+Node has no field to indicate a node's turn position within its episode. The tensor dict
+converter `_node_to_tensor_dict` hardcodes `_turn_idx_in_episode = 0` and
+`_num_turns_in_episode = 1`, so downstream training code and MCTS tree logic cannot
+determine turn ordering.
 
 ## Solution
 
-Add a `turn_idx: int` field to the Node dataclass (1-based per episode, default
-0 meaning unset). Set it at Node creation time in proxy_workflow and
-grouped_workflow. Propagate through checkpoint serialization and tensor dict
-conversion.
+Add a `turn_idx: int` field to the Node dataclass (1-based per episode, default 0
+meaning unset). Set it at Node creation time in proxy_workflow and grouped_workflow.
+Propagate through checkpoint serialization and tensor dict conversion.
 
 ## Changes
 
@@ -48,7 +47,7 @@ for turn_idx, node in enumerate(result, start=1):
     node.turn_idx = turn_idx
 ```
 
-### 4. _node_to_tensor_dict (mcts_tree_store.py)
+### 4. \_node_to_tensor_dict (mcts_tree_store.py)
 
 Replace hardcoded values with Node data:
 
@@ -61,15 +60,14 @@ def _node_to_tensor_dict(
     traj["_num_turns_in_episode"] = num_turns_in_episode
 ```
 
-Callers compute `num_turns_in_episode` by counting nodes sharing the same
-`episode_id`.
+Callers compute `num_turns_in_episode` by counting nodes sharing the same `episode_id`.
 
 ### 5. trainer.py callers
 
 Two call sites need updating to pass `num_turns_in_episode`:
 
-**CacheAwarePPOTrainer._load_cached_trajs** (line ~120): Build an
-`episode_id → count` map from the loaded nodes, then pass it:
+**CacheAwarePPOTrainer.\_load_cached_trajs** (line ~120): Build an `episode_id → count`
+map from the loaded nodes, then pass it:
 
 ```python
 episode_sizes: dict[str, int] = {}
@@ -82,8 +80,8 @@ for node in nodes:
     )
 ```
 
-**TreeBackupPPOTrainer.compute_loss** (line ~368): Same pattern — build
-`episode_sizes` from `nodes`, pass to `_node_to_tensor_dict`.
+**TreeBackupPPOTrainer.compute_loss** (line ~368): Same pattern — build `episode_sizes`
+from `nodes`, pass to `_node_to_tensor_dict`.
 
 ### 6. Checkpoint (checkpoint.py)
 
@@ -96,10 +94,9 @@ Add `turn_idx` to `_serialize_record` and `_deserialize_record`:
 
 - `node_id` remains the global auto-incrementing unique identifier assigned by
   MCTSTreeStore
-- `MCTSTreeStore` internal indexing (`_node_id_to_key`, `_query_node_ids`) is
-  unchanged
-- `num_turns_in_episode` is not stored on Node; it is computed at export time
-  from episode grouping
+- `MCTSTreeStore` internal indexing (`_node_id_to_key`, `_query_node_ids`) is unchanged
+- `num_turns_in_episode` is not stored on Node; it is computed at export time from
+  episode grouping
 
 ## Scope
 

@@ -1,18 +1,24 @@
 # Add turn_idx to Node Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `turn_idx` field (1-based per episode) to the Node dataclass so downstream training and MCTS code can determine turn ordering within episodes.
+**Goal:** Add a `turn_idx` field (1-based per episode) to the Node dataclass so
+downstream training and MCTS code can determine turn ordering within episodes.
 
-**Architecture:** Add `turn_idx: int = 0` to Node, set it at creation time in proxy_workflow and grouped_workflow, propagate through `_node_to_tensor_dict`, checkpoint serialization, and both trainer.py call sites.
+**Architecture:** Add `turn_idx: int = 0` to Node, set it at creation time in
+proxy_workflow and grouped_workflow, propagate through `_node_to_tensor_dict`,
+checkpoint serialization, and both trainer.py call sites.
 
 **Tech Stack:** Python 3.12+, pytest
 
----
+______________________________________________________________________
 
 ### Task 1: Add turn_idx field to Node dataclass
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:23-58`
 
 - [ ] **Step 1: Write the failing test**
@@ -47,12 +53,13 @@ class TestTurnIdx:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdx -v`
-Expected: FAIL — `Node.__init__()` got an unexpected keyword argument `turn_idx`
+Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdx -v` Expected: FAIL —
+`Node.__init__()` got an unexpected keyword argument `turn_idx`
 
 - [ ] **Step 3: Add turn_idx field to Node**
 
-In `customized_areal/tree_search/mcts_tree_store.py`, add the field after `episode_id` (line 44):
+In `customized_areal/tree_search/mcts_tree_store.py`, add the field after `episode_id`
+(line 44):
 
 ```python
     episode_id: str = ""  # groups turns into a trajectory path
@@ -62,8 +69,7 @@ In `customized_areal/tree_search/mcts_tree_store.py`, add the field after `episo
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdx -v`
-Expected: PASS
+Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdx -v` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -72,11 +78,12 @@ git add customized_areal/tree_search/mcts_tree_store.py tests/test_treesearch_bu
 git commit -m "feat: add turn_idx field to Node dataclass (1-based per episode)"
 ```
 
----
+______________________________________________________________________
 
-### Task 2: Set turn_idx in proxy_workflow._interactions_to_nodes
+### Task 2: Set turn_idx in proxy_workflow.\_interactions_to_nodes
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/proxy_workflow.py:65-149`
 
 - [ ] **Step 1: Write the failing test**
@@ -123,10 +130,11 @@ class TestTurnIdxInInteractionsToNodes:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxInInteractionsToNodes -v`
+Run:
+`uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxInInteractionsToNodes -v`
 Expected: FAIL — `nodes[0].turn_idx == 0` (not 1)
 
-- [ ] **Step 3: Implement turn_idx in _interactions_to_nodes**
+- [ ] **Step 3: Implement turn_idx in \_interactions_to_nodes**
 
 In `customized_areal/tree_search/proxy_workflow.py`, change line 74 from:
 
@@ -156,7 +164,8 @@ And add `turn_idx=turn_idx,` to the Node constructor (after `node_id=0,` at line
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxInInteractionsToNodes -v`
+Run:
+`uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxInInteractionsToNodes -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -166,11 +175,12 @@ git add customized_areal/tree_search/proxy_workflow.py tests/test_treesearch_bug
 git commit -m "feat: set turn_idx in proxy_workflow._interactions_to_nodes"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Set turn_idx in grouped_workflow
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/grouped_workflow.py:50-57`
 
 - [ ] **Step 1: Write the failing test**
@@ -252,11 +262,12 @@ git add customized_areal/tree_search/grouped_workflow.py tests/test_treesearch_b
 git commit -m "feat: set turn_idx in grouped_workflow"
 ```
 
----
+______________________________________________________________________
 
-### Task 4: Fix _node_to_tensor_dict to use turn_idx
+### Task 4: Fix \_node_to_tensor_dict to use turn_idx
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:109-163`
 
 - [ ] **Step 1: Write the failing test**
@@ -289,11 +300,13 @@ class TestTurnIdxInTensorDict:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxInTensorDict -v`
-Expected: FAIL — `_node_to_tensor_dict() got an unexpected keyword argument 'num_turns_in_episode'`
+Expected: FAIL —
+`_node_to_tensor_dict() got an unexpected keyword argument 'num_turns_in_episode'`
 
-- [ ] **Step 3: Update _node_to_tensor_dict signature and body**
+- [ ] **Step 3: Update \_node_to_tensor_dict signature and body**
 
-In `customized_areal/tree_search/mcts_tree_store.py`, change the function signature (line 109) from:
+In `customized_areal/tree_search/mcts_tree_store.py`, change the function signature
+(line 109) from:
 
 ```python
 def _node_to_tensor_dict(node: Node, query_id: str, node_id: int) -> dict[str, Any]:
@@ -331,12 +344,14 @@ git add customized_areal/tree_search/mcts_tree_store.py tests/test_treesearch_bu
 git commit -m "feat: _node_to_tensor_dict uses node.turn_idx and num_turns_in_episode param"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Update trainer.py call sites
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py:113-124`
+
 - Modify: `customized_areal/tree_search/trainer.py:364-368`
 
 - [ ] **Step 1: Update CacheAwarePPOTrainer.load_cached_trajectories**
@@ -415,7 +430,8 @@ with:
 
 - [ ] **Step 3: Run existing tree search tests to verify no regressions**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py tests/test_treesearch_patches.py -v`
+Run:
+`uv run pytest tests/test_treesearch_bugfixes.py tests/test_treesearch_patches.py -v`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
@@ -425,11 +441,12 @@ git add customized_areal/tree_search/trainer.py
 git commit -m "feat: pass num_turns_in_episode to _node_to_tensor_dict in trainer call sites"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Add turn_idx to checkpoint serialization
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/checkpoint.py:126-164`
 
 - [ ] **Step 1: Write the failing test**
@@ -461,19 +478,22 @@ class TestTurnIdxCheckpoint:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_treesearch_bugfixes.py::TestTurnIdxCheckpoint -v`
-Expected: FAIL — `loaded_nodes[0].turn_idx == 0` (not 3, because deserialization doesn't read it)
+Expected: FAIL — `loaded_nodes[0].turn_idx == 0` (not 3, because deserialization doesn't
+read it)
 
-- [ ] **Step 3: Add turn_idx to _serialize_record**
+- [ ] **Step 3: Add turn_idx to \_serialize_record**
 
-In `customized_areal/tree_search/checkpoint.py`, in `_serialize_record` (after line 136 `"episode_id": node.episode_id,`), add:
+In `customized_areal/tree_search/checkpoint.py`, in `_serialize_record` (after line 136
+`"episode_id": node.episode_id,`), add:
 
 ```python
             "turn_idx": node.turn_idx,
 ```
 
-- [ ] **Step 4: Add turn_idx to _deserialize_record**
+- [ ] **Step 4: Add turn_idx to \_deserialize_record**
 
-In `customized_areal/tree_search/checkpoint.py`, in `_deserialize_record` (after line 158 `episode_id=data.get("episode_id", ""),`), add:
+In `customized_areal/tree_search/checkpoint.py`, in `_deserialize_record` (after line
+158 `episode_id=data.get("episode_id", ""),`), add:
 
 ```python
             turn_idx=data.get("turn_idx", 0),
@@ -491,16 +511,17 @@ git add customized_areal/tree_search/checkpoint.py tests/test_treesearch_bugfixe
 git commit -m "feat: serialize/deserialize turn_idx in TreeCheckpointManager"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Run full test suite and verify
 
 - [ ] **Step 1: Run all tree search tests**
 
-Run: `uv run pytest tests/test_treesearch_bugfixes.py tests/test_treesearch_patches.py tests/test_tree_training.py -v`
+Run:
+`uv run pytest tests/test_treesearch_bugfixes.py tests/test_treesearch_patches.py tests/test_tree_training.py -v`
 Expected: All PASS
 
 - [ ] **Step 2: Run pre-commit**
 
-Run: `pre-commit run --all-files`
-Expected: PASS (or only pre-existing warnings unrelated to changed files)
+Run: `pre-commit run --all-files` Expected: PASS (or only pre-existing warnings
+unrelated to changed files)
