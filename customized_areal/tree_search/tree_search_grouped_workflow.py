@@ -15,6 +15,7 @@ a single class that:
 
 from __future__ import annotations
 
+import traceback
 import uuid
 from typing import Any
 
@@ -228,9 +229,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
 
-        # Reset trained flags for a fresh training run
-        self.tree_store.reset_trained_flags()
-
     def _result_to_nodes(self, result: Any, query_id: str, group_idx: int) -> list[Node] | None:
         """Convert a single arun_episode result to list[Node]."""
         from areal.experimental.openai.types import InteractionWithTokenLogpReward
@@ -271,14 +269,21 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if not isinstance(result, Exception) and result is not None:
                 return result
             logger.warning(
-                "Episode %d retry %d/%d %s",
+                "Episode %s retry %d/%d %s",
                 group_idx,
                 attempt,
                 max_retries,
                 f"failed: {result}" if isinstance(result, Exception) else "returned None",
             )
+            if isinstance(result, Exception):
+                logger.warning(
+                    "Episode %s retry %d traceback:\n%s",
+                    group_idx,
+                    attempt,
+                    "".join(traceback.format_exception(type(result), result, result.__traceback__)),
+                )
         logger.error(
-            "Episode %d exhausted all %d retries — skipping", group_idx, max_retries
+            "Episode %s exhausted all %d retries — skipping", group_idx, max_retries
         )
         return None
 
