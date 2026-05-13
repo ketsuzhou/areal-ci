@@ -340,6 +340,53 @@ class MCTSTreeStore:
                 episode_has_untrained[ep_id] = True
         return sum(1 for v in episode_has_untrained.values() if v)
 
+    def load_untrained_episodes(self, query_id: str, n_episodes: int) -> list[Node]:
+        """Load nodes from up to n_episodes untrained episodes.
+
+        Returns all nodes belonging to the first n_episodes untrained
+        episodes (in insertion order). An episode is untrained if any
+        of its nodes is untrained.
+        """
+        if query_id not in self._query_node_ids:
+            return []
+        # Build episode_id → list of (node_id, query_id, idx) in insertion order
+        episode_nodes: dict[str, list[tuple[str, str, int]]] = {}
+        episode_order: list[str] = []
+        for node_id in self._query_node_ids[query_id]:
+            key = self._node_id_to_key.get(node_id)
+            if key is None:
+                continue
+            qid, idx = key
+            node = self.trajectories[qid][idx]
+            if isinstance(node, dict):
+                ep_id = node.get("episode_id", "")
+            else:
+                ep_id = node.episode_id
+            if not ep_id:
+                continue
+            if ep_id not in episode_nodes:
+                episode_nodes[ep_id] = []
+                episode_order.append(ep_id)
+            episode_nodes[ep_id].append((node_id, qid, idx))
+        # Select up to n_episodes untrained episodes
+        selected: list[Node] = []
+        count = 0
+        for ep_id in episode_order:
+            if count >= n_episodes:
+                break
+            # Check if any node in this episode is untrained
+            is_untrained = False
+            for node_id, qid, idx in episode_nodes[ep_id]:
+                if not self.is_trained(node_id):
+                    is_untrained = True
+                    break
+            if not is_untrained:
+                continue
+            count += 1
+            for node_id, qid, idx in episode_nodes[ep_id]:
+                selected.append(self.trajectories[qid][idx])
+        return selected
+
     def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
         if query_id not in self._query_node_ids:
             return []
