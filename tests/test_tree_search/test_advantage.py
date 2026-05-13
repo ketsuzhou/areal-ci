@@ -103,3 +103,87 @@ class TestTreeAdvantageComputer:
         # Q-value advantages are independent from returns
         # (Q-values == outcome_reward for single-insert nodes, so they
         # happen to match here, but they come from different normalization paths)
+
+
+class TestTreeAdvantageComputerEpisodeLevel:
+    def test_episode_level_normalization(self):
+        """GRPO normalization operates across episodes, not individual nodes."""
+        store = MCTSTreeStore()
+        computer = TreeAdvantageComputer(store)
+        # Episode A: 2 turns, reward 1.0
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
+            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[-1, -1, 0],
+            outcome_reward=1.0, query_id="q1", node_id="ep_a_2", episode_id="ep_a",
+        )
+        # Episode B: 1 turn, reward 0.0
+        n3 = Node(
+            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3], versions=[-1, -1, 0],
+            outcome_reward=0.0, query_id="q1", node_id="ep_b_1", episode_id="ep_b",
+        )
+        store.insert_batch([n1, n2, n3])
+        computer.compute([n1, n2, n3])
+        # Both nodes in episode A get the same normalized value
+        assert n1.advantages is not None
+        assert n2.advantages is not None
+        assert n3.advantages is not None
+        # Response positions (loss_mask=1) in same episode get same advantage
+        assert abs(n1.advantages[2].item() - n2.advantages[2].item()) < 1e-6
+        # Episode A and B have different rewards, so different advantages
+        assert abs(n1.advantages[2].item() - n3.advantages[2].item()) > 0.1
+        # Prompt positions are zero
+        assert n1.advantages[0].item() == 0.0
+        assert n1.advantages[1].item() == 0.0
+
+    def test_episode_level_zero_mean(self):
+        """Per-episode GRPO normalization preserves zero-mean property."""
+        store = MCTSTreeStore()
+        computer = TreeAdvantageComputer(store)
+        # 2 episodes with rewards 1.0 and -1.0 → mean=0, std=1.0
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
+            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[-1, -1, 0],
+            outcome_reward=-1.0, query_id="q1", node_id="ep_b_1", episode_id="ep_b",
+        )
+        store.insert_batch([n1, n2])
+        computer.compute([n1, n2])
+        # Response positions: ep_a gets +1.0, ep_b gets -1.0
+        assert abs(n1.advantages[2].item() - 1.0) < 1e-5
+        assert abs(n2.advantages[2].item() + 1.0) < 1e-5
+
+    def test_episode_level_backward_compat_single_node(self):
+        """Single-node trajectories (no episode_id) still work: each node is its own episode."""
+        store = MCTSTreeStore()
+        computer = TreeAdvantageComputer(store)
+        t1 = _make_node([1, 2, 3], [0, 0, 1], reward=1.0, query_id="q1")
+        t2 = _make_node([4, 5, 6], [0, 0, 1], reward=0.0, query_id="q1")
+        store.insert_batch([t1, t2])
+        computer.compute([t1, t2])
+        # Two nodes with no episode_id → each is its own "episode"
+        # Same behavior as before: non-zero normalized values
+        assert not torch.allclose(t1.advantages, torch.zeros(3))
+        assert not torch.allclose(t2.advantages, torch.zeros(3))
+
+    def test_episode_level_single_episode_zero_advantage(self):
+        """A single episode in the query group gets zero advantage (std=0)."""
+        store = MCTSTreeStore()
+        computer = TreeAdvantageComputer(store)
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
+            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+        )
+        store.insert_batch([n1])
+        computer.compute([n1])
+        assert torch.allclose(n1.advantages, torch.zeros(3))
