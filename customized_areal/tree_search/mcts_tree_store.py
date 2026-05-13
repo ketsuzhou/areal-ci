@@ -313,6 +313,33 @@ class MCTSTreeStore:
             if not self.is_trained(node_id)
         )
 
+    def get_untrained_episode_count(self, query_id: str) -> int:
+        """Count untrained episodes for a query.
+
+        An episode is untrained if any of its nodes is untrained
+        (train_id != current_train_id).
+        """
+        if query_id not in self._query_node_ids:
+            return 0
+        episode_has_untrained: dict[str, bool] = {}
+        for node_id in self._query_node_ids[query_id]:
+            key = self._node_id_to_key.get(node_id)
+            if key is None:
+                continue
+            qid, idx = key
+            node = self.trajectories[qid][idx]
+            if isinstance(node, dict):
+                ep_id = node.get("episode_id", "")
+            else:
+                ep_id = node.episode_id
+            if not ep_id:
+                continue
+            if ep_id not in episode_has_untrained:
+                episode_has_untrained[ep_id] = False
+            if not self.is_trained(node_id):
+                episode_has_untrained[ep_id] = True
+        return sum(1 for v in episode_has_untrained.values() if v)
+
     def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
         if query_id not in self._query_node_ids:
             return []

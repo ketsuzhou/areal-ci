@@ -529,6 +529,97 @@ class TestMCTSTreeStoreMCTSStats:
         assert store._q_values[t2.node_id] == 0.0
 
 
+class TestGetUntrainedEpisodeCount:
+    def test_no_episodes(self):
+        store = MCTSTreeStore()
+        assert store.get_untrained_episode_count("q1") == 0
+
+    def test_unknown_query(self):
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        store.insert_batch([n1])
+        assert store.get_untrained_episode_count("q_other") == 0
+
+    def test_all_untrained(self):
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+        )
+        store.insert_batch([n1, n2])
+        assert store.get_untrained_episode_count("q1") == 2
+
+    def test_multi_node_episodes(self):
+        """An episode with multiple nodes counts as one episode."""
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_a_2", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        n3 = Node(
+            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3], versions=[0, 0, 0],
+            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+        )
+        store.insert_batch([n1, n2, n3])
+        assert store.get_untrained_episode_count("q1") == 2
+
+    def test_trained_episode_excluded(self):
+        """An episode where all nodes are trained is excluded from count."""
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+        )
+        store.insert_batch([n1, n2])
+        store.set_trained(n1.node_id, True)
+        assert store.get_untrained_episode_count("q1") == 1
+
+    def test_partially_trained_episode_still_counted(self):
+        """An episode is untrained if any of its nodes is untrained."""
+        store = MCTSTreeStore()
+        store.current_train_id = "run_001"
+        n1 = Node(
+            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
+            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        n2 = Node(
+            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
+            node_id="ep_a_2", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+        )
+        store.insert_batch([n1, n2])
+        store.set_trained(n1.node_id, True)
+        assert store.get_untrained_episode_count("q1") == 1
+
+
 class TestNodeToTensorDict:
     def test_response_only_fields_sliced(self):
         from customized_areal.tree_search.mcts_tree_store import (
