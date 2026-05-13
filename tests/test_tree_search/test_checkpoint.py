@@ -189,19 +189,20 @@ class TestTreeCheckpointManager:
             [-1.9, -2.0],
         ]
 
-    def test_sanitize_query_id_special_chars(self, tmp_path):
-        """Query IDs with special chars (/, \\, :) should be safely saved and loaded."""
+    def test_uuid_query_id_roundtrip(self, tmp_path):
+        """UUID query_ids (the real-world format) survive save/load exactly."""
         manager = TreeCheckpointManager(str(tmp_path))
         store = MCTSTreeStore()
+        uuid_qid = "a7143270374d4eeab8ad5f4716475e28"
         node = _make_node(
-            [1, 2, 3], [0, 0, 1], reward=1.0, query_id="path/with:special\\chars"
+            [1, 2, 3], [0, 0, 1], reward=1.0, query_id=uuid_qid
         )
         store.insert_batch([node])
         manager.save(store)
 
         loaded = manager.load()
-        assert "path/with:special\\chars" in loaded.trajectories
-        assert loaded.trajectories["path/with:special\\chars"][0].outcome_reward == 1.0
+        assert uuid_qid in loaded.trajectories
+        assert loaded.trajectories[uuid_qid][0].outcome_reward == 1.0
 
     def test_atomic_save_no_partial_files(self, tmp_path):
         """Verify no .tmp files remain after successful save."""

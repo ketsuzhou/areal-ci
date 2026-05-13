@@ -15,6 +15,7 @@ a single class that:
 
 from __future__ import annotations
 
+import asyncio
 import traceback
 import uuid
 from typing import Any
@@ -282,6 +283,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     attempt,
                     "".join(traceback.format_exception(type(result), result, result.__traceback__)),
                 )
+            wait = 2 ** attempt
+            logger.info("Episode %s retry %d — waiting %ds before next attempt", group_idx, attempt, wait)
+            await asyncio.sleep(wait)
         logger.error(
             "Episode %s exhausted all %d retries — skipping", group_idx, max_retries
         )
@@ -310,8 +314,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         # 2. Generate fresh episodes if needed
         fresh_nodes: list[Node] = []
         if need_gen > 0:
-            import asyncio
-
             results = await asyncio.gather(
                 *[
                     self._retry_episode(engine, data, query_id, group_idx)

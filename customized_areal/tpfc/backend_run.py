@@ -614,53 +614,58 @@ async def run_backend(
     )
     logger.info("Task created: %s", task_id)
 
-    token_manager = SharedTokenManager(
-        refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
-    )
-    auth_token = await token_manager.get_valid_token()
+    try:
+        token_manager = SharedTokenManager(
+            refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
+        )
+        auth_token = await token_manager.get_valid_token()
 
-    form_data = _prepare_form_data(
-        task_id=task_id,
-        task_description=task_description,
-        agent_id=resolved_agent_id,
-        model_name=model_name,
-        base_url=base_url,
-        api_key=api_key,
-        tags=tags,
-    )
-
-    result = await _start_agent_run(
-        api_base_url=LE_AGENT_API_URL,
-        auth_token=auth_token,
-        form_data=form_data,
-        task_file_path=task_file_path,
-    )
-    logger.info("Agent run started via API: %s", result)
-
-    agent_run_id = result.get("agent_run_id")
-    start_status = result.get("status")
-
-    if start_status == "queued" and not agent_run_id:
-        logger.warning(
-            "Agent run queued (slot occupied) for task_id=%s, waiting via task stream",
-            task_id,
+        form_data = _prepare_form_data(
+            task_id=task_id,
+            task_description=task_description,
+            agent_id=resolved_agent_id,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            tags=tags,
         )
 
-    status = await _wait_for_agent_run(
-        client,
-        task_id=task_id,
-        agent_run_id=agent_run_id,
-        api_base_url=LE_AGENT_API_URL,
-        auth_token=auth_token,
-    )
+        result = await _start_agent_run(
+            api_base_url=LE_AGENT_API_URL,
+            auth_token=auth_token,
+            form_data=form_data,
+            task_file_path=task_file_path,
+        )
+        logger.info("Agent run started via API: %s", result)
 
-    messages = await get_llm_messages(task_id, return_raw=True)
-    final_boxed_answer = _extract_final_answer(messages)
+        agent_run_id = result.get("agent_run_id")
+        start_status = result.get("status")
 
-    if status in {"completed", "failed", "stopped"}:
+        if start_status == "queued" and not agent_run_id:
+            logger.warning(
+                "Agent run queued (slot occupied) for task_id=%s, waiting via task stream",
+                task_id,
+            )
+
+        status = await _wait_for_agent_run(
+            client,
+            task_id=task_id,
+            agent_run_id=agent_run_id,
+            api_base_url=LE_AGENT_API_URL,
+            auth_token=auth_token,
+        )
+
+        messages = await get_llm_messages(task_id, return_raw=True)
+        final_boxed_answer = _extract_final_answer(messages)
+
+        return messages, final_boxed_answer, log_path, None
+    except Exception:
+        logger.exception("Exception in run_backend for task_id=%s", task_id)
+        raise
+    finally:
+        # Guaranteed to run on normal exit, exception, or CancelledError
+        # (the latter fires when asyncio.run() is cancelled by SIGINT/Ctrl+C).
         await cleanup_sandbox_for_task(client, task_id)
-
-    return messages, final_boxed_answer, log_path, None
 
 
 if __name__ == "__main__":

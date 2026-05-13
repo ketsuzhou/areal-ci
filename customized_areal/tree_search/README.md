@@ -9,37 +9,53 @@ teacher model. It is a customization layer on top of AReaL's `PPOTrainer`.
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                    CacheAwarePPOTrainer                          │
-│  (extends PPOTrainer with rollout caching + tree backup)         │
+│  (extends PPOTrainer with MultiCandidateFSDPPPOActor support)   │
 │                                                                  │
 │  __init__()                                                      │
-│   ├─ Creates MCTSTreeStore, TreeAdvantageComputer                │
-│   ├─ Creates TreeCheckpointManager                               │
-│   ├─ On CROSS_TRAINING: loads existing checkpoint                │
-│   ├─ Creates TreeSearchPatches (not applied yet)                 │
-│   └─ Creates _CacheAwareBatchBuilder                             │
+│   ├─ Accepts TreeBackupConfig, RolloutCacheConfig               │
+│   └─ Stores tree_backup_config for later use                    │
+│                                                                  │
+│  _create_train_engine()                                          │
+│   ├─ If loss_mode != GRPO: returns MultiCandidateFSDPPPOActor   │
+│   └─ Otherwise: delegates to standard PPOTrainer engine          │
 │                                                                  │
 │  train()                                                         │
-│   ├─ patches.apply()  (monkey-patch all components)              │
-│   ├─ monkey-patches self.actor.prepare_batch                     │
-│   ├─ super().train()  (runs training loop)                       │
-│   └─ patches.restore()  (in finally block)                       │
+│   ├─ If loss_mode != GRPO: applies distill loss patch           │
+│   ├─ Calls super().train() (standard training loop)             │
+│   └─ Restores patch in finally block                             │
 │                                                                  │
-│  _cache_aware_prepare_batch()  ← replaces prepare_batch          │
-│       ├─ split_prompts()          → cached / need-generation     │
-│       ├─ load_cached_trajectories() from tree store              │
-│       ├─ rollout_batch()           → generate missing only       │
-│       ├─ tree_store.insert_batch() → store trajectories          │
-│       ├─ tree_advantage_computer.compute() → stash tree adv      │
-│       ├─ _mark_batch_trained()     → mark as used                │
-│       └─ tree_checkpoint_manager.save() (CROSS_TRAINING)         │
+│  close()                                                         │
+│   └─ Delegates to parent                                         │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│              TreeSearchGroupedRolloutWorkflow                    │
+│  (extends RolloutWorkflow with cache reuse + tree ops)           │
 │                                                                  │
-│   └─ [patched] PPOActor.compute_advantages()                     │
-│       ├─ original GAE pipeline (KL, scaling, normalization)      │
-│       └─ restore tree advantages from _tree_advantages/_returns  │
+│  arun_episode()                                                  │
+│   ├─ Checks cache: how many untrained episodes exist?            │
+│   ├─ Generates only needed fresh episodes (partial reuse)        │
+│   ├─ Converts fresh results to Nodes via interactions_dict_to_nodes
+│   ├─ Loads cached Nodes from MCTSTreeStore                       │
+│   ├─ Combines fresh + cached Nodes                               │
+│   ├─ Inserts fresh Nodes into tree_store                         │
+│   ├─ Computes tree advantages (TREE mode)                        │
+│   ├─ Marks all nodes as trained                                  │
+│   ├─ Saves tree checkpoint (CROSS_TRAINING mode)                 │
+│   └─ Converts to batched tensor dict via _nodes_to_batched_tensor_dict
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                         MCTSTreeStore                            │
+│  (flat trajectory store with MCTS statistics)                    │
 │                                                                  │
-│  _save_recover_checkpoint()                                      │
-│   ├─ super()._save_recover_checkpoint()                          │
-│   └─ TreeCheckpointManager.save() + save_trained_episodes()      │
+│  insert_batch() → store trajectories                             │
+│  load_trajectories() → retrieve untrained Nodes                  │
+│  get_untrained_count() → check cache availability                │
+│  set_trained() / is_trained() → track usage                      │
+│  _backup() → update MCTS Q-values                                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,8 +111,8 @@ tokens from the beginning through this turn's response). Nodes are linked via `n
 | `loss_mask`      | `list[int]`                 | 0=prompt tokens, 1=response tokens              |
 | `logprobs`       | `list[float]`               | Per-token log probabilities                     |
 | `versions`       | `list[int]`                 | Policy version per token (-1 on prompt)         |
-| `node_id`        | `int`                       | Unique sequence ID (assigned by store)          |
-| `parent_node_id` | `int \| None`               | Parent sequence ID (None for root)              |
+| `node_id`        | `str`                       | Globally unique interaction ID (UUID)           |
+| `parent_node_id` | `str \| None`               | Parent interaction ID (None for root)           |
 | `episode_id`     | `str`                       | Groups turns into a trajectory path             |
 | `turn_idx`       | `int`                       | 1-based turn position within episode            |
 | `query_id`       | `str`                       | Dataset query identifier                        |
@@ -131,8 +147,8 @@ assistant markers.
 **MCTS backup** (`_backup`): Each trajectory gets a single Q-value = mean reward (visit
 count = 1 currently). Stored in `_visit_counts`, `_total_values`, `_q_values`.
 
-**Node ID assignment** (`_insert_single`): Each Node receives a globally unique
-monotonic `node_id`. The Node's `query_id` is set during insertion.
+**Node ID assignment** (`_insert_single`): Each Node receives its `node_id` from the
+inference engine (a UUID string). The Node's `query_id` is set during insertion.
 
 ### 3. Advantage Computer (`advantage.py`)
 
@@ -145,11 +161,9 @@ tree_advantage_computer.compute(trajectories)
 For each trajectory:
 
 1. Collect all `(query_id, node_id)` pairs across the batch
-1. **Per-query GRPO normalization of Q-values** for advantages: normalize Q-values to
+1. **Per-query GRPO normalization of outcome_rewards** for returns: normalize rewards to
    zero-mean unit-variance within each query group (so episodes for the same prompt are
    compared against each other)
-1. **Per-query GRPO normalization of outcome_rewards** for returns: normalize rewards
-   similarly
 1. For each trajectory, compute per-token advantages: normalized Q-value × prompt_mask
    (value on response tokens, 0 on prompt tokens)
 1. Set `node.advantages` and `node.returns` in-place
@@ -162,127 +176,71 @@ Serializes/deserializes the full MCTS tree state to disk.
 
 | Method                              | Description                                                                                                                   |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `save(tree_store)`                  | Save per-query trajectory records as `query_{id}.json` + `metadata.json` (seq_id indices, MCTS stats, trained flags, rewards) |
-| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by int seq_id.                                             |
+| `save(tree_store)`                  | Save per-query trajectory records as `query_{sanitized_id}.json` + `metadata.json` (node_id indices, MCTS stats, trained flags, rewards) |
+| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                                         |
 | `exists()`                          | Check if a checkpoint directory exists                                                                                        |
 | `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                                      |
 | `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                                    |
 
-### 5. Patch Manager (`patches.py`)
+### 5. Tree Search Grouped Rollout Workflow (`tree_search_grouped_workflow.py`)
 
-`TreeSearchPatches` is a consolidated monkey-patch manager that handles all patches
-needed for tree search training. It provides atomic apply/restore and a context manager
-protocol.
+`TreeSearchGroupedRolloutWorkflow` is the core component that extends `RolloutWorkflow`
+to provide tree-search-aware rollout with cache reuse.
 
-**Patches applied:**
+**Initialization (`__init__`):**
 
-1. **PPOActor.compute_advantages** — restores tree advantages after GAE runs
-1. **engine.\_wrap_openai_agent** — returns `TreeSearchGroupedRolloutWorkflow`
-1. **engine.\_resolve_workflow** — prevents double-wrapping with
-   `GroupedRolloutWorkflow`
-1. **engine.workflow_executor** — replaces with `TreeSearchWorkflowExecutor`
-1. **PPOActor.\_ppo_update** (conditional) — uses distillation loss when loss_mode is
-   DISTILL or BOTH
+- Creates `TreeCheckpointManager` and `MCTSTreeStore`
+- On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
+- Creates `TreeAdvantageComputer`
+- Resets trained flags for a fresh training run
 
-**Usage:**
+**Per-episode flow (`arun_episode`):**
 
-```python
-patches = TreeSearchPatches(
-    rollout_engine=engine,
-    advantage_mode=AdvantageMode.TREE,
-    loss_mode=LossMode.GRPO,
-    group_size=4,
-)
-patches.apply()
-try:
-    ...  # training loop
-finally:
-    patches.restore()
-```
+1. **Check cache**: Count untrained episodes for the query via `tree_store.get_untrained_count()`
+2. **Generate fresh episodes** if needed: Run `group_size - cached_count` parallel rollouts via `asyncio.gather`
+3. **Convert results to Nodes**: `interactions_dict_to_nodes()` converts `InteractionWithTokenLogpReward` objects to `list[Node]`
+4. **Load cached nodes**: `tree_store.load_trajectories(query_id, cached_count)`
+5. **Combine**: Merge fresh and cached nodes (total = group_size)
+6. **Insert fresh nodes**: `tree_store.insert_batch(fresh_nodes)`
+7. **Compute tree advantages**: `tree_advantage_computer.compute(all_nodes)` (TREE mode)
+8. **Mark trained**: Set trained flags for all nodes
+9. **Save checkpoint**: `tree_checkpoint_manager.save()` (CROSS_TRAINING mode)
+10. **Convert to tensor dict**: `_nodes_to_batched_tensor_dict()` converts `list[Node]` to batched tensor dict
+11. **Inject distill weights**: Set `rl_loss_weight` and `distill_loss_weight` if loss_mode != GRPO
+
+**Utility functions:**
+
+| Function                          | Description                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `interactions_dict_to_nodes()`    | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]`         |
+| `_nodes_to_batched_tensor_dict()` | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`     |
 
 ### 6. Trainer (`trainer.py`)
 
 #### `CacheAwarePPOTrainer`
 
-PPO trainer with rollout caching **and** tree backup. Extends `PPOTrainer` directly.
+PPO trainer with tree-search-aware rollout support. Extends `PPOTrainer` directly.
+
+**Key design**: All cache logic, tree ops, and checkpoint saving happen inside
+`TreeSearchGroupedRolloutWorkflow` (activated by the `.env` flag in
+`customized_areal/.env`). The trainer itself is minimal:
 
 **Initialization (`__init__`):**
 
-When `cache_config.enabled` and `tree_backup_config.mode != OFF`:
+- Accepts `tree_backup_config` and stores it
+- Delegates to `PPOTrainer.__init__()`
 
-1. Creates `MCTSTreeStore`, `TreeAdvantageComputer`, `TreeCheckpointManager`
-1. On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
-1. Restores trained flags from recover checkpoint, or resets for fresh run
-1. Creates `_CacheAwareBatchBuilder` for prompt splitting
-1. Creates `TreeSearchPatches` (not applied yet)
-1. If `loss_mode != GRPO`, overrides `_create_train_engine` to use
-   `MultiCandidateFSDPPPOActor`
+**`_create_train_engine`:**
 
-**Training flow — per step:**
+- When `loss_mode != GRPO`: Returns `MultiCandidateFSDPPPOActor` (requires FSDP backend)
+- Otherwise: Delegates to standard `PPOTrainer._create_train_engine()`
 
-1. **Split prompts** into cached / needs-generation via
-   `_CacheAwareBatchBuilder.split_prompts()`
-   - Query ID derived from `prompt["query_id"]` (dataset-provided)
-   - If all prompts have enough cached (untrained) trajectories → load from cache
-   - Otherwise → generate all prompts fresh via `rollout_batch()`
-1. **Tree insert** via `tree_store.insert_batch(trajs)` — while `query_id`/`node_id` are
-   available
-1. **Tree advantage compute** (TREE mode) via `tree_advantage_computer.compute(trajs)`
-   - Stashes results as `node.advantages` / `node.returns`
-1. **Mark trained** via `_mark_batch_trained()` — so rollouts aren't reused
-1. **Save checkpoint** (CROSS_TRAINING mode)
-1. **Convert to tensor dicts** for the downstream PPO pipeline
-1. **Distillation weights** injected if loss_mode is DISTILL or BOTH
-1. **GAE runs** via patched `compute_advantages()` — GAE computes normally, then tree
-   advantages are restored
-1. **PPO update** uses tree advantages (TREE mode) or GAE advantages (GAE mode)
+**`train()`:**
 
-**Key methods:**
+- When `loss_mode != GRPO`: Applies distill loss patch, calls `super().train()`, restores patch in `finally`
+- Otherwise: Delegates to `super().train()`
 
-| Method                         | Description                                                                       |
-| ------------------------------ | --------------------------------------------------------------------------------- |
-| `train()`                      | Applies patches, monkey-patches prepare_batch, runs training, restores in finally |
-| `_cache_aware_prepare_batch()` | Cache-aware batch preparation with tree operations                                |
-| `_save_recover_checkpoint()`   | Saves MCTS tree checkpoint + trained episodes on CROSS_TRAINING mode              |
-| `close()`                      | Safety net: restores patches if train() crashed before finally                    |
-
-**Custom train engine:** When `loss_mode != GRPO`, `_create_train_engine` returns
-`MultiCandidateFSDPPPOActor` instead of the standard actor, enabling multi-candidate
-logprob gathering for distillation.
-
-### 7. Grouped Rollout Workflow (`grouped_workflow.py`)
-
-`TreeSearchGroupedRolloutWorkflow` extends `GroupedRolloutWorkflow` to run multiple
-rollouts per query and collect all per-turn `Node` objects into a flat `list[Node]`.
-
-- `arun_episode()`: runs `group_size` parallel rollouts via `asyncio.gather`, tags each
-  Node with `episode_id` and `query_id`, returns flat `list[Node]`
-
-### 8. Proxy Workflow (`proxy_workflow.py`)
-
-`QueryIDProxyWorkflow` extends `OpenAIProxyWorkflow` to inject dataset `query_id` into
-trajectories and convert `InteractionWithTokenLogpReward` objects to `list[Node]`.
-
-- `_interactions_to_nodes()`: converts interaction dict to Node objects, reconstructing
-  full-sequence `logprobs`/`loss_mask`/`versions` by concatenating parent context with
-  new response tokens
-- `arun_episode()`: calls parent, converts result to `list[Node]` with `query_id`
-  injected
-- Supports `agent_path` kwarg for dotted import path resolution
-
-### 9. Workflow Executor (`workflow_executor.py`)
-
-`TreeSearchWorkflowExecutor` extends `WorkflowExecutor` to handle `list[dict]` returns
-from `arun_episode` (the standard executor expects a single dict).
-
-- `_create_workflow_task()`: wraps workflow execution, handles three return types
-  (list\[dict\], dict, InteractionWithTokenLogpReward dict), applies acceptance
-  filtering
-- `wait()`: extracts `_TreeSearchRolloutResult` trajectories, flattening into a single
-  list
-- `rollout_batch()`: submits all items and returns flattened results
-
-### 10. Distillation Support
+### 7. Distillation Support
 
 #### `distill_types.py`
 
@@ -342,126 +300,58 @@ from `arun_episode` (the standard executor expects a single dict).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                        CacheAwarePPOTrainer.train()                      │
+│                    CacheAwarePPOTrainer.train()                          │
 │                                                                          │
-│  patches.apply()  ← TreeSearchPatches manages all monkey-patches        │
-│  monkey-patches self.actor.prepare_batch → _cache_aware_prepare_batch() │
+│  If loss_mode != GRPO:                                                   │
+│   ├─ patch_ppo_actor_class_to_use_distill_loss()                        │
+│   ├─ super().train()  (standard training loop)                          │
+│   └─ unpatch_ppo_actor_distill_loss()  (in finally)                     │
+│  Otherwise:                                                              │
+│   └─ super().train()  (standard training loop)                          │
 └─────────────────────────────────┬────────────────────────────────────────┘
                                   │
                                   │  per training step
                                   ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  1. BATCH PREPARATION  (_cache_aware_prepare_batch)                      │
+│  TreeSearchGroupedRolloutWorkflow.arun_episode()                         │
 │                                                                          │
-│  ┌──────────────┐                                                       │
-│  │  Dataloader   │  raw prompts (list[dict])                             │
-│  └──────┬───────┘                                                       │
-│         │                                                                │
-│  ┌──────▼─────────────────────────────────┐                              │
-│  │  _CacheAwareBatchBuilder.split_prompts │                              │
-│  │                                        │                              │
-│  │  For each prompt:                      │
-│  │   • prompt["query_id"]                 │
-│  │   • tree_store.get_untrained_count()   │── check cached rollouts      │
-│  │                                        │                              │
-│  │   fully cached (≥ n_samples)  ──────► │  cached_items[]               │
-│  │   not fully cached            ──────► │  need_gen_items[]             │
-│  └──┬──────────────────────────────────┬─┘                              │
-│     │                                   │                                │
-│     ▼                                   ▼                                │
-│  ┌──────────────────────┐  ┌──────────────────────┐                     │
-│  │ load_cached_trajs()  │  │  rollout_batch()     │                     │
-│  │                      │  │  (inference engine)   │                     │
-│  │ tree_store.load_     │  │                      │                     │
-│  │  trajectories(qid,n) │  │ TreeSearchGrouped    │                     │
-│  │                      │  │ RolloutWorkflow runs │                     │
-│  │ Returns list[Node]   │  │ group_size episodes  │                     │
-│  └──────┬───────────────┘  │                      │                     │
-│         │                  │ Returns flat list    │                     │
-│         │                  │ of per-episode dicts │                     │
-│         │                  └──────────┬───────────┘                     │
-│         │                             │                                 │
-│         └──────────┬──────────────────┘                                 │
-│                    ▼                                                    │
-│  ┌──────────────────────────────────────┐                               │
-│  │  Tree Operations                     │                               │
-│  │                                      │                               │
-│  │  1. tree_store.insert_batch(trajs)   │                               │
-│  │     For each trajectory:             │                               │
-│  │      • Skip if node_id already set   │                               │
-│  │      • Assign global node_id         │                               │
-│  │      • Store Node record            │                               │
-│  │      • MCTS backup (Q = reward)     │                               │
-│  │                                      │                               │
-│  │  2. tree_advantage_computer.compute  │                               │
-│  │     (TREE mode)                      │                               │
-│  │     • Per-query GRPO normalize adv   │                               │
-│  │     • Per-query GRPO normalize ret   │                               │
-│  │     • Set node.advantages/returns    │                               │
-│  │                                      │                               │
-│  │  3. _mark_batch_trained()            │                               │
-│  │                                      │                               │
-│  │  4. Save checkpoint (CROSS_TRAINING) │                               │
-│  └──────────────────┬───────────────────┘                               │
-│                     │                                                    │
-│  ┌──────────────────▼───────────────────┐                               │
-│  │  Convert to tensor dicts             │                               │
-│  │  • Node → _node_to_tensor_dict()     │                               │
-│  │                                      │                               │
-│  │  Inject distillation loss weights:   │                               │
-│  │  • DISTILL: rl_loss_weight = 0.0     │                               │
-│  │  • BOTH:    rl_loss_weight = config  │                               │
-│  └──────────────────┬───────────────────┘                               │
-│                     │                                                    │
-└─────────────────────┼────────────────────────────────────────────────────┘
-                      ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  2. ADVANTAGE COMPUTATION  (patched compute_advantages)                  │
+│  1. CHECK CACHE                                                          │
+│     ├─ query_id = data.get("query_id", "")                               │
+│     ├─ cached_count = tree_store.get_untrained_count(query_id)           │
+│     └─ need_gen = max(0, group_size - cached_count)                      │
 │                                                                          │
-│  ┌─────────────────────────────────────┐                                 │
-│  │  Step A: Original GAE pipeline      │                                 │
-│  │  • Compute KL rewards              │                                 │
-│  │  • Scale rewards                   │                                 │
-│  │  • GAE λ-returns → advantages      │                                 │
-│  │  • Compute loss_mask, logprobs     │                                 │
-│  │                                     │                                 │
-│  │  Preserved for logging: kl_rewards, │                                 │
-│  │  tot_rewards, loss_mask, logprobs   │                                 │
-│  └──────────────────────┬──────────────┘                                 │
-│                         │                                                │
-│  ┌──────────────────────▼──────────────┐                                 │
-│  │  Step B: Restore tree advantages    │                                 │
-│  │  (TREE mode only)                   │                                 │
-│  │                                     │                                 │
-│  │  For each trajectory:               │                                 │
-│  │   Pop node.advantages → advantages  │                                 │
-│  │   Pop node.returns → returns        │                                 │
-│  └─────────────────────────────────────┘                                 │
+│  2. GENERATE FRESH EPISODES (if need_gen > 0)                            │
+│     ├─ Run need_gen parallel rollouts via asyncio.gather                 │
+│     ├─ Retry failed episodes up to max_retries                           │
+│     └─ Convert results to Nodes via interactions_dict_to_nodes()        │
 │                                                                          │
+│  3. LOAD CACHED NODES (if cached_count > 0)                              │
+│     └─ tree_store.load_trajectories(query_id, cached_count)              │
+│                                                                          │
+│  4. COMBINE fresh_nodes + cached_nodes                                   │
+│                                                                          │
+│  5. TREE OPERATIONS                                                      │
+│     ├─ tree_store.insert_batch(fresh_nodes)                              │
+│     ├─ tree_advantage_computer.compute(all_nodes)  (TREE mode)          │
+│     ├─ Mark all nodes as trained                                         │
+│     └─ Save checkpoint (CROSS_TRAINING mode)                             │
+│                                                                          │
+│  6. CONVERT TO TENSOR DICT                                               │
+│     ├─ _nodes_to_batched_tensor_dict(all_nodes)                          │
+│     └─ Inject distill weights if loss_mode != GRPO                       │
+│                                                                          │
+│  Return: dict[str, torch.Tensor]  (batched tensor dict)                  │
 └──────────────────────────────────────────────────────────────────────────┘
-                      ▼
+                                  │
+                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  3. PPO UPDATE                                                           │
+│  Standard PPO Training Pipeline (AReaL)                                  │
 │                                                                          │
-│  • GRPO loss: clipped loss on advantages (tree Q-values in TREE mode)   │
-│  • Value loss on returns                                                 │
-│  • Distillation loss (DISTILL/BOTH modes):                               │
-│    position-level GRPO using teacher logprobs                            │
-│  • KL metadata available for logging                                     │
+│  ├─ compute_advantages()  (GAE or TREE)                                  │
+│  ├─ ppo_update()                                                         │
+│  │   └─ If loss_mode != GRPO: uses grpo_distill_loss_fn()               │
+│  └─ Standard logging and checkpointing                                   │
 └──────────────────────────────────────────────────────────────────────────┘
-
-After PPO update (CROSS_TRAINING mode):
-
-┌──────────────────────────────────────────────┐
-│  _save_recover_checkpoint()                  │
-│  ├─ super()._save_recover_checkpoint()       │
-│  ├─ TreeCheckpointManager.save(tree_store)   │
-│  │   • Each query → query_{id}.json           │
-│  │   • metadata.json (seq_id indices,         │
-│  │     MCTS stats, trained flags)             │
-│  └─ TreeCheckpointManager.save_trained_ep... │
-│     • trained_episodes.json (episode IDs)    │
-└──────────────────────────────────────────────┘
 ```
 
 ### Metadata Propagation
@@ -470,8 +360,8 @@ Key metadata fields attached to trajectory dicts throughout the pipeline:
 
 | Field      | Attached by                               | Type  | Used by                                         |
 | ---------- | ----------------------------------------- | ----- | ----------------------------------------------- |
-| `query_id` | `insert_batch()` / `QueryIDProxyWorkflow` | `str` | Tree lookup, cache splitting, advantage compute |
-| `node_id`  | `insert_batch()`                          | `int` | Advantage lookup, mark trained                  |
+| `query_id` | `TreeSearchGroupedRolloutWorkflow`        | `str` | Tree lookup, cache splitting, advantage compute |
+| `node_id`  | `insert_batch()` / inference engine       | `str` | Advantage lookup, mark trained                  |
 
 ## Public API
 
@@ -489,7 +379,7 @@ from customized_areal.tree_search import (
     LossMode,
     TreeAdvantageComputer,
     TreeCheckpointManager,
-    QueryIDProxyWorkflow,
+    TreeSearchGroupedRolloutWorkflow,
     PositionRewardInfo,
     InteractionWithTokenLevelReward,
 )
@@ -553,27 +443,28 @@ with CacheAwarePPOTrainer(
     )
 ```
 
+## Known Issues
+
+See [BUGS.md](BUGS.md) for a list of known bugs and their recommended fixes.
+
 ## File Index
 
-| File                     | Purpose                                                                            |
-| ------------------------ | ---------------------------------------------------------------------------------- |
-| `__init__.py`            | Public API exports and lazy imports for distillation components                    |
-| `config.py`              | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode` |
-| `mcts_tree_store.py`     | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics               |
-| `advantage.py`           | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                  |
-| `checkpoint.py`          | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                 |
-| `trainer.py`             | `CacheAwarePPOTrainer` — PPO trainer with rollout caching + tree backup            |
-| `patches.py`             | `TreeSearchPatches` — consolidated monkey-patch manager                            |
-| `grouped_workflow.py`    | `TreeSearchGroupedRolloutWorkflow` — runs group_size episodes per query            |
-| `proxy_workflow.py`      | `QueryIDProxyWorkflow` — injects query_id, converts interactions to Nodes          |
-| `workflow_executor.py`   | `TreeSearchWorkflowExecutor` — handles list\[dict\] returns from arun_episode      |
-| `distill_types.py`       | `PositionRewardInfo`, `InteractionWithTokenLevelReward`                            |
-| `core/config.py`         | `OnPolicyDistillConfig`, `AgentConfig`                                             |
-| `core/agent.py`          | `OnPolicyDistillAgent` — agent for distillation training                           |
-| `core/reward_compute.py` | Student vs teacher logprob reward computation                                      |
-| `core/teacher_client.py` | `TeacherClient` — async teacher model inference client                             |
-| `engine/fsdp_engine.py`  | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                     |
-| `engine/actor.py`        | `MultiCandidateFSDPPPOActor` — PPO actor for distillation                          |
-| `training/loss.py`       | `grpo_distill_loss_fn` — combined GRPO + distillation loss                         |
-| `training/actor.py`      | Patch to use distillation loss in PPOActor                                         |
-| `training/logprobs.py`   | Multi-candidate logprob/entropy gathering utilities                                |
+| File                          | Purpose                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `__init__.py`                 | Public API exports and lazy imports for distillation components                    |
+| `config.py`                   | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode` |
+| `mcts_tree_store.py`          | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics               |
+| `advantage.py`                | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                  |
+| `checkpoint.py`               | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                 |
+| `trainer.py`                  | `CacheAwarePPOTrainer` — PPO trainer with distillation engine support              |
+| `tree_search_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops |
+| `distill_types.py`            | `PositionRewardInfo`, `InteractionWithTokenLevelReward`                            |
+| `core/config.py`              | `OnPolicyDistillConfig`, `AgentConfig`                                             |
+| `core/agent.py`               | `OnPolicyDistillAgent` — agent for distillation training                           |
+| `core/reward_compute.py`      | Student vs teacher logprob reward computation                                      |
+| `core/teacher_client.py`      | `TeacherClient` — async teacher model inference client                             |
+| `engine/fsdp_engine.py`       | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                     |
+| `engine/actor.py`             | `MultiCandidateFSDPPPOActor` — PPO actor for distillation                          |
+| `training/loss.py`            | `grpo_distill_loss_fn` — combined GRPO + distillation loss                         |
+| `training/actor.py`           | Patch to use distillation loss in PPOActor                                         |
+| `training/logprobs.py`        | Multi-candidate logprob/entropy gathering utilities                                |

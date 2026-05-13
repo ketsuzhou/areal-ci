@@ -267,15 +267,21 @@ class MCTSTreeStore:
             node.train_id = self.current_train_id
 
     def is_trained(self, node_id: str) -> bool:
-        """A node is trained if its train_id matches the current run's train_id."""
+        """A node is trained if its train_id matches the current run's train_id.
+
+        An empty train_id means the node has never been trained, so it
+        is always considered untrained regardless of current_train_id.
+        """
         key = self._node_id_to_key.get(node_id)
         if key is None:
             return False
         query_id, idx = key
         node = self.trajectories[query_id][idx]
         if isinstance(node, dict):
-            return node.get("train_id", "") == self.current_train_id
-        return node.train_id == self.current_train_id
+            train_id = node.get("train_id", "")
+        else:
+            train_id = node.train_id
+        return bool(train_id) and train_id == self.current_train_id
 
     def get_reward(self, node_id: str) -> float:
         return self._rewards.get(node_id, 0.0)

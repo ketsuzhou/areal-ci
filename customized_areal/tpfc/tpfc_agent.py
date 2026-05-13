@@ -6,84 +6,20 @@ agentic RL training pattern, wrapping the existing run_backend functionality.
 """
 
 import os
+import traceback
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from customized_areal.tpfc.backend_run import run_backend
 from customized_areal.tpfc.gaia_final_reward import compute_reward
 
-from areal.api import AsyncRewardWrapper
 from areal.utils import logging
 
 logger = logging.getLogger("TPFCAgent")
-
-
-def tpfc_reward_fn(
-    completions: list[dict[str, Any]],
-    gt: str = "",
-    user_query: str = "",
-    judge_model_name: str | None = None,
-    judge_base_url: str | None = None,
-    judge_api_key: str | None = None,
-) -> float:
-    """
-    Compute reward using GAIA final reward logic with LLM-as-judge.
-
-    Args:
-        completions: List of completion messages from the agent.
-        gt: Ground truth answer.
-        user_query: The original user question/task.
-        judge_model_name: Model name for the judge LLM.
-        judge_base_url: Base URL for the judge LLM API.
-        judge_api_key: API key for the judge LLM.
-
-    Returns:
-        Float reward value (0.0 or 1.0).
-    """
-    if not completions:
-        return 0.0
-
-    # Extract response text from the last assistant message
-    # Content can be a str, dict (e.g. {"type": "text", "text": "..."}), or list of parts
-    response_text = ""
-    for msg in reversed(completions):
-        if msg.get("role") == "assistant":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                response_text = "".join(
-                    p.get("text", p.get("content", ""))
-                    if isinstance(p, dict)
-                    else str(p)
-                    for p in content
-                )
-            elif isinstance(content, dict):
-                response_text = content.get("text", content.get("content", ""))
-            else:
-                response_text = content
-            break
-
-    if not response_text:
-        return 0.0
-
-    # Use provided judge params, fall back to env vars
-    model_name = judge_model_name or os.environ.get("TPFC_JUDGE_MODEL", "qwen/qwen3.5-397b-a17b")
-    base_url = judge_base_url or os.environ.get(
-        "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-    )
-    api_key = judge_api_key or os.environ.get("OPENROUTER_API_KEY", "")
-
-    try:
-        result = compute_reward(
-            response_text=response_text,
-            ground_truth=gt,
-            user_query=user_query,
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-        )
-        return float(result.get("answer_reward", 0))
-    except Exception as exc:
-        logger.warning("GAIA reward computation failed: %s", exc)
-        return 0.0
 
 
 class TPFCAgent:
@@ -213,16 +149,50 @@ class TPFCAgent:
                 api_key=api_key,
             )
 
-            # Calculate reward using reward function
-            reward_fn = AsyncRewardWrapper(tpfc_reward_fn)
-            reward = await reward_fn(
-                completions=completion_messages,
-                gt=gt,
-                user_query=task_description,
-                judge_model_name=self.judge_model_name,
-                judge_base_url=self.judge_base_url,
-                judge_api_key=self.judge_api_key,
+            # Extract response text from the last assistant message
+            response_text = ""
+            for msg in reversed(completion_messages):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        response_text = "".join(
+                            p.get("text", p.get("content", ""))
+                            if isinstance(p, dict)
+                            else str(p)
+                            for p in content
+                        )
+                    elif isinstance(content, dict):
+                        response_text = content.get("text", content.get("content", ""))
+                    else:
+                        response_text = content
+                    break
+
+            # Calculate reward using gaia_final_reward.compute_reward
+            judge_model_name = self.judge_model_name or os.environ.get(
+                "TPFC_JUDGE_MODEL", "qwen/qwen3.5-397b-a17b"
             )
+            judge_base_url = os.environ.get(
+                "WORKSPACE_OPENAI_API_BASE", "https://openrouter.ai/api/v1"
+            )
+            judge_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY", "OPENROUTER_API_KEY")
+
+            try:
+                result = compute_reward(
+                    response_text=response_text,
+                    ground_truth=gt,
+                    user_query=task_description,
+                    model_name=judge_model_name,
+                    base_url=judge_base_url,
+                    api_key=judge_api_key,
+                )
+                reward = float(result.get("answer_reward", 0))
+            except Exception as exc:
+                logger.warning(
+                    "GAIA reward computation failed: %s\n%s",
+                    exc,
+                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                )
+                reward = 0.0
 
             logger.info(
                 "TPFCAgent run completed: message_count=%d, query_id=%s, reward=%.4f",
@@ -233,5 +203,9 @@ class TPFCAgent:
 
             return float(reward)
         except Exception as exc:
-            logger.warning("TPFCAgent run failed: %s", exc)
+            logger.warning(
+                "TPFCAgent run failed: %s\n%s",
+                exc,
+                "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            )
             return 0.0

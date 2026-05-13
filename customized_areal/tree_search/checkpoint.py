@@ -26,8 +26,10 @@ class TreeCheckpointManager:
         os.makedirs(self.save_dir, exist_ok=True)
 
         # Save per-query trajectory records (atomic per file)
+        query_id_to_file: dict[str, str] = {}
         for query_id, records in tree_store.trajectories.items():
             data = {"records": [self._serialize_record(r) for r in records]}
+            query_id_to_file[query_id] = query_id
             filepath = os.path.join(self.save_dir, f"query_{query_id}.json")
             tmp_path = filepath + ".tmp"
             with open(tmp_path, "w") as f:
@@ -42,6 +44,7 @@ class TreeCheckpointManager:
                 k: [v[0], v[1]] for k, v in tree_store._node_id_to_key.items()
             },
             "query_node_ids": {k: v for k, v in tree_store._query_node_ids.items()},
+            "query_id_to_file": query_id_to_file,
             "visit_counts": {k: v for k, v in tree_store._visit_counts.items()},
             "total_values": {k: v for k, v in tree_store._total_values.items()},
             "q_values": {k: v for k, v in tree_store._q_values.items()},
@@ -93,11 +96,18 @@ class TreeCheckpointManager:
         }
         store._turn_nodes = metadata.get("turn_nodes", {})
 
+        # Build reverse mapping from filenames back to query_ids
+        # (needed for old checkpoints where filename may differ from query_id)
+        query_id_to_file = metadata.get("query_id_to_file", {})
+        file_to_query = {v: k for k, v in query_id_to_file.items()}
+
         # Load per-query trajectory records
         for filename in os.listdir(self.save_dir):
             if not filename.startswith("query_") or not filename.endswith(".json"):
                 continue
-            query_id = filename[len("query_") : -len(".json")]
+            file_key = filename[len("query_") : -len(".json")]
+            # For new checkpoints, file_key == query_id; for old ones, use metadata mapping
+            query_id = file_to_query.get(file_key, file_key)
             filepath = os.path.join(self.save_dir, filename)
             with open(filepath) as f:
                 data = json.load(f)
@@ -157,6 +167,8 @@ class TreeCheckpointManager:
         recover_checkpoint_dir: str, tree_store: MCTSTreeStore
     ) -> None:
         """Save trained episode IDs to the recover checkpoint directory."""
+        if not tree_store.current_train_id:
+            return
         trained_ids: set[str] = set()
         for query_id, records in tree_store.trajectories.items():
             for node in records:

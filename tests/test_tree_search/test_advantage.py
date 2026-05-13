@@ -3,6 +3,10 @@ import torch
 from customized_areal.tree_search.advantage import TreeAdvantageComputer
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
 
+import itertools
+
+_node_id_counter = itertools.count(1)
+
 
 def _make_node(
     input_ids: list[int],
@@ -10,7 +14,10 @@ def _make_node(
     *,
     reward: float = 1.0,
     query_id: str = "q1",
+    node_id: str | None = None,
 ) -> Node:
+    if node_id is None:
+        node_id = f"n{next(_node_id_counter)}"
     return Node(
         input_ids=input_ids,
         loss_mask=loss_mask,
@@ -18,6 +25,7 @@ def _make_node(
         versions=[-1] * len(input_ids),
         outcome_reward=reward,
         query_id=query_id,
+        node_id=node_id,
     )
 
 

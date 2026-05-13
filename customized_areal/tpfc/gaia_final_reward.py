@@ -7,9 +7,13 @@ Only standard-library imports are used.
 from __future__ import annotations
 
 import json
-import ssl
-import urllib.error
-import urllib.request
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 def _flatten_content(content):
@@ -80,51 +84,29 @@ def call_openai_compatible_model(
     max_tokens=8192,
     top_p=0.95,
 ):
-    url = base_url.rstrip("/") + "/chat/completions"
-    payload = {
-        "model": model_name,
-        "messages": [
+    import httpx
+    http_client = httpx.Client(verify=False)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        http_client=http_client,
+    )
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "top_p": top_p,
-        "frequency_penalty": 0,
-        "presence_penalty": 0,
-        "stop": None,
-        "extra_body": {
-            "enable_thinking": True,
-        },
-    }
-
-    request = urllib.request.Request(
-        url=url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key,
-        },
-        method="POST",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        frequency_penalty=0,
+        presence_penalty=0,
+        stop=None,
+        extra_body={"enable_thinking": True},
+        timeout=timeout,
     )
-
-    ssl_context = None
-    if not verify_ssl:
-        ssl_context = ssl._create_unverified_context()
-
-    try:
-        with urllib.request.urlopen(
-            request, timeout=timeout, context=ssl_context
-        ) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM judge HTTP error {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"LLM judge request failed: {exc}") from exc
-
-    parsed = json.loads(body)
-    return parsed["choices"][0]["message"]["content"].strip()
+    return response.choices[0].message.content.strip()
 
 
 def parse_judge_score(judge_response_text):
@@ -213,6 +195,21 @@ def compute_reward(
         "judge_response_text": judge_result["judge_response_text"],
         "answer_reward": judge_result["answer_reward"],
     }
+
+
+if __name__ == "__main__":
+    judge_base_url = os.environ.get("WORKSPACE_OPENAI_API_BASE")
+    judge_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY")
+
+    result = compute_reward(
+        response_text='The capital of France is Paris. <answer>Paris</answer>',
+        ground_truth="Paris",
+        user_query="What is the capital of France?",
+        model_name="deepseek-v3",
+        base_url=judge_base_url,
+        api_key=judge_api_key,
+    )
+    print(json.dumps(result, indent=2))
 
 
 __all__ = [
