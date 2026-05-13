@@ -5,7 +5,7 @@ Consolidates the functionality of QueryIDProxyWorkflow,
 TreeSearchGroupedRolloutWorkflow, and TreeSearchWorkflowExecutor into
 a single class that:
 - Loads/saves tree_store from a checkpoint directory
-- Does per-query cache lookup to determine how many fresh episodes are needed
+- Does per-query cache lookup to determine how many fresh episodes are needed (episode-level counting)
 - Generates only the needed fresh episodes (partial cache reuse)
 - Converts fresh results to Nodes, loads cached Nodes, combines them
 - Inserts fresh Nodes into tree_store, computes advantages, marks trained
@@ -182,10 +182,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     Wraps the base OpenAIProxyWorkflow and overrides arun_episode to:
     1. Check cache: how many untrained episodes exist for this query?
     2. Generate only the needed fresh episodes (group_size - cached_count)
-    3. Convert fresh results to Nodes, load cached Nodes
-    4. Combine cached + fresh Nodes (total = group_size)
+    3. Convert fresh results to Nodes, load cached episode Nodes
+    4. Combine cached + fresh Nodes (total = group_size episodes)
     5. Insert fresh Nodes into tree_store
-    6. Compute tree advantages (if advantage_mode == TREE)
+    6. Compute tree advantages per-episode (if advantage_mode == TREE)
     7. Mark all nodes as trained
     8. Save tree checkpoint (if cache_mode == CROSS_TRAINING)
     9. Return batched tensor dict
@@ -298,7 +298,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         # 1. Check cache
         cached_count = (
-            self.tree_store.get_untrained_count(query_id) if query_id else 0
+            self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
         )
         need_gen = max(0, self.group_size - cached_count)
 
@@ -337,9 +337,13 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         # 3. Load cached nodes
         cached_nodes: list[Node] = []
         if cached_count > 0 and query_id:
-            cached_nodes = self.tree_store.load_trajectories(
+            cached_nodes = self.tree_store.load_untrained_episodes(
                 query_id, cached_count
             )
+            # Reset versions to 0 so decoupled PPO treats cached rollouts
+            # as coming from the current behavior policy
+            for node in cached_nodes:
+                node.versions = [0 if m == 1 else -1 for m in node.loss_mask]
 
         # 4. Combine
         all_nodes = fresh_nodes + cached_nodes
