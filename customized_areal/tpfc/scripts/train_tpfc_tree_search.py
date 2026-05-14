@@ -10,6 +10,7 @@ Usage:
     uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml  2>&1 | tee training.log
 """
 
+import json
 import os
 import pathlib
 import sys
@@ -30,8 +31,34 @@ from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
 from areal.api.cli_args import load_expr_config
 from areal.utils import logging
 from areal.utils.hf_utils import load_hf_tokenizer
+from areal.utils.saver import Saver
 
 logger = logging.getLogger("TrainTPFCTreeSearch")
+
+
+def _try_load_train_id_from_checkpoint(config: TPFCConfig) -> str | None:
+    recover_cfg = config.recover
+    for name in ("default", "critic"):
+        path = Saver.get_recover_checkpoint_path(
+            recover_cfg.experiment_name,
+            recover_cfg.trial_name,
+            recover_cfg.fileroot,
+            name,
+        )
+        sidecar = os.path.join(path, "train_id.json")
+        if os.path.isfile(sidecar):
+            try:
+                with open(sidecar) as f:
+                    data = json.load(f)
+                train_id = data["train_id"]
+                if train_id:
+                    return train_id
+            except (json.JSONDecodeError, KeyError, TypeError):
+                logger.warning(
+                    "Corrupt train_id.json at %s, generating new train_id",
+                    sidecar,
+                )
+    return None
 
 
 def main(args: list[str] | None = None) -> None:
@@ -40,12 +67,18 @@ def main(args: list[str] | None = None) -> None:
 
     logger.info("Starting TPFC tree search training")
 
-    # Generate a unique train_id for this training run
-    if "TRAIN_ID" not in os.environ:
-        os.environ["TRAIN_ID"] = uuid.uuid4().hex
-    logger.info("Train ID: %s", os.environ["TRAIN_ID"])
-
     config, _ = load_expr_config(args, TPFCConfig)
+
+    # Restore train_id from recover checkpoint if available, otherwise generate
+    restored_id = _try_load_train_id_from_checkpoint(config)
+    if restored_id is not None:
+        os.environ["TRAIN_ID"] = restored_id
+        logger.info("Restored Train ID from checkpoint: %s", restored_id)
+    elif "TRAIN_ID" not in os.environ:
+        os.environ["TRAIN_ID"] = uuid.uuid4().hex
+        logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
+    else:
+        logger.info("Using Train ID from environment: %s", os.environ["TRAIN_ID"])
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
 
     # Load TPFC dataset

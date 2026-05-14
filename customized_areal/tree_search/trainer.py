@@ -5,16 +5,21 @@ All cache logic, tree ops, and checkpoint saving happen inside
 TreeSearchGroupedRolloutWorkflow (activated by .env flag
 use_TreeSearchGroupedRolloutWorkflow=True in customized_areal/.env).
 
-This class only overrides:
+This class overrides:
 - _create_train_engine: uses MultiCandidateFSDPPPOActor when distill loss
   is enabled
 - train: applies/restores the distill loss PPOActor patch when loss_mode
   != GRPO
+- _save_hf / _save_recover_checkpoint: writes train_id.json sidecar
 """
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
+
+import torch.distributed as dist
 
 from customized_areal.tree_search.config import (
     LossMode,
@@ -24,6 +29,7 @@ from customized_areal.tree_search.config import (
 from areal import PPOTrainer
 from areal.utils import logging
 from areal.utils.environ import is_single_controller
+from areal.utils.saver import Saver
 
 logger = logging.getLogger("TreeBackupPPOTrainer")
 
@@ -110,6 +116,51 @@ class CacheAwarePPOTrainer(PPOTrainer):
             dynamic_filter_fn=dynamic_filter_fn,
             total_epochs=total_epochs,
         )
+
+    @staticmethod
+    def _write_train_id_sidecar(checkpoint_dir: str) -> None:
+        train_id = os.environ.get("TRAIN_ID", "")
+        if not train_id:
+            return
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        filepath = os.path.join(checkpoint_dir, "train_id.json")
+        tmp_path = filepath + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump({"train_id": train_id}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, filepath)
+
+    def _save_hf(self, epoch: int, epoch_step: int, global_step: int) -> None:
+        super()._save_hf(epoch, epoch_step, global_step)
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            saver_cfg = self.saver.config
+            for name in ["default"] + (["critic"] if self.critic is not None else []):
+                path = Saver.get_model_save_path(
+                    saver_cfg.experiment_name,
+                    saver_cfg.trial_name,
+                    saver_cfg.fileroot,
+                    epoch,
+                    epoch_step,
+                    global_step,
+                    name,
+                )
+                self._write_train_id_sidecar(path)
+
+    def _save_recover_checkpoint(
+        self, epoch: int, epoch_step: int, global_step: int
+    ) -> None:
+        super()._save_recover_checkpoint(epoch, epoch_step, global_step)
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            recover_cfg = self.recover_handler.config
+            for name in ["default"] + (["critic"] if self.critic is not None else []):
+                path = Saver.get_recover_checkpoint_path(
+                    recover_cfg.experiment_name,
+                    recover_cfg.trial_name,
+                    recover_cfg.fileroot,
+                    name,
+                )
+                self._write_train_id_sidecar(path)
 
     def close(self) -> None:
         super().close()

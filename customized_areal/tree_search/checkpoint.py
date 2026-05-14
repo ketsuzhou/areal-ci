@@ -69,6 +69,17 @@ class TreeCheckpointManager:
     def load(self) -> MCTSTreeStore:
         store = MCTSTreeStore()
 
+        # Runtime train_id from env identifies THIS run.
+        # It MUST be set before loading a checkpoint.
+        runtime_train_id = store.current_train_id
+        if not runtime_train_id:
+            raise RuntimeError(
+                "TRAIN_ID environment variable is not set. "
+                "It must be set before loading a tree checkpoint "
+                "so that cached nodes can be correctly classified as "
+                "trained or untrained for this run."
+            )
+
         with open(os.path.join(self.save_dir, "metadata.json")) as f:
             metadata = json.load(f)
 
@@ -86,7 +97,8 @@ class TreeCheckpointManager:
             k: v for k, v in metadata.get("total_values", {}).items()
         }
         store._q_values = {k: v for k, v in metadata.get("q_values", {}).items()}
-        store.current_train_id = metadata.get("current_train_id", "")
+        # Keep runtime train_id — metadata's value records which run saved the
+        # checkpoint, but the runtime value identifies this run.
         store._rewards = {k: v for k, v in metadata.get("rewards", {}).items()}
         store._normalized_advantages = {
             k: v for k, v in metadata.get("normalized_advantages", {}).items()
@@ -114,6 +126,18 @@ class TreeCheckpointManager:
             store.trajectories[query_id] = [
                 self._deserialize_record(r) for r in data["records"]
             ]
+
+        # Rebuild indices from loaded trajectories so that query files on
+        # disk are always visible even if metadata.json is stale (e.g. after
+        # a crash that wrote files but not metadata).
+        for query_id, records in store.trajectories.items():
+            for idx, node in enumerate(records):
+                node_id = node.node_id
+                if not node_id:
+                    continue
+                if node_id not in store._node_id_to_key:
+                    store._node_id_to_key[node_id] = (query_id, idx)
+                    store._query_node_ids.setdefault(query_id, []).append(node_id)
 
         return store
 
