@@ -34,6 +34,23 @@ class FakeProvider:
         return self.teacher_logprobs
 
 
+class FakeTopKEngine:
+    def __init__(self, topk_ids, topk_logp):
+        self.topk_ids = topk_ids
+        self.topk_logp = topk_logp
+        self.calls = []
+
+    async def get_topk_logprobs(self, input_ids, loss_mask, top_k):
+        self.calls.append(
+            {
+                "input_ids": input_ids,
+                "loss_mask": loss_mask,
+                "top_k": top_k,
+            }
+        )
+        return self.topk_ids, self.topk_logp
+
+
 def test_position_reward_info_carries_teacher_logprobs():
     info = PositionRewardInfo(
         position=0,
@@ -324,6 +341,130 @@ async def test_selected_turn_to_position_rewards_topk_accepts_current_turn_rows(
         teacher_top_k=10,
     )
 
+    assert provider.calls[0]["generation_ids"] == [30]
+    assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
+    assert rewards[0].candidate_token_ids == [30, 60]
+    assert rewards[0].logprobs == [-0.3, -1.3]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_requires_engine_for_missing_cache():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    node = Node(
+        input_ids=[10, 11, 20],
+        loss_mask=[0, 0, 1],
+        logprobs=[0.0, 0.0, -0.3],
+        versions=[-1, -1, 0],
+    )
+
+    with pytest.raises(NotImplementedError, match="get_topk_logprobs"):
+        await selected_turn_to_position_rewards(
+            node=node,
+            guidance="Be more direct.",
+            tokenizer=FakeTokenizer(),
+            provider=FakeProvider([[-1.0]]),
+            sample_index=0,
+            topk_distill=True,
+            engine=None,
+            teacher_top_k=2,
+        )
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_recomputes_missing_cache_from_full_sequence_rows():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    provider = FakeProvider([[-1.0, -2.0], [-1.5, -2.5]])
+    engine = FakeTopKEngine(
+        topk_ids=[
+            [10, 50],
+            [11, 51],
+            [20, 60],
+            [21, 61],
+        ],
+        topk_logp=[
+            [0.0, -5.0],
+            [0.0, -5.1],
+            [-0.3, -1.3],
+            [-0.4, -1.4],
+        ],
+    )
+    node = Node(
+        input_ids=[10, 11, 20, 21],
+        loss_mask=[0, 0, 1, 1],
+        logprobs=[0.0, 0.0, -0.3, -0.4],
+        versions=[-1, -1, 0, 0],
+    )
+
+    rewards = await selected_turn_to_position_rewards(
+        node=node,
+        guidance="Be more direct.",
+        tokenizer=FakeTokenizer(),
+        provider=provider,
+        sample_index=0,
+        topk_distill=True,
+        engine=engine,
+        teacher_top_k=2,
+    )
+
+    assert engine.calls == [
+        {
+            "input_ids": [10, 11, 20, 21],
+            "loss_mask": [0, 0, 1, 1],
+            "top_k": 2,
+        }
+    ]
+    assert node.topk_ids == [[20, 60], [21, 61]]
+    assert node.topk_logp == [[-0.3, -1.3], [-0.4, -1.4]]
+    assert provider.calls[0]["candidate_token_ids"] == [[20, 60], [21, 61]]
+    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert rewards[1].logprobs == [-0.4, -1.4]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_rows():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    provider = FakeProvider([[-1.0, -2.0]])
+    engine = FakeTopKEngine(
+        topk_ids=[
+            [20, 50],
+            [21, 51],
+            [30, 60],
+        ],
+        topk_logp=[
+            [-0.1, -1.1],
+            [-0.2, -1.2],
+            [-0.3, -1.3],
+        ],
+    )
+    node = Node(
+        input_ids=[10, 20, 21, 11, 12, 30],
+        loss_mask=[0, 1, 1, 0, 0, 1],
+        logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
+        versions=[-1, 0, 0, -1, -1, 0],
+    )
+
+    rewards = await selected_turn_to_position_rewards(
+        node=node,
+        guidance="Fix the last turn.",
+        tokenizer=FakeTokenizer(),
+        provider=provider,
+        sample_index=0,
+        topk_distill=True,
+        engine=engine,
+        teacher_top_k=2,
+    )
+
+    assert node.topk_ids == [[30, 60]]
+    assert node.topk_logp == [[-0.3, -1.3]]
     assert provider.calls[0]["generation_ids"] == [30]
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]

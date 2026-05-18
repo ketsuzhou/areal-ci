@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from typing import Any
 
 from customized_areal.tree_search.core.teacher_provider import TeacherProvider
@@ -106,14 +107,7 @@ async def selected_turn_to_position_rewards(
     teacher_top_k: int,
 ) -> list[PositionRewardInfo]:
     """Convert one selected turn into position-level teacher rewards.
-
-    Task 3 fully supports the single-candidate path. The top-k path keeps a
-    minimal local skeleton so callers can opt in when cached top-k fields are
-    already present; Task 4 will harden recomputation via ``engine``.
     """
-    del engine
-    del teacher_top_k
-
     prompt_ids, generation_ids = build_teacher_prompt_ids(node, guidance, tokenizer)
     if not generation_ids:
         return []
@@ -123,25 +117,20 @@ async def selected_turn_to_position_rewards(
     start, end = response_token_span(loss_mask)
     generation_logprobs = [float(value) for value in logprobs[start:end]]
 
-    if topk_distill and node.topk_ids is not None and node.topk_logp is not None:
-        if len(node.topk_ids) == len(generation_ids):
-            topk_ids = node.topk_ids
-            topk_logp = node.topk_logp
-        else:
-            response_offset = sum(1 for value in loss_mask[:start] if value == 1)
-            topk_ids = node.topk_ids[
-                response_offset : response_offset + len(generation_ids)
-            ]
-            topk_logp = node.topk_logp[
-                response_offset : response_offset + len(generation_ids)
-            ]
-        if len(topk_ids) != len(generation_ids) or len(topk_logp) != len(
-            generation_ids
-        ):
-            raise ValueError(
-                "top-k rows must align with selected generation positions"
+    if topk_distill:
+        if node.topk_ids is None or node.topk_logp is None:
+            topk_ids, topk_logp = await _recompute_student_topk(
+                engine=engine,
+                node=node,
+                teacher_top_k=teacher_top_k,
             )
-
+        else:
+            topk_ids, topk_logp = _select_current_topk_rows(
+                topk_ids=node.topk_ids,
+                topk_logp=node.topk_logp,
+                input_ids=_as_list(node.input_ids),
+                loss_mask=loss_mask,
+            )
         candidate_token_ids = []
         student_logprobs = []
         for generated_id, generated_logprob, candidates, position_logprobs in zip(
@@ -203,6 +192,63 @@ async def selected_turn_to_position_rewards(
     return position_rewards
 
 
+async def _recompute_student_topk(
+    engine: Any,
+    node: Node,
+    teacher_top_k: int,
+) -> tuple[list[list[int]], list[list[float]]]:
+    get_topk_logprobs = getattr(engine, "get_topk_logprobs", None)
+    if get_topk_logprobs is None or not inspect.iscoroutinefunction(
+        get_topk_logprobs
+    ):
+        raise NotImplementedError(
+            "topk_distill requires async engine.get_topk_logprobs for missing "
+            "student top-k"
+        )
+
+    topk_ids, topk_logp = await get_topk_logprobs(
+        input_ids=node.input_ids,
+        loss_mask=node.loss_mask,
+        top_k=teacher_top_k,
+    )
+    selected_topk_ids, selected_topk_logp = _select_current_topk_rows(
+        topk_ids=topk_ids,
+        topk_logp=topk_logp,
+        input_ids=_as_list(node.input_ids),
+        loss_mask=_as_list(node.loss_mask),
+    )
+    node.topk_ids = selected_topk_ids
+    node.topk_logp = selected_topk_logp
+    return selected_topk_ids, selected_topk_logp
+
+
+def _select_current_topk_rows(
+    topk_ids: Any,
+    topk_logp: Any,
+    input_ids: list[int],
+    loss_mask: list[int],
+) -> tuple[list[list[int]], list[list[float]]]:
+    ids_rows = _nested_list(topk_ids)
+    logp_rows = _nested_list(topk_logp)
+    start, end = response_token_span(loss_mask)
+    response_len = end - start
+
+    if len(ids_rows) == len(input_ids):
+        selected_ids = ids_rows[start:end]
+        selected_logp = logp_rows[start:end]
+    elif len(ids_rows) == response_len:
+        selected_ids = ids_rows
+        selected_logp = logp_rows
+    else:
+        response_offset = sum(1 for value in loss_mask[:start] if value == 1)
+        selected_ids = ids_rows[response_offset : response_offset + response_len]
+        selected_logp = logp_rows[response_offset : response_offset + response_len]
+
+    if len(selected_ids) != response_len or len(selected_logp) != response_len:
+        raise ValueError("top-k rows must align with selected generation positions")
+    return selected_ids, selected_logp
+
+
 def _encode(tokenizer: Any, text: str) -> list[int]:
     try:
         encoded = tokenizer.encode(text, add_special_tokens=False)
@@ -215,6 +261,10 @@ def _as_list(values: Any) -> list:
     if hasattr(values, "tolist"):
         return values.tolist()
     return list(values)
+
+
+def _nested_list(rows: Any) -> list[list[Any]]:
+    return [_as_list(row) for row in _as_list(rows)]
 
 
 __all__ = [
