@@ -111,8 +111,7 @@ def grpo_distill_loss_fn(
     position_rewards = input_data.get("position_rewards")
     distill_stat = None
 
-    if position_rewards is not None and logprobs.dim() == 2:
-        # Multi-candidate logprobs available
+    if position_rewards is not None:
         rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
         distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
 
@@ -129,15 +128,15 @@ def grpo_distill_loss_fn(
             )
             prompt_lens = [prompt_len]
 
-        position_grpo_loss = _compute_position_level_grpo_loss(
+        teacher_kl_loss = _compute_teacher_kl_loss(
             position_rewards=position_rewards,
             logprobs=logprobs,
             loss_mask=loss_mask,
             prompt_lens=prompt_lens,
         )
 
-        loss = rl_loss_weight * loss + distill_loss_weight * position_grpo_loss
-        distill_stat = position_grpo_loss.detach()
+        loss = rl_loss_weight * loss + distill_loss_weight * teacher_kl_loss
+        distill_stat = teacher_kl_loss.detach()
 
     stats_tracker.denominator(
         n_tokens=infer_token_denominator(input_data, loss_mask),
@@ -173,6 +172,66 @@ def grpo_distill_loss_fn(
     )
 
     return loss
+
+
+def _compute_teacher_kl_loss(
+    position_rewards: list,
+    logprobs: torch.Tensor,
+    loss_mask: torch.Tensor,
+    prompt_lens: list[int] | int,
+) -> torch.Tensor:
+    """Compute direct teacher KL distillation loss from stored teacher logprobs."""
+    if not position_rewards:
+        return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
+
+    terms = []
+    max_position = logprobs.shape[0]
+    max_candidates = 1 if logprobs.dim() == 1 else logprobs.shape[1]
+    flat_loss_mask = loss_mask.reshape(-1).bool()
+
+    for pr in position_rewards:
+        teacher_logprobs = getattr(pr, "teacher_logprobs", None)
+        if not teacher_logprobs:
+            continue
+
+        if isinstance(prompt_lens, list):
+            prompt_len = (
+                prompt_lens[pr.sample_index]
+                if pr.sample_index < len(prompt_lens)
+                else 0
+            )
+        else:
+            prompt_len = prompt_lens
+
+        position = pr.position + prompt_len
+        if position < 0 or position >= max_position:
+            continue
+        if position < flat_loss_mask.numel() and not flat_loss_mask[position]:
+            continue
+
+        if logprobs.dim() == 1:
+            teacher_t = torch.tensor(
+                teacher_logprobs[0],
+                dtype=logprobs.dtype,
+                device=logprobs.device,
+            ).detach()
+            terms.append(logprobs[position] - teacher_t)
+            continue
+
+        num_candidates = min(len(teacher_logprobs), max_candidates)
+        if num_candidates <= 0:
+            continue
+        teacher_t = torch.tensor(
+            teacher_logprobs[:num_candidates],
+            dtype=logprobs.dtype,
+            device=logprobs.device,
+        ).detach()
+        terms.append(logprobs[position, :num_candidates] - teacher_t)
+
+    if not terms:
+        return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
+
+    return torch.cat([term.reshape(-1) for term in terms]).mean()
 
 
 def _resolve_proximal_logp(
