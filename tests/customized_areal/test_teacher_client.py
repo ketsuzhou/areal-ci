@@ -475,9 +475,7 @@ class TestTeacherClient:
         )
 
     @pytest.mark.asyncio
-    async def test_complete_text_returns_message_content_when_text_absent(
-        self, client
-    ):
+    async def test_complete_text_returns_message_content_when_text_absent(self, client):
         """Test complete_text falls back to chat message content."""
         client._post_with_retries = AsyncMock(
             return_value={"choices": [{"message": {"content": "diagnosis"}}]}
@@ -493,6 +491,14 @@ class TestTeacherClient:
         client._post_with_retries = AsyncMock(return_value={"choices": []})
 
         with pytest.raises(RuntimeError, match="no completion choices"):
+            await client.complete_text("episode context")
+
+    @pytest.mark.asyncio
+    async def test_complete_text_choice_without_text_raises(self, client):
+        """Test complete_text raises when a choice has no completion text."""
+        client._post_with_retries = AsyncMock(return_value={"choices": [{}]})
+
+        with pytest.raises(RuntimeError, match="contained no text"):
             await client.complete_text("episode context")
 
 
@@ -580,6 +586,14 @@ def test_engine_provider_fails_early_without_compatible_methods():
         EngineTeacherProvider(Engine())
 
 
+def test_engine_provider_fails_early_with_non_callable_logprobs_method():
+    class Engine:
+        get_logprobs_for_prompt = None
+
+    with pytest.raises(NotImplementedError, match="engine.get_logprobs_for_prompt"):
+        EngineTeacherProvider(Engine())
+
+
 @pytest.mark.asyncio
 async def test_engine_provider_diagnose_without_engine_method_raises():
     class Engine:
@@ -590,6 +604,25 @@ async def test_engine_provider_diagnose_without_engine_method_raises():
             candidate_token_ids,
         ):
             return [[-0.1]]
+
+    provider = EngineTeacherProvider(Engine())
+
+    with pytest.raises(NotImplementedError, match="engine.diagnose_episode"):
+        await provider.diagnose_episode("context", "gold")
+
+
+@pytest.mark.asyncio
+async def test_engine_provider_diagnose_with_non_callable_engine_method_raises():
+    class Engine:
+        async def get_logprobs_for_prompt(
+            self,
+            prompt_ids,
+            generation_ids,
+            candidate_token_ids,
+        ):
+            return [[-0.1]]
+
+        diagnose_episode = None
 
     provider = EngineTeacherProvider(Engine())
 

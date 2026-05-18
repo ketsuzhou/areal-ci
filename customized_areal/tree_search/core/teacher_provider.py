@@ -79,19 +79,19 @@ class EngineTeacherProvider:
     """Teacher provider backed by an in-process inference engine."""
 
     def __init__(self, engine) -> None:
-        if not hasattr(engine, "get_logprobs_for_prompt"):
+        if not callable(getattr(engine, "get_logprobs_for_prompt", None)):
             raise NotImplementedError(
-                "engine-backed teacher provider requires "
-                "engine.get_logprobs_for_prompt"
+                "engine-backed teacher provider requires engine.get_logprobs_for_prompt"
             )
         self.engine = engine
 
     async def diagnose_episode(self, context: str, gold_answer: str) -> str:
-        if not hasattr(self.engine, "diagnose_episode"):
+        diagnose_episode = getattr(self.engine, "diagnose_episode", None)
+        if not callable(diagnose_episode):
             raise NotImplementedError(
                 "engine-backed teacher provider requires engine.diagnose_episode"
             )
-        return await self.engine.diagnose_episode(
+        return await diagnose_episode(
             context=context,
             gold_answer=gold_answer,
         )

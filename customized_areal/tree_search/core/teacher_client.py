@@ -257,7 +257,9 @@ class TeacherClient:
         text = choice.get("text")
         if text is None:
             message = choice.get("message", {})
-            text = message.get("content", "")
+            text = message.get("content")
+        if text is None:
+            raise RuntimeError("Teacher API completion choice contained no text")
         return str(text)
 
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
