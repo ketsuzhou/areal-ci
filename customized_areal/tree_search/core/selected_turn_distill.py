@@ -119,17 +119,32 @@ async def selected_turn_to_position_rewards(
         return []
 
     logprobs = _as_list(node.logprobs)
-    start, end = response_token_span(_as_list(node.loss_mask))
+    loss_mask = _as_list(node.loss_mask)
+    start, end = response_token_span(loss_mask)
     generation_logprobs = [float(value) for value in logprobs[start:end]]
 
     if topk_distill and node.topk_ids is not None and node.topk_logp is not None:
+        response_offset = sum(1 for value in loss_mask[:start] if value == 1)
+        topk_ids = node.topk_ids[
+            response_offset : response_offset + len(generation_ids)
+        ]
+        topk_logp = node.topk_logp[
+            response_offset : response_offset + len(generation_ids)
+        ]
+        if len(topk_ids) != len(generation_ids) or len(topk_logp) != len(
+            generation_ids
+        ):
+            raise ValueError(
+                "top-k rows must align with selected generation positions"
+            )
+
         candidate_token_ids = []
         student_logprobs = []
         for generated_id, generated_logprob, candidates, position_logprobs in zip(
             generation_ids,
             generation_logprobs,
-            node.topk_ids,
-            node.topk_logp,
+            topk_ids,
+            topk_logp,
             strict=True,
         ):
             reordered_ids = [generated_id]
