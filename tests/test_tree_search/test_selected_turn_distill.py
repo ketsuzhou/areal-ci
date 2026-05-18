@@ -43,6 +43,16 @@ def test_episode_diagnosis_returns_only_selected_turn_guidance():
     assert diagnosis.selected_turns == {1: "Use the tool."}
 
 
+def test_package_exports_selected_turn_diagnosis_types():
+    from customized_areal.tree_search import (
+        DiagnosisTurn as ExportedDiagnosisTurn,
+        EpisodeDiagnosis as ExportedEpisodeDiagnosis,
+    )
+
+    assert ExportedDiagnosisTurn is DiagnosisTurn
+    assert ExportedEpisodeDiagnosis is EpisodeDiagnosis
+
+
 def test_tree_backup_config_has_distill_defaults():
     config = TreeBackupConfig()
 

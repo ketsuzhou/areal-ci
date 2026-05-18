@@ -72,6 +72,7 @@ async def test_basic_reward_computation():
     assert pos0.candidate_token_ids == [100, 200, 300]
     assert pos0.candidates == ["100", "200", "300"]
     assert pos0.logprobs == pytest.approx([-0.5, -1.0, -2.0])
+    assert pos0.teacher_logprobs == pytest.approx([-0.5, -1.0, -2.0])
     # reward = student_logp - teacher_logp
     assert pos0.rewards == pytest.approx([0.0, 0.0, 0.0])
     assert pos0.chosen_index == 0  # token 100 at index 0
@@ -82,6 +83,7 @@ async def test_basic_reward_computation():
     assert pos1.candidate_token_ids == [400, 500]
     assert pos1.candidates == ["400", "500"]
     assert pos1.logprobs == pytest.approx([-0.2, -0.6])
+    assert pos1.teacher_logprobs == pytest.approx([-0.2, -0.6])
     assert pos1.rewards == pytest.approx([0.0, 0.0])
     assert pos1.chosen_index == 0  # token 400 at index 0
 
@@ -115,6 +117,7 @@ async def test_missing_teacher_logprobs():
     assert len(result) == 1
     pos0 = result[0]
     # Token 100: student -0.3, teacher -0.5 => reward 0.2
+    assert pos0.teacher_logprobs == pytest.approx([-0.5, missing_lp, missing_lp])
     assert pos0.rewards[0] == pytest.approx(-0.3 - (-0.5))
     # Token 200: student -1.5, teacher missing_lp (-50.0) => reward 48.5
     assert pos0.rewards[1] == pytest.approx(-1.5 - missing_lp)
@@ -197,7 +200,8 @@ async def test_chosen_index_middle_position():
         teacher_client=client,
     )
 
-    assert result[0].chosen_index == 1
+    assert result[0].candidate_token_ids == [20, 10, 30]
+    assert result[0].chosen_index == 0
 
 
 @pytest.mark.asyncio
@@ -215,7 +219,8 @@ async def test_chosen_index_last_position():
         teacher_client=client,
     )
 
-    assert result[0].chosen_index == 2
+    assert result[0].candidate_token_ids == [30, 10, 20]
+    assert result[0].chosen_index == 0
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +255,10 @@ async def test_reward_exact_computation():
     assert result[0].rewards[1] == pytest.approx(-1.0 - (-0.8))  # -0.2
     assert result[0].rewards[2] == pytest.approx(-2.5 - (-1.5))  # -1.0
 
-    # Position 1
-    assert result[1].rewards[0] == pytest.approx(-0.4 - (-0.1))  # -0.3
-    assert result[1].rewards[1] == pytest.approx(-1.8 - (-2.0))  # 0.2
+    # Position 1. The chosen token is moved to index 0.
+    assert result[1].candidate_token_ids == [50, 40]
+    assert result[1].rewards[0] == pytest.approx(-1.8 - (-2.0))  # 0.2
+    assert result[1].rewards[1] == pytest.approx(-0.4 - (-0.1))  # -0.3
 
 
 # ---------------------------------------------------------------------------
@@ -353,8 +359,8 @@ async def test_multiple_positions():
 
     # Position 2
     assert result[2].position == 2
-    assert result[2].candidate_token_ids == [40, 50, 60]
-    assert result[2].chosen_index == 1  # token 50 at index 1
+    assert result[2].candidate_token_ids == [50, 40, 60]
+    assert result[2].chosen_index == 0
     assert result[2].rewards == pytest.approx(
-        [-0.1 - (-0.2), -0.3 - (-0.4), -0.7 - (-0.6)]
+        [-0.3 - (-0.4), -0.1 - (-0.2), -0.7 - (-0.6)]
     )

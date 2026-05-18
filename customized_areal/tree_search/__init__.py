@@ -8,6 +8,8 @@ from customized_areal.tree_search.config import (
     TreeBackupConfig,
 )
 from customized_areal.tree_search.distill_types import (
+    DiagnosisTurn,
+    EpisodeDiagnosis,
     InteractionWithTokenLevelReward,
     PositionRewardInfo,
 )
@@ -18,6 +20,8 @@ from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
 __all__ = [
     "AdvantageMode",
     "CacheAwarePPOTrainer",
+    "DiagnosisTurn",
+    "EpisodeDiagnosis",
     "InteractionWithTokenLevelReward",
     "LossMode",
     "MCTSTreeStore",

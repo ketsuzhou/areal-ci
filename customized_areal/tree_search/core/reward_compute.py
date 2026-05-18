@@ -115,10 +115,12 @@ async def _compute_token_rewards(
         # Compute rewards and gather per-candidate data.
         rewards: list[float] = []
         student_lps: list[float] = []
+        teacher_lps: list[float] = []
         for tid in pos_candidates:
             s_lp = student_lp_lookup[tid]
             t_lp = teacher_map.get(tid, missing_logprob)
             student_lps.append(s_lp)
+            teacher_lps.append(t_lp)
             rewards.append(s_lp - t_lp)
 
         # Determine the index of the actually-generated token.
@@ -141,6 +143,7 @@ async def _compute_token_rewards(
                 candidates=[str(tid) for tid in pos_candidates],
                 candidate_token_ids=list(pos_candidates),
                 logprobs=student_lps,
+                teacher_logprobs=teacher_lps,
                 rewards=rewards,
                 chosen_index=chosen_index,
             )
