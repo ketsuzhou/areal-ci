@@ -295,3 +295,36 @@ async def test_selected_turn_to_position_rewards_topk_uses_latest_response_rows(
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]
     assert rewards[0].logprobs == [-0.3, -1.3]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_to_position_rewards_topk_accepts_current_turn_rows():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    provider = FakeProvider([[-1.0, -2.0]])
+    node = Node(
+        input_ids=[10, 20, 21, 11, 12, 30],
+        loss_mask=[0, 1, 1, 0, 0, 1],
+        logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
+        versions=[-1, 0, 0, -1, -1, 0],
+        topk_ids=[[30, 60]],
+        topk_logp=[[-0.3, -1.3]],
+    )
+
+    rewards = await selected_turn_to_position_rewards(
+        node=node,
+        guidance="Fix the last turn.",
+        tokenizer=FakeTokenizer(),
+        provider=provider,
+        sample_index=0,
+        topk_distill=True,
+        engine=None,
+        teacher_top_k=10,
+    )
+
+    assert provider.calls[0]["generation_ids"] == [30]
+    assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
+    assert rewards[0].candidate_token_ids == [30, 60]
+    assert rewards[0].logprobs == [-0.3, -1.3]

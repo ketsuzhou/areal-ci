@@ -124,13 +124,17 @@ async def selected_turn_to_position_rewards(
     generation_logprobs = [float(value) for value in logprobs[start:end]]
 
     if topk_distill and node.topk_ids is not None and node.topk_logp is not None:
-        response_offset = sum(1 for value in loss_mask[:start] if value == 1)
-        topk_ids = node.topk_ids[
-            response_offset : response_offset + len(generation_ids)
-        ]
-        topk_logp = node.topk_logp[
-            response_offset : response_offset + len(generation_ids)
-        ]
+        if len(node.topk_ids) == len(generation_ids):
+            topk_ids = node.topk_ids
+            topk_logp = node.topk_logp
+        else:
+            response_offset = sum(1 for value in loss_mask[:start] if value == 1)
+            topk_ids = node.topk_ids[
+                response_offset : response_offset + len(generation_ids)
+            ]
+            topk_logp = node.topk_logp[
+                response_offset : response_offset + len(generation_ids)
+            ]
         if len(topk_ids) != len(generation_ids) or len(topk_logp) != len(
             generation_ids
         ):
