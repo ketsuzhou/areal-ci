@@ -215,8 +215,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.advantage_mode = advantage_mode
         self.loss_mode = loss_mode
         self.cache_mode = cache_mode
+        self.max_reasoning_tokens = max_reasoning_tokens
         self.rl_loss_weight = rl_loss_weight
         self.distill_loss_weight = distill_loss_weight
+
+        # Tokenizer path for episode validation (shared via class-level cache)
+        self._tokenizer_path = tokenizer_path
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 
@@ -262,29 +266,91 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 node.turn_idx = turn_idx
         return nodes
 
+    # Class-level tokenizer cache: same path shares one instance across all workflow objects
+    _shared_tokenizers: dict[str, Any] = {}
+
+    @property
+    def tokenizer(self):
+        """Lazy-load tokenizer, shared across instances with the same path."""
+        if self._tokenizer_path not in self._shared_tokenizers:
+            if not self._tokenizer_path:
+                raise ValueError(
+                    "tokenizer_path is required for episode validation "
+                    "(reasoning filter). Set it in __init__ or via "
+                    "TREE_SEARCH_TOKENIZER_PATH env var."
+                )
+            from transformers import AutoTokenizer
+            self._shared_tokenizers[self._tokenizer_path] = AutoTokenizer.from_pretrained(
+                self._tokenizer_path, trust_remote_code=True
+            )
+            logger.info("Loaded tokenizer from %s (shared cache)", self._tokenizer_path)
+        return self._shared_tokenizers[self._tokenizer_path]
+
+    def _is_episode_valid(self, nodes: list[Node]) -> bool:
+        """Reject episode if any node lacks <reasoning>...</reasoning> in its
+        loss-masked (response) portion, or if reasoning content exceeds
+        max_reasoning_tokens in length.
+        """
+        import re
+
+        for node in nodes:
+            resp_ids = [
+                tid for tid, m in zip(node.input_ids, node.loss_mask) if m == 1
+            ]
+            if not resp_ids:
+                return False
+            text = self.tokenizer.decode(resp_ids, skip_special_tokens=False)
+            m = re.search(r"<reasoning>(.*?)</reasoning>", text, re.DOTALL)
+            if m is None:
+                return False
+            if len(m.group(1)) > self.max_reasoning_tokens:
+                return False
+        return True
+
     async def _retry_episode(
-        self, engine, data: dict[str, Any], group_idx: int,
-        max_retries: int = 1,
-    ) -> Any:
-        """Retry a failed episode until success or max_retries exhausted."""
+        self, engine, data: dict[str, Any], query_id: str, group_idx: int,
+        max_retries: int = 5,
+    ) -> list[Node] | None:
+        """Retry a failed episode until success or max_retries exhausted.
+
+        On success, converts the result to Nodes and inserts them into
+        tree_store immediately, so that other concurrent episodes can
+        see the newly inserted nodes.
+
+        Episodes that fail the _is_episode_valid filter (missing or
+        overlong <reasoning>) are treated as failed attempts and retried.
+        """
         for attempt in range(1, max_retries + 1):
             result = await self.workflow.arun_episode(engine, data)
             if not isinstance(result, Exception) and result is not None:
-                return result
-            logger.warning(
-                "Episode %s retry %d/%d %s",
-                group_idx,
-                attempt,
-                max_retries,
-                f"failed: {result}" if isinstance(result, Exception) else "returned None",
-            )
-            if isinstance(result, Exception):
+                nodes = self._result_to_nodes(result, query_id, group_idx)
+                if nodes and self._is_episode_valid(nodes):
+                    self.tree_store.insert_batch(nodes)
+                    return nodes
+                if nodes:
+                    logger.warning(
+                        "Episode %s retry %d/%d rejected: "
+                        "invalid <reasoning> (missing or >%d chars)",
+                        group_idx, attempt, max_retries,
+                        self.max_reasoning_tokens,
+                    )
+                else:
+                    logger.warning(
+                        "Episode %s retry %d/%d returned None after _result_to_nodes",
+                        group_idx, attempt, max_retries,
+                    )
+            else:
                 logger.warning(
-                    "Episode %s retry %d traceback:\n%s",
-                    group_idx,
-                    attempt,
-                    "".join(traceback.format_exception(type(result), result, result.__traceback__)),
+                    "Episode %s retry %d/%d %s",
+                    group_idx, attempt, max_retries,
+                    f"failed: {result}" if isinstance(result, Exception) else "returned None",
                 )
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "Episode %s retry %d traceback:\n%s",
+                        group_idx, attempt,
+                        "".join(traceback.format_exception(type(result), result, result.__traceback__)),
+                    )
             wait = 2 ** attempt
             logger.info("Episode %s retry %d — waiting %ds before next attempt", group_idx, attempt, wait)
             await asyncio.sleep(wait)
@@ -332,9 +398,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     continue
                 if result is None:
                     continue
-                nodes = self._result_to_nodes(result, query_id, group_idx)
-                if nodes:
-                    fresh_nodes.extend(nodes)
+                fresh_nodes.extend(result)
 
         # 3. Load cached nodes
         cached_nodes: list[Node] = []
@@ -353,9 +417,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if not all_nodes:
             return None
 
-        # 5. Insert fresh nodes into tree
-        if fresh_nodes:
-            self.tree_store.insert_batch(fresh_nodes)
+        # 5. (fresh nodes already inserted into tree_store by _retry_episode)
 
         # 6. Compute tree advantages
         if self.advantage_mode == AdvantageMode.TREE:

@@ -45,6 +45,7 @@ def _try_load_train_id_from_checkpoint(config: TPFCConfig) -> str | None:
             recover_cfg.fileroot,
             name,
         )
+        logger.info(f"path: {path}")
         sidecar = os.path.join(path, "train_id.json")
         if os.path.isfile(sidecar):
             try:
@@ -69,16 +70,19 @@ def main(args: list[str] | None = None) -> None:
 
     config, _ = load_expr_config(args, TPFCConfig)
 
-    # Restore train_id from recover checkpoint if available, otherwise generate
-    restored_id = _try_load_train_id_from_checkpoint(config)
-    if restored_id is not None:
-        os.environ["TRAIN_ID"] = restored_id
-        logger.info("Restored Train ID from checkpoint: %s", restored_id)
-    elif "TRAIN_ID" not in os.environ:
-        os.environ["TRAIN_ID"] = uuid.uuid4().hex
-        logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
-    else:
-        logger.info("Using Train ID from environment: %s", os.environ["TRAIN_ID"])
+    os.environ["TRAIN_ID"] = uuid.uuid4().hex
+    logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
+    
+    # # Restore train_id from recover checkpoint if available, otherwise generate
+    # restored_id = _try_load_train_id_from_checkpoint(config)
+    # if restored_id is not None:
+    #     os.environ["TRAIN_ID"] = restored_id
+    #     logger.info("Restored Train ID from checkpoint: %s", restored_id)
+    # elif "TRAIN_ID" not in os.environ:
+    #     os.environ["TRAIN_ID"] = uuid.uuid4().hex
+    #     logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
+    # else:
+    #     logger.info("Using Train ID from environment: %s", os.environ["TRAIN_ID"])
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
 
     # Load TPFC dataset

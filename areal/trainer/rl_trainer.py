@@ -369,7 +369,12 @@ class PPOTrainer:
         )
 
         self._config_perf_tracer()
+        logger.info("Applying initial offload policy: rollout=%s, ref=%s, critic=%s, teacher=%s, actor=%s",
+                     self._should_offload_rollout, self._should_offload_ref,
+                     self._should_offload_critic, self._should_offload_teacher,
+                     self._should_offload_actor)
         self._apply_initial_offload_policy()
+        logger.info("PPOTrainer __init__ complete, ready for train()")
 
     @staticmethod
     def _is_colocation(strategy: SchedulingStrategy | None) -> bool:
@@ -413,6 +418,7 @@ class PPOTrainer:
         if rollout is None:
             return
 
+        logger.info("_offload_rollout: calling rollout.pause()...")
         with (
             stats_tracker.record_timing("rollout_pause"),
             perf_tracer.trace_scope(
@@ -421,7 +427,9 @@ class PPOTrainer:
             ),
         ):
             rollout.pause()
+        logger.info("_offload_rollout: rollout.pause() completed")
 
+        logger.info("_offload_rollout: calling rollout.pause_generation()...")
         with (
             stats_tracker.record_timing("rollout_pause_generation"),
             perf_tracer.trace_scope(
@@ -430,7 +438,9 @@ class PPOTrainer:
             ),
         ):
             call_maybe_async(rollout.pause_generation)
+        logger.info("_offload_rollout: rollout.pause_generation() completed")
 
+        logger.info("_offload_rollout: calling rollout.offload()...")
         with (
             stats_tracker.record_timing("rollout_offload"),
             perf_tracer.trace_scope(
@@ -439,6 +449,7 @@ class PPOTrainer:
             ),
         ):
             rollout.offload()
+        logger.info("_offload_rollout: rollout.offload() completed")
 
     def _onload_rollout(self, is_eval: bool = False) -> None:
         cleanup_error: Exception | None = None
@@ -448,6 +459,7 @@ class PPOTrainer:
             return
 
         try:
+            logger.info("_onload_rollout: calling rollout.onload()...")
             with (
                 stats_tracker.record_timing("rollout_onload"),
                 perf_tracer.trace_scope(
@@ -456,10 +468,12 @@ class PPOTrainer:
                 ),
             ):
                 rollout.onload()
+            logger.info("_onload_rollout: rollout.onload() completed")
         except Exception as exc:  # noqa: BLE001
             cleanup_error = exc
 
         try:
+            logger.info("_onload_rollout: calling rollout.continue_generation()...")
             with (
                 stats_tracker.record_timing("rollout_continue_generation"),
                 perf_tracer.trace_scope(
@@ -468,11 +482,13 @@ class PPOTrainer:
                 ),
             ):
                 call_maybe_async(rollout.continue_generation)
+            logger.info("_onload_rollout: rollout.continue_generation() completed")
         except Exception as exc:  # noqa: BLE001
             if cleanup_error is None:
                 cleanup_error = exc
 
         try:
+            logger.info("_onload_rollout: calling rollout.resume()...")
             with (
                 stats_tracker.record_timing("rollout_resume"),
                 perf_tracer.trace_scope(
@@ -481,6 +497,7 @@ class PPOTrainer:
                 ),
             ):
                 rollout.resume()
+            logger.info("_onload_rollout: rollout.resume() completed")
         except Exception as exc:  # noqa: BLE001
             if cleanup_error is None:
                 cleanup_error = exc
@@ -523,6 +540,13 @@ class PPOTrainer:
         steps_per_epoch = len(self.train_dataloader)
         max_steps = total_epochs * steps_per_epoch
 
+        logger.info(
+            "train() called: start_step=%d, max_steps=%d, steps_per_epoch=%d, "
+            "workflow=%s, _requires_proxy=%s",
+            start_step, max_steps, steps_per_epoch,
+            workflow, self._requires_proxy_workflow(workflow) if workflow else "N/A",
+        )
+
         # Initialize proxy workers if not using RolloutWorkflow
         if workflow is None:
             agent_cfg = self.config.rollout.agent
@@ -537,6 +561,8 @@ class PPOTrainer:
         elif self._requires_proxy_workflow(workflow):
             self._ensure_proxy_started()
 
+        logger.info("Proxy initialization complete, entering training loop")
+
         for global_step in range(start_step, max_steps):
             if (
                 config.total_train_steps is not None
@@ -546,8 +572,18 @@ class PPOTrainer:
             epoch = global_step // steps_per_epoch
             step = global_step % steps_per_epoch
 
+            logger.info(
+                "Training step %d (epoch=%d, epoch_step=%d): "
+                "offload_rollout=%s, offload_actor=%s",
+                global_step, epoch, step,
+                self._should_offload_rollout, self._should_offload_actor,
+            )
+
             if self._should_offload_rollout:
+                logger.info("Calling _onload_rollout()...")
                 self._onload_rollout()
+                logger.info("_onload_rollout() completed")
+            logger.info("Calling prepare_batch (rollout generation)...")
             with (
                 stats_tracker.record_timing("rollout"),
                 perf_tracer.trace_scope(
@@ -567,6 +603,9 @@ class PPOTrainer:
                     group_size=config.gconfig.n_samples,
                     dynamic_bs=self.config.dynamic_bs,
                 )
+            logger.info(
+                "prepare_batch completed: got %d trajectories", len(rollout_batch)
+            )
             if self._should_offload_rollout:
                 self._offload_rollout()
 

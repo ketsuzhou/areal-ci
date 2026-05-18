@@ -296,7 +296,8 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
         return agent_id
 
     agent_service = AgentService(client)
-    from customized_areal.tpfc.config.builtin import TPFC_CONFIG
+    # from customized_areal.tpfc.config.builtin import TPFC_CONFIG
+    from customized_areal.tpfc.config.builtin_new import TPFC_CONFIG
 
     created_agent = await agent_service.create_agent(
         user_id,
@@ -306,12 +307,12 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
             is_default=TPFC_CONFIG.get("is_default", False),
         ),
     )
-    new_agent_id = created_agent.agent_id
+    agent_id = created_agent.agent_id
     loader = await get_agent_loader()
     # agent_data = await loader.load_agent(agent_id, user_id, load_config=True)
-    agent_data = await loader.load_agent(new_agent_id, user_id, load_config=True)
-    logger.info("Created agent: %s", new_agent_id)
-    return new_agent_id
+    agent_data = await loader.load_agent(agent_id, user_id, load_config=True)
+    logger.info("Created agent: %s", )
+    return agent_id
 
 
 async def _start_agent_run(
@@ -366,7 +367,7 @@ async def _wait_for_agent_run(
     agent_run_id: str | None,
     api_base_url: str | None = None,
     auth_token: str | None = None,
-    timeout: int = 3000,
+    timeout: int = 9000,
 ) -> str:
     """Wait until the agent run reaches a terminal state.
 
@@ -678,6 +679,10 @@ if __name__ == "__main__":
     ]
     gt = "Time-Parking 2: Parallel Universe"
 
+    task_description = "今天北京天气怎么样"
+    task_file_path = [ ]
+    gt = ""
+
     messages, final_answer, log_path, _trace = asyncio.run(
         run_backend(
             task_description=task_description,
@@ -687,6 +692,7 @@ if __name__ == "__main__":
             user_id=DEFAULT_USER_ID,
             model_name="openrouter/qwen/qwen3-vl-8b-thinking",
             api_key=os.environ.get("OPENROUTER_API_KEY"),
+            # api_key='aaa',
             base_url=os.environ.get(
                 "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
             ),

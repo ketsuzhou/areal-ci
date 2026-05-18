@@ -168,22 +168,12 @@ class TPFCAgent:
                     break
 
             # Calculate reward using gaia_final_reward.compute_reward
-            judge_model_name = self.judge_model_name or os.environ.get(
-                "TPFC_JUDGE_MODEL", "qwen/qwen3.5-397b-a17b"
-            )
-            judge_base_url = os.environ.get(
-                "WORKSPACE_OPENAI_API_BASE", "https://openrouter.ai/api/v1"
-            )
-            judge_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY", "OPENROUTER_API_KEY")
-
+            # (env var resolution and OpenRouter fallback live inside compute_reward)
             try:
                 result = compute_reward(
-                    response_text=response_text,
                     ground_truth=gt,
                     user_query=task_description,
-                    model_name=judge_model_name,
-                    base_url=judge_base_url,
-                    api_key=judge_api_key,
+                    answer=_final_answer,
                 )
                 reward = float(result.get("answer_reward", 0))
             except Exception as exc:
@@ -192,7 +182,7 @@ class TPFCAgent:
                     exc,
                     "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
                 )
-                reward = 0.0
+                raise
 
             logger.info(
                 "TPFCAgent run completed: message_count=%d, query_id=%s, reward=%.4f",
@@ -208,4 +198,4 @@ class TPFCAgent:
                 exc,
                 "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
             )
-            return 0.0
+            raise

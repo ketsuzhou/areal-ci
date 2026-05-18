@@ -700,6 +700,7 @@ class RemoteInfEngine(InferenceEngine):
             use_tree_search = os.getenv(
                 "use_TreeSearchGroupedRolloutWorkflow", "False"
             ).lower() == "true"
+            use_tree_search = True
             if use_tree_search:
                 self.logger.warning(
                     "use TreeSearchGroupedRolloutWorkflow"
@@ -739,6 +740,13 @@ class RemoteInfEngine(InferenceEngine):
                 distill_loss_weight = float(
                     os.getenv("TREE_SEARCH_DISTILL_LOSS_WEIGHT", "0.005")
                 )
+                tokenizer_path = (
+                    os.getenv("TREE_SEARCH_TOKENIZER_PATH", "")
+                    or self.config.tokenizer_path
+                )
+                max_reasoning_tokens = int(
+                    os.getenv("TREE_SEARCH_MAX_REASONING_TOKENS", "1000")
+                )
 
                 resolved = TreeSearchGroupedRolloutWorkflow(
                     resolved,
@@ -747,6 +755,8 @@ class RemoteInfEngine(InferenceEngine):
                     advantage_mode=advantage_mode,
                     loss_mode=loss_mode,
                     cache_mode=cache_mode,
+                    tokenizer_path=tokenizer_path,
+                    max_reasoning_tokens=max_reasoning_tokens,
                     rl_loss_weight=rl_loss_weight,
                     distill_loss_weight=distill_loss_weight,
                 )
@@ -1130,6 +1140,10 @@ class RemoteInfEngine(InferenceEngine):
         is_eval: bool = False,
         proxy_addr: str | None = None,
     ) -> int:
+        self.logger.info(
+            "RemoteInfEngine.submit() called: task_id=%s, workflow=%s, group_size=%d, proxy_addr=%s",
+            task_id, workflow, group_size, proxy_addr,
+        )
         """Submit a request to the inference engine and return immediately.
 
         Parameters
@@ -1164,11 +1178,17 @@ class RemoteInfEngine(InferenceEngine):
             self.workflow_executor.dispatcher.register_callback(task_id, callback_addr)
 
         # Resolve workflow to a RolloutWorkflow instance
+        self.logger.info("RemoteInfEngine.submit: calling _resolve_workflow...")
         resolved_workflow = self._resolve_workflow(
             workflow, workflow_kwargs, group_size, proxy_addr=proxy_addr
         )
+        self.logger.info(
+            "RemoteInfEngine.submit: _resolve_workflow returned %s",
+            type(resolved_workflow).__name__,
+        )
         resolved_should_accept_fn = self._resolve_should_accept_fn(should_accept_fn)
 
+        self.logger.info("RemoteInfEngine.submit: calling workflow_executor.submit...")
         return self.workflow_executor.submit(
             data,
             workflow=resolved_workflow,

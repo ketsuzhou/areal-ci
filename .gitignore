@@ -208,3 +208,4 @@ tmp/*
 
 customized_areal/tpfc/data/tree_cache/mcts_trees/*
 customized_areal/tpfc/.shared_auth_token.json
+*.json

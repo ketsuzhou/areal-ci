@@ -356,6 +356,8 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
 
         get_executor().submit(post)
 
+    _commit_loop_logged = False
+
     def _commit_loop(self) -> None:
         """Producer thread - continuously submits tasks based on capacity."""
         while not self._shutdown_event.is_set():
@@ -367,12 +369,21 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 if task_input is None:
                     continue
 
+                if not self._commit_loop_logged:
+                    self.logger.info(
+                        "_commit_loop: first task picked up, task_id=%s, pending_inputs=%d",
+                        task_input.task_id, len(self._pending_inputs),
+                    )
+                    self._commit_loop_logged = True
+
                 task_fn = self.task_factory(task_input)
                 try:
                     self.runner.submit(task_fn, task_id=task_input.task_id)
                     self.staleness_manager.on_rollout_submitted()
-                    if self.enable_tracing:
-                        self.logger.info(f"Submit rollout. {self._rollout_stats()}")
+                    self.logger.info(
+                        "_commit_loop: submitted task_id=%s to runner. %s",
+                        task_input.task_id, self._rollout_stats(),
+                    )
                 except TaskQueueFullError:
                     with self._input_cv:
                         self._pending_inputs.appendleft(task_input)
@@ -433,16 +444,29 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                     self._input_cv.notify()
                 break
 
+    _get_next_logged = False
+
     def _get_next_task_for_submission(self) -> TInput | None:
         with self._input_cv:
             while not self._shutdown_event.is_set():
                 self._check_thread_exception()
                 # There is capacity and pending inputs
-                if (
+                has_capacity = (
                     not self.runner.paused.is_set()
                     and self.staleness_manager.get_capacity() > 0
                     and self._pending_inputs
-                ):
+                )
+                if not self._get_next_logged:
+                    self.logger.info(
+                        "_get_next_task_for_submission: pending_inputs=%d, "
+                        "runner_paused=%s, staleness_capacity=%d, has_capacity=%s",
+                        len(self._pending_inputs),
+                        self.runner.paused.is_set(),
+                        self.staleness_manager.get_capacity(),
+                        has_capacity,
+                    )
+                    self._get_next_logged = True
+                if has_capacity:
                     return self._pending_inputs.popleft()
                 self._input_cv.wait()
 
@@ -525,6 +549,8 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
             f"rejected: {stats.rejected}."
         )
 
+    _submit_count = 0
+
     def submit_task_input(self, task_input: TInput) -> None:
         """Submit a task input for processing.
 
@@ -537,8 +563,13 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         with self._input_cv:
             self._pending_inputs.append(task_input)
             self.staleness_manager.on_rollout_enqueued()
-            if self.enable_tracing:
-                self.logger.info(f"Enqueue rollout. {self._rollout_stats()}")
+            self._submit_count += 1
+            if self._submit_count <= 5 or self._submit_count % 32 == 0:
+                self.logger.info(
+                    "submit_task_input: task_id=%s, total_submitted=%d, pending_inputs=%d. %s",
+                    task_input.task_id, self._submit_count, len(self._pending_inputs),
+                    self._rollout_stats(),
+                )
             self._input_cv.notify()
         with self._result_cv:
             self._active_task_ids.add(task_input.task_id)
@@ -637,6 +668,13 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         batch_size: int,
         dynamic_bs: bool = False,
     ) -> list[TResult]:
+        self.logger.info(
+            "active_submit_and_wait: batch_size=%d, dynamic_bs=%s, "
+            "runner_queue_sizes=(input=%d, output=%d), pending_inputs=%d, pending_results=%d",
+            batch_size, dynamic_bs,
+            self.runner.get_input_queue_size(), self.runner.get_output_queue_size(),
+            len(self._pending_inputs), len(self._pending_results),
+        )
         """Continuously submit tasks and wait until a full batch of results is ready.
 
         This method maintains overlap between submission and result collection
@@ -671,6 +709,7 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         total_attempts = 0
         results = []
 
+        loop_iter = 0
         while True:
             # Submit tasks to maintain overlap
             with self._input_cv:
@@ -680,10 +719,29 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 raise ValueError(
                     f"Inference engine config's queue size is too small: {self.runner.max_queue_size} < batch size {batch_size}."
                 )
+            if self.runner.max_queue_size <= batch_size and accepted_cnt == 0:
+                raise ValueError(
+                    f"queue_size ({self.runner.max_queue_size}) must be > batch_size ({batch_size}) "
+                    f"to avoid deadlock in active_submit_and_wait. "
+                    f"Increase rollout.queue_size in config (e.g. batch_size * 4 = {batch_size * 4})."
+                )
             cap_queue = self.runner.max_queue_size - (
                 self.runner.get_input_queue_size() + batch_size
             )
             capacity = min(cap_staleness, cap_queue)
+            if loop_iter % 10 == 0:
+                conc_cap, stal_cap = self.staleness_manager.get_capacity_breakdown()
+                self.logger.info(
+                    "active_submit_and_wait loop: iter=%d, cap_staleness=%d, cap_queue=%d, "
+                    "capacity=%d, pending_inputs=%d, accepted_cnt=%d/%d, "
+                    "runner_input_q=%d, runner_output_q=%d, runner_paused=%s, "
+                    "concurrency_capacity=%d, staleness_capacity=%d",
+                    loop_iter, cap_staleness, cap_queue, capacity,
+                    pending_inputs, accepted_cnt, batch_size,
+                    self.runner.get_input_queue_size(), self.runner.get_output_queue_size(),
+                    self.runner.paused.is_set(),
+                    conc_cap, stal_cap,
+                )
             if capacity > 0:
                 if self.enable_tracing:
                     perf_tracer.instant(
@@ -725,6 +783,7 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 elif accepted_cnt >= batch_size:
                     break
             else:
+                loop_iter += 1
                 continue
             break
 
@@ -1171,6 +1230,10 @@ class WorkflowExecutor:
         """
         if task_id is None:
             task_id = self._task_id_generator.next()
+        self.logger.info(
+            "WorkflowExecutor.submit: task_id=%d, workflow=%s, is_eval=%s",
+            task_id, type(workflow).__name__, is_eval,
+        )
         perf_tracer.register_task(task_id)
         task_input = _RolloutTaskInput(
             data=data,

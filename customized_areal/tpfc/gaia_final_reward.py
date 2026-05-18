@@ -158,37 +158,59 @@ def evaluate_final_answer(
 
 
 def compute_reward(
-    response_text,
     ground_truth,
     user_query,
-    model_name,
-    base_url,
-    api_key,
+    answer,
+    model_name=None,
+    base_url=None,
+    api_key=None,
     system_prompt="You are a helpful assistant.",
     timeout=120.0,
     verify_ssl=False,
 ):
-    answer = extract_answer(response_text)
     if answer is None or ground_truth is None:
-        return {
-            "raw_answer": answer,
-            "judge_prompt": None,
-            "judge_response_text": None,
-            "answer_reward": 0,
-            "final_reward": 0,
-        }
+        raise
 
-    judge_result = evaluate_final_answer(
-        model_answer=answer,
-        ground_truth=ground_truth,
-        user_query=user_query,
-        model_name=model_name,
-        base_url=base_url,
-        api_key=api_key,
-        system_prompt=system_prompt,
-        timeout=timeout,
-        verify_ssl=verify_ssl,
+    # Resolve judge config: explicit args > env vars > defaults
+    _model_name = model_name or os.environ.get(
+        "TPFC_JUDGE_MODEL", "qwen/qwen3.5-397b-a17b"
     )
+    _base_url = base_url or os.environ.get(
+        "WORKSPACE_OPENAI_API_BASE", "https://openrouter.ai/api/v1"
+    )
+    _api_key = api_key or os.environ.get("WORKSPACE_OPENAI_API_KEY", "")
+
+    try:
+        judge_result = evaluate_final_answer(
+            model_answer=answer,
+            ground_truth=ground_truth,
+            user_query=user_query,
+            model_name=_model_name,
+            base_url=_base_url,
+            api_key=_api_key,
+            system_prompt=system_prompt,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+        )
+    except Exception:
+        # Fallback to OpenRouter if WORKSPACE endpoint fails
+        fallback_url = "https://openrouter.ai/api/v1"
+        fallback_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if _base_url != fallback_url or _api_key != fallback_key:
+            judge_result = evaluate_final_answer(
+                model_answer=answer,
+                ground_truth=ground_truth,
+                user_query=user_query,
+                model_name=_model_name,
+                base_url=fallback_url,
+                api_key=fallback_key,
+                system_prompt=system_prompt,
+                timeout=timeout,
+                verify_ssl=verify_ssl,
+            )
+        else:
+            raise
+
     return {
         "raw_answer": answer,
         "judge_prompt": judge_result["judge_prompt"],

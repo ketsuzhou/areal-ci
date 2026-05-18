@@ -111,8 +111,8 @@ async def main():
 
     # Define directories to evaluate
     directories = [
-        base_path / "qwen3-vl-8b-thinking-base_0427_new" / "level_1",
-        base_path / "qwen3-vl-8b-thinking-trained_0427_new" / "level_1",
+        base_path / "qwen3-vl-8b-thinking-base_0517" / "level_1",
+        # base_path / "qwen3-vl-8b-thinking-trained_0427_new" / "level_1",
     ]
 
     all_summaries = []
