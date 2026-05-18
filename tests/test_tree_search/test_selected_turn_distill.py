@@ -118,12 +118,13 @@ def test_parse_episode_diagnosis_keeps_only_selected_turns():
     assert diagnosis.selected_turns == {1: "Use exact units."}
 
 
-def test_response_token_span_returns_first_contiguous_one_span():
+def test_response_token_span_returns_last_contiguous_one_span():
     from customized_areal.tree_search.core.selected_turn_distill import (
         response_token_span,
     )
 
     assert response_token_span([0, 0, 1, 1, 0]) == (2, 4)
+    assert response_token_span([0, 1, 1, 0, 0, 1, 1]) == (5, 7)
 
 
 def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
@@ -144,6 +145,26 @@ def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
 
     assert generation_ids == [20, 21]
     assert prompt_ids == [10, 11, 900, 901]
+
+
+def test_build_teacher_prompt_ids_uses_latest_response_span():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        build_teacher_prompt_ids,
+    )
+
+    node = Node(
+        input_ids=[10, 20, 21, 11, 12, 30, 31],
+        loss_mask=[0, 1, 1, 0, 0, 1, 1],
+        logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3, -0.4],
+        versions=[-1, 0, 0, -1, -1, 0, 0],
+    )
+
+    prompt_ids, generation_ids = build_teacher_prompt_ids(
+        node, "Fix the last turn.", FakeTokenizer()
+    )
+
+    assert generation_ids == [30, 31]
+    assert prompt_ids == [10, 20, 21, 11, 12, 900, 901]
 
 
 @pytest.mark.asyncio
@@ -200,3 +221,36 @@ async def test_selected_turn_to_position_rewards_single_candidate_path():
             sample_index=7,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_to_position_rewards_topk_moves_generated_token_first():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    provider = FakeProvider([[-1.0, -2.0, -3.0]])
+    node = Node(
+        input_ids=[10, 11, 20],
+        loss_mask=[0, 0, 1],
+        logprobs=[0.0, 0.0, -0.3],
+        versions=[-1, -1, 0],
+        topk_ids=[[30, 20, 40]],
+        topk_logp=[[-0.1, -0.3, -0.8]],
+    )
+
+    rewards = await selected_turn_to_position_rewards(
+        node=node,
+        guidance="Be more direct.",
+        tokenizer=FakeTokenizer(),
+        provider=provider,
+        sample_index=0,
+        topk_distill=True,
+        engine=None,
+        teacher_top_k=10,
+    )
+
+    assert provider.calls[0]["candidate_token_ids"] == [[20, 30, 40]]
+    assert rewards[0].candidate_token_ids == [20, 30, 40]
+    assert rewards[0].logprobs == [-0.3, -0.1, -0.8]
+    assert rewards[0].chosen_index == 0

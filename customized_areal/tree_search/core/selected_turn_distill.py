@@ -61,15 +61,22 @@ def parse_episode_diagnosis(raw_text: str) -> EpisodeDiagnosis:
 
 
 def response_token_span(loss_mask: list[int]) -> tuple[int, int]:
-    """Return the first contiguous response span in a loss mask."""
+    """Return the selected response span in a loss mask.
+
+    Concat-mode multi-turn nodes can contain earlier assistant response spans
+    plus the current selected turn. The selected turn is the last contiguous
+    response span.
+    """
     start: int | None = None
+    last_span = (0, 0)
     for index, value in enumerate(loss_mask):
         if value == 1 and start is None:
             start = index
         elif value != 1 and start is not None:
-            return start, index
+            last_span = (start, index)
+            start = None
     if start is None:
-        return 0, 0
+        return last_span
     return start, len(loss_mask)
 
 
@@ -116,11 +123,24 @@ async def selected_turn_to_position_rewards(
     generation_logprobs = [float(value) for value in logprobs[start:end]]
 
     if topk_distill and node.topk_ids is not None and node.topk_logp is not None:
-        candidate_token_ids = [list(candidates) for candidates in node.topk_ids]
-        student_logprobs = [
-            [float(logprob) for logprob in position_logprobs]
-            for position_logprobs in node.topk_logp
-        ]
+        candidate_token_ids = []
+        student_logprobs = []
+        for generated_id, generated_logprob, candidates, position_logprobs in zip(
+            generation_ids,
+            generation_logprobs,
+            node.topk_ids,
+            node.topk_logp,
+            strict=True,
+        ):
+            reordered_ids = [generated_id]
+            reordered_logprobs = [generated_logprob]
+            for token_id, logprob in zip(candidates, position_logprobs, strict=True):
+                if token_id == generated_id:
+                    continue
+                reordered_ids.append(int(token_id))
+                reordered_logprobs.append(float(logprob))
+            candidate_token_ids.append(reordered_ids)
+            student_logprobs.append(reordered_logprobs)
     else:
         candidate_token_ids = [[token_id] for token_id in generation_ids]
         student_logprobs = [[logprob] for logprob in generation_logprobs]
