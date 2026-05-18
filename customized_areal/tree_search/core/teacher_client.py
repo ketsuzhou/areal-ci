@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -254,13 +255,24 @@ class TeacherClient:
             raise RuntimeError("Teacher API returned no completion choices")
 
         choice = choices[0]
+        if not isinstance(choice, Mapping):
+            raise RuntimeError("Teacher API completion choice must be a mapping")
+
         text = choice.get("text")
-        if text is None:
-            message = choice.get("message", {})
+        if isinstance(text, str):
+            return text
+
+        if "message" in choice:
+            message = choice["message"]
+            if not isinstance(message, Mapping):
+                raise RuntimeError("Teacher API completion message must be a mapping")
             text = message.get("content")
+            if isinstance(text, str):
+                return text
+
         if text is None:
             raise RuntimeError("Teacher API completion choice contained no text")
-        return str(text)
+        raise RuntimeError("Teacher API completion choice contained no text string")
 
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the completions endpoint with retry logic.

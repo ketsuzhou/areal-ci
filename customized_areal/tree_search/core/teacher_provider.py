@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Protocol
 
 from customized_areal.tree_search.core.teacher_client import TeacherClient
@@ -79,17 +80,20 @@ class EngineTeacherProvider:
     """Teacher provider backed by an in-process inference engine."""
 
     def __init__(self, engine) -> None:
-        if not callable(getattr(engine, "get_logprobs_for_prompt", None)):
+        get_logprobs_for_prompt = getattr(engine, "get_logprobs_for_prompt", None)
+        if not inspect.iscoroutinefunction(get_logprobs_for_prompt):
             raise NotImplementedError(
-                "engine-backed teacher provider requires engine.get_logprobs_for_prompt"
+                "engine-backed teacher provider requires async coroutine function "
+                "engine.get_logprobs_for_prompt"
             )
         self.engine = engine
 
     async def diagnose_episode(self, context: str, gold_answer: str) -> str:
         diagnose_episode = getattr(self.engine, "diagnose_episode", None)
-        if not callable(diagnose_episode):
+        if not inspect.iscoroutinefunction(diagnose_episode):
             raise NotImplementedError(
-                "engine-backed teacher provider requires engine.diagnose_episode"
+                "engine-backed teacher provider requires async coroutine function "
+                "engine.diagnose_episode"
             )
         return await diagnose_episode(
             context=context,

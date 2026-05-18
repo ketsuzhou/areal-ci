@@ -501,6 +501,25 @@ class TestTeacherClient:
         with pytest.raises(RuntimeError, match="contained no text"):
             await client.complete_text("episode context")
 
+    @pytest.mark.asyncio
+    async def test_complete_text_malformed_choice_type_raises(self, client):
+        """Test complete_text raises when the choice is not a mapping."""
+        client._post_with_retries = AsyncMock(return_value={"choices": ["bad-choice"]})
+
+        with pytest.raises(RuntimeError, match="completion choice"):
+            await client.complete_text("episode context")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", [None, "bad-message"])
+    async def test_complete_text_malformed_message_raises(self, client, message):
+        """Test complete_text raises when message is present but malformed."""
+        client._post_with_retries = AsyncMock(
+            return_value={"choices": [{"message": message}]}
+        )
+
+        with pytest.raises(RuntimeError, match="completion message"):
+            await client.complete_text("episode context")
+
 
 class FakeTeacherClient:
     def __init__(self):
@@ -594,6 +613,20 @@ def test_engine_provider_fails_early_with_non_callable_logprobs_method():
         EngineTeacherProvider(Engine())
 
 
+def test_engine_provider_rejects_sync_logprobs_method_at_init():
+    class Engine:
+        def get_logprobs_for_prompt(
+            self,
+            prompt_ids,
+            generation_ids,
+            candidate_token_ids,
+        ):
+            return [[-0.1]]
+
+    with pytest.raises(NotImplementedError, match="async.*get_logprobs_for_prompt"):
+        EngineTeacherProvider(Engine())
+
+
 @pytest.mark.asyncio
 async def test_engine_provider_diagnose_without_engine_method_raises():
     class Engine:
@@ -627,6 +660,26 @@ async def test_engine_provider_diagnose_with_non_callable_engine_method_raises()
     provider = EngineTeacherProvider(Engine())
 
     with pytest.raises(NotImplementedError, match="engine.diagnose_episode"):
+        await provider.diagnose_episode("context", "gold")
+
+
+@pytest.mark.asyncio
+async def test_engine_provider_rejects_sync_diagnose_method_at_use():
+    class Engine:
+        async def get_logprobs_for_prompt(
+            self,
+            prompt_ids,
+            generation_ids,
+            candidate_token_ids,
+        ):
+            return [[-0.1]]
+
+        def diagnose_episode(self, context, gold_answer):
+            return "diagnosis"
+
+    provider = EngineTeacherProvider(Engine())
+
+    with pytest.raises(NotImplementedError, match="async.*diagnose_episode"):
         await provider.diagnose_episode("context", "gold")
 
 
