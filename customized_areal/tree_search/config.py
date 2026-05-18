@@ -33,6 +33,18 @@ class TreeBackupConfig:
     overlong_reward_penalty: bool = False
     overlong_tokens: int | None = None
     overlong_penalty_factor: float | None = None
+    topk_distill: bool = False
+    teacher_provider: str = "external"
+    teacher_base_url: str = "http://localhost:8001"
+    teacher_model_name: str = ""
+    teacher_top_k: int = 10
+    teacher_max_retries: int = 3
+    teacher_timeout: float = 60.0
+    teacher_missing_logprob: float = -23.0
+    diagnose_model_name: str = ""
+    diagnose_max_tokens: int = 1024
+    diagnose_temperature: float = 0.0
+    strict_distill_json: bool = True
 
 
 @dataclass

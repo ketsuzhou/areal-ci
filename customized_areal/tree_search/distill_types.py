@@ -19,9 +19,30 @@ class PositionRewardInfo:
     candidates: list[str] = field(default_factory=list)
     candidate_token_ids: list[int] = field(default_factory=list)
     logprobs: list[float] | None = None
+    teacher_logprobs: list[float] | None = None
     rewards: list[float] = field(default_factory=list)
     chosen_index: int = 0
     sample_index: int = 0
+
+
+@dataclass(frozen=True)
+class DiagnosisTurn:
+    turn_idx: int
+    should_improve: bool
+    guidance: str = ""
+
+    @property
+    def is_selected(self) -> bool:
+        return self.should_improve and bool(self.guidance.strip())
+
+
+@dataclass(frozen=True)
+class EpisodeDiagnosis:
+    turns: tuple[DiagnosisTurn, ...]
+
+    @property
+    def selected_turns(self) -> dict[int, str]:
+        return {turn.turn_idx: turn.guidance for turn in self.turns if turn.is_selected}
 
 
 @dataclass
