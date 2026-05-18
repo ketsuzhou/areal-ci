@@ -60,6 +60,23 @@ def test_compute_teacher_kl_loss_2d_uses_candidate_columns():
     torch.testing.assert_close(loss, expected)
 
 
+def test_compute_teacher_kl_loss_empty_position_rewards_returns_device_scalar_zero():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logprobs = torch.tensor([-1.0, -2.0], device=device, requires_grad=True)
+    loss_mask = torch.tensor([1, 1], dtype=torch.bool, device=device)
+
+    loss = _compute_teacher_kl_loss(
+        position_rewards=[],
+        logprobs=logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[0],
+    )
+
+    assert loss.shape == torch.Size([])
+    assert loss.device == logprobs.device == loss_mask.device
+    torch.testing.assert_close(loss, torch.tensor(0.0, device=logprobs.device))
+
+
 def test_compute_teacher_kl_loss_ignores_missing_and_invalid_entries():
     logprobs = torch.tensor([-1.0, -2.0], requires_grad=True)
     loss_mask = torch.tensor([1, 1], dtype=torch.bool)
