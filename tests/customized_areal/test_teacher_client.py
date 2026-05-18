@@ -494,6 +494,25 @@ class TestTeacherClient:
             await client.complete_text("episode context")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("response_data", [[], "bad"])
+    async def test_complete_text_malformed_response_type_raises(
+        self, client, response_data
+    ):
+        """Test complete_text raises when the API response is not a mapping."""
+        client._post_with_retries = AsyncMock(return_value=response_data)
+
+        with pytest.raises(RuntimeError, match="response must be a mapping"):
+            await client.complete_text("episode context")
+
+    @pytest.mark.asyncio
+    async def test_complete_text_malformed_choices_type_raises(self, client):
+        """Test complete_text raises when choices is not a sequence."""
+        client._post_with_retries = AsyncMock(return_value={"choices": {"text": "x"}})
+
+        with pytest.raises(RuntimeError, match="choices must be a sequence"):
+            await client.complete_text("episode context")
+
+    @pytest.mark.asyncio
     async def test_complete_text_choice_without_text_raises(self, client):
         """Test complete_text raises when a choice has no completion text."""
         client._post_with_retries = AsyncMock(return_value={"choices": [{}]})

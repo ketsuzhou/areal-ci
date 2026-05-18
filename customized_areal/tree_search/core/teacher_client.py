@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -250,7 +250,12 @@ class TeacherClient:
             payload["model"] = selected_model
 
         response_data = await self._post_with_retries(payload)
+        if not isinstance(response_data, Mapping):
+            raise RuntimeError("Teacher API completion response must be a mapping")
+
         choices = response_data.get("choices", [])
+        if isinstance(choices, str | bytes) or not isinstance(choices, Sequence):
+            raise RuntimeError("Teacher API completion choices must be a sequence")
         if not choices:
             raise RuntimeError("Teacher API returned no completion choices")
 
