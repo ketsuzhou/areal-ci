@@ -450,6 +450,51 @@ class TestTeacherClient:
         assert result[0][20] == pytest.approx(-0.1)
         assert mock_http_client.post.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_complete_text_returns_text_and_sends_payload(self, client):
+        """Test complete_text returns choice text and sends expected payload."""
+        client._post_with_retries = AsyncMock(
+            return_value={"choices": [{"text": "diagnosis"}]}
+        )
+
+        result = await client.complete_text(
+            "episode context",
+            model="diagnoser",
+            max_tokens=256,
+            temperature=0.2,
+        )
+
+        assert result == "diagnosis"
+        client._post_with_retries.assert_awaited_once_with(
+            {
+                "prompt": "episode context",
+                "max_tokens": 256,
+                "temperature": 0.2,
+                "model": "diagnoser",
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_complete_text_returns_message_content_when_text_absent(
+        self, client
+    ):
+        """Test complete_text falls back to chat message content."""
+        client._post_with_retries = AsyncMock(
+            return_value={"choices": [{"message": {"content": "diagnosis"}}]}
+        )
+
+        result = await client.complete_text("episode context")
+
+        assert result == "diagnosis"
+
+    @pytest.mark.asyncio
+    async def test_complete_text_empty_choices_raises(self, client):
+        """Test complete_text raises when the API returns no choices."""
+        client._post_with_retries = AsyncMock(return_value={"choices": []})
+
+        with pytest.raises(RuntimeError, match="no completion choices"):
+            await client.complete_text("episode context")
+
 
 class FakeTeacherClient:
     def __init__(self):
@@ -533,3 +578,43 @@ def test_engine_provider_fails_early_without_compatible_methods():
 
     with pytest.raises(NotImplementedError, match="engine-backed teacher provider"):
         EngineTeacherProvider(Engine())
+
+
+@pytest.mark.asyncio
+async def test_engine_provider_diagnose_without_engine_method_raises():
+    class Engine:
+        async def get_logprobs_for_prompt(
+            self,
+            prompt_ids,
+            generation_ids,
+            candidate_token_ids,
+        ):
+            return [[-0.1]]
+
+    provider = EngineTeacherProvider(Engine())
+
+    with pytest.raises(NotImplementedError, match="engine.diagnose_episode"):
+        await provider.diagnose_episode("context", "gold")
+
+
+@pytest.mark.asyncio
+async def test_engine_provider_delegates_logprobs_to_engine():
+    class Engine:
+        def __init__(self):
+            self.get_logprobs_for_prompt = AsyncMock(return_value=[[0.1, 0.2]])
+
+    engine = Engine()
+    provider = EngineTeacherProvider(engine)
+
+    result = await provider.get_logprobs_for_prompt(
+        prompt_ids=[1, 2],
+        generation_ids=[3],
+        candidate_token_ids=[[4, 5]],
+    )
+
+    assert result == [[0.1, 0.2]]
+    engine.get_logprobs_for_prompt.assert_awaited_once_with(
+        prompt_ids=[1, 2],
+        generation_ids=[3],
+        candidate_token_ids=[[4, 5]],
+    )
