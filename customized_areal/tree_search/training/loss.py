@@ -180,7 +180,12 @@ def _compute_teacher_kl_loss(
     loss_mask: torch.Tensor,
     prompt_lens: list[int] | int,
 ) -> torch.Tensor:
-    """Compute direct teacher KL distillation loss from stored teacher logprobs."""
+    """Compute direct teacher KL distillation loss from stored teacher logprobs.
+
+    This intentionally matches the existing BOTH-mode distillation convention in
+    `areal.trainer.ppo.actor`: add mean(student_logp - teacher_logp) to the
+    minimized actor loss. Pure KD can use a different weighting/sign upstream.
+    """
     if not position_rewards:
         return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
 
@@ -210,8 +215,11 @@ def _compute_teacher_kl_loss(
             continue
 
         if logprobs.dim() == 1:
+            chosen_index = getattr(pr, "chosen_index", 0)
+            if chosen_index < 0 or chosen_index >= len(teacher_logprobs):
+                continue
             teacher_t = torch.tensor(
-                teacher_logprobs[0],
+                teacher_logprobs[chosen_index],
                 dtype=logprobs.dtype,
                 device=logprobs.device,
             ).detach()

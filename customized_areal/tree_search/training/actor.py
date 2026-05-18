@@ -7,6 +7,7 @@ GRPO and position-level GRPO loss function for on-policy distillation.
 from __future__ import annotations
 
 import functools
+import copy
 from typing import Any
 
 import torch
@@ -141,7 +142,8 @@ def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
             mb_assignment[orig_idx] = i
         offset += mb_bs
 
-    # Group position_rewards by minibatch
+    # Group position_rewards by minibatch and rebase sample_index to the
+    # sample's local index inside that minibatch.
     per_mb_prs: dict[int, list] = {}
     for pr in position_rewards:
         if pr.sample_index >= len(mb_assignment):
@@ -162,7 +164,30 @@ def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
                 pr.position,
             )
             continue
-        per_mb_prs.setdefault(mb_i, []).append(pr)
+        local_sample_index = None
+        offset = 0
+        for i, mb in enumerate(mb_inputs.mbs):
+            mb_bs = mb["attention_mask"].shape[0]
+            if i == mb_i:
+                for local_idx in range(mb_bs):
+                    orig_idx = int(forward_indices[offset + local_idx])
+                    if orig_idx == pr.sample_index:
+                        local_sample_index = local_idx
+                        break
+                break
+            offset += mb_bs
+        if local_sample_index is None:
+            logger.warning(
+                "position_reward sample_index=%d could not be rebased for minibatch %d, "
+                "dropping position=%d",
+                pr.sample_index,
+                mb_i,
+                pr.position,
+            )
+            continue
+        mb_pr = copy.copy(pr)
+        mb_pr.sample_index = local_sample_index
+        per_mb_prs.setdefault(mb_i, []).append(mb_pr)
 
     # Attach to minibatches
     for i, mb in enumerate(mb_inputs.mbs):

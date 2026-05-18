@@ -1,6 +1,7 @@
 import torch
 
 from customized_areal.tree_search.distill_types import PositionRewardInfo
+from customized_areal.tree_search.training.actor import _distribute_position_rewards
 from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
 
 
@@ -29,6 +30,28 @@ def test_compute_teacher_kl_loss_1d_uses_prompt_len_absolute_positions():
 
     expected = torch.tensor(((-1.0 + 0.25) + (-3.0 + 1.5)) / 2)
     torch.testing.assert_close(loss, expected)
+
+
+def test_compute_teacher_kl_loss_1d_uses_chosen_index():
+    logprobs = torch.tensor([-1.0], requires_grad=True)
+    loss_mask = torch.tensor([1], dtype=torch.bool)
+    position_rewards = [
+        PositionRewardInfo(
+            position=0,
+            teacher_logprobs=[-9.0, -0.25],
+            chosen_index=1,
+            sample_index=0,
+        )
+    ]
+
+    loss = _compute_teacher_kl_loss(
+        position_rewards=position_rewards,
+        logprobs=logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[0],
+    )
+
+    torch.testing.assert_close(loss, torch.tensor(-0.75))
 
 
 def test_compute_teacher_kl_loss_2d_uses_candidate_columns():
@@ -94,3 +117,29 @@ def test_compute_teacher_kl_loss_ignores_missing_and_invalid_entries():
 
     assert loss.device == logprobs.device
     torch.testing.assert_close(loss, torch.tensor(0.0, device=logprobs.device))
+
+
+class _FakeMbInputs:
+    def __init__(self):
+        self.forward_indices = torch.tensor([2, 0, 1])
+        self.mbs = [
+            {"attention_mask": torch.ones(2, 4, dtype=torch.bool)},
+            {"attention_mask": torch.ones(1, 4, dtype=torch.bool)},
+        ]
+
+
+def test_distribute_position_rewards_rebases_sample_index_to_minibatch_local():
+    mb_inputs = _FakeMbInputs()
+    rewards = [
+        PositionRewardInfo(position=0, teacher_logprobs=[-0.5], sample_index=1),
+        PositionRewardInfo(position=1, teacher_logprobs=[-0.6], sample_index=2),
+    ]
+
+    _distribute_position_rewards(mb_inputs, rewards)
+
+    assert "position_rewards" in mb_inputs.mbs[0]
+    assert "position_rewards" in mb_inputs.mbs[1]
+    assert mb_inputs.mbs[0]["position_rewards"][0].sample_index == 0
+    assert mb_inputs.mbs[1]["position_rewards"][0].sample_index == 0
+    assert rewards[0].sample_index == 1
+    assert rewards[1].sample_index == 2
