@@ -9,9 +9,17 @@ This module contains:
 
 from .reward_compute import _compute_token_rewards
 from .teacher_client import TeacherClient, TeacherConfig
+from .teacher_provider import (
+    EngineTeacherProvider,
+    ExternalTeacherProvider,
+    TeacherProvider,
+)
 
 __all__ = [
+    "EngineTeacherProvider",
+    "ExternalTeacherProvider",
     "TeacherClient",
     "TeacherConfig",
+    "TeacherProvider",
     "_compute_token_rewards",
 ]

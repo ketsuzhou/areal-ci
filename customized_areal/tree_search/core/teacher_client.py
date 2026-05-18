@@ -230,6 +230,36 @@ class TeacherClient:
 
         return result
 
+    async def complete_text(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> str:
+        """Return a text completion from the teacher API."""
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        selected_model = model or self.config.teacher_model_name
+        if selected_model:
+            payload["model"] = selected_model
+
+        response_data = await self._post_with_retries(payload)
+        choices = response_data.get("choices", [])
+        if not choices:
+            raise RuntimeError("Teacher API returned no completion choices")
+
+        choice = choices[0]
+        text = choice.get("text")
+        if text is None:
+            message = choice.get("message", {})
+            text = message.get("content", "")
+        return str(text)
+
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the completions endpoint with retry logic.
 

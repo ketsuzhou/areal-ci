@@ -10,6 +10,10 @@ from customized_areal.tree_search.core.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )
+from customized_areal.tree_search.core.teacher_provider import (
+    EngineTeacherProvider,
+    ExternalTeacherProvider,
+)
 
 # ---------------------------------------------------------------------------
 # TeacherConfig tests
@@ -445,3 +449,87 @@ class TestTeacherClient:
 
         assert result[0][20] == pytest.approx(-0.1)
         assert mock_http_client.post.call_count == 2
+
+
+class FakeTeacherClient:
+    def __init__(self):
+        self.diagnose_payload = None
+        self.logprob_payload = None
+
+    async def complete_text(
+        self,
+        prompt,
+        *,
+        model=None,
+        max_tokens=1024,
+        temperature=0.0,
+    ):
+        self.diagnose_payload = {
+            "prompt": prompt,
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        return (
+            '{"turns":[{"turn_idx":1,"should_improve":true,"guidance":"Be precise."}]}'
+        )
+
+    async def get_logprobs_for_candidates(
+        self,
+        input_ids,
+        output_ids,
+        candidate_token_ids,
+        tokenizer=None,
+    ):
+        self.logprob_payload = {
+            "input_ids": input_ids,
+            "output_ids": output_ids,
+            "candidate_token_ids": candidate_token_ids,
+            "tokenizer": tokenizer,
+        }
+        return [{7: -0.25, 8: -1.5}, {9: -0.75}]
+
+
+@pytest.mark.asyncio
+async def test_external_provider_delegates_diagnosis_to_client():
+    client = FakeTeacherClient()
+    provider = ExternalTeacherProvider(
+        client=client,
+        diagnose_model_name="qwen-397b",
+        diagnose_max_tokens=300,
+        diagnose_temperature=0.0,
+    )
+
+    text = await provider.diagnose_episode("context", "gold")
+
+    assert "turns" in text
+    assert client.diagnose_payload["model"] == "qwen-397b"
+    assert client.diagnose_payload["max_tokens"] == 300
+    assert client.diagnose_payload["temperature"] == 0.0
+    assert "context" in client.diagnose_payload["prompt"]
+    assert "gold" in client.diagnose_payload["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_external_provider_delegates_candidate_logprobs_to_client():
+    client = FakeTeacherClient()
+    provider = ExternalTeacherProvider(client=client)
+
+    result = await provider.get_logprobs_for_prompt(
+        prompt_ids=[1, 2],
+        generation_ids=[7, 9],
+        candidate_token_ids=[[7, 8], [9]],
+    )
+
+    assert result == [[-0.25, -1.5], [-0.75]]
+    assert client.logprob_payload["input_ids"] == [1, 2]
+    assert client.logprob_payload["output_ids"] == [7, 9]
+    assert client.logprob_payload["candidate_token_ids"] == [[7, 8], [9]]
+
+
+def test_engine_provider_fails_early_without_compatible_methods():
+    class Engine:
+        pass
+
+    with pytest.raises(NotImplementedError, match="engine-backed teacher provider"):
+        EngineTeacherProvider(Engine())
