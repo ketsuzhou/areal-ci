@@ -247,6 +247,11 @@ def _select_current_topk_rows(
         selected_ids = ids_rows
         selected_logp = logp_rows
     else:
+        total_response_len = sum(1 for value in loss_mask if value == 1)
+        if len(ids_rows) != total_response_len:
+            raise ValueError(
+                "top-k rows must be full-sequence, selected-response, or all-response aligned"
+            )
         response_offset = sum(1 for value in loss_mask[:start] if value == 1)
         selected_ids = ids_rows[response_offset : response_offset + response_len]
         selected_logp = logp_rows[response_offset : response_offset + response_len]

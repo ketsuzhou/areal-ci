@@ -555,3 +555,43 @@ async def test_selected_turn_topk_rejects_mismatched_id_logprob_layouts():
             engine=engine,
             teacher_top_k=2,
         )
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_rejects_invalid_same_length_row_layouts():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    engine = FakeTopKEngine(
+        topk_ids=[
+            [99, -1],
+            [20, 50],
+            [21, 51],
+            [30, 60],
+        ],
+        topk_logp=[
+            [-9.9, -9.1],
+            [-0.1, -1.1],
+            [-0.2, -1.2],
+            [-0.3, -1.3],
+        ],
+    )
+    node = Node(
+        input_ids=[10, 20, 21, 11, 12, 30],
+        loss_mask=[0, 1, 1, 0, 0, 1],
+        logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
+        versions=[-1, 0, 0, -1, -1, 0],
+    )
+
+    with pytest.raises(ValueError, match="all-response aligned"):
+        await selected_turn_to_position_rewards(
+            node=node,
+            guidance="Fix the last turn.",
+            tokenizer=FakeTokenizer(),
+            provider=FakeProvider([[-1.0, -2.0]]),
+            sample_index=0,
+            topk_distill=True,
+            engine=engine,
+            teacher_top_k=2,
+        )
