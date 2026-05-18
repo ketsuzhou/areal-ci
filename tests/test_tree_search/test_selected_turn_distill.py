@@ -51,6 +51,26 @@ class FakeTopKEngine:
         return self.topk_ids, self.topk_logp
 
 
+class AwaitableTopK:
+    def __init__(self, result):
+        self.result = result
+
+    def __await__(self):
+        async def _return_result():
+            return self.result
+
+        return _return_result().__await__()
+
+
+class AwaitableReturningTopKEngine:
+    def __init__(self, topk_ids, topk_logp):
+        self.topk_ids = topk_ids
+        self.topk_logp = topk_logp
+
+    def get_topk_logprobs(self, input_ids, loss_mask, top_k):
+        return AwaitableTopK((self.topk_ids, self.topk_logp))
+
+
 def test_position_reward_info_carries_teacher_logprobs():
     info = PositionRewardInfo(
         position=0,
@@ -469,3 +489,69 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]
     assert rewards[0].logprobs == [-0.3, -1.3]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_accepts_callable_returning_awaitable():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    provider = FakeProvider([[-1.0, -2.0]])
+    engine = AwaitableReturningTopKEngine(
+        topk_ids=[[20, 60]],
+        topk_logp=[[-0.3, -1.3]],
+    )
+    node = Node(
+        input_ids=[10, 11, 20],
+        loss_mask=[0, 0, 1],
+        logprobs=[0.0, 0.0, -0.3],
+        versions=[-1, -1, 0],
+    )
+
+    rewards = await selected_turn_to_position_rewards(
+        node=node,
+        guidance="Be direct.",
+        tokenizer=FakeTokenizer(),
+        provider=provider,
+        sample_index=0,
+        topk_distill=True,
+        engine=engine,
+        teacher_top_k=2,
+    )
+
+    assert rewards[0].candidate_token_ids == [20, 60]
+    assert node.topk_ids == [[20, 60]]
+
+
+@pytest.mark.asyncio
+async def test_selected_turn_topk_rejects_mismatched_id_logprob_layouts():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        selected_turn_to_position_rewards,
+    )
+
+    engine = FakeTopKEngine(
+        topk_ids=[
+            [10, 50],
+            [20, 60],
+        ],
+        topk_logp=[[-0.3, -1.3]],
+    )
+    node = Node(
+        input_ids=[10, 20],
+        loss_mask=[0, 1],
+        logprobs=[0.0, -0.3],
+        versions=[-1, 0],
+    )
+
+    with pytest.raises(ValueError, match="same layout"):
+        await selected_turn_to_position_rewards(
+            node=node,
+            guidance="Be direct.",
+            tokenizer=FakeTokenizer(),
+            provider=FakeProvider([[-1.0, -2.0]]),
+            sample_index=0,
+            topk_distill=True,
+            engine=engine,
+            teacher_top_k=2,
+        )

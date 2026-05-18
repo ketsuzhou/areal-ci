@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import inspect
+import json
 from typing import Any
 
 from customized_areal.tree_search.core.teacher_provider import TeacherProvider
@@ -198,19 +198,23 @@ async def _recompute_student_topk(
     teacher_top_k: int,
 ) -> tuple[list[list[int]], list[list[float]]]:
     get_topk_logprobs = getattr(engine, "get_topk_logprobs", None)
-    if get_topk_logprobs is None or not inspect.iscoroutinefunction(
-        get_topk_logprobs
-    ):
+    if get_topk_logprobs is None or not callable(get_topk_logprobs):
         raise NotImplementedError(
-            "topk_distill requires async engine.get_topk_logprobs for missing "
+            "topk_distill requires engine.get_topk_logprobs for missing "
             "student top-k"
         )
 
-    topk_ids, topk_logp = await get_topk_logprobs(
+    maybe_topk = get_topk_logprobs(
         input_ids=node.input_ids,
         loss_mask=node.loss_mask,
         top_k=teacher_top_k,
     )
+    if not inspect.isawaitable(maybe_topk):
+        raise NotImplementedError(
+            "topk_distill requires awaitable engine.get_topk_logprobs for missing "
+            "student top-k"
+        )
+    topk_ids, topk_logp = await maybe_topk
     selected_topk_ids, selected_topk_logp = _select_current_topk_rows(
         topk_ids=topk_ids,
         topk_logp=topk_logp,
@@ -232,6 +236,9 @@ def _select_current_topk_rows(
     logp_rows = _nested_list(topk_logp)
     start, end = response_token_span(loss_mask)
     response_len = end - start
+
+    if len(ids_rows) != len(logp_rows):
+        raise ValueError("top-k id rows and logprob rows must use the same layout")
 
     if len(ids_rows) == len(input_ids):
         selected_ids = ids_rows[start:end]
