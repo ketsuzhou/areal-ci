@@ -5,7 +5,17 @@ from customized_areal.tree_search.training.actor import _distribute_position_rew
 from customized_areal.tree_search.training.loss import (
     _compute_teacher_kl_loss,
     _select_chosen_logprobs,
+    grpo_distill_loss_fn,
 )
+
+
+class _Config:
+    eps_clip = 0.2
+    eps_clip_higher = None
+    c_clip = None
+    importance_sampling_level = "token"
+    prox_clip = "recompute"
+    rejection_sampling = None
 
 
 def test_select_chosen_logprobs_supports_distill_shapes():
@@ -36,6 +46,29 @@ def test_select_chosen_logprobs_supports_distill_shapes():
         _select_chosen_logprobs(batch_candidate_logprobs, batch_mask),
         torch.tensor([[-1.0, -2.0], [-3.0, -4.0]]),
     )
+
+
+def test_grpo_distill_loss_uses_current_rejection_sampling_api():
+    logprobs = torch.tensor([-0.8, -0.6], requires_grad=True)
+    entropy = torch.zeros(2)
+    input_data = {
+        "logprobs": torch.tensor([-1.0, -0.7]),
+        "advantages": torch.tensor([1.0, 1.0]),
+        "loss_mask": torch.tensor([1, 1], dtype=torch.bool),
+        "versions": torch.tensor([0, 0]),
+        "position_rewards": [],
+        "rl_loss_weight": 1.0,
+        "distill_loss_weight": 0.1,
+    }
+
+    loss = grpo_distill_loss_fn(
+        logprobs=logprobs,
+        entropy=entropy,
+        input_data=input_data,
+        config=_Config(),
+    )
+
+    assert loss.shape == torch.Size([])
 
 
 def test_compute_teacher_kl_loss_1d_uses_prompt_len_absolute_positions():

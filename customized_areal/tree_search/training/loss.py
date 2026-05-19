@@ -101,7 +101,7 @@ def grpo_distill_loss_fn(
         loss_mask=loss_mask,
         c_clip=config.c_clip,
         proximal_logprobs=coeffs,
-        behave_imp_weight_cap=config.behave_imp_weight_cap,
+        rejection_sampling=getattr(config, "rejection_sampling", None),
         importance_sampling_level=config.importance_sampling_level,
         cu_seqlens=input_data.get("cu_seqlens"),
     )
@@ -335,7 +335,7 @@ def _compute_grpo_loss(
     loss_mask: torch.Tensor,
     c_clip: float | None,
     proximal_logprobs: torch.Tensor | None,
-    behave_imp_weight_cap: float | None,
+    rejection_sampling: object | None,
     importance_sampling_level: str,
     cu_seqlens: torch.Tensor | None,
 ) -> tuple[torch.Tensor, dict]:
@@ -353,7 +353,7 @@ def _compute_grpo_loss(
         eps_clip_higher=eps_clip_higher,
         loss_mask=loss_mask,
         c_clip=c_clip,
-        behave_imp_weight_cap=behave_imp_weight_cap,
+        rejection_sampling=rejection_sampling,
         importance_sampling_level=importance_sampling_level,
         cu_seqlens=cu_seqlens,
     )
