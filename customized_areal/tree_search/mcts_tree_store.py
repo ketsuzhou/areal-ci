@@ -100,13 +100,32 @@ def _optional_tensor_field(
     dtype: torch.dtype,
     start: int = 0,
     end: int | None = None,
+    loss_mask: list[int] | None = None,
 ) -> None:
     """Add an unsqueezed tensor to traj if values is not None.
 
-    If start/end are given, slice values[start:end] before conversion.
+    Supports full-sequence rows, all-response rows, and current-response rows.
+    If start/end are given and the field has full-sequence rows, slice by
+    absolute token offsets. Response-only and current-response fields are
+    already relative and are exported as-is.
     """
     if values is not None:
-        sliced = values[start:end] if end is not None else values[start:]
+        sliced = values
+        if end is not None:
+            value_len = len(values)
+            if loss_mask is not None:
+                seq_len = len(loss_mask)
+                starts, ends = _find_turn_boundaries(loss_mask)
+                total_response_len = sum(e - s for s, e in zip(starts, ends))
+                current_response_len = (ends[-1] - starts[-1]) if starts else 0
+                if value_len == seq_len:
+                    sliced = values[start:end]
+                elif value_len in (total_response_len, current_response_len):
+                    sliced = values
+                else:
+                    sliced = values[start:end]
+            else:
+                sliced = values[start:end]
         traj[key] = torch.tensor(sliced, dtype=dtype).unsqueeze(0)
 
 
@@ -130,16 +149,40 @@ def _node_to_tensor_dict(
     # Response-only fields: extract response portion from full sequence
     resp_start, resp_end = _response_span(node.loss_mask)
     _optional_tensor_field(
-        traj, "topk_ids", node.topk_ids, torch.int32, resp_start, resp_end
+        traj,
+        "topk_ids",
+        node.topk_ids,
+        torch.int32,
+        resp_start,
+        resp_end,
+        node.loss_mask,
     )
     _optional_tensor_field(
-        traj, "topk_logp", node.topk_logp, torch.float32, resp_start, resp_end
+        traj,
+        "topk_logp",
+        node.topk_logp,
+        torch.float32,
+        resp_start,
+        resp_end,
+        node.loss_mask,
     )
     _optional_tensor_field(
-        traj, "distill_reward", node.distill_reward, torch.float32, resp_start, resp_end
+        traj,
+        "distill_reward",
+        node.distill_reward,
+        torch.float32,
+        resp_start,
+        resp_end,
+        node.loss_mask,
     )
     _optional_tensor_field(
-        traj, "teacher_logp", node.teacher_logp, torch.float32, resp_start, resp_end
+        traj,
+        "teacher_logp",
+        node.teacher_logp,
+        torch.float32,
+        resp_start,
+        resp_end,
+        node.loss_mask,
     )
     # Derived from logprobs for response tokens
     if resp_end > resp_start:

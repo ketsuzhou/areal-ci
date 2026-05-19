@@ -757,6 +757,42 @@ class TestNodeToTensorDict:
         assert result["episode_id"] == [""]  # default: node.episode_id is empty
         assert result["turn_idx"] == [0]  # default: node.turn_idx is 0
 
+    def test_current_response_only_fields_export_for_multiturn_node(self):
+        from customized_areal.tree_search.mcts_tree_store import (
+            Node,
+            _node_to_tensor_dict,
+        )
+
+        node = Node(
+            input_ids=[1, 2, 3, 4, 5, 6],
+            loss_mask=[0, 1, 1, 0, 0, 1],
+            logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
+            versions=[-1, 1, 1, -1, -1, 1],
+            outcome_reward=1.0,
+            query_id="q1",
+            node_id="t1",
+            topk_ids=[[60, 61]],
+            topk_logp=[[-0.3, -1.3]],
+            distill_reward=[[0.7, 0.2]],
+            teacher_logp=[[-1.0, -1.5]],
+        )
+
+        result = _node_to_tensor_dict(node, "q1", "t1")
+
+        assert result["topk_ids"].tolist() == [[[60, 61]]]
+        torch.testing.assert_close(
+            result["topk_logp"],
+            torch.tensor([[[-0.3, -1.3]]], dtype=torch.float32),
+        )
+        torch.testing.assert_close(
+            result["distill_reward"],
+            torch.tensor([[[0.7, 0.2]]], dtype=torch.float32),
+        )
+        torch.testing.assert_close(
+            result["teacher_logp"],
+            torch.tensor([[[-1.0, -1.5]]], dtype=torch.float32),
+        )
+
     def test_logp_already_sliced(self):
         """logp is already correctly sliced — verify it stays that way."""
         from customized_areal.tree_search.mcts_tree_store import (
