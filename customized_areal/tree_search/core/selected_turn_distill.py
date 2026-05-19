@@ -62,16 +62,26 @@ def parse_episode_diagnosis(raw_text: str) -> EpisodeDiagnosis:
 
 
 def response_token_span(loss_mask: list[int]) -> tuple[int, int]:
-    """Return the first selected response span in a loss mask."""
+    """Return the current selected response span in a loss mask.
+
+    In concat-mode multi-turn nodes, parent assistant spans are retained in
+    the node loss mask and the current turn is appended at the end. The
+    selected turn's generation is therefore the latest contiguous response
+    span, not the earliest one.
+    """
     start: int | None = None
+    latest_span: tuple[int, int] | None = None
     for index, value in enumerate(loss_mask):
         if value == 1 and start is None:
             start = index
         elif value != 1 and start is not None:
-            return start, index
-    if start is None:
+            latest_span = (start, index)
+            start = None
+    if start is not None:
+        latest_span = (start, len(loss_mask))
+    if latest_span is None:
         return 0, 0
-    return start, len(loss_mask)
+    return latest_span
 
 
 def build_teacher_prompt_ids(

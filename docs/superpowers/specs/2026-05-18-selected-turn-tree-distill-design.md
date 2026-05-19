@@ -69,7 +69,10 @@ If diagnosis JSON parsing fails:
 For each selected turn, split the node by `loss_mask`:
 
 - `student_each_turn_prefix`: tokens before the selected assistant generation.
-- `student_each_turn_generation`: tokens where `loss_mask == 1`.
+- `student_each_turn_generation`: tokens in the current turn's contiguous
+  response span. In concat-mode nodes, parent assistant spans can also have
+  `loss_mask == 1`, so use the latest contiguous response span for the selected
+  node.
 
 The teacher evaluation context is:
 

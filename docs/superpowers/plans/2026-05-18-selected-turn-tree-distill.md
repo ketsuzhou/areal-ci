@@ -484,8 +484,9 @@ def test_parse_episode_diagnosis_keeps_selected_turn_guidance():
     assert diagnosis.selected_turns == {1: "Be exact."}
 
 
-def test_response_token_span_returns_first_response_region():
+def test_response_token_span_returns_current_response_region():
     assert response_token_span([0, 0, 1, 1, 0]) == (2, 4)
+    assert response_token_span([0, 1, 1, 0, 0, 1, 1]) == (5, 7)
 
 
 def test_build_teacher_prompt_ids_keeps_generation_out_of_prefix():
@@ -586,15 +587,17 @@ def parse_episode_diagnosis(raw_text: str) -> EpisodeDiagnosis:
 
 
 def response_token_span(loss_mask: list[int]) -> tuple[int, int]:
-    start = -1
+    start: int | None = None
+    latest_span: tuple[int, int] | None = None
     for idx, value in enumerate(loss_mask):
-        if value == 1 and start < 0:
+        if value == 1 and start is None:
             start = idx
-        elif value == 0 and start >= 0:
-            return start, idx
-    if start >= 0:
-        return start, len(loss_mask)
-    return 0, 0
+        elif value != 1 and start is not None:
+            latest_span = (start, idx)
+            start = None
+    if start is not None:
+        latest_span = (start, len(loss_mask))
+    return latest_span or (0, 0)
 
 
 def build_teacher_prompt_ids(
