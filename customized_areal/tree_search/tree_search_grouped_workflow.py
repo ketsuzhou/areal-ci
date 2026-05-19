@@ -176,6 +176,26 @@ def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
     return concat_padded_tensors(tensor_dicts)
 
 
+def _filter_distill_episode_failure(
+    nodes: list[Node], loss_mode: LossMode
+) -> list[Node]:
+    if loss_mode == LossMode.DISTILL:
+        return []
+    return nodes
+
+
+def _set_position_reward_sample_indices(
+    nodes: list[Node],
+    rewards_by_node_id: dict[str, list[Any]],
+) -> list[Any]:
+    all_rewards: list[Any] = []
+    for sample_index, node in enumerate(nodes):
+        for reward in rewards_by_node_id.get(node.node_id, []):
+            reward.sample_index = sample_index
+            all_rewards.append(reward)
+    return all_rewards
+
+
 class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     """GroupedRolloutWorkflow with tree-search cache reuse, tree ops, and checkpoint.
 
@@ -191,6 +211,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     9. Return batched tensor dict
     """
 
+    _tokenizer_cache: dict[str, Any] = {}
+    _tokenizer_lock = asyncio.Lock()
+
     def __init__(
         self,
         workflow: RolloutWorkflow,
@@ -203,6 +226,18 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         max_reasoning_tokens: int = 1000,
         rl_loss_weight: float = 1.0,
         distill_loss_weight: float = 0.005,
+        topk_distill: bool = False,
+        teacher_provider: str = "external",
+        teacher_base_url: str = "http://localhost:8001",
+        teacher_model_name: str = "",
+        teacher_top_k: int = 10,
+        teacher_max_retries: int = 3,
+        teacher_timeout: float = 60.0,
+        teacher_missing_logprob: float = -23.0,
+        diagnose_model_name: str = "",
+        diagnose_max_tokens: int = 1024,
+        diagnose_temperature: float = 0.0,
+        strict_distill_json: bool = True,
     ) -> None:
         from customized_areal.tree_search.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.checkpoint import TreeCheckpointManager
@@ -215,8 +250,22 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.advantage_mode = advantage_mode
         self.loss_mode = loss_mode
         self.cache_mode = cache_mode
+        self.tokenizer_path = tokenizer_path
+        self.max_reasoning_tokens = max_reasoning_tokens
         self.rl_loss_weight = rl_loss_weight
         self.distill_loss_weight = distill_loss_weight
+        self.topk_distill = topk_distill
+        self.teacher_provider = teacher_provider
+        self.teacher_base_url = teacher_base_url
+        self.teacher_model_name = teacher_model_name
+        self.teacher_top_k = teacher_top_k
+        self.teacher_max_retries = teacher_max_retries
+        self.teacher_timeout = teacher_timeout
+        self.teacher_missing_logprob = teacher_missing_logprob
+        self.diagnose_model_name = diagnose_model_name
+        self.diagnose_max_tokens = diagnose_max_tokens
+        self.diagnose_temperature = diagnose_temperature
+        self.strict_distill_json = strict_distill_json
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 
@@ -262,6 +311,107 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 node.turn_idx = turn_idx
         return nodes
 
+    async def _get_tokenizer(self):
+        if self.loss_mode == LossMode.GRPO:
+            return None
+        if not self.tokenizer_path:
+            raise ValueError(
+                "tokenizer_path is required when tree-search distillation is enabled"
+            )
+        async with self._tokenizer_lock:
+            tokenizer = self._tokenizer_cache.get(self.tokenizer_path)
+            if tokenizer is None:
+                from areal.utils.hf_utils import load_hf_tokenizer
+
+                tokenizer = load_hf_tokenizer(self.tokenizer_path)
+                self._tokenizer_cache[self.tokenizer_path] = tokenizer
+            return tokenizer
+
+    async def _build_teacher_provider(self, engine):
+        from customized_areal.tree_search.core.teacher_client import (
+            TeacherClient,
+            TeacherConfig,
+        )
+        from customized_areal.tree_search.core.teacher_provider import (
+            EngineTeacherProvider,
+            ExternalTeacherProvider,
+        )
+
+        if self.teacher_provider == "engine":
+            return EngineTeacherProvider(engine), None
+
+        config = TeacherConfig(
+            teacher_base_url=self.teacher_base_url,
+            teacher_model_name=self.teacher_model_name,
+            teacher_top_k=self.teacher_top_k,
+            teacher_max_retries=self.teacher_max_retries,
+            teacher_timeout=self.teacher_timeout,
+            teacher_missing_logprob=self.teacher_missing_logprob,
+        )
+        client = TeacherClient(config)
+        await client.__aenter__()
+        provider = ExternalTeacherProvider(
+            client=client,
+            diagnose_model_name=self.diagnose_model_name or self.teacher_model_name,
+            diagnose_max_tokens=self.diagnose_max_tokens,
+            diagnose_temperature=self.diagnose_temperature,
+        )
+        return provider, client
+
+    async def _prepare_distill_for_episode(
+        self,
+        nodes: list[Node],
+        data: dict[str, Any],
+        engine: Any,
+        provider: Any,
+        tokenizer: Any,
+    ) -> tuple[list[Node], dict[str, list[Any]]]:
+        from customized_areal.tree_search.core.selected_turn_distill import (
+            parse_episode_diagnosis,
+            selected_turn_to_position_rewards,
+        )
+
+        if not nodes:
+            return nodes, {}
+        try:
+            context = tokenizer.decode(
+                nodes[-1].input_ids, skip_special_tokens=False
+            )
+        except TypeError:
+            context = tokenizer.decode(nodes[-1].input_ids)
+        raw = await provider.diagnose_episode(context, str(data.get("answer", "")))
+        diagnosis = parse_episode_diagnosis(raw)
+        selected = diagnosis.selected_turns
+        if not selected:
+            if self.loss_mode == LossMode.DISTILL:
+                return [], {}
+            return nodes, {}
+
+        rewards_by_node_id: dict[str, list[Any]] = {}
+        for node in nodes:
+            guidance = selected.get(node.turn_idx)
+            if not guidance:
+                continue
+            rewards = await selected_turn_to_position_rewards(
+                node=node,
+                guidance=guidance,
+                tokenizer=tokenizer,
+                provider=provider,
+                sample_index=0,
+                topk_distill=self.topk_distill,
+                engine=engine,
+                teacher_top_k=self.teacher_top_k,
+            )
+            if rewards:
+                rewards_by_node_id[node.node_id] = rewards
+                node.distill_reward = [reward.rewards for reward in rewards]
+                node.teacher_logp = [
+                    reward.teacher_logprobs or [] for reward in rewards
+                ]
+        if self.loss_mode == LossMode.DISTILL and not rewards_by_node_id:
+            return [], {}
+        return nodes, rewards_by_node_id
+
     async def _retry_episode(
         self, engine, data: dict[str, Any], group_idx: int,
         max_retries: int = 1,
@@ -293,6 +443,36 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
         return None
 
+    async def _prepare_distill_for_node_groups(
+        self,
+        node_groups: list[list[Node]],
+        data: dict[str, Any],
+        engine: Any,
+        provider: Any,
+        tokenizer: Any,
+    ) -> tuple[list[Node], dict[str, list[Any]]]:
+        prepared_nodes: list[Node] = []
+        rewards_by_node_id: dict[str, list[Any]] = {}
+        for nodes in node_groups:
+            try:
+                episode_nodes, episode_rewards = await self._prepare_distill_for_episode(
+                    nodes=nodes,
+                    data=data,
+                    engine=engine,
+                    provider=provider,
+                    tokenizer=tokenizer,
+                )
+            except Exception:
+                logger.exception(
+                    "Selected-turn distillation failed for episode_id=%s",
+                    nodes[0].episode_id if nodes else "",
+                )
+                episode_nodes = _filter_distill_episode_failure(nodes, self.loss_mode)
+                episode_rewards = {}
+            prepared_nodes.extend(episode_nodes)
+            rewards_by_node_id.update(episode_rewards)
+        return prepared_nodes, rewards_by_node_id
+
     async def arun_episode(
         self, engine, data: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -318,7 +498,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if need_gen > 0:
             results = await asyncio.gather(
                 *[
-                    self._retry_episode(engine, data, query_id, group_idx)
+                    self._retry_episode(engine, data, group_idx)
                     for group_idx in range(need_gen)
                 ],
                 return_exceptions=True,
@@ -347,38 +527,83 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             for node in cached_nodes:
                 node.versions = [0 if m == 1 else -1 for m in node.loss_mask]
 
-        # 4. Combine
-        all_nodes = fresh_nodes + cached_nodes
+        rewards_by_node_id: dict[str, list[Any]] = {}
+        provider_client = None
+        try:
+            if self.loss_mode != LossMode.GRPO:
+                tokenizer = await self._get_tokenizer()
+                provider, provider_client = await self._build_teacher_provider(engine)
+                fresh_nodes, fresh_rewards = await self._prepare_distill_for_node_groups(
+                    _group_nodes_by_episode(fresh_nodes),
+                    data,
+                    engine,
+                    provider,
+                    tokenizer,
+                )
+                cached_nodes, cached_rewards = (
+                    await self._prepare_distill_for_node_groups(
+                        _group_nodes_by_episode(cached_nodes),
+                        data,
+                        engine,
+                        provider,
+                        tokenizer,
+                    )
+                )
+                rewards_by_node_id.update(fresh_rewards)
+                rewards_by_node_id.update(cached_rewards)
 
-        if not all_nodes:
-            return None
+            # 4. Combine
+            all_nodes = fresh_nodes + cached_nodes
 
-        # 5. Insert fresh nodes into tree
-        if fresh_nodes:
-            self.tree_store.insert_batch(fresh_nodes)
+            if not all_nodes:
+                return None
 
-        # 6. Compute tree advantages
-        if self.advantage_mode == AdvantageMode.TREE:
-            self.tree_advantage_computer.compute(all_nodes)
+            # 5. Insert fresh nodes into tree
+            if fresh_nodes:
+                self.tree_store.insert_batch(fresh_nodes)
 
-        # 7. Mark all nodes as trained
-        for node in all_nodes:
-            if node.node_id:
-                self.tree_store.set_trained(node.node_id, True)
+            # 6. Compute tree advantages
+            if self.advantage_mode == AdvantageMode.TREE:
+                self.tree_advantage_computer.compute(all_nodes)
 
-        # 8. Save tree checkpoint
-        if self.cache_mode == CacheMode.CROSS_TRAINING:
-            self.tree_checkpoint_manager.save(self.tree_store)
+            # 7. Mark all nodes as trained
+            for node in all_nodes:
+                if node.node_id:
+                    self.tree_store.set_trained(node.node_id, True)
 
-        # 9. Convert to batched tensor dict
-        result_dict = _nodes_to_batched_tensor_dict(all_nodes)
+            # 8. Save tree checkpoint
+            if self.cache_mode == CacheMode.CROSS_TRAINING:
+                self.tree_checkpoint_manager.save(self.tree_store)
 
-        # 10. Inject distill loss weights
-        if result_dict is not None and self.loss_mode != LossMode.GRPO:
-            if self.loss_mode == LossMode.DISTILL:
-                result_dict["rl_loss_weight"] = 0.0
-            else:
-                result_dict["rl_loss_weight"] = self.rl_loss_weight
-            result_dict["distill_loss_weight"] = self.distill_loss_weight
+            # 9. Convert to batched tensor dict
+            result_dict = _nodes_to_batched_tensor_dict(all_nodes)
 
-        return result_dict
+            # 10. Inject distill loss weights and position rewards
+            if result_dict is not None and self.loss_mode != LossMode.GRPO:
+                if self.loss_mode == LossMode.DISTILL:
+                    result_dict["rl_loss_weight"] = 0.0
+                else:
+                    result_dict["rl_loss_weight"] = self.rl_loss_weight
+                result_dict["distill_loss_weight"] = self.distill_loss_weight
+                position_rewards = _set_position_reward_sample_indices(
+                    all_nodes, rewards_by_node_id
+                )
+                if position_rewards:
+                    result_dict["position_rewards"] = position_rewards
+
+            return result_dict
+        finally:
+            if provider_client is not None:
+                await provider_client.__aexit__(None, None, None)
+
+
+def _group_nodes_by_episode(nodes: list[Node]) -> list[list[Node]]:
+    grouped: dict[str, list[Node]] = {}
+    fallback_index = 0
+    for node in nodes:
+        episode_id = node.episode_id
+        if not episode_id:
+            episode_id = f"__missing_episode_{fallback_index}"
+            fallback_index += 1
+        grouped.setdefault(episode_id, []).append(node)
+    return list(grouped.values())
