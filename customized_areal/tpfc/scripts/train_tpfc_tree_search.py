@@ -21,11 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from customized_areal.tpfc.tpfc_config import TPFCConfig
 from customized_areal.tpfc.tpfc_dataset import get_tpfc_rl_dataset
-from customized_areal.tree_search.config import (
-    CacheMode,
-    RolloutCacheConfig,
-    TreeBackupConfig,
-)
+from customized_areal.tree_search.config import RolloutCacheConfig
 from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
 
 from areal.api.cli_args import load_expr_config
@@ -104,41 +100,29 @@ def main(args: list[str] | None = None) -> None:
     logger.info("Loaded %d validation samples", len(valid_dataset))
 
     # Build cache / tree backup configs from overrides
-    cache_dir = config.cache_dir
-    if not cache_dir:
+    tree_search = config.tree_search
+    if not tree_search.checkpoint_dir:
         raise ValueError(
-            "cache_dir must be set when using tree search training. "
-            "Pass it as a CLI override, e.g. +cache_dir=/path/to/cache"
+            "tree_search.checkpoint_dir must be set when using tree search training. "
+            "Set it in the config YAML under tree_search.checkpoint_dir."
         )
 
     n_samples = config.gconfig.n_samples
 
-    # Cache mode from config (default "cross_training" set in TPFCConfig)
-    tree_mode_str = config.cache_mode
-    try:
-        tree_mode = CacheMode(tree_mode_str)
-    except ValueError:
-        raise ValueError(
-            f"Invalid cache_mode={tree_mode_str}. "
-            f"Must be one of: {[m.value for m in CacheMode]}"
-        ) from None
-
     cache_config = RolloutCacheConfig(
-        cache_dir=cache_dir,
+        cache_dir=tree_search.checkpoint_dir,
         enabled=True,
         n_samples=n_samples,
     )
 
-    tree_backup_config = TreeBackupConfig(
-        mode=tree_mode,
-        checkpoint_dir=cache_dir,
-    )
+    tree_backup_config = tree_search
 
     logger.info(
-        "Cache config: dir=%s, n_samples=%d, tree_mode=%s",
-        cache_dir,
+        "Cache config: dir=%s, n_samples=%d, tree_mode=%s, loss_mode=%s",
+        tree_search.checkpoint_dir,
         n_samples,
         tree_backup_config.mode.value,
+        tree_backup_config.loss_mode.value,
     )
 
     # Build workflow kwargs
@@ -146,6 +130,7 @@ def main(args: list[str] | None = None) -> None:
         temperature=config.gconfig.temperature,
         top_p=getattr(config.gconfig, "top_p", 1.0),
         max_completion_tokens=config.gconfig.max_new_tokens,
+        tree_search_config=tree_backup_config,
     )
     eval_workflow_kwargs = workflow_kwargs.copy()
     eval_workflow_kwargs["temperature"] = 0.6
