@@ -4,9 +4,12 @@ trial_name: trial0
 seed: 1
 enable_offload: true
 
-# Tree search / cache configuration
-cache_dir: customized_areal/tpfc/data/tree_cache
-cache_mode: cross_training
+# Tree search configuration
+tree_search:
+  enabled: true
+  checkpoint_dir: customized_areal/tpfc/data/tree_cache
+  mode: cross_training
+  loss_mode: grpo
 total_train_epochs: 5
 tokenizer_path: ${actor.path}
 

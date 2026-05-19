@@ -9,7 +9,14 @@ tree_search:
   enabled: true
   checkpoint_dir: customized_areal/tpfc/data/tree_cache
   mode: cross_training
-  loss_mode: grpo
+  loss_mode: distill
+  advantage_mode: tree
+  rl_loss_weight: 1.0
+  distill_loss_weight: 0.005
+  max_reasoning_tokens: 1000
+  diagnose_model_name: qwen/qwen3.5-397b-a17b
+  diagnose_base_url: http://10.254.244.168:8443/service-large-64-1775803465274/llm/v1
+  diagnose_api_key: aH6867Z7ppZWqN7NQGsaPhSlMrk68AGQnr18Z66KsSL0864mkjaBP7Tr868pKvnCJcWa0VvHZDHk64MrKG5Z5gWrZGx88mrmAv7pk88p786gFB6XXr6MrtSckKs9QJsr
 total_train_epochs: 4
 tokenizer_path: ${actor.path}
 
@@ -27,15 +34,15 @@ agent:
 
 cluster:
   n_nodes: 1
-  n_gpus_per_node: 3
+  n_gpus_per_node: 2
   fileroot: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/experiments
   name_resolve:
     type: nfs
     nfs_record_root: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/name_resolve
 
-# 3 GPUs: 1 for inference (sglang DP), 2 for training (fsdp DP)
-# train_dataset.batch_size must be divisible by fsdp DP size (2)
-allocation_mode: sglang:d1+fsdp:d2
+# 2 GPUs: 1 for inference (sglang DP), 1 for training (fsdp DP)
+# train_dataset.batch_size must be divisible by fsdp DP size (1)
+allocation_mode: sglang:d1+fsdp:d1
 
 scheduler:
   type: local
@@ -64,7 +71,7 @@ rollout:
     engine_max_tokens: 15000
 
 gconfig:
-  n_samples: 8
+  n_samples: 4
   min_new_tokens: 0
   max_new_tokens: 1024
   max_tokens: 15000
@@ -72,7 +79,7 @@ gconfig:
   temperature: 1.0
 
 actor:
-  backend: fsdp:d2
+  backend: fsdp:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   attn_impl: sdpa
@@ -130,7 +137,7 @@ actor:
         PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
 
 ref:
-  backend: fsdp:d2
+  backend: fsdp:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   path: ${actor.path}
@@ -170,7 +177,7 @@ vllm:
 # TPFC dataset configuration - uses generated_training_final.parquet
 # NOTE: All samples have ~1034-1366 tokens due to long system prompts
 train_dataset:
-  batch_size: 32
+  batch_size: 2
   shuffle: false
   pin_memory: true
   num_workers: 2
