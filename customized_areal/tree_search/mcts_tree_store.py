@@ -86,10 +86,10 @@ def _find_turn_boundaries(
 
 
 def _response_span(loss_mask: list[int]) -> tuple[int, int]:
-    """Return (start, end) of the first response region in loss_mask."""
+    """Return (start, end) of the current response region in loss_mask."""
     starts, ends = _find_turn_boundaries(loss_mask)
     if starts:
-        return starts[0], ends[0]
+        return starts[-1], ends[-1]
     return 0, 0
 
 

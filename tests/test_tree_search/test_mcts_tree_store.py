@@ -779,6 +779,10 @@ class TestNodeToTensorDict:
 
         result = _node_to_tensor_dict(node, "q1", "t1")
 
+        torch.testing.assert_close(
+            result["logp"],
+            torch.tensor([[-0.3]], dtype=torch.float32),
+        )
         assert result["topk_ids"].tolist() == [[[60, 61]]]
         torch.testing.assert_close(
             result["topk_logp"],
