@@ -594,6 +594,13 @@ class RemoteInfEngine(InferenceEngine):
     ) -> RolloutWorkflow:
         resolved: RolloutWorkflow
 
+        # Extract tree_search_config from workflow_kwargs so it is not
+        # forwarded to inner workflow constructors (they don't accept it).
+        tree_search_cfg = None
+        if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
+            workflow_kwargs = dict(workflow_kwargs)
+            tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+
         # 0. None workflow = online mode (config-driven)
         if workflow is None:
             agent_cfg = self.config.agent
@@ -697,111 +704,43 @@ class RemoteInfEngine(InferenceEngine):
 
         # Wrap with GroupedRolloutWorkflow if group_size > 1
         if group_size > 1:
-            use_tree_search = os.getenv(
-                "use_TreeSearchGroupedRolloutWorkflow", "False"
-            ).lower() == "true"
-            use_tree_search = True
+            use_tree_search = (
+                tree_search_cfg is not None and tree_search_cfg.enabled
+            )
             if use_tree_search:
                 self.logger.warning(
                     "use TreeSearchGroupedRolloutWorkflow"
                 )
-                from dotenv import load_dotenv
 
-                # Load .env from the project root (where customized_areal/ lives)
-                _project_root = os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                )
-                _env_path = os.path.join(_project_root, "customized_areal", ".env")
-                if os.path.isfile(_env_path):
-                    load_dotenv(_env_path, override=False)
-
-                from customized_areal.tree_search.config import (
-                    AdvantageMode,
-                    CacheMode,
-                    LossMode,
-                )
                 from customized_areal.tree_search.tree_search_grouped_workflow import (
                     TreeSearchGroupedRolloutWorkflow,
-                )
-
-                checkpoint_dir = os.getenv("TREE_SEARCH_CHECKPOINT_DIR", "")
-                advantage_mode = AdvantageMode(
-                    os.getenv("TREE_SEARCH_ADVANTAGE_MODE", "GAE").lower()
-                )
-                loss_mode = LossMode(
-                    os.getenv("TREE_SEARCH_LOSS_MODE", "GRPO").lower()
-                )
-                cache_mode = CacheMode(
-                    os.getenv("TREE_SEARCH_CACHE_MODE", "OFF").lower()
-                )
-                rl_loss_weight = float(
-                    os.getenv("TREE_SEARCH_RL_LOSS_WEIGHT", "1.0")
-                )
-                distill_loss_weight = float(
-                    os.getenv("TREE_SEARCH_DISTILL_LOSS_WEIGHT", "0.005")
-                )
-                tokenizer_path = (
-                    os.getenv("TREE_SEARCH_TOKENIZER_PATH", "")
-                    or self.config.tokenizer_path
-                )
-                max_reasoning_tokens = int(
-                    os.getenv("TREE_SEARCH_MAX_REASONING_TOKENS", "1000")
-                )
-                topk_distill = (
-                    os.getenv("TREE_SEARCH_TOPK_DISTILL", "false").lower() == "true"
-                )
-                teacher_provider = os.getenv("TREE_SEARCH_TEACHER_PROVIDER", "external")
-                teacher_base_url = os.getenv(
-                    "TREE_SEARCH_TEACHER_BASE_URL", "http://localhost:8001"
-                )
-                teacher_model_name = os.getenv("TREE_SEARCH_TEACHER_MODEL_NAME", "")
-                teacher_top_k = int(os.getenv("TREE_SEARCH_TEACHER_TOP_K", "10"))
-                teacher_max_retries = int(
-                    os.getenv("TREE_SEARCH_TEACHER_MAX_RETRIES", "3")
-                )
-                teacher_timeout = float(
-                    os.getenv("TREE_SEARCH_TEACHER_TIMEOUT", "60.0")
-                )
-                teacher_missing_logprob = float(
-                    os.getenv("TREE_SEARCH_TEACHER_MISSING_LOGPROB", "-23.0")
-                )
-                diagnose_model_name = os.getenv(
-                    "TREE_SEARCH_DIAGNOSE_MODEL_NAME", teacher_model_name
-                )
-                diagnose_max_tokens = int(
-                    os.getenv("TREE_SEARCH_DIAGNOSE_MAX_TOKENS", "1024")
-                )
-                diagnose_temperature = float(
-                    os.getenv("TREE_SEARCH_DIAGNOSE_TEMPERATURE", "0.0")
-                )
-                strict_distill_json = (
-                    os.getenv("TREE_SEARCH_STRICT_DISTILL_JSON", "true").lower()
-                    == "true"
                 )
 
                 resolved = TreeSearchGroupedRolloutWorkflow(
                     resolved,
                     group_size,
-                    checkpoint_dir=checkpoint_dir,
-                    advantage_mode=advantage_mode,
-                    loss_mode=loss_mode,
-                    cache_mode=cache_mode,
-                    tokenizer_path=tokenizer_path,
-                    max_reasoning_tokens=max_reasoning_tokens,
-                    rl_loss_weight=rl_loss_weight,
-                    distill_loss_weight=distill_loss_weight,
-                    topk_distill=topk_distill,
-                    teacher_provider=teacher_provider,
-                    teacher_base_url=teacher_base_url,
-                    teacher_model_name=teacher_model_name,
-                    teacher_top_k=teacher_top_k,
-                    teacher_max_retries=teacher_max_retries,
-                    teacher_timeout=teacher_timeout,
-                    teacher_missing_logprob=teacher_missing_logprob,
-                    diagnose_model_name=diagnose_model_name,
-                    diagnose_max_tokens=diagnose_max_tokens,
-                    diagnose_temperature=diagnose_temperature,
-                    strict_distill_json=strict_distill_json,
+                    checkpoint_dir=tree_search_cfg.checkpoint_dir,
+                    advantage_mode=tree_search_cfg.advantage_mode,
+                    loss_mode=tree_search_cfg.loss_mode,
+                    cache_mode=tree_search_cfg.mode,
+                    tokenizer_path=self.config.tokenizer_path,
+                    max_reasoning_tokens=tree_search_cfg.max_reasoning_tokens,
+                    rl_loss_weight=tree_search_cfg.rl_loss_weight,
+                    distill_loss_weight=tree_search_cfg.distill_loss_weight,
+                    topk_distill=tree_search_cfg.topk_distill,
+                    teacher_provider=tree_search_cfg.teacher_provider,
+                    teacher_base_url=tree_search_cfg.teacher_base_url,
+                    teacher_model_name=tree_search_cfg.teacher_model_name,
+                    teacher_top_k=tree_search_cfg.teacher_top_k,
+                    teacher_max_retries=tree_search_cfg.teacher_max_retries,
+                    teacher_timeout=tree_search_cfg.teacher_timeout,
+                    teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                    diagnose_model_name=tree_search_cfg.diagnose_model_name,
+                    diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
+                    diagnose_temperature=tree_search_cfg.diagnose_temperature,
+                    diagnose_base_url=tree_search_cfg.diagnose_base_url,
+                    diagnose_api_key=tree_search_cfg.diagnose_api_key,
+                    strict_distill_json=tree_search_cfg.strict_distill_json,
                 )
             else:
                 self.logger.warning(
