@@ -62,22 +62,15 @@ def parse_episode_diagnosis(raw_text: str) -> EpisodeDiagnosis:
 
 
 def response_token_span(loss_mask: list[int]) -> tuple[int, int]:
-    """Return the selected response span in a loss mask.
-
-    Concat-mode multi-turn nodes can contain earlier assistant response spans
-    plus the current selected turn. The selected turn is the last contiguous
-    response span.
-    """
+    """Return the first selected response span in a loss mask."""
     start: int | None = None
-    last_span = (0, 0)
     for index, value in enumerate(loss_mask):
         if value == 1 and start is None:
             start = index
         elif value != 1 and start is not None:
-            last_span = (start, index)
-            start = None
+            return start, index
     if start is None:
-        return last_span
+        return 0, 0
     return start, len(loss_mask)
 
 

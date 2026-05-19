@@ -155,13 +155,13 @@ def test_parse_episode_diagnosis_keeps_only_selected_turns():
     assert diagnosis.selected_turns == {1: "Use exact units."}
 
 
-def test_response_token_span_returns_last_contiguous_one_span():
+def test_response_token_span_returns_first_contiguous_one_span():
     from customized_areal.tree_search.core.selected_turn_distill import (
         response_token_span,
     )
 
     assert response_token_span([0, 0, 1, 1, 0]) == (2, 4)
-    assert response_token_span([0, 1, 1, 0, 0, 1, 1]) == (5, 7)
+    assert response_token_span([0, 1, 1, 0, 0, 1, 1]) == (1, 3)
 
 
 def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
@@ -184,7 +184,7 @@ def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
     assert prompt_ids == [10, 11, 900, 901]
 
 
-def test_build_teacher_prompt_ids_uses_latest_response_span():
+def test_build_teacher_prompt_ids_uses_first_response_span():
     from customized_areal.tree_search.core.selected_turn_distill import (
         build_teacher_prompt_ids,
     )
@@ -197,11 +197,11 @@ def test_build_teacher_prompt_ids_uses_latest_response_span():
     )
 
     prompt_ids, generation_ids = build_teacher_prompt_ids(
-        node, "Fix the last turn.", FakeTokenizer()
+        node, "Fix the first turn.", FakeTokenizer()
     )
 
-    assert generation_ids == [30, 31]
-    assert prompt_ids == [10, 20, 21, 11, 12, 900, 901]
+    assert generation_ids == [20, 21]
+    assert prompt_ids == [10, 900, 901]
 
 
 @pytest.mark.asyncio
@@ -294,12 +294,12 @@ async def test_selected_turn_to_position_rewards_topk_moves_generated_token_firs
 
 
 @pytest.mark.asyncio
-async def test_selected_turn_to_position_rewards_topk_uses_latest_response_rows():
+async def test_selected_turn_to_position_rewards_topk_uses_first_response_rows():
     from customized_areal.tree_search.core.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
-    provider = FakeProvider([[-1.0, -2.0]])
+    provider = FakeProvider([[-1.0, -2.0], [-1.5, -2.5]])
     node = Node(
         input_ids=[10, 20, 21, 11, 12, 30],
         loss_mask=[0, 1, 1, 0, 0, 1],
@@ -319,7 +319,7 @@ async def test_selected_turn_to_position_rewards_topk_uses_latest_response_rows(
 
     rewards = await selected_turn_to_position_rewards(
         node=node,
-        guidance="Fix the last turn.",
+        guidance="Fix the first turn.",
         tokenizer=FakeTokenizer(),
         provider=provider,
         sample_index=0,
@@ -328,31 +328,33 @@ async def test_selected_turn_to_position_rewards_topk_uses_latest_response_rows(
         teacher_top_k=10,
     )
 
-    assert provider.calls[0]["generation_ids"] == [30]
-    assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
-    assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert provider.calls[0]["generation_ids"] == [20, 21]
+    assert provider.calls[0]["candidate_token_ids"] == [[20, 50], [21, 51]]
+    assert rewards[0].candidate_token_ids == [20, 50]
+    assert rewards[0].logprobs == [-0.1, -1.1]
+    assert rewards[1].candidate_token_ids == [21, 51]
+    assert rewards[1].logprobs == [-0.2, -1.2]
 
 
 @pytest.mark.asyncio
-async def test_selected_turn_to_position_rewards_topk_accepts_current_turn_rows():
+async def test_selected_turn_to_position_rewards_topk_accepts_selected_response_rows():
     from customized_areal.tree_search.core.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
-    provider = FakeProvider([[-1.0, -2.0]])
+    provider = FakeProvider([[-1.0, -2.0], [-1.5, -2.5]])
     node = Node(
         input_ids=[10, 20, 21, 11, 12, 30],
         loss_mask=[0, 1, 1, 0, 0, 1],
         logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
         versions=[-1, 0, 0, -1, -1, 0],
-        topk_ids=[[30, 60]],
-        topk_logp=[[-0.3, -1.3]],
+        topk_ids=[[20, 50], [21, 51]],
+        topk_logp=[[-0.1, -1.1], [-0.2, -1.2]],
     )
 
     rewards = await selected_turn_to_position_rewards(
         node=node,
-        guidance="Fix the last turn.",
+        guidance="Fix the first turn.",
         tokenizer=FakeTokenizer(),
         provider=provider,
         sample_index=0,
@@ -361,10 +363,12 @@ async def test_selected_turn_to_position_rewards_topk_accepts_current_turn_rows(
         teacher_top_k=10,
     )
 
-    assert provider.calls[0]["generation_ids"] == [30]
-    assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
-    assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert provider.calls[0]["generation_ids"] == [20, 21]
+    assert provider.calls[0]["candidate_token_ids"] == [[20, 50], [21, 51]]
+    assert rewards[0].candidate_token_ids == [20, 50]
+    assert rewards[0].logprobs == [-0.1, -1.1]
+    assert rewards[1].candidate_token_ids == [21, 51]
+    assert rewards[1].logprobs == [-0.2, -1.2]
 
 
 @pytest.mark.asyncio
@@ -452,7 +456,7 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
         selected_turn_to_position_rewards,
     )
 
-    provider = FakeProvider([[-1.0, -2.0]])
+    provider = FakeProvider([[-1.0, -2.0], [-1.5, -2.5]])
     engine = FakeTopKEngine(
         topk_ids=[
             [20, 50],
@@ -474,7 +478,7 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
 
     rewards = await selected_turn_to_position_rewards(
         node=node,
-        guidance="Fix the last turn.",
+        guidance="Fix the first turn.",
         tokenizer=FakeTokenizer(),
         provider=provider,
         sample_index=0,
@@ -483,12 +487,14 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
         teacher_top_k=2,
     )
 
-    assert node.topk_ids == [[30, 60]]
-    assert node.topk_logp == [[-0.3, -1.3]]
-    assert provider.calls[0]["generation_ids"] == [30]
-    assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
-    assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert node.topk_ids == [[20, 50], [21, 51]]
+    assert node.topk_logp == [[-0.1, -1.1], [-0.2, -1.2]]
+    assert provider.calls[0]["generation_ids"] == [20, 21]
+    assert provider.calls[0]["candidate_token_ids"] == [[20, 50], [21, 51]]
+    assert rewards[0].candidate_token_ids == [20, 50]
+    assert rewards[0].logprobs == [-0.1, -1.1]
+    assert rewards[1].candidate_token_ids == [21, 51]
+    assert rewards[1].logprobs == [-0.2, -1.2]
 
 
 @pytest.mark.asyncio
@@ -587,7 +593,7 @@ async def test_selected_turn_topk_rejects_invalid_same_length_row_layouts():
     with pytest.raises(ValueError, match="all-response aligned"):
         await selected_turn_to_position_rewards(
             node=node,
-            guidance="Fix the last turn.",
+            guidance="Fix the first turn.",
             tokenizer=FakeTokenizer(),
             provider=FakeProvider([[-1.0, -2.0]]),
             sample_index=0,
