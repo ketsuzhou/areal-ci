@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Protocol
+
+import httpx
+from openai import OpenAI
 
 from customized_areal.tree_search.core.teacher_client import TeacherClient
 
@@ -34,11 +38,26 @@ class ExternalTeacherProvider:
         diagnose_model_name: str = "",
         diagnose_max_tokens: int = 1024,
         diagnose_temperature: float = 0.0,
+        diagnose_base_url: str = "",
+        diagnose_api_key: str = "",
     ) -> None:
         self.client = client
         self.diagnose_model_name = diagnose_model_name
         self.diagnose_max_tokens = diagnose_max_tokens
         self.diagnose_temperature = diagnose_temperature
+        self.diagnose_base_url = diagnose_base_url
+        self.diagnose_api_key = diagnose_api_key
+        self._openai_client: OpenAI | None = None
+
+    def _get_openai_client(self) -> OpenAI:
+        if self._openai_client is None:
+            http_client = httpx.Client(verify=False)
+            self._openai_client = OpenAI(
+                api_key=self.diagnose_api_key or "unused",
+                base_url=self.diagnose_base_url,
+                http_client=http_client,
+            )
+        return self._openai_client
 
     async def diagnose_episode(self, context: str, gold_answer: str) -> str:
         prompt = (
@@ -50,6 +69,19 @@ class ExternalTeacherProvider:
             f"Gold answer:\n{gold_answer}\n\n"
             f"Episode context:\n{context}\n"
         )
+        if self.diagnose_base_url:
+            client = self._get_openai_client()
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=self.diagnose_model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=self.diagnose_max_tokens,
+                    temperature=self.diagnose_temperature,
+                ),
+            )
+            return response.choices[0].message.content
         return await self.client.complete_text(
             prompt,
             model=self.diagnose_model_name or None,

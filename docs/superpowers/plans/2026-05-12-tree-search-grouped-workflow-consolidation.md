@@ -1,23 +1,38 @@
 # Tree Search Grouped Workflow Consolidation — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Consolidate 4 tree-search files (proxy_workflow.py, grouped_workflow.py, workflow_executor.py, patches.py) into 1 new file (tree_search_grouped_workflow.py), move cache logic into the workflow with partial reuse, eliminate all workflow/executor monkey-patches via .env flag, and simplify the trainer to only handle distill loss patching and actor creation.
+**Goal:** Consolidate 4 tree-search files (proxy_workflow.py, grouped_workflow.py,
+workflow_executor.py, patches.py) into 1 new file (tree_search_grouped_workflow.py),
+move cache logic into the workflow with partial reuse, eliminate all workflow/executor
+monkey-patches via .env flag, and simplify the trainer to only handle distill loss
+patching and actor creation.
 
-**Architecture:** `TreeSearchGroupedRolloutWorkflow` extends `GroupedRolloutWorkflow`, wraps the base `OpenAIProxyWorkflow`, and is self-contained: it loads/saves tree_store from checkpoint_dir, does cache lookup, generates only needed fresh episodes, combines cached+fresh, does tree ops, and returns batched tensor dicts. `_resolve_workflow` reads `.env` flag to decide between `GroupedRolloutWorkflow` and `TreeSearchGroupedRolloutWorkflow`. The distill loss patch stays in `training/actor.py` and is called directly from the trainer.
+**Architecture:** `TreeSearchGroupedRolloutWorkflow` extends `GroupedRolloutWorkflow`,
+wraps the base `OpenAIProxyWorkflow`, and is self-contained: it loads/saves tree_store
+from checkpoint_dir, does cache lookup, generates only needed fresh episodes, combines
+cached+fresh, does tree ops, and returns batched tensor dicts. `_resolve_workflow` reads
+`.env` flag to decide between `GroupedRolloutWorkflow` and
+`TreeSearchGroupedRolloutWorkflow`. The distill loss patch stays in `training/actor.py`
+and is called directly from the trainer.
 
 **Tech Stack:** Python 3.12+, PyTorch, asyncio
 
----
+______________________________________________________________________
 
 ### Task 1: Create `tree_search_grouped_workflow.py` with utilities
 
 **Files:**
+
 - Create: `customized_areal/tree_search/tree_search_grouped_workflow.py`
 
-- [ ] **Step 1: Create the file with `interactions_dict_to_nodes` and `_nodes_to_batched_tensor_dict`**
+- [ ] **Step 1: Create the file with `interactions_dict_to_nodes` and
+  `_nodes_to_batched_tensor_dict`**
 
-Copy these two functions verbatim from `proxy_workflow.py` into the new file. Update imports to use the new module path. Remove the `PATCH_VERIFICATION` debug logs.
+Copy these two functions verbatim from `proxy_workflow.py` into the new file. Update
+imports to use the new module path. Remove the `PATCH_VERIFICATION` debug logs.
 
 ```python
 # customized_areal/tree_search/tree_search_grouped_workflow.py
@@ -183,7 +198,8 @@ def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
 
 - [ ] **Step 2: Verify the file has no syntax errors**
 
-Run: `python -c "import ast; ast.parse(open('customized_areal/tree_search/tree_search_grouped_workflow.py').read()); print('OK')"`
+Run:
+`python -c "import ast; ast.parse(open('customized_areal/tree_search/tree_search_grouped_workflow.py').read()); print('OK')"`
 
 - [ ] **Step 3: Commit**
 
@@ -192,11 +208,12 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py
 git commit -m "feat: add tree_search_grouped_workflow.py with moved utilities"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Add `TreeSearchGroupedRolloutWorkflow` class
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py`
 
 - [ ] **Step 1: Add the class after the `_nodes_to_batched_tensor_dict` function**
@@ -375,13 +392,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 ```
 
 Add the missing import at the top of the file:
+
 ```python
 from areal.api import InferenceEngine, RolloutWorkflow
 ```
 
 - [ ] **Step 2: Verify the file has no syntax errors**
 
-Run: `python -c "import ast; ast.parse(open('customized_areal/tree_search/tree_search_grouped_workflow.py').read()); print('OK')"`
+Run:
+`python -c "import ast; ast.parse(open('customized_areal/tree_search/tree_search_grouped_workflow.py').read()); print('OK')"`
 
 - [ ] **Step 3: Commit**
 
@@ -390,11 +409,12 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py
 git commit -m "feat: add TreeSearchGroupedRolloutWorkflow with cache reuse and tree ops"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Add `.env` variables for tree search config
 
 **Files:**
+
 - Modify: `customized_areal/.env`
 
 - [ ] **Step 1: Add tree search config variables to .env**
@@ -420,11 +440,12 @@ git add customized_areal/.env
 git commit -m "feat: add tree search .env variables for workflow configuration"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Modify `_resolve_workflow` in `remote_inf_engine.py`
 
 **Files:**
+
 - Modify: `areal/infra/remote_inf_engine.py:698-701`
 
 - [ ] **Step 1: Replace the group_size > 1 wrapping with .env-aware logic**
@@ -498,11 +519,13 @@ With:
         return resolved
 ```
 
-Also add `from dotenv import load_dotenv` is done inline (lazy import). No top-level import changes needed since `os` is already imported.
+Also add `from dotenv import load_dotenv` is done inline (lazy import). No top-level
+import changes needed since `os` is already imported.
 
 - [ ] **Step 2: Verify no syntax errors**
 
-Run: `python -c "import ast; ast.parse(open('areal/infra/remote_inf_engine.py').read()); print('OK')"`
+Run:
+`python -c "import ast; ast.parse(open('areal/infra/remote_inf_engine.py').read()); print('OK')"`
 
 - [ ] **Step 3: Commit**
 
@@ -511,11 +534,12 @@ git add areal/infra/remote_inf_engine.py
 git commit -m "feat: _resolve_workflow reads .env flag to use TreeSearchGroupedRolloutWorkflow"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Simplify `CacheAwarePPOTrainer`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py`
 
 - [ ] **Step 1: Replace the entire file with the simplified trainer**
@@ -642,7 +666,8 @@ class CacheAwarePPOTrainer(PPOTrainer):
 
 - [ ] **Step 2: Verify no syntax errors**
 
-Run: `python -c "import ast; ast.parse(open('customized_areal/tree_search/trainer.py').read()); print('OK')"`
+Run:
+`python -c "import ast; ast.parse(open('customized_areal/tree_search/trainer.py').read()); print('OK')"`
 
 - [ ] **Step 3: Commit**
 
@@ -651,28 +676,33 @@ git add customized_areal/tree_search/trainer.py
 git commit -m "refactor: simplify CacheAwarePPOTrainer — remove cache logic, tree ops, patches"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Update `__init__.py` exports
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/__init__.py`
 
-- [ ] **Step 1: Replace `QueryIDProxyWorkflow` export with `TreeSearchGroupedRolloutWorkflow`**
+- [ ] **Step 1: Replace `QueryIDProxyWorkflow` export with
+  `TreeSearchGroupedRolloutWorkflow`**
 
 Replace:
+
 ```python
 from customized_areal.tree_search.proxy_workflow import QueryIDProxyWorkflow
 ```
 
 With:
+
 ```python
 from customized_areal.tree_search.tree_search_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
 )
 ```
 
-And in `__all__`, replace `"QueryIDProxyWorkflow"` with `"TreeSearchGroupedRolloutWorkflow"`.
+And in `__all__`, replace `"QueryIDProxyWorkflow"` with
+`"TreeSearchGroupedRolloutWorkflow"`.
 
 - [ ] **Step 2: Commit**
 
@@ -681,24 +711,31 @@ git add customized_areal/tree_search/__init__.py
 git commit -m "refactor: update __init__.py exports for TreeSearchGroupedRolloutWorkflow"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Update test files for deleted modules
 
 **Files:**
+
 - Modify: `tests/test_treesearch_patches.py`
+
 - Modify: `tests/test_treesearch_bugfixes.py`
+
 - Modify: `tests/test_tree_search/test_trainer.py`
 
 - [ ] **Step 1: Delete `tests/test_treesearch_patches.py`**
 
-This file tests `TreeSearchPatches` which is being deleted. All its test cases (apply/restore, idempotency, context manager, tree search wrap) are no longer relevant since the `.env` flag replaces all patches.
+This file tests `TreeSearchPatches` which is being deleted. All its test cases
+(apply/restore, idempotency, context manager, tree search wrap) are no longer relevant
+since the `.env` flag replaces all patches.
 
 Run: `git rm tests/test_treesearch_patches.py`
 
 - [ ] **Step 2: Update `tests/test_treesearch_bugfixes.py`**
 
-In `TestTurnIdxInInteractionsToNodes`, replace the import and test that uses `QueryIDProxyWorkflow._interactions_to_nodes` with a direct call to the new module's `interactions_dict_to_nodes`:
+In `TestTurnIdxInInteractionsToNodes`, replace the import and test that uses
+`QueryIDProxyWorkflow._interactions_to_nodes` with a direct call to the new module's
+`interactions_dict_to_nodes`:
 
 Replace the entire `TestTurnIdxInInteractionsToNodes` class:
 
@@ -742,13 +779,15 @@ class TestTurnIdxInInteractionsToNodes:
 
 - [ ] **Step 3: Delete `tests/test_tree_search/test_trainer.py`**
 
-This file tests `TreeSearchPatches` apply/restore behavior (which is deleted). The new trainer has no patches to test.
+This file tests `TreeSearchPatches` apply/restore behavior (which is deleted). The new
+trainer has no patches to test.
 
 Run: `git rm tests/test_tree_search/test_trainer.py`
 
 - [ ] **Step 4: Run remaining tests to verify no regressions**
 
-Run: `python -m pytest tests/test_treesearch_bugfixes.py tests/test_tree_search/test_advantage.py tests/test_tree_search/test_checkpoint.py tests/test_tree_search/test_mcts_tree_store.py -v`
+Run:
+`python -m pytest tests/test_treesearch_bugfixes.py tests/test_tree_search/test_advantage.py tests/test_tree_search/test_checkpoint.py tests/test_tree_search/test_mcts_tree_store.py -v`
 
 Expected: All pass.
 
@@ -760,14 +799,18 @@ git rm tests/test_treesearch_patches.py tests/test_tree_search/test_trainer.py
 git commit -m "test: update tests for removed patches and deleted modules"
 ```
 
----
+______________________________________________________________________
 
 ### Task 8: Delete old files
 
 **Files:**
+
 - Delete: `customized_areal/tree_search/proxy_workflow.py`
+
 - Delete: `customized_areal/tree_search/grouped_workflow.py`
+
 - Delete: `customized_areal/tree_search/workflow_executor.py`
+
 - Delete: `customized_areal/tree_search/patches.py`
 
 - [ ] **Step 1: Delete the 4 files**
@@ -781,7 +824,8 @@ git rm customized_areal/tree_search/patches.py
 
 - [ ] **Step 2: Verify no remaining imports reference deleted modules**
 
-Run: `grep -r "from customized_areal.tree_search.proxy_workflow\|from customized_areal.tree_search.grouped_workflow\|from customized_areal.tree_search.workflow_executor\|from customized_areal.tree_search.patches" --include="*.py" .`
+Run:
+`grep -r "from customized_areal.tree_search.proxy_workflow\|from customized_areal.tree_search.grouped_workflow\|from customized_areal.tree_search.workflow_executor\|from customized_areal.tree_search.patches" --include="*.py" .`
 
 Expected: No results (all references updated in previous tasks).
 
@@ -792,11 +836,12 @@ git add -A
 git commit -m "refactor: delete proxy_workflow, grouped_workflow, workflow_executor, patches"
 ```
 
----
+______________________________________________________________________
 
 ### Task 9: Run pre-commit and final verification
 
 **Files:**
+
 - All modified files
 
 - [ ] **Step 1: Run pre-commit**
@@ -807,13 +852,15 @@ Expected: All hooks pass (or fix any issues and re-run).
 
 - [ ] **Step 2: Verify the new workflow module imports cleanly**
 
-Run: `python -c "from customized_areal.tree_search.tree_search_grouped_workflow import TreeSearchGroupedRolloutWorkflow, interactions_dict_to_nodes, _nodes_to_batched_tensor_dict; print('OK')"`
+Run:
+`python -c "from customized_areal.tree_search.tree_search_grouped_workflow import TreeSearchGroupedRolloutWorkflow, interactions_dict_to_nodes, _nodes_to_batched_tensor_dict; print('OK')"`
 
 Expected: `OK`
 
 - [ ] **Step 3: Verify the simplified trainer imports cleanly**
 
-Run: `python -c "from customized_areal.tree_search.trainer import CacheAwarePPOTrainer; print('OK')"`
+Run:
+`python -c "from customized_areal.tree_search.trainer import CacheAwarePPOTrainer; print('OK')"`
 
 Expected: `OK`
 

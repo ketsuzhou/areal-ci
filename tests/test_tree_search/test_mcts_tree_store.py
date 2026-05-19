@@ -335,19 +335,34 @@ class TestMCTSTreeStoreTrainId:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         n3 = Node(
-            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.3], versions=[0, 0, 0],
-            node_id="ep_a_2", episode_id="ep_a", outcome_reward=0.3, query_id="q1",
+            input_ids=[7, 8, 9],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3],
+            versions=[0, 0, 0],
+            node_id="ep_a_2",
+            episode_id="ep_a",
+            outcome_reward=0.3,
+            query_id="q1",
         )
         store.insert_batch([n1, n2, n3])
         store.mark_episodes_trained({"ep_a"})
@@ -362,14 +377,24 @@ class TestMCTSTreeStoreTrainId:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
@@ -384,9 +409,14 @@ class TestMCTSTreeStoreTrainId:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1])
         store.set_trained(n1.node_id, True)
@@ -399,9 +429,14 @@ class TestMCTSTreeStoreTrainId:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1])
         store.mark_episodes_trained({"nonexistent_episode"})
@@ -538,9 +573,14 @@ class TestGetUntrainedEpisodeCount:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1])
         assert store.get_untrained_episode_count("q_other") == 0
@@ -549,14 +589,24 @@ class TestGetUntrainedEpisodeCount:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         assert store.get_untrained_episode_count("q1") == 2
@@ -566,19 +616,34 @@ class TestGetUntrainedEpisodeCount:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_a_2", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_a_2",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n3 = Node(
-            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.3], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[7, 8, 9],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2, n3])
         assert store.get_untrained_episode_count("q1") == 2
@@ -588,14 +653,24 @@ class TestGetUntrainedEpisodeCount:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
@@ -606,14 +681,24 @@ class TestGetUntrainedEpisodeCount:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_a_2", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_a_2",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
@@ -629,9 +714,14 @@ class TestLoadUntrainedEpisodes:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1])
         assert store.load_untrained_episodes("q_other", n_episodes=1) == []
@@ -640,14 +730,24 @@ class TestLoadUntrainedEpisodes:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_a_2", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_a_2",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         loaded = store.load_untrained_episodes("q1", n_episodes=1)
@@ -659,19 +759,34 @@ class TestLoadUntrainedEpisodes:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         n3 = Node(
-            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.3], versions=[0, 0, 0],
-            node_id="ep_c_1", episode_id="ep_c", outcome_reward=0.3, query_id="q1",
+            input_ids=[7, 8, 9],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3],
+            versions=[0, 0, 0],
+            node_id="ep_c_1",
+            episode_id="ep_c",
+            outcome_reward=0.3,
+            query_id="q1",
         )
         store.insert_batch([n1, n2, n3])
         loaded = store.load_untrained_episodes("q1", n_episodes=2)
@@ -684,14 +799,24 @@ class TestLoadUntrainedEpisodes:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
@@ -704,14 +829,24 @@ class TestLoadUntrainedEpisodes:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="ep_a_1", episode_id="ep_a", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="ep_a_1",
+            episode_id="ep_a",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="ep_b_1", episode_id="ep_b", outcome_reward=0.5, query_id="q1",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="ep_b_1",
+            episode_id="ep_b",
+            outcome_reward=0.5,
+            query_id="q1",
         )
         store.insert_batch([n1, n2])
         loaded = store.load_untrained_episodes("q1", n_episodes=2)

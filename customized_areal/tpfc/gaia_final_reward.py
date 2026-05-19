@@ -85,6 +85,7 @@ def call_openai_compatible_model(
     top_p=0.95,
 ):
     import httpx
+
     http_client = httpx.Client(verify=False)
     client = OpenAI(
         api_key=api_key,
@@ -224,7 +225,7 @@ if __name__ == "__main__":
     judge_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY")
 
     result = compute_reward(
-        response_text='The capital of France is Paris. <answer>Paris</answer>',
+        response_text="The capital of France is Paris. <answer>Paris</answer>",
         ground_truth="Paris",
         user_query="What is the capital of France?",
         model_name="deepseek-v3",

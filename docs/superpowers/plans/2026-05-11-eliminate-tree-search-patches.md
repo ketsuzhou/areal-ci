@@ -1,32 +1,50 @@
 # Eliminate Tree Search Patches — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move tree insertion, advantage computation, and mark-trained into `QueryIDProxyWorkflow`, return batched tensor dicts so base `WorkflowExecutor` handles them natively, and eliminate patches on `grouped_workflow.py` and `workflow_executor.py`.
+**Goal:** Move tree insertion, advantage computation, and mark-trained into
+`QueryIDProxyWorkflow`, return batched tensor dicts so base `WorkflowExecutor` handles
+them natively, and eliminate patches on `grouped_workflow.py` and
+`workflow_executor.py`.
 
-**Architecture:** `QueryIDProxyWorkflow` gains `tree_store`, `advantage_computer`, `advantage_mode` constructor args. After building `list[Node]` (existing logic), it inserts into tree, computes advantages, marks trained, then converts `list[Node]` → batched tensor dict via a new `_nodes_to_batched_tensor_dict` helper. The base `WorkflowExecutor` sees a normal `dict[str, Any]` return and handles it natively. The trainer no longer does tree insert/advantage/mark-trained/conversion.
+**Architecture:** `QueryIDProxyWorkflow` gains `tree_store`, `advantage_computer`,
+`advantage_mode` constructor args. After building `list[Node]` (existing logic), it
+inserts into tree, computes advantages, marks trained, then converts `list[Node]` →
+batched tensor dict via a new `_nodes_to_batched_tensor_dict` helper. The base
+`WorkflowExecutor` sees a normal `dict[str, Any]` return and handles it natively. The
+trainer no longer does tree insert/advantage/mark-trained/conversion.
 
 **Tech Stack:** Python 3.12+, PyTorch
 
 **Files:**
-- Modify: `customized_areal/tree_search/mcts_tree_store.py` — `_node_to_tensor_dict` metadata as lists
-- Modify: `customized_areal/tree_search/proxy_workflow.py` — new args, tree ops, dict return
+
+- Modify: `customized_areal/tree_search/mcts_tree_store.py` — `_node_to_tensor_dict`
+  metadata as lists
+- Modify: `customized_areal/tree_search/proxy_workflow.py` — new args, tree ops, dict
+  return
 - Modify: `customized_areal/tree_search/patches.py` — remove 3 patches, simplify 1
 - Modify: `customized_areal/tree_search/trainer.py` — remove tree ops from prepare_batch
 - Delete: `customized_areal/tree_search/grouped_workflow.py`
 - Delete: `customized_areal/tree_search/workflow_executor.py`
 - Modify: `tests/test_tree_search/test_mcts_tree_store.py` — expect list metadata
 - Modify: `tests/test_treesearch_bugfixes.py` — remove grouped_workflow tests
-- Modify: `tests/test_treesearch_patches.py` — remove executor/resolve_workflow/GAE tests
+- Modify: `tests/test_treesearch_patches.py` — remove executor/resolve_workflow/GAE
+  tests
 
----
+______________________________________________________________________
 
 ### Task 1: Update `_node_to_tensor_dict` — metadata as single-element lists
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:111-167`
 
-**Why:** `concat_padded_tensors` concatenates list keys across dicts (keeping the first value for non-tensor non-list keys). To preserve per-turn `query_id`, `node_id`, `episode_id`, `turn_idx` through concat, these must be single-element lists, matching the pattern `InteractionWithTokenLogpReward.to_tensor_dict` already uses for `node_id`.
+**Why:** `concat_padded_tensors` concatenates list keys across dicts (keeping the first
+value for non-tensor non-list keys). To preserve per-turn `query_id`, `node_id`,
+`episode_id`, `turn_idx` through concat, these must be single-element lists, matching
+the pattern `InteractionWithTokenLogpReward.to_tensor_dict` already uses for `node_id`.
 
 - [ ] **Step 1: Read the current `_node_to_tensor_dict` function**
 
@@ -50,7 +68,12 @@ In `customized_areal/tree_search/mcts_tree_store.py`, replace lines 125-126:
 
 And update the `_turn_idx_in_episode` line (164) to read from node:
 
-Actually, leave the underscore-prefixed convenience fields (`_turn_id`, `_parent_turn_id`, `_turn_reward`, `_outcome_reward`, `_episode_idx`, `_turn_idx_in_episode`, `_num_turns_in_episode`) as they are — they're not list-concatenated through `concat_padded_tensors` because `_node_to_tensor_dict` is called on individual nodes, one dict at a time. Those underscore fields are passed straight through.
+Actually, leave the underscore-prefixed convenience fields (`_turn_id`,
+`_parent_turn_id`, `_turn_reward`, `_outcome_reward`, `_episode_idx`,
+`_turn_idx_in_episode`, `_num_turns_in_episode`) as they are — they're not
+list-concatenated through `concat_padded_tensors` because `_node_to_tensor_dict` is
+called on individual nodes, one dict at a time. Those underscore fields are passed
+straight through.
 
 - [ ] **Step 3: Run existing `_node_to_tensor_dict` tests to verify breakage**
 
@@ -58,13 +81,15 @@ Actually, leave the underscore-prefixed convenience fields (`_turn_id`, `_parent
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestResponseOnlyFieldsSliced::test_response_only_fields_sliced tests/test_tree_search/test_mcts_tree_store.py::TestResponseOnlyFieldsSliced::test_logp_already_sliced -xvs
 ```
 
-Expected: FAIL on assertion because tests read `result["query_id"]` expecting a string, but now it's a list.
+Expected: FAIL on assertion because tests read `result["query_id"]` expecting a string,
+but now it's a list.
 
 - [ ] **Step 4: Update tests to expect list values**
 
 In `tests/test_tree_search/test_mcts_tree_store.py`, update the two test methods:
 
-`test_response_only_fields_sliced` (around line 605) — add assertions after `_node_to_tensor_dict` call:
+`test_response_only_fields_sliced` (around line 605) — add assertions after
+`_node_to_tensor_dict` call:
 
 ```python
 result = _node_to_tensor_dict(node, "q1", "t1")
@@ -85,7 +110,8 @@ assert result["query_id"] == ["q1"]
 assert result["node_id"] == ["t1"]
 ```
 
-If node.episode_id and node.turn_idx are not passed to the `Node()` constructor in these tests, they default to `""` and `0` respectively.
+If node.episode_id and node.turn_idx are not passed to the `Node()` constructor in these
+tests, they default to `""` and `0` respectively.
 
 - [ ] **Step 5: Run updated tests**
 
@@ -104,18 +130,23 @@ git commit -m "refactor: store query_id/node_id/episode_id/turn_idx as single-el
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Add `_nodes_to_batched_tensor_dict` helper to proxy_workflow.py
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/proxy_workflow.py`
 
-**Why:** `QueryIDProxyWorkflow.arun_episode` will convert `list[Node]` to a single batched tensor dict. This helper function encapsulates that logic: call `_node_to_tensor_dict` per Node, then `concat_padded_tensors` to produce a `[N, seq_len]` dict.
+**Why:** `QueryIDProxyWorkflow.arun_episode` will convert `list[Node]` to a single
+batched tensor dict. This helper function encapsulates that logic: call
+`_node_to_tensor_dict` per Node, then `concat_padded_tensors` to produce a
+`[N, seq_len]` dict.
 
 - [ ] **Step 1: Add the helper function**
 
-Insert after the `interactions_dict_to_nodes` function (after line 156) in `proxy_workflow.py`:
+Insert after the `interactions_dict_to_nodes` function (after line 156) in
+`proxy_workflow.py`:
 
 ```python
 def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
@@ -164,14 +195,17 @@ git commit -m "feat: add _nodes_to_batched_tensor_dict helper to proxy_workflow
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Update `QueryIDProxyWorkflow` — tree ops + dict return
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/proxy_workflow.py`
 
-**Why:** Move tree insertion, advantage computation, and mark-trained into `QueryIDProxyWorkflow.arun_episode`. Change the return type from `list[Node] | None` to `dict[str, Any] | None` so the base `WorkflowExecutor` handles it natively.
+**Why:** Move tree insertion, advantage computation, and mark-trained into
+`QueryIDProxyWorkflow.arun_episode`. Change the return type from `list[Node] | None` to
+`dict[str, Any] | None` so the base `WorkflowExecutor` handles it natively.
 
 - [ ] **Step 1: Add new constructor args**
 
@@ -227,7 +261,9 @@ def _post_rollout_tree_ops(self, nodes: list[Node]) -> None:
 
 - [ ] **Step 3: Update `_async_single_episode` — convert to dict, call tree ops**
 
-Replace the existing `_async_single_episode` method. The key change: after converting interactions to `list[Node]` and setting metadata, call `_post_rollout_tree_ops` then `_nodes_to_batched_tensor_dict`.
+Replace the existing `_async_single_episode` method. The key change: after converting
+interactions to `list[Node]` and setting metadata, call `_post_rollout_tree_ops` then
+`_nodes_to_batched_tensor_dict`.
 
 ```python
 async def _async_single_episode(
@@ -343,9 +379,11 @@ async def arun_episode(self, engine, data: dict) -> dict[str, Any] | None:
 
 Remove the `_single_episode` (synchronous) stub method — it's not used.
 
-- [ ] **Step 5: Remove the now-unnecessary `interactions_dict_to_nodes` import from patched executor**
+- [ ] **Step 5: Remove the now-unnecessary `interactions_dict_to_nodes` import from
+  patched executor**
 
-No action needed — the function stays where it is, it's used by `_interactions_to_nodes`.
+No action needed — the function stays where it is, it's used by
+`_interactions_to_nodes`.
 
 - [ ] **Step 6: Verify import**
 
@@ -364,18 +402,23 @@ git commit -m "feat: QueryIDProxyWorkflow does tree ops and returns batched tens
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Simplify `TreeSearchPatches` — remove 3 patches
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/patches.py`
 
-**Why:** Remove GAE backup/restore patch (advantages pre-computed in proxy_workflow), _resolve_workflow patch (no double-wrapping), workflow_executor patch (base executor handles dict returns). Simplify _wrap_openai_agent patch to create `QueryIDProxyWorkflow` directly with tree_store/advantage_computer args.
+**Why:** Remove GAE backup/restore patch (advantages pre-computed in proxy_workflow),
+\_resolve_workflow patch (no double-wrapping), workflow_executor patch (base executor
+handles dict returns). Simplify \_wrap_openai_agent patch to create
+`QueryIDProxyWorkflow` directly with tree_store/advantage_computer args.
 
 - [ ] **Step 1: Remove imports of deleted modules**
 
-Remove the imports for `TreeSearchGroupedRolloutWorkflow` and `TreeSearchWorkflowExecutor` (lines 14-18):
+Remove the imports for `TreeSearchGroupedRolloutWorkflow` and
+`TreeSearchWorkflowExecutor` (lines 14-18):
 
 ```python
 # Remove these lines:
@@ -385,7 +428,9 @@ from customized_areal.tree_search.grouped_workflow import (
 from customized_areal.tree_search.workflow_executor import TreeSearchWorkflowExecutor
 ```
 
-No new imports needed — `QueryIDProxyWorkflow` is already imported (line 17 of the current patches.py), and `tree_store`/`advantage_computer` are passed through as `Any`-typed values.
+No new imports needed — `QueryIDProxyWorkflow` is already imported (line 17 of the
+current patches.py), and `tree_store`/`advantage_computer` are passed through as
+`Any`-typed values.
 
 - [ ] **Step 2: Add tree_store/advantage_computer to constructor**
 
@@ -418,7 +463,8 @@ Delete the entire method (lines 111-144).
 
 - [ ] **Step 4: Simplify `_build_tree_search_wrap`**
 
-Remove the `TreeSearchGroupedRolloutWorkflow` wrapping. This method should now create `QueryIDProxyWorkflow` directly:
+Remove the `TreeSearchGroupedRolloutWorkflow` wrapping. This method should now create
+`QueryIDProxyWorkflow` directly:
 
 ```python
 def _build_tree_search_wrap(self):
@@ -456,15 +502,18 @@ def _build_tree_search_wrap(self):
 
 - [ ] **Step 5: Remove `_build_patched_resolve` method**
 
-Delete the entire method (lines 177-203). No longer needed since `QueryIDProxyWorkflow` handles grouping internally and no `TreeSearchGroupedRolloutWorkflow` wrapper exists.
+Delete the entire method (lines 177-203). No longer needed since `QueryIDProxyWorkflow`
+handles grouping internally and no `TreeSearchGroupedRolloutWorkflow` wrapper exists.
 
 - [ ] **Step 6: Remove `_build_tree_search_executor` method**
 
-Delete the entire method (lines 205-224). Base `WorkflowExecutor` handles dict returns natively.
+Delete the entire method (lines 205-224). Base `WorkflowExecutor` handles dict returns
+natively.
 
 - [ ] **Step 7: Simplify `apply()` — remove the deleted patches**
 
-Update `apply()` to only apply the _wrap_openai_agent patch (and distill loss if applicable). The new apply() should:
+Update `apply()` to only apply the \_wrap_openai_agent patch (and distill loss if
+applicable). The new apply() should:
 
 ```python
 def apply(self) -> None:
@@ -533,7 +582,8 @@ def apply(self) -> None:
 
 - [ ] **Step 8: Update `restore()` — remove `_original_compute_advantages` cleanup**
 
-The `restore()` method stays mostly the same, except remove the `PPOActor._original_compute_advantages` cleanup block (lines 355-356):
+The `restore()` method stays mostly the same, except remove the
+`PPOActor._original_compute_advantages` cleanup block (lines 355-356):
 
 ```python
 # Remove:
@@ -559,18 +609,22 @@ git commit -m "refactor: simplify TreeSearchPatches — remove GAE/executor/reso
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Simplify `CacheAwarePPOTrainer._cache_aware_prepare_batch`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py:299-421`
 
-**Why:** Tree insertion, advantage computation, mark-trained, and Node→tensor conversion happen in `QueryIDProxyWorkflow` now. The trainer only needs to handle cache loading, checkpoint saving, and distill loss weight injection.
+**Why:** Tree insertion, advantage computation, mark-trained, and Node→tensor conversion
+happen in `QueryIDProxyWorkflow` now. The trainer only needs to handle cache loading,
+checkpoint saving, and distill loss weight injection.
 
 - [ ] **Step 1: Update `_cache_aware_prepare_batch` — remove tree ops**
 
-Replace the tree operations block (lines 378-408) with a simplified version. The "After" section:
+Replace the tree operations block (lines 378-408) with a simplified version. The "After"
+section:
 
 The tree operations section (lines 378-420) becomes:
 
@@ -613,10 +667,13 @@ The tree operations section (lines 378-420) becomes:
         return trajs
 ```
 
+- [ ] **Step 2: Update rollout path — keep `_tensor_dicts_to_nodes` for controller
+  fallback**
 
-- [ ] **Step 2: Update rollout path — keep `_tensor_dicts_to_nodes` for controller fallback**
-
-In `customized_areal/tree_search/trainer.py`, update lines 364-368. In single-controller mode, `QueryIDProxyWorkflow` patches don't apply to the remote engine, so tree ops must happen in the trainer. Detect this by checking if tensor dicts already have list-typed metadata (proxy_workflow was active) or not (controller fallback):
+In `customized_areal/tree_search/trainer.py`, update lines 364-368. In single-controller
+mode, `QueryIDProxyWorkflow` patches don't apply to the remote engine, so tree ops must
+happen in the trainer. Detect this by checking if tensor dicts already have list-typed
+metadata (proxy_workflow was active) or not (controller fallback):
 
 ```python
             # Tree ops (insert, advantage, mark-trained) happen inside
@@ -684,7 +741,8 @@ Replace the block from "--- Tree operations ---" through the return statement wi
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_tree_search/test_cache_trainer.py -xvs
 ```
 
-Expected: Tests that mock the rollout to return Node objects may still pass (they test cache splitting, not tree ops). If they fail, update mocks.
+Expected: Tests that mock the rollout to return Node objects may still pass (they test
+cache splitting, not tree ops). If they fail, update mocks.
 
 - [ ] **Step 5: Commit**
 
@@ -695,14 +753,16 @@ git commit -m "refactor: remove tree ops from CacheAwarePPOTrainer._cache_aware_
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Update `CacheAwarePPOTrainer.train()` — pass tree_store/advantage_computer to patches
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py:130-175`
 
-**Why:** `TreeSearchPatches` now needs `tree_store` and `advantage_computer` to pass through to `QueryIDProxyWorkflow` via `_build_tree_search_wrap`.
+**Why:** `TreeSearchPatches` now needs `tree_store` and `advantage_computer` to pass
+through to `QueryIDProxyWorkflow` via `_build_tree_search_wrap`.
 
 - [ ] **Step 1: Update `__init__` — pass tree_store/advantage_computer to patches**
 
@@ -736,19 +796,24 @@ git commit -m "feat: pass tree_store and advantage_computer to TreeSearchPatches
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Update test files for removed patches and classes
 
 **Files:**
+
 - Modify: `tests/test_treesearch_patches.py`
+
 - Modify: `tests/test_treesearch_bugfixes.py`
 
 - [ ] **Step 1: Update `tests/test_treesearch_patches.py`**
 
 Changes needed:
-1. Remove `test_apply_then_restore_restores_originals` assertions about `_resolve_workflow` and `workflow_executor` (lines 53-54, 59-60, 64-66)
-2. Remove `test_returns_treesearch_workflow` test (lines 122-149) — references `TreeSearchGroupedRolloutWorkflow`
+
+1. Remove `test_apply_then_restore_restores_originals` assertions about
+   `_resolve_workflow` and `workflow_executor` (lines 53-54, 59-60, 64-66)
+1. Remove `test_returns_treesearch_workflow` test (lines 122-149) — references
+   `TreeSearchGroupedRolloutWorkflow`
 
 Updated `test_apply_then_restore_restores_originals`:
 
@@ -767,20 +832,27 @@ class TestApplyRestore:
         assert mock_engine._wrap_openai_agent == original_wrap
 ```
 
-Remove `test_returns_treesearch_workflow` entirely (it checks for `TreeSearchGroupedRolloutWorkflow` which no longer exists).
+Remove `test_returns_treesearch_workflow` entirely (it checks for
+`TreeSearchGroupedRolloutWorkflow` which no longer exists).
 
-Remove the import of `TreeSearchGroupedRolloutWorkflow` if it was imported (it's imported in the test method, so just remove the method).
+Remove the import of `TreeSearchGroupedRolloutWorkflow` if it was imported (it's
+imported in the test method, so just remove the method).
 
 - [ ] **Step 2: Update `tests/test_treesearch_bugfixes.py`**
 
 Remove:
-- `TestEpisodeIdUniqueness` class (lines 131-180) — tests `TreeSearchGroupedRolloutWorkflow`
-- `test_grouped_workflow_sets_turn_idx` method in `TestTurnIdx` — tests `TreeSearchGroupedRolloutWorkflow` (around line 271)
 
-The `TestEpisodeIdUniqueness` and `test_grouped_workflow_sets_turn_idx` test `TreeSearchGroupedRolloutWorkflow` which is being deleted. Remove those test classes/methods:
+- `TestEpisodeIdUniqueness` class (lines 131-180) — tests
+  `TreeSearchGroupedRolloutWorkflow`
+- `test_grouped_workflow_sets_turn_idx` method in `TestTurnIdx` — tests
+  `TreeSearchGroupedRolloutWorkflow` (around line 271)
 
-Remove lines 131-180 (TestEpisodeIdUniqueness class).
-Remove `test_grouped_workflow_sets_turn_idx` method (find its exact location and remove it).
+The `TestEpisodeIdUniqueness` and `test_grouped_workflow_sets_turn_idx` test
+`TreeSearchGroupedRolloutWorkflow` which is being deleted. Remove those test
+classes/methods:
+
+Remove lines 131-180 (TestEpisodeIdUniqueness class). Remove
+`test_grouped_workflow_sets_turn_idx` method (find its exact location and remove it).
 
 - [ ] **Step 3: Run updated tests**
 
@@ -799,12 +871,14 @@ git commit -m "test: remove tests for deleted patches and TreeSearchGroupedRollo
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 8: Delete `grouped_workflow.py` and `workflow_executor.py`
 
 **Files:**
+
 - Delete: `customized_areal/tree_search/grouped_workflow.py`
+
 - Delete: `customized_areal/tree_search/workflow_executor.py`
 
 - [ ] **Step 1: Verify no remaining imports of these files**
@@ -813,7 +887,8 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && rg "from customized_areal.tree_search.grouped_workflow|from customized_areal.tree_search.workflow_executor" --no-ignore-vcs
 ```
 
-Expected: Only in plan files, spec files, and test files (which we've already updated). No references in production code.
+Expected: Only in plan files, spec files, and test files (which we've already updated).
+No references in production code.
 
 - [ ] **Step 2: Delete grouped_workflow.py**
 
@@ -835,11 +910,12 @@ git commit -m "refactor: remove TreeSearchGroupedRolloutWorkflow and TreeSearchW
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
----
+______________________________________________________________________
 
 ### Task 9: Run all tree search tests
 
 **Files:**
+
 - None (verification only)
 
 - [ ] **Step 1: Run the full tree search test suite**

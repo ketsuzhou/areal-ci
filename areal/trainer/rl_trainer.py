@@ -369,10 +369,14 @@ class PPOTrainer:
         )
 
         self._config_perf_tracer()
-        logger.info("Applying initial offload policy: rollout=%s, ref=%s, critic=%s, teacher=%s, actor=%s",
-                     self._should_offload_rollout, self._should_offload_ref,
-                     self._should_offload_critic, self._should_offload_teacher,
-                     self._should_offload_actor)
+        logger.info(
+            "Applying initial offload policy: rollout=%s, ref=%s, critic=%s, teacher=%s, actor=%s",
+            self._should_offload_rollout,
+            self._should_offload_ref,
+            self._should_offload_critic,
+            self._should_offload_teacher,
+            self._should_offload_actor,
+        )
         self._apply_initial_offload_policy()
         logger.info("PPOTrainer __init__ complete, ready for train()")
 
@@ -543,8 +547,11 @@ class PPOTrainer:
         logger.info(
             "train() called: start_step=%d, max_steps=%d, steps_per_epoch=%d, "
             "workflow=%s, _requires_proxy=%s",
-            start_step, max_steps, steps_per_epoch,
-            workflow, self._requires_proxy_workflow(workflow) if workflow else "N/A",
+            start_step,
+            max_steps,
+            steps_per_epoch,
+            workflow,
+            self._requires_proxy_workflow(workflow) if workflow else "N/A",
         )
 
         # Initialize proxy workers if not using RolloutWorkflow
@@ -575,8 +582,11 @@ class PPOTrainer:
             logger.info(
                 "Training step %d (epoch=%d, epoch_step=%d): "
                 "offload_rollout=%s, offload_actor=%s",
-                global_step, epoch, step,
-                self._should_offload_rollout, self._should_offload_actor,
+                global_step,
+                epoch,
+                step,
+                self._should_offload_rollout,
+                self._should_offload_actor,
             )
 
             if self._should_offload_rollout:

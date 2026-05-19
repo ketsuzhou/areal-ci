@@ -92,7 +92,8 @@ class CacheAwarePPOTrainer(PPOTrainer):
         """Train with distill loss patch applied if needed."""
         logger.info(
             "CacheAwarePPOTrainer.train() called: workflow=%s, loss_mode=%s",
-            workflow, self.tree_backup_config.loss_mode.value,
+            workflow,
+            self.tree_backup_config.loss_mode.value,
         )
         if self.tree_backup_config.loss_mode != LossMode.GRPO:
             from customized_areal.tree_search.training.actor import (

@@ -108,8 +108,7 @@ async def selected_turn_to_position_rewards(
     engine: Any,
     teacher_top_k: int,
 ) -> list[PositionRewardInfo]:
-    """Convert one selected turn into position-level teacher rewards.
-    """
+    """Convert one selected turn into position-level teacher rewards."""
     prompt_ids, generation_ids = build_teacher_prompt_ids(node, guidance, tokenizer)
     if not generation_ids:
         return []
@@ -202,8 +201,7 @@ async def _recompute_student_topk(
     get_topk_logprobs = getattr(engine, "get_topk_logprobs", None)
     if get_topk_logprobs is None or not callable(get_topk_logprobs):
         raise NotImplementedError(
-            "topk_distill requires engine.get_topk_logprobs for missing "
-            "student top-k"
+            "topk_distill requires engine.get_topk_logprobs for missing student top-k"
         )
 
     maybe_topk = get_topk_logprobs(

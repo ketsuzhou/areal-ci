@@ -131,8 +131,6 @@ class TestBesselVariance:
         )
 
 
-
-
 class TestTurnIdx:
     """Feature: turn_idx field on Node for per-episode turn ordering."""
 
@@ -167,6 +165,7 @@ class TestTurnIdxInInteractionsToNodes:
         from customized_areal.tree_search.tree_search_grouped_workflow import (
             interactions_dict_to_nodes,
         )
+
         from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
         def make_interaction():
@@ -215,8 +214,6 @@ class TestTurnIdxInTensorDict:
         traj = _node_to_tensor_dict(node, "q1", 1)
         assert traj["_turn_idx_in_episode"] == 0
         assert traj["_num_turns_in_episode"] == 1
-
-
 
 
 class TestTurnIdxCheckpoint:

@@ -139,7 +139,9 @@ def get_tpfc_rl_dataset(
 
         # Extract query_id from extra_info (UUID generated at data prep time)
         extra_info = sample.get("extra_info", {})
-        query_id = extra_info.get("query_id", "") if isinstance(extra_info, dict) else ""
+        query_id = (
+            extra_info.get("query_id", "") if isinstance(extra_info, dict) else ""
+        )
 
         # Extract query text from the last user message after "<User Query>: ",
         # stripping any leading "<context>...</context>" prefix

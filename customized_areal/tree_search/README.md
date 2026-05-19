@@ -8,15 +8,17 @@ teacher model. It is a customization layer on top of AReaL's `PPOTrainer`.
 
 This system uses **two distinct tree concepts** that work together:
 
-1. **MCTS Tree Search** (`tree_search/`): Organizes rollouts into a tree structure for caching,
-   advantage computation, and episode management. Each `Node` represents one turn with parent-child
-   relationships.
+1. **MCTS Tree Search** (`tree_search/`): Organizes rollouts into a tree structure for
+   caching, advantage computation, and episode management. Each `Node` represents one
+   turn with parent-child relationships.
 
-2. **Tree Attention (Trie Packing)** (`areal/models/tree_attn/`): Packs sequences with shared
-   prefixes into a compressed trie (`TrieNode`) for efficient attention computation during training.
-   Shared prefix tokens are computed only once, dramatically reducing training cost.
+1. **Tree Attention (Trie Packing)** (`areal/models/tree_attn/`): Packs sequences with
+   shared prefixes into a compressed trie (`TrieNode`) for efficient attention
+   computation during training. Shared prefix tokens are computed only once,
+   dramatically reducing training cost.
 
 These two trees are **unrelated data structures** that operate at different layers:
+
 - **MCTS Tree** is a logical structure for RL (episodes, turns, rewards)
 - **Trie** is a physical packing structure for efficient transformer attention
 
@@ -81,24 +83,24 @@ These two trees are **unrelated data structures** that operate at different laye
 
 Dataclasses controlling tree backup, caching, and advantage computation.
 
-| Class                | Field                 | Type            | Default | Description                             |
-| -------------------- | --------------------- | --------------- | ------- | --------------------------------------- |
-| `TreeBackupConfig`   | `mode`                | `CacheMode`     | `OFF`   | Controls when/how tree backup activates |
-|                      | `checkpoint_dir`      | `str`           | `""`    | Directory for MCTS tree checkpoints     |
-|                      | `advantage_mode`      | `AdvantageMode` | `TREE`  | TREE (Q-values) or GAE advantages       |
-|                      | `loss_mode`           | `LossMode`      | `GRPO`  | GRPO, DISTILL, or BOTH                  |
-|                      | `rl_loss_weight`      | `float`         | `1.0`   | Weight for RL loss in BOTH mode         |
-|                      | `distill_loss_weight` | `float`         | `0.005` | Weight for distillation loss            |
-|                      | `topk_distill`        | `bool`          | `False` | Use top-k distillation                  |
-|                      | `teacher_provider`    | `str`           | `"external"` | Teacher provider type             |
-|                      | `teacher_base_url`    | `str`           | `"http://localhost:8001"` | Teacher API endpoint   |
-|                      | `teacher_model_name`  | `str`           | `""`    | Teacher model identifier                |
-|                      | `teacher_top_k`       | `int`           | `10`    | Top-k tokens from teacher               |
-|                      | `teacher_max_retries` | `int`           | `3`     | Max retries for teacher requests        |
-|                      | `teacher_timeout`     | `float`         | `60.0`  | Timeout for teacher requests            |
-| `RolloutCacheConfig` | `cache_dir`           | `str`           | `""`    | Directory for rollout cache             |
-|                      | `enabled`             | `bool`          | `True`  | Enable/disable caching                  |
-|                      | `n_samples`           | `int`           | `1`     | Number of rollout samples per prompt    |
+| Class                | Field                 | Type            | Default                   | Description                             |
+| -------------------- | --------------------- | --------------- | ------------------------- | --------------------------------------- |
+| `TreeBackupConfig`   | `mode`                | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates |
+|                      | `checkpoint_dir`      | `str`           | `""`                      | Directory for MCTS tree checkpoints     |
+|                      | `advantage_mode`      | `AdvantageMode` | `TREE`                    | TREE (Q-values) or GAE advantages       |
+|                      | `loss_mode`           | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                  |
+|                      | `rl_loss_weight`      | `float`         | `1.0`                     | Weight for RL loss in BOTH mode         |
+|                      | `distill_loss_weight` | `float`         | `0.005`                   | Weight for distillation loss            |
+|                      | `topk_distill`        | `bool`          | `False`                   | Use top-k distillation                  |
+|                      | `teacher_provider`    | `str`           | `"external"`              | Teacher provider type                   |
+|                      | `teacher_base_url`    | `str`           | `"http://localhost:8001"` | Teacher API endpoint                    |
+|                      | `teacher_model_name`  | `str`           | `""`                      | Teacher model identifier                |
+|                      | `teacher_top_k`       | `int`           | `10`                      | Top-k tokens from teacher               |
+|                      | `teacher_max_retries` | `int`           | `3`                       | Max retries for teacher requests        |
+|                      | `teacher_timeout`     | `float`         | `60.0`                    | Timeout for teacher requests            |
+| `RolloutCacheConfig` | `cache_dir`           | `str`           | `""`                      | Directory for rollout cache             |
+|                      | `enabled`             | `bool`          | `True`                    | Enable/disable caching                  |
+|                      | `n_samples`           | `int`           | `1`                       | Number of rollout samples per prompt    |
 
 **`CacheMode`** values:
 
@@ -197,13 +199,13 @@ Handles Node objects directly, setting attributes on the Node dataclass.
 
 Serializes/deserializes the full MCTS tree state to disk.
 
-| Method                              | Description                                                                                                                   |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Method                              | Description                                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `save(tree_store)`                  | Save per-query trajectory records as `query_{sanitized_id}.json` + `metadata.json` (node_id indices, MCTS stats, trained flags, rewards) |
-| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                                         |
-| `exists()`                          | Check if a checkpoint directory exists                                                                                        |
-| `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                                      |
-| `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                                    |
+| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                                                    |
+| `exists()`                          | Check if a checkpoint directory exists                                                                                                   |
+| `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                                                 |
+| `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                                               |
 
 ### 5. Tree Search Grouped Rollout Workflow (`tree_search_grouped_workflow.py`)
 
@@ -219,31 +221,39 @@ to provide tree-search-aware rollout with cache reuse.
 
 **Per-episode flow (`arun_episode`):**
 
-1. **Check cache**: Count untrained episodes for the query via `tree_store.get_untrained_count()`
-2. **Generate fresh episodes** if needed: Run `group_size - cached_count` parallel rollouts via `asyncio.gather`
-3. **Convert results to Nodes**: `interactions_dict_to_nodes()` converts `InteractionWithTokenLogpReward` objects to `list[Node]`
-4. **Load cached nodes**: `tree_store.load_trajectories(query_id, cached_count)`
-5. **Teacher model reward computation** (if `loss_mode != GRPO`):
+1. **Check cache**: Count untrained episodes for the query via
+   `tree_store.get_untrained_count()`
+1. **Generate fresh episodes** if needed: Run `group_size - cached_count` parallel
+   rollouts via `asyncio.gather`
+1. **Convert results to Nodes**: `interactions_dict_to_nodes()` converts
+   `InteractionWithTokenLogpReward` objects to `list[Node]`
+1. **Load cached nodes**: `tree_store.load_trajectories(query_id, cached_count)`
+1. **Teacher model reward computation** (if `loss_mode != GRPO`):
    - Load tokenizer from `tokenizer_path`
    - Build teacher provider (external API or engine-based)
-   - For each episode, diagnose to find turns needing improvement (`provider.diagnose_episode()`)
-   - For selected turns, get teacher logprobs for candidate tokens (`selected_turn_to_position_rewards()`)
-   - Build `PositionRewardInfo` with `candidate_token_ids`, `teacher_logprobs`, and `rewards`
+   - For each episode, diagnose to find turns needing improvement
+     (`provider.diagnose_episode()`)
+   - For selected turns, get teacher logprobs for candidate tokens
+     (`selected_turn_to_position_rewards()`)
+   - Build `PositionRewardInfo` with `candidate_token_ids`, `teacher_logprobs`, and
+     `rewards`
    - Store distillation data in `node.distill_reward` and `node.teacher_logp`
-6. **Combine**: Merge fresh and cached nodes (total = group_size)
-7. **Insert fresh nodes**: `tree_store.insert_batch(fresh_nodes)`
-8. **Compute tree advantages**: `tree_advantage_computer.compute(all_nodes)` (TREE mode)
-9. **Mark trained**: Set trained flags for all nodes
-10. **Save checkpoint**: `tree_checkpoint_manager.save()` (CROSS_TRAINING mode)
-11. **Convert to tensor dict**: `_nodes_to_batched_tensor_dict()` converts `list[Node]` to batched tensor dict
-12. **Inject distill weights**: Set `rl_loss_weight`, `distill_loss_weight`, and `position_rewards` if loss_mode != GRPO
+1. **Combine**: Merge fresh and cached nodes (total = group_size)
+1. **Insert fresh nodes**: `tree_store.insert_batch(fresh_nodes)`
+1. **Compute tree advantages**: `tree_advantage_computer.compute(all_nodes)` (TREE mode)
+1. **Mark trained**: Set trained flags for all nodes
+1. **Save checkpoint**: `tree_checkpoint_manager.save()` (CROSS_TRAINING mode)
+1. **Convert to tensor dict**: `_nodes_to_batched_tensor_dict()` converts `list[Node]`
+   to batched tensor dict
+1. **Inject distill weights**: Set `rl_loss_weight`, `distill_loss_weight`, and
+   `position_rewards` if loss_mode != GRPO
 
 **Utility functions:**
 
-| Function                          | Description                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------- |
-| `interactions_dict_to_nodes()`    | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]`         |
-| `_nodes_to_batched_tensor_dict()` | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`     |
+| Function                          | Description                                                             |
+| --------------------------------- | ----------------------------------------------------------------------- |
+| `interactions_dict_to_nodes()`    | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]`     |
+| `_nodes_to_batched_tensor_dict()` | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors` |
 
 ### 6. Trainer (`trainer.py`)
 
@@ -267,60 +277,67 @@ PPO trainer with tree-search-aware rollout support. Extends `PPOTrainer` directl
 
 **`train()`:**
 
-- When `loss_mode != GRPO`: Applies distill loss patch, calls `super().train()`, restores patch in `finally`
+- When `loss_mode != GRPO`: Applies distill loss patch, calls `super().train()`,
+  restores patch in `finally`
 - Otherwise: Delegates to `super().train()`
 
 ### 7. Tree Attention (Trie Packing)
 
 The `areal/models/tree_attn/` module provides efficient attention for sequences with
-shared prefixes. This is **independent** of the MCTS tree but is used during training
-to compute attention efficiently.
+shared prefixes. This is **independent** of the MCTS tree but is used during training to
+compute attention efficiently.
 
 #### How It Works
 
 1. **Build Trie**: `build_packed_tree_batch()` in `tree.py` takes multiple sequences and
-   builds a compressed trie (`TrieNode`) where sequences with shared prefixes share nodes.
+   builds a compressed trie (`TrieNode`) where sequences with shared prefixes share
+   nodes.
 
-2. **Pack Inputs**: Sequences are packed into a single tensor where shared prefix tokens
+1. **Pack Inputs**: Sequences are packed into a single tensor where shared prefix tokens
    appear only once. Each token's position IDs are computed from the tree structure.
 
-3. **Tree Attention Mask**: A custom attention mask is built where each token can only
-   attend to its ancestors in the trie (causal + tree structure). This is represented as:
+1. **Tree Attention Mask**: A custom attention mask is built where each token can only
+   attend to its ancestors in the trie (causal + tree structure). This is represented
+   as:
+
    - `tree_triton_data` for Triton kernel (fast path)
    - `tree_block_mask` (BlockMask) for PyTorch flex attention
 
-4. **Forward Pass**: In `FSDPEngine.forward_backward_batch()`, tree attention kwargs are
+1. **Forward Pass**: In `FSDPEngine.forward_backward_batch()`, tree attention kwargs are
    injected into model inputs:
+
    ```python
    tree_kwargs = build_tree_attn_kwargs(ctx.trie_node, padded_size, self.device)
    inputs.update(tree_kwargs)
    ```
 
-5. **Tree Attention Function**: `_tree_attn_fwd_func()` in `module_fsdp.py` handles the
+1. **Tree Attention Function**: `_tree_attn_fwd_func()` in `module_fsdp.py` handles the
    actual attention computation:
+
    - Triton path: Custom kernel with O(1) memory for tree attention
    - Flex Attention path: Uses BlockMask with PyTorch's compiled flex_attention
 
 #### Key Data Structures
 
-| Class/Function | Purpose |
-| -------------- | ------- |
-| `TrieNode` | Compressed trie node with token sequences, sequence IDs, children |
-| `build_packed_tree_batch()` | Main entry point: packs batch into trie structure |
-| `build_tree_attn_kwargs()` | Builds kwargs for model forward (selects Triton or Flex) |
-| `build_block_mask_from_trie()` | Creates BlockMask for flex attention |
-| `build_triton_attn_data_from_trie()` | Precomputes Triton kernel data structures |
-| `gather_packed_tree_logprobs()` | Computes logprobs respecting tree structure (shared prefix caching) |
-| `gather_packed_tree_logprobs_entropy()` | Computes logprobs + entropy for tree-packed sequences |
-| `patch_fsdp_for_tree_training()` | Monkey-patches FSDP attention to use tree attention |
+| Class/Function                          | Purpose                                                             |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| `TrieNode`                              | Compressed trie node with token sequences, sequence IDs, children   |
+| `build_packed_tree_batch()`             | Main entry point: packs batch into trie structure                   |
+| `build_tree_attn_kwargs()`              | Builds kwargs for model forward (selects Triton or Flex)            |
+| `build_block_mask_from_trie()`          | Creates BlockMask for flex attention                                |
+| `build_triton_attn_data_from_trie()`    | Precomputes Triton kernel data structures                           |
+| `gather_packed_tree_logprobs()`         | Computes logprobs respecting tree structure (shared prefix caching) |
+| `gather_packed_tree_logprobs_entropy()` | Computes logprobs + entropy for tree-packed sequences               |
+| `patch_fsdp_for_tree_training()`        | Monkey-patches FSDP attention to use tree attention                 |
 
 #### Tree Logprob Gathering
 
-For tree-packed sequences, standard rolling of `input_ids` doesn't work because sequences
-share prefixes. The `functional.py` module provides tree-aware logprob computation:
+For tree-packed sequences, standard rolling of `input_ids` doesn't work because
+sequences share prefixes. The `functional.py` module provides tree-aware logprob
+computation:
 
-- `_gather_packed_tree_logprobs()`: Computes logprobs for all sequences with **node-level caching**
-  (shared prefix logprobs are computed once and reused)
+- `_gather_packed_tree_logprobs()`: Computes logprobs for all sequences with
+  **node-level caching** (shared prefix logprobs are computed once and reused)
 - `_compute_internal_node_logprobs()`: Logprobs within a single trie node
 - `_compute_transition_logprob()`: Logprobs for transitions between nodes
 - `gather_packed_tree_vocab_stats()`: Vocab min/max logits for tree-packed sequences
@@ -336,14 +353,14 @@ share prefixes. The `functional.py` module provides tree-aware logprob computati
 
 #### `core/` — On-Policy Distillation Core
 
-| File                     | Purpose                                                            |
-| ------------------------ | ------------------------------------------------------------------ |
-| `core/config.py`         | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`      |
-| `core/agent.py`          | `OnPolicyDistillAgent` — agent class for distillation training     |
-| `core/reward_compute.py` | `_compute_token_rewards()` — student vs teacher logprob comparison |
-| `core/teacher_client.py` | `TeacherClient` — async client for remote teacher model inference  |
-| `core/teacher_provider.py` | `TeacherProvider` — abstraction for teacher logprob sources        |
-| `core/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards |
+| File                            | Purpose                                                            |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `core/config.py`                | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`      |
+| `core/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training     |
+| `core/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison |
+| `core/teacher_client.py`        | `TeacherClient` — async client for remote teacher model inference  |
+| `core/teacher_provider.py`      | `TeacherProvider` — abstraction for teacher logprob sources        |
+| `core/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards       |
 
 #### `engine/` — Multi-Candidate Engine
 
@@ -380,8 +397,7 @@ share prefixes. The `functional.py` module provides tree-aware logprob computati
    - For each position with teacher logprobs: `student_logp - teacher_logp`
    - Mean over all positions and candidates
    - Added to the actor loss with weight `distill_loss_weight`
-1. Combined loss:
-   `rl_loss_weight * grpo_loss + distill_loss_weight * teacher_kl_loss`
+1. Combined loss: `rl_loss_weight * grpo_loss + distill_loss_weight * teacher_kl_loss`
 
 ## Data Flow
 
@@ -456,47 +472,51 @@ share prefixes. The `functional.py` module provides tree-aware logprob computati
 
 Key metadata fields attached to trajectory dicts throughout the pipeline:
 
-| Field      | Attached by                               | Type  | Used by                                         |
-| ---------- | ----------------------------------------- | ----- | ----------------------------------------------- |
-| `query_id` | `TreeSearchGroupedRolloutWorkflow`        | `str` | Tree lookup, cache splitting, advantage compute |
-| `node_id`  | `insert_batch()` / inference engine       | `str` | Advantage lookup, mark trained                  |
-| `position_rewards` | `TreeSearchGroupedRolloutWorkflow` | `list[PositionRewardInfo]` | Multi-candidate logprob computation |
-| `distill_loss_weight` | `TreeSearchGroupedRolloutWorkflow` | `float` | Weight for teacher KL loss |
-| `rl_loss_weight` | `TreeSearchGroupedRolloutWorkflow` | `float` | Weight for GRPO loss |
+| Field                 | Attached by                         | Type                       | Used by                                         |
+| --------------------- | ----------------------------------- | -------------------------- | ----------------------------------------------- |
+| `query_id`            | `TreeSearchGroupedRolloutWorkflow`  | `str`                      | Tree lookup, cache splitting, advantage compute |
+| `node_id`             | `insert_batch()` / inference engine | `str`                      | Advantage lookup, mark trained                  |
+| `position_rewards`    | `TreeSearchGroupedRolloutWorkflow`  | `list[PositionRewardInfo]` | Multi-candidate logprob computation             |
+| `distill_loss_weight` | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for teacher KL loss                      |
+| `rl_loss_weight`      | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for GRPO loss                            |
 
 ## How Distillation Works with Tree Attention
 
 When distillation is enabled (`loss_mode` = `DISTILL` or `BOTH`), the system combines
 tree attention efficiency with teacher supervision:
 
-1. **Episode Generation**: The workflow generates episodes and stores them as `Node` objects
-   in the MCTS tree.
+1. **Episode Generation**: The workflow generates episodes and stores them as `Node`
+   objects in the MCTS tree.
 
-2. **Teacher Diagnosis**: For each episode, a teacher model (or external API) diagnoses
+1. **Teacher Diagnosis**: For each episode, a teacher model (or external API) diagnoses
    which turns need improvement and provides guidance.
 
-3. **Selected-Turn Distillation**: For selected turns:
+1. **Selected-Turn Distillation**: For selected turns:
+
    - Builds teacher prompt with guidance
    - Gets teacher logprobs for candidate tokens at each position
-   - Creates `PositionRewardInfo` with `candidate_token_ids`, `teacher_logprobs`, and `rewards`
+   - Creates `PositionRewardInfo` with `candidate_token_ids`, `teacher_logprobs`, and
+     `rewards`
 
-4. **Tree Packing**: During training, sequences are packed into a trie for efficient
+1. **Tree Packing**: During training, sequences are packed into a trie for efficient
    attention. The `TrieNode` structure ensures shared prefixes are computed only once.
 
-5. **Multi-Candidate Logprobs**: The engine computes logprobs for **all candidate tokens**
-   (not just the chosen one) at each position using `gather_logprobs_entropy_multi_candidates()`.
-   This is necessary for the distillation loss which needs logprobs for all candidates.
+1. **Multi-Candidate Logprobs**: The engine computes logprobs for **all candidate
+   tokens** (not just the chosen one) at each position using
+   `gather_logprobs_entropy_multi_candidates()`. This is necessary for the distillation
+   loss which needs logprobs for all candidates.
 
-6. **Tree-Aware Logprob Gathering**: For tree-packed sequences, logprobs are gathered
+1. **Tree-Aware Logprob Gathering**: For tree-packed sequences, logprobs are gathered
    respecting the trie structure via `gather_packed_tree_logprobs()` in `functional.py`.
    Shared prefix logprobs are cached and reused across sequences.
 
-7. **Combined Loss**: The loss function combines:
+1. **Combined Loss**: The loss function combines:
+
    - **GRPO loss**: Standard policy gradient on chosen tokens
    - **Teacher KL loss**: `mean(student_logp - teacher_logp)` for all candidates,
      weighted by `distill_loss_weight`
 
-8. **Tree Attention in Forward**: During the forward pass, tree attention metadata
+1. **Tree Attention in Forward**: During the forward pass, tree attention metadata
    (`tree_triton_data` or `tree_block_mask`) is injected into the model inputs, allowing
    the transformer to attend according to the trie structure.
 
@@ -590,24 +610,24 @@ See [BUGS.md](BUGS.md) for a list of known bugs and their recommended fixes.
 
 ## File Index
 
-| File                          | Purpose                                                                            |
-| ----------------------------- | ---------------------------------------------------------------------------------- |
-| `__init__.py`                 | Public API exports and lazy imports for distillation components                    |
-| `config.py`                   | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode` |
-| `mcts_tree_store.py`          | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics               |
-| `advantage.py`                | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                  |
-| `checkpoint.py`               | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                 |
-| `trainer.py`                  | `CacheAwarePPOTrainer` — PPO trainer with distillation engine support              |
-| `tree_search_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops |
-| `distill_types.py`            | `PositionRewardInfo`, `InteractionWithTokenLevelReward`                            |
-| `core/config.py`              | `OnPolicyDistillConfig`, `AgentConfig`                                             |
-| `core/agent.py`               | `OnPolicyDistillAgent` — agent for distillation training                           |
-| `core/reward_compute.py`      | Student vs teacher logprob reward computation                                      |
-| `core/teacher_client.py`      | `TeacherClient` — async teacher model inference client                             |
-| `core/teacher_provider.py`    | `TeacherProvider` — abstraction for teacher logprob sources                        |
-| `core/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                   |
-| `engine/fsdp_engine.py`       | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                     |
-| `engine/actor.py`             | `MultiCandidateFSDPPPOActor` — PPO actor for distillation                          |
-| `training/loss.py`            | `grpo_distill_loss_fn` — combined GRPO + distillation loss                         |
-| `training/actor.py`           | Patch to use distillation loss in PPOActor                                         |
-| `training/logprobs.py`        | Multi-candidate logprob/entropy gathering utilities                                |
+| File                              | Purpose                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| `__init__.py`                     | Public API exports and lazy imports for distillation components                    |
+| `config.py`                       | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode` |
+| `mcts_tree_store.py`              | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics               |
+| `advantage.py`                    | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                  |
+| `checkpoint.py`                   | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                 |
+| `trainer.py`                      | `CacheAwarePPOTrainer` — PPO trainer with distillation engine support              |
+| `tree_search_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops     |
+| `distill_types.py`                | `PositionRewardInfo`, `InteractionWithTokenLevelReward`                            |
+| `core/config.py`                  | `OnPolicyDistillConfig`, `AgentConfig`                                             |
+| `core/agent.py`                   | `OnPolicyDistillAgent` — agent for distillation training                           |
+| `core/reward_compute.py`          | Student vs teacher logprob reward computation                                      |
+| `core/teacher_client.py`          | `TeacherClient` — async teacher model inference client                             |
+| `core/teacher_provider.py`        | `TeacherProvider` — abstraction for teacher logprob sources                        |
+| `core/selected_turn_distill.py`   | Diagnoses episodes and builds position-level teacher rewards                       |
+| `engine/fsdp_engine.py`           | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                     |
+| `engine/actor.py`                 | `MultiCandidateFSDPPPOActor` — PPO actor for distillation                          |
+| `training/loss.py`                | `grpo_distill_loss_fn` — combined GRPO + distillation loss                         |
+| `training/actor.py`               | Patch to use distillation loss in PPOActor                                         |
+| `training/logprobs.py`            | Multi-candidate logprob/entropy gathering utilities                                |

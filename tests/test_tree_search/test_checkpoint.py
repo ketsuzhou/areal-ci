@@ -1,11 +1,11 @@
+import itertools
+
 from customized_areal.tree_search.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.mcts_tree_store import (
     MCTSTreeStore,
     Node,
     _find_turn_boundaries,
 )
-
-import itertools
 
 _node_id_counter = itertools.count(1)
 
@@ -194,9 +194,7 @@ class TestTreeCheckpointManager:
         manager = TreeCheckpointManager(str(tmp_path))
         store = MCTSTreeStore()
         uuid_qid = "a7143270374d4eeab8ad5f4716475e28"
-        node = _make_node(
-            [1, 2, 3], [0, 0, 1], reward=1.0, query_id=uuid_qid
-        )
+        node = _make_node([1, 2, 3], [0, 0, 1], reward=1.0, query_id=uuid_qid)
         store.insert_batch([node])
         manager.save(store)
 
@@ -304,14 +302,24 @@ class TestTrainedEpisodesRestoreIntegration:
         store = MCTSTreeStore()
         store.current_train_id = "run_001"
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="n1", episode_id="ep_1", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="n1",
+            episode_id="ep_1",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="n2", episode_id="ep_2", outcome_reward=0.5, query_id="q2",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="n2",
+            episode_id="ep_2",
+            outcome_reward=0.5,
+            query_id="q2",
         )
         store.insert_batch([n1, n2])
         store.set_trained(n1.node_id, True)
@@ -322,14 +330,24 @@ class TestTrainedEpisodesRestoreIntegration:
         fresh_store = MCTSTreeStore()
         fresh_store.current_train_id = "run_001"
         fresh_n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[0, 0, 0],
-            node_id="fn1", episode_id="ep_1", outcome_reward=1.0, query_id="q1",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[0, 0, 0],
+            node_id="fn1",
+            episode_id="ep_1",
+            outcome_reward=1.0,
+            query_id="q1",
         )
         fresh_n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[0, 0, 0],
-            node_id="fn2", episode_id="ep_2", outcome_reward=0.5, query_id="q2",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[0, 0, 0],
+            node_id="fn2",
+            episode_id="ep_2",
+            outcome_reward=0.5,
+            query_id="q2",
         )
         fresh_store.insert_batch([fresh_n1, fresh_n2])
 

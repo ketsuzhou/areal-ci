@@ -1,24 +1,34 @@
 # Episode-Aware cached_count and Advantage Normalization Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the semantic mismatch where `cached_count` counts untrained nodes instead of untrained episodes, and change `TreeAdvantageComputer.compute()` to normalize per-episode instead of per-node.
+**Goal:** Fix the semantic mismatch where `cached_count` counts untrained nodes instead
+of untrained episodes, and change `TreeAdvantageComputer.compute()` to normalize
+per-episode instead of per-node.
 
-**Architecture:** Add two episode-aware methods to `MCTSTreeStore` that derive episode grouping from existing `episode_id` attributes on Nodes. Rewrite `TreeAdvantageComputer.compute()` to group by `(query_id, episode_id)`. Update the workflow to call the new episode-aware methods.
+**Architecture:** Add two episode-aware methods to `MCTSTreeStore` that derive episode
+grouping from existing `episode_id` attributes on Nodes. Rewrite
+`TreeAdvantageComputer.compute()` to group by `(query_id, episode_id)`. Update the
+workflow to call the new episode-aware methods.
 
 **Tech Stack:** Python 3.12+, PyTorch, pytest
 
----
+______________________________________________________________________
 
 ### Task 1: Add `get_untrained_episode_count` to MCTSTreeStore
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:307-314`
+
 - Test: `tests/test_tree_search/test_mcts_tree_store.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_tree_search/test_mcts_tree_store.py` after `TestMCTSTreeStoreTrainId`:
+Add to `tests/test_tree_search/test_mcts_tree_store.py` after
+`TestMCTSTreeStoreTrainId`:
 
 ```python
 class TestGetUntrainedEpisodeCount:
@@ -116,12 +126,15 @@ class TestGetUntrainedEpisodeCount:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestGetUntrainedEpisodeCount -v`
-Expected: FAIL with `AttributeError: 'MCTSTreeStore' object has no attribute 'get_untrained_episode_count'`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestGetUntrainedEpisodeCount -v`
+Expected: FAIL with
+`AttributeError: 'MCTSTreeStore' object has no attribute 'get_untrained_episode_count'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add to `customized_areal/tree_search/mcts_tree_store.py` after `get_untrained_count` (line 314):
+Add to `customized_areal/tree_search/mcts_tree_store.py` after `get_untrained_count`
+(line 314):
 
 ```python
     def get_untrained_episode_count(self, query_id: str) -> int:
@@ -154,7 +167,8 @@ Add to `customized_areal/tree_search/mcts_tree_store.py` after `get_untrained_co
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestGetUntrainedEpisodeCount -v`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestGetUntrainedEpisodeCount -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -164,17 +178,20 @@ git add customized_areal/tree_search/mcts_tree_store.py tests/test_tree_search/t
 git commit -m "feat: add get_untrained_episode_count to MCTSTreeStore"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Add `load_untrained_episodes` to MCTSTreeStore
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py`
+
 - Test: `tests/test_tree_search/test_mcts_tree_store.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_tree_search/test_mcts_tree_store.py` after `TestGetUntrainedEpisodeCount`:
+Add to `tests/test_tree_search/test_mcts_tree_store.py` after
+`TestGetUntrainedEpisodeCount`:
 
 ```python
 class TestLoadUntrainedEpisodes:
@@ -278,12 +295,15 @@ class TestLoadUntrainedEpisodes:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestLoadUntrainedEpisodes -v`
-Expected: FAIL with `AttributeError: 'MCTSTreeStore' object has no attribute 'load_untrained_episodes'`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestLoadUntrainedEpisodes -v`
+Expected: FAIL with
+`AttributeError: 'MCTSTreeStore' object has no attribute 'load_untrained_episodes'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add to `customized_areal/tree_search/mcts_tree_store.py` after `get_untrained_episode_count`:
+Add to `customized_areal/tree_search/mcts_tree_store.py` after
+`get_untrained_episode_count`:
 
 ```python
     def load_untrained_episodes(self, query_id: str, n_episodes: int) -> list[Node]:
@@ -336,7 +356,8 @@ Add to `customized_areal/tree_search/mcts_tree_store.py` after `get_untrained_ep
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestLoadUntrainedEpisodes -v`
+Run:
+`uv run pytest tests/test_tree_search/test_mcts_tree_store.py::TestLoadUntrainedEpisodes -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -346,12 +367,14 @@ git add customized_areal/tree_search/mcts_tree_store.py tests/test_tree_search/t
 git commit -m "feat: add load_untrained_episodes to MCTSTreeStore"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Rewrite `TreeAdvantageComputer.compute()` for episode-level normalization
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/advantage.py:35-86`
+
 - Test: `tests/test_tree_search/test_advantage.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -445,12 +468,15 @@ class TestTreeAdvantageComputerEpisodeLevel:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerEpisodeLevel -v`
-Expected: FAIL — current `compute()` normalizes per-node, so `n1.advantages[2]` will not equal `n2.advantages[2]` for nodes in the same episode
+Run:
+`uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerEpisodeLevel -v`
+Expected: FAIL — current `compute()` normalizes per-node, so `n1.advantages[2]` will not
+equal `n2.advantages[2]` for nodes in the same episode
 
 - [ ] **Step 3: Rewrite `compute()` implementation**
 
-Replace the body of `TreeAdvantageComputer.compute()` in `customized_areal/tree_search/advantage.py` (lines 35-86) with:
+Replace the body of `TreeAdvantageComputer.compute()` in
+`customized_areal/tree_search/advantage.py` (lines 35-86) with:
 
 ```python
     def compute(self, trajectories: list[Node]) -> None:
@@ -515,13 +541,16 @@ Replace the body of `TreeAdvantageComputer.compute()` in `customized_areal/tree_
 
 - [ ] **Step 4: Run the new episode-level tests**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerEpisodeLevel -v`
+Run:
+`uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerEpisodeLevel -v`
 Expected: PASS
 
 - [ ] **Step 5: Run existing advantage tests to verify backward compatibility**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py -v`
-Expected: All existing `TestTreeAdvantageComputer` tests still PASS. Key: the single-node tests use `_make_node` which does not set `episode_id`, so `ep_id` falls back to `node_id` — each node becomes its own "episode", preserving the old behavior.
+Run: `uv run pytest tests/test_tree_search/test_advantage.py -v` Expected: All existing
+`TestTreeAdvantageComputer` tests still PASS. Key: the single-node tests use
+`_make_node` which does not set `episode_id`, so `ep_id` falls back to `node_id` — each
+node becomes its own "episode", preserving the old behavior.
 
 - [ ] **Step 6: Commit**
 
@@ -530,11 +559,12 @@ git add customized_areal/tree_search/advantage.py tests/test_tree_search/test_ad
 git commit -m "feat: episode-level GRPO normalization in TreeAdvantageComputer"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Update workflow to use episode-aware methods
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:299-341`
 
 - [ ] **Step 1: Update `arun_episode` to use episode-aware methods**
@@ -542,6 +572,7 @@ git commit -m "feat: episode-level GRPO normalization in TreeAdvantageComputer"
 In `customized_areal/tree_search/tree_search_grouped_workflow.py`, change lines 300-302:
 
 From:
+
 ```python
         cached_count = (
             self.tree_store.get_untrained_count(query_id) if query_id else 0
@@ -549,6 +580,7 @@ From:
 ```
 
 To:
+
 ```python
         cached_count = (
             self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
@@ -558,6 +590,7 @@ To:
 Change lines 339-341:
 
 From:
+
 ```python
         if cached_count > 0 and query_id:
             cached_nodes = self.tree_store.load_trajectories(
@@ -566,6 +599,7 @@ From:
 ```
 
 To:
+
 ```python
         if cached_count > 0 and query_id:
             cached_nodes = self.tree_store.load_untrained_episodes(
@@ -575,13 +609,11 @@ To:
 
 - [ ] **Step 2: Run the full test suite for tree_search**
 
-Run: `uv run pytest tests/test_tree_search/ -v`
-Expected: All tests PASS
+Run: `uv run pytest tests/test_tree_search/ -v` Expected: All tests PASS
 
 - [ ] **Step 3: Run pre-commit**
 
-Run: `pre-commit run --all-files`
-Expected: All checks PASS
+Run: `pre-commit run --all-files` Expected: All checks PASS
 
 - [ ] **Step 4: Commit**
 
@@ -590,18 +622,21 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py
 git commit -m "feat: use episode-aware caching in TreeSearchGroupedWorkflow"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Update docstrings and class-level docs
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:183-191`
 
 - [ ] **Step 1: Update the class docstring**
 
-In `customized_areal/tree_search/tree_search_grouped_workflow.py`, change the class docstring (lines 183-191):
+In `customized_areal/tree_search/tree_search_grouped_workflow.py`, change the class
+docstring (lines 183-191):
 
 From:
+
 ```python
     """GroupedRolloutWorkflow with tree-search cache reuse, tree ops, and checkpoint.
 
@@ -619,6 +654,7 @@ From:
 ```
 
 To:
+
 ```python
     """GroupedRolloutWorkflow with tree-search cache reuse, tree ops, and checkpoint.
 
@@ -638,11 +674,13 @@ To:
 Also update the module docstring (line 8):
 
 From:
+
 ```python
 - Does per-query cache lookup to determine how many fresh episodes are needed
 ```
 
 To:
+
 ```python
 - Does per-query cache lookup to determine how many fresh episodes are needed (episode-level counting)
 ```

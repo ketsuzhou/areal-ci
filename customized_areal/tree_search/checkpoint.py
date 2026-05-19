@@ -186,7 +186,9 @@ class TreeCheckpointManager:
             topk_logp=data.get("topk_logp"),
             distill_reward=data.get("distill_reward"),
             teacher_logp=data.get("teacher_logp"),
-            guidance={int(k): v for k, v in data.get("guidance", {}).items()} if data.get("guidance") else None,
+            guidance={int(k): v for k, v in data.get("guidance", {}).items()}
+            if data.get("guidance")
+            else None,
         )
 
     @staticmethod

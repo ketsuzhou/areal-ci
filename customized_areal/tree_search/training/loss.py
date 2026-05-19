@@ -216,11 +216,11 @@ def _compute_teacher_kl_loss(
 
     terms = []
     mask = loss_mask.bool()
-    is_batched_single = logprobs.dim() == 2 and mask.dim() == 2 and logprobs.shape == mask.shape
+    is_batched_single = (
+        logprobs.dim() == 2 and mask.dim() == 2 and logprobs.shape == mask.shape
+    )
     is_batched_multi = (
-        logprobs.dim() == 3
-        and mask.dim() == 2
-        and logprobs.shape[:2] == mask.shape
+        logprobs.dim() == 3 and mask.dim() == 2 and logprobs.shape[:2] == mask.shape
     )
 
     for pr in position_rewards:
@@ -273,7 +273,9 @@ def _compute_teacher_kl_loss(
                 dtype=logprobs.dtype,
                 device=logprobs.device,
             ).detach()
-            terms.append(logprobs[pr.sample_index, position, :num_candidates] - teacher_t)
+            terms.append(
+                logprobs[pr.sample_index, position, :num_candidates] - teacher_t
+            )
             continue
 
         max_position = logprobs.shape[0]

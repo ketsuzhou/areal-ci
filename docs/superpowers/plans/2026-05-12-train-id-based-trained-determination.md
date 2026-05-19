@@ -1,18 +1,25 @@
 # train_id-based Trained Determination Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace boolean `_trained` flag with `train_id`-based comparison so a Node is "trained" only when its `train_id` matches the current run's.
+**Goal:** Replace boolean `_trained` flag with `train_id`-based comparison so a Node is
+"trained" only when its `train_id` matches the current run's.
 
-**Architecture:** Add `train_id` field to Node dataclass. MCTSTreeStore reads `current_train_id` from `TRAIN_ID` env var and compares `node.train_id == self.current_train_id` in all trained-check methods. Checkpoint serializes `train_id` per-node. Training script generates UUID and exports to env.
+**Architecture:** Add `train_id` field to Node dataclass. MCTSTreeStore reads
+`current_train_id` from `TRAIN_ID` env var and compares
+`node.train_id == self.current_train_id` in all trained-check methods. Checkpoint
+serializes `train_id` per-node. Training script generates UUID and exports to env.
 
 **Tech Stack:** Python 3.12+, dataclasses, json
 
----
+______________________________________________________________________
 
 ### Task 1: Add `train_id` field to Node dataclass
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:36-60`
 
 - [ ] **Step 1: Add `train_id` field to Node**
@@ -67,20 +74,24 @@ git add customized_areal/tree_search/mcts_tree_store.py
 git commit -m "feat: add train_id field to Node dataclass"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Replace `_trained` dict with `train_id`-based logic in MCTSTreeStore
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/mcts_tree_store.py:170-350`
 
 - [ ] **Step 1: Add `current_train_id` to `__init__` and remove `_trained`**
 
 In `MCTSTreeStore.__init__`, replace:
+
 ```python
 self._trained: dict[str, bool] = {}
 ```
+
 with:
+
 ```python
 self.current_train_id: str = os.environ.get("TRAIN_ID", "")
 ```
@@ -90,6 +101,7 @@ And add `import os` at the top of the file.
 - [ ] **Step 2: Rewrite `_insert_single` to remove `_trained[` references**
 
 In `_insert_single`, remove the line:
+
 ```python
 self._trained[node_id] = False
 ```
@@ -99,11 +111,14 @@ Nodes default `train_id=""` from the dataclass, so they are automatically "untra
 - [ ] **Step 3: Rewrite `set_trained`**
 
 Replace:
+
 ```python
 def set_trained(self, node_id: str, trained: bool = True) -> None:
     self._trained[node_id] = trained
 ```
+
 with:
+
 ```python
 def set_trained(self, node_id: str, trained: bool = True) -> None:
     """Stamp the node with current_train_id to mark it as trained."""
@@ -123,11 +138,14 @@ def set_trained(self, node_id: str, trained: bool = True) -> None:
 - [ ] **Step 4: Rewrite `is_trained`**
 
 Replace:
+
 ```python
 def is_trained(self, node_id: str) -> bool:
     return self._trained.get(node_id, False)
 ```
+
 with:
+
 ```python
 def is_trained(self, node_id: str) -> bool:
     """A node is trained if its train_id matches the current run's train_id."""
@@ -144,6 +162,7 @@ def is_trained(self, node_id: str) -> bool:
 - [ ] **Step 5: Rewrite `get_untrained_count`**
 
 Replace `self._trained.get(node_id, False)` with `not self.is_trained(node_id)`:
+
 ```python
 def get_untrained_count(self, query_id: str) -> int:
     if query_id not in self._query_node_ids:
@@ -158,6 +177,7 @@ def get_untrained_count(self, query_id: str) -> int:
 - [ ] **Step 6: Rewrite `get_untrained_node_ids`**
 
 Replace `self._trained.get(node_id, False)` with `not self.is_trained(node_id)`:
+
 ```python
 def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
     if query_id not in self._query_node_ids:
@@ -174,6 +194,7 @@ def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
 - [ ] **Step 7: Remove `reset_trained_flags` method**
 
 Delete the entire method:
+
 ```python
 def reset_trained_flags(self) -> None:
     for key in self._trained:
@@ -183,6 +204,7 @@ def reset_trained_flags(self) -> None:
 - [ ] **Step 8: Rewrite `mark_episodes_trained`**
 
 Replace the boolean-based logic with `train_id` stamping:
+
 ```python
 def mark_episodes_trained(self, episode_ids: set[str]) -> None:
     """Set train_id based on episode IDs.
@@ -212,6 +234,7 @@ def mark_episodes_trained(self, episode_ids: set[str]) -> None:
 - [ ] **Step 9: Update `clear` to remove `_trained` references**
 
 In `clear()`, remove the line:
+
 ```python
 self._trained.clear()
 ```
@@ -222,7 +245,8 @@ self._trained.clear()
 uv run pytest tests/test_tree_search/test_mcts_tree_store.py -v
 ```
 
-Expected: Some tests will fail because they test the old `_trained`-based behavior. That's expected — we'll update tests next.
+Expected: Some tests will fail because they test the old `_trained`-based behavior.
+That's expected — we'll update tests next.
 
 - [ ] **Step 11: Commit**
 
@@ -231,24 +255,31 @@ git add customized_areal/tree_search/mcts_tree_store.py
 git commit -m "feat: replace _trained dict with train_id-based comparison"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Update checkpoint serialization for `train_id`
 
 **Files:**
-- Modify: `customized_areal/tree_search/checkpoint.py:110-151` (serialize/deserialize), `:39-48` (metadata save), `:66-86` (metadata load), `:154-166` (save_trained_episodes)
-- Modify: `customized_areal/tree_search/migrate_checkpoint.py:150-162` (metadata rebuild)
+
+- Modify: `customized_areal/tree_search/checkpoint.py:110-151` (serialize/deserialize),
+  `:39-48` (metadata save), `:66-86` (metadata load), `:154-166` (save_trained_episodes)
+
+- Modify: `customized_areal/tree_search/migrate_checkpoint.py:150-162` (metadata
+  rebuild)
 
 - [ ] **Step 1: Add `train_id` to `_serialize_record`**
 
 In `TreeCheckpointManager._serialize_record`, add after `"query_id": node.query_id`:
+
 ```python
 "train_id": node.train_id,
 ```
 
 - [ ] **Step 2: Add `train_id` to `_deserialize_record`**
 
-In `TreeCheckpointManager._deserialize_record`, add to the `Node(...)` constructor call after `query_id=data.get("query_id", "")`:
+In `TreeCheckpointManager._deserialize_record`, add to the `Node(...)` constructor call
+after `query_id=data.get("query_id", "")`:
+
 ```python
 train_id=data.get("train_id", ""),
 ```
@@ -256,10 +287,13 @@ train_id=data.get("train_id", ""),
 - [ ] **Step 3: Update metadata save to include `current_train_id`**
 
 In `save()`, in the metadata dict, replace:
+
 ```python
 "trained": {k: v for k, v in tree_store._trained.items()},
 ```
+
 with:
+
 ```python
 "current_train_id": tree_store.current_train_id,
 ```
@@ -267,10 +301,13 @@ with:
 - [ ] **Step 4: Update metadata load to read `current_train_id`**
 
 In `load()`, replace:
+
 ```python
 store._trained = {k: v for k, v in metadata.get("trained", {}).items()}
 ```
+
 with:
+
 ```python
 store.current_train_id = metadata.get("current_train_id", "")
 ```
@@ -278,6 +315,7 @@ store.current_train_id = metadata.get("current_train_id", "")
 - [ ] **Step 5: Update `save_trained_episodes` to use `train_id` comparison**
 
 Replace the `is_trained` check with direct `train_id` comparison:
+
 ```python
 @staticmethod
 def save_trained_episodes(
@@ -307,10 +345,13 @@ def save_trained_episodes(
 - [ ] **Step 6: Update `migrate_checkpoint.py` metadata rebuild**
 
 In `migrate_checkpoint.py`, replace:
+
 ```python
 "trained": meta.get("trained", {}),
 ```
+
 with:
+
 ```python
 "current_train_id": meta.get("current_train_id", ""),
 ```
@@ -321,7 +362,8 @@ with:
 uv run pytest tests/test_tree_search/test_checkpoint.py -v
 ```
 
-Expected: Failure on `test_load_preserves_trained_flags` (uses old `_trained` API). Other tests may also fail. We'll fix tests in the next task.
+Expected: Failure on `test_load_preserves_trained_flags` (uses old `_trained` API).
+Other tests may also fail. We'll fix tests in the next task.
 
 - [ ] **Step 8: Commit**
 
@@ -330,21 +372,24 @@ git add customized_areal/tree_search/checkpoint.py customized_areal/tree_search/
 git commit -m "feat: serialize train_id in checkpoint and update metadata format"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Remove `reset_trained_flags()` call from workflow
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:233`
 
 - [ ] **Step 1: Remove the `reset_trained_flags()` call**
 
 In `TreeSearchGroupedRolloutWorkflow.__init__`, delete the line:
+
 ```python
 self.tree_store.reset_trained_flags()
 ```
 
-The `train_id` comparison handles this automatically — nodes from old runs have mismatched `train_id` and are treated as untrained.
+The `train_id` comparison handles this automatically — nodes from old runs have
+mismatched `train_id` and are treated as untrained.
 
 - [ ] **Step 2: Commit**
 
@@ -353,16 +398,19 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py
 git commit -m "feat: remove reset_trained_flags call from workflow init"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Generate and export `train_id` in training script
 
 **Files:**
+
 - Modify: `customized_areal/tpfc/scripts/train_tpfc_tree_search.py:1-12`
 
 - [ ] **Step 1: Add UUID generation and env export**
 
-Add `import os` and `import uuid` to the imports. Add before `config, _ = load_expr_config(...)`:
+Add `import os` and `import uuid` to the imports. Add before
+`config, _ = load_expr_config(...)`:
+
 ```python
 import os
 import uuid
@@ -380,13 +428,16 @@ git add customized_areal/tpfc/scripts/train_tpfc_tree_search.py
 git commit -m "feat: generate train_id UUID and export to TRAIN_ID env var"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Update tests
 
 **Files:**
+
 - Modify: `tests/test_tree_search/test_mcts_tree_store.py`
+
 - Modify: `tests/test_tree_search/test_checkpoint.py`
+
 - Modify: `tests/test_treesearch_bugfixes.py`
 
 - [ ] **Step 1: Update MCTSTreeStore tests — `TestMCTSTreeStoreTrainedFlag`**
@@ -518,7 +569,8 @@ class TestMCTSTreeStoreTrainId:
         assert n1.train_id == ""
 ```
 
-Remove the old `TestMCTSTreeStoreTrainedFlag` class and `test_reset_trained_flags` method entirely.
+Remove the old `TestMCTSTreeStoreTrainedFlag` class and `test_reset_trained_flags`
+method entirely.
 
 - [ ] **Step 2: Update `TestSetTrainedSignature` in test_treesearch_bugfixes.py**
 
@@ -624,30 +676,36 @@ git add tests/test_tree_search/test_mcts_tree_store.py tests/test_tree_search/te
 git commit -m "test: update tests for train_id-based trained determination"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Clean up config — remove `agent.train_id`
 
 **Files:**
-- Modify: `customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml:19`
+
+- Modify:
+  `customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml:19`
 
 - [ ] **Step 1: Remove `train_id` from agent config**
 
 In the YAML config, change:
+
 ```yaml
 agent:
   trial_name: ${trial_name}
   train_id: ""
   user_id: ""
 ```
+
 to:
+
 ```yaml
 agent:
   trial_name: ${trial_name}
   user_id: ""
 ```
 
-The `TPFCAgent` still accepts `train_id` in its constructor (it's optional), so this is backward-compatible. If an agent needs a `train_id`, it'll get `""` by default.
+The `TPFCAgent` still accepts `train_id` in its constructor (it's optional), so this is
+backward-compatible. If an agent needs a `train_id`, it'll get `""` by default.
 
 - [ ] **Step 2: Commit**
 

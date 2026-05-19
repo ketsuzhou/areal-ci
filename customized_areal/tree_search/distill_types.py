@@ -58,8 +58,7 @@ class PositionRewardInfo:
 
     @property
     def chosen_logprob(self) -> float:
-        return (self.logprobs[self.chosen_index]
-                if self.logprobs is not None else 0.0)
+        return self.logprobs[self.chosen_index] if self.logprobs is not None else 0.0
 
 
 @dataclass(frozen=True)

@@ -311,7 +311,9 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
     loader = await get_agent_loader()
     # agent_data = await loader.load_agent(agent_id, user_id, load_config=True)
     agent_data = await loader.load_agent(agent_id, user_id, load_config=True)
-    logger.info("Created agent: %s", )
+    logger.info(
+        "Created agent: %s",
+    )
     return agent_id
 
 
@@ -680,7 +682,7 @@ if __name__ == "__main__":
     gt = "Time-Parking 2: Parallel Universe"
 
     task_description = "今天北京天气怎么样"
-    task_file_path = [ ]
+    task_file_path = []
     gt = ""
 
     messages, final_answer, log_path, _trace = asyncio.run(

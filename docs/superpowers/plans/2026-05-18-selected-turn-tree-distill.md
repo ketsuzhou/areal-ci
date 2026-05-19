@@ -1,47 +1,65 @@
 # Selected-Turn Tree Distillation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build selected-turn teacher distillation for `TreeSearchGroupedRolloutWorkflow`, with turn-wise Qwen diagnosis, optional top-k distillation, cache refill, and direct `student_logp - teacher_logp` loss.
+**Goal:** Build selected-turn teacher distillation for
+`TreeSearchGroupedRolloutWorkflow`, with turn-wise Qwen diagnosis, optional top-k
+distillation, cache refill, and direct `student_logp - teacher_logp` loss.
 
-**Architecture:** Add a provider layer for diagnosis/logprob calls, defaulting to the existing external OpenAI-compatible teacher client and exposing an engine-provider boundary. Add a selected-turn distill builder that converts episode `Node`s into teacher-scored `PositionRewardInfo` records, then integrate it into the grouped workflow before batching. Update the custom distill loss to use explicit teacher logprobs instead of the current normalized position-level reward objective.
+**Architecture:** Add a provider layer for diagnosis/logprob calls, defaulting to the
+existing external OpenAI-compatible teacher client and exposing an engine-provider
+boundary. Add a selected-turn distill builder that converts episode `Node`s into
+teacher-scored `PositionRewardInfo` records, then integrate it into the grouped workflow
+before batching. Update the custom distill loss to use explicit teacher logprobs instead
+of the current normalized position-level reward objective.
 
-**Tech Stack:** Python 3.12, asyncio, dataclasses, PyTorch, AReaL FSDP actor training, existing `customized_areal.tree_search` modules, pytest.
+**Tech Stack:** Python 3.12, asyncio, dataclasses, PyTorch, AReaL FSDP actor training,
+existing `customized_areal.tree_search` modules, pytest.
 
----
+______________________________________________________________________
 
 ## File Structure
 
 - Create `customized_areal/tree_search/core/selected_turn_distill.py`
-  - Owns diagnosis parsing, turn span extraction, teacher prompt assembly, selected-turn episode preparation, and `PositionRewardInfo` construction.
+  - Owns diagnosis parsing, turn span extraction, teacher prompt assembly, selected-turn
+    episode preparation, and `PositionRewardInfo` construction.
 - Create `customized_areal/tree_search/core/teacher_provider.py`
   - Defines `TeacherProvider`, `ExternalTeacherProvider`, and `EngineTeacherProvider`.
 - Modify `customized_areal/tree_search/core/teacher_client.py`
-  - Add generic completion support for diagnosis and a prompt-plus-target candidate logprob method.
+  - Add generic completion support for diagnosis and a prompt-plus-target candidate
+    logprob method.
 - Modify `customized_areal/tree_search/distill_types.py`
-  - Add `teacher_logprobs` to `PositionRewardInfo` and small diagnosis result dataclasses.
+  - Add `teacher_logprobs` to `PositionRewardInfo` and small diagnosis result
+    dataclasses.
 - Modify `customized_areal/tree_search/config.py`
   - Add distill provider/config fields to `TreeBackupConfig`.
 - Modify `customized_areal/tree_search/tree_search_grouped_workflow.py`
-  - Add tokenizer cache, provider construction, selected-turn distill stage, cache refill, failure policy, and `position_rewards` injection.
+  - Add tokenizer cache, provider construction, selected-turn distill stage, cache
+    refill, failure policy, and `position_rewards` injection.
 - Modify `customized_areal/tree_search/training/loss.py`
   - Replace position-level reward objective with direct teacher-logprob KL loss.
 - Modify `areal/infra/remote_inf_engine.py`
   - Read new env values and pass them to the workflow.
 - Add tests in `tests/test_tree_search/test_selected_turn_distill.py`
-  - Unit tests for parser, prompt spans, top-k reuse/recompute, failure policy helpers, and sample index behavior.
+  - Unit tests for parser, prompt spans, top-k reuse/recompute, failure policy helpers,
+    and sample index behavior.
 - Add/update tests in `tests/customized_areal/test_teacher_client.py`
   - Client/provider request parsing tests.
 - Add/update tests in `tests/test_tree_search/test_distill_loss.py`
   - Direct KL loss tests.
 
----
+______________________________________________________________________
 
 ### Task 1: Distill Types And Config
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/distill_types.py`
+
 - Modify: `customized_areal/tree_search/config.py`
+
 - Test: `tests/test_tree_search/test_selected_turn_distill.py`
 
 - [ ] **Step 1: Write failing tests for diagnosis result types and teacher logprobs**
@@ -96,11 +114,13 @@ Run:
 uv run pytest tests/test_tree_search/test_selected_turn_distill.py -q
 ```
 
-Expected: FAIL with import errors for `DiagnosisTurn` and missing `teacher_logprobs` or config fields.
+Expected: FAIL with import errors for `DiagnosisTurn` and missing `teacher_logprobs` or
+config fields.
 
 - [ ] **Step 3: Add types and config fields**
 
-In `customized_areal/tree_search/distill_types.py`, extend `PositionRewardInfo` and add diagnosis types:
+In `customized_areal/tree_search/distill_types.py`, extend `PositionRewardInfo` and add
+diagnosis types:
 
 ```python
 @dataclass
@@ -175,14 +195,18 @@ git add customized_areal/tree_search/distill_types.py customized_areal/tree_sear
 git commit -m "feat(tree-search): add selected-turn distill types"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Teacher Client And Provider Interface
 
 **Files:**
+
 - Create: `customized_areal/tree_search/core/teacher_provider.py`
+
 - Modify: `customized_areal/tree_search/core/teacher_client.py`
+
 - Modify: `customized_areal/tree_search/core/__init__.py`
+
 - Test: `tests/customized_areal/test_teacher_client.py`
 
 - [ ] **Step 1: Write failing tests for completion and provider behavior**
@@ -276,7 +300,8 @@ Expected: FAIL because `teacher_provider.py` and `complete_text()` do not exist.
 
 - [ ] **Step 3: Add `complete_text()` to `TeacherClient`**
 
-In `customized_areal/tree_search/core/teacher_client.py`, add this method to `TeacherClient`:
+In `customized_areal/tree_search/core/teacher_client.py`, add this method to
+`TeacherClient`:
 
 ```python
     async def complete_text(
@@ -434,12 +459,14 @@ git add customized_areal/tree_search/core/teacher_client.py customized_areal/tre
 git commit -m "feat(tree-search): add teacher provider interface"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Selected-Turn Distill Builder
 
 **Files:**
+
 - Create: `customized_areal/tree_search/core/selected_turn_distill.py`
+
 - Test: `tests/test_tree_search/test_selected_turn_distill.py`
 
 - [ ] **Step 1: Write failing tests for parser, spans, and single-candidate scoring**
@@ -721,12 +748,14 @@ git add customized_areal/tree_search/core/selected_turn_distill.py tests/test_tr
 git commit -m "feat(tree-search): build selected-turn distill rewards"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Top-K Reuse And Recompute Tests
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/selected_turn_distill.py`
+
 - Test: `tests/test_tree_search/test_selected_turn_distill.py`
 
 - [ ] **Step 1: Add failing tests for top-k reuse and recompute**
@@ -812,11 +841,13 @@ Run:
 uv run pytest tests/test_tree_search/test_selected_turn_distill.py -q
 ```
 
-Expected: PASS if Task 3 implementation already covers this; otherwise FAIL points to top-k alignment.
+Expected: PASS if Task 3 implementation already covers this; otherwise FAIL points to
+top-k alignment.
 
 - [ ] **Step 3: Fix top-k alignment if needed**
 
-If the recompute path returns full-sequence top-k rows, keep this alignment in `_recompute_student_topk()`:
+If the recompute path returns full-sequence top-k rows, keep this alignment in
+`_recompute_student_topk()`:
 
 ```python
     start, end = response_token_span(node.loss_mask)
@@ -845,12 +876,14 @@ git add customized_areal/tree_search/core/selected_turn_distill.py tests/test_tr
 git commit -m "feat(tree-search): support top-k distill candidates"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Direct KL Distill Loss
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/training/loss.py`
+
 - Test: `tests/test_tree_search/test_distill_loss.py`
 
 - [ ] **Step 1: Write failing tests for direct teacher-logprob KL**
@@ -976,7 +1009,8 @@ def _compute_teacher_kl_loss(
 
 - [ ] **Step 4: Replace position-level GRPO branch**
 
-In `grpo_distill_loss_fn`, replace the call to `_compute_position_level_grpo_loss(...)` with:
+In `grpo_distill_loss_fn`, replace the call to `_compute_position_level_grpo_loss(...)`
+with:
 
 ```python
         teacher_kl_loss = _compute_teacher_kl_loss(
@@ -990,7 +1024,8 @@ In `grpo_distill_loss_fn`, replace the call to `_compute_position_level_grpo_los
         distill_stat = teacher_kl_loss.detach()
 ```
 
-Keep `_compute_position_level_grpo_loss()` temporarily if external callers still import it, but do not use it from `grpo_distill_loss_fn`.
+Keep `_compute_position_level_grpo_loss()` temporarily if external callers still import
+it, but do not use it from `grpo_distill_loss_fn`.
 
 - [ ] **Step 5: Run tests**
 
@@ -1010,12 +1045,14 @@ git add customized_areal/tree_search/training/loss.py tests/test_tree_search/tes
 git commit -m "feat(tree-search): use teacher logprob KL distill loss"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Workflow Integration
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py`
+
 - Test: `tests/test_tree_search/test_selected_turn_distill.py`
 
 - [ ] **Step 1: Add failing tests for episode filtering and sample index assignment**
@@ -1227,7 +1264,10 @@ Add episode preparation:
         return nodes, rewards_by_node_id
 ```
 
-In `arun_episode()`, after fresh and cached nodes are collected and before insert/advantage, call this stage for each episode group when `loss_mode != LossMode.GRPO`. Collect `rewards_by_node_id`, apply the failure policy per episode, then after `all_nodes` final order is known set:
+In `arun_episode()`, after fresh and cached nodes are collected and before
+insert/advantage, call this stage for each episode group when
+`loss_mode != LossMode.GRPO`. Collect `rewards_by_node_id`, apply the failure policy per
+episode, then after `all_nodes` final order is known set:
 
 ```python
 position_rewards = _set_position_reward_sample_indices(all_nodes, rewards_by_node_id)
@@ -1264,12 +1304,14 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py tests/test_
 git commit -m "feat(tree-search): integrate selected-turn distill workflow"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Env Wiring
 
 **Files:**
+
 - Modify: `areal/infra/remote_inf_engine.py`
+
 - Test: `tests/test_tree_search/test_config.py`
 
 - [ ] **Step 1: Add failing test for env parsing helper if available**
@@ -1367,11 +1409,12 @@ git add areal/infra/remote_inf_engine.py tests/test_tree_search/test_config.py
 git commit -m "feat(infra): wire selected-turn distill env config"
 ```
 
----
+______________________________________________________________________
 
 ### Task 8: Integration Verification
 
 **Files:**
+
 - Modify tests only if prior tasks reveal broken assumptions.
 
 - [ ] **Step 1: Run tree-search and customized teacher tests**
@@ -1392,7 +1435,9 @@ Run:
 uv run pytest tests/test_distill_bugfixes.py tests/customized_areal/test_teacher_distill_integration.py -q
 ```
 
-Expected: PASS. If a test asserts the old normalized position-level reward objective, update the assertion to the direct `student_logp - teacher_logp` objective and include the exact expected scalar in the test.
+Expected: PASS. If a test asserts the old normalized position-level reward objective,
+update the assertion to the direct `student_logp - teacher_logp` objective and include
+the exact expected scalar in the test.
 
 - [ ] **Step 3: Run formatting/lint for changed files**
 
@@ -1425,7 +1470,7 @@ git commit -m "test(tree-search): update distill KL expectations"
 
 If no files changed in Task 8, do not create an empty commit.
 
----
+______________________________________________________________________
 
 ## Self-Review
 
@@ -1443,6 +1488,10 @@ Spec coverage:
 - Failure policy for `BOTH` and `DISTILL`: Task 6.
 - Verification: Task 8.
 
-Red-flag scan: the plan contains no incomplete markers, no open-ended implementation steps, and no unnamed test commands.
+Red-flag scan: the plan contains no incomplete markers, no open-ended implementation
+steps, and no unnamed test commands.
 
-Type consistency: `teacher_logprobs`, `DiagnosisTurn`, `EpisodeDiagnosis`, `TeacherProvider`, `ExternalTeacherProvider`, `EngineTeacherProvider`, `selected_turn_to_position_rewards`, and `_compute_teacher_kl_loss` are introduced before later tasks use them.
+Type consistency: `teacher_logprobs`, `DiagnosisTurn`, `EpisodeDiagnosis`,
+`TeacherProvider`, `ExternalTeacherProvider`, `EngineTeacherProvider`,
+`selected_turn_to_position_rewards`, and `_compute_teacher_kl_loss` are introduced
+before later tasks use them.

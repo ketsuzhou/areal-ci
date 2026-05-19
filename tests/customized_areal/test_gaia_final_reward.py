@@ -2,15 +2,12 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from customized_areal.tpfc.gaia_final_reward import (
     compute_reward,
     evaluate_final_answer,
     extract_answer,
     parse_judge_score,
 )
-
 
 # ---------------------------------------------------------------------------
 # extract_answer
@@ -173,7 +170,10 @@ class TestComputeReward:
         mock_llm.return_value = "<score>1.0</score>"
         with patch.dict(
             "os.environ",
-            {"WORKSPACE_OPENAI_API_BASE": "http://env-url", "WORKSPACE_OPENAI_API_KEY": "env-key"},
+            {
+                "WORKSPACE_OPENAI_API_BASE": "http://env-url",
+                "WORKSPACE_OPENAI_API_KEY": "env-key",
+            },
         ):
             compute_reward(
                 response_text="<answer>42</answer>",
@@ -185,14 +185,20 @@ class TestComputeReward:
             )
         mock_llm.assert_called_once()
         call_kwargs = mock_llm.call_args
-        assert call_kwargs.kwargs.get("base_url") == "http://explicit-url" or call_kwargs[1].get("base_url") == "http://explicit-url"
+        assert (
+            call_kwargs.kwargs.get("base_url") == "http://explicit-url"
+            or call_kwargs[1].get("base_url") == "http://explicit-url"
+        )
 
     @patch("customized_areal.tpfc.gaia_final_reward.call_openai_compatible_model")
     def test_env_fallback_when_no_explicit_params(self, mock_llm):
         mock_llm.return_value = "<score>1.0</score>"
         with patch.dict(
             "os.environ",
-            {"WORKSPACE_OPENAI_API_BASE": "http://env-url", "WORKSPACE_OPENAI_API_KEY": "env-key"},
+            {
+                "WORKSPACE_OPENAI_API_BASE": "http://env-url",
+                "WORKSPACE_OPENAI_API_KEY": "env-key",
+            },
         ):
             compute_reward(
                 response_text="<answer>42</answer>",
@@ -203,7 +209,10 @@ class TestComputeReward:
                 api_key=None,
             )
         call_kwargs = mock_llm.call_args
-        assert call_kwargs.kwargs.get("base_url") == "http://env-url" or call_kwargs[1].get("base_url") == "http://env-url"
+        assert (
+            call_kwargs.kwargs.get("base_url") == "http://env-url"
+            or call_kwargs[1].get("base_url") == "http://env-url"
+        )
 
     @patch("customized_areal.tpfc.gaia_final_reward.call_openai_compatible_model")
     def test_realistic_llm_response_with_thinking(self, mock_llm):

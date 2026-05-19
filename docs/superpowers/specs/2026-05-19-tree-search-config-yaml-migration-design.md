@@ -10,8 +10,8 @@ Move all `TREE_SEARCH_*` configuration values from `customized_areal/.env` into 
 
 - `.env` is a separate config channel from the YAML config system, causing duplication
   and manual sync burden (e.g., `cache_dir` exists in both YAML and `.env`)
-- On recovery, `config.yaml` is the authoritative snapshot of the experiment — but
-  tree search settings are missing from it
+- On recovery, `config.yaml` is the authoritative snapshot of the experiment — but tree
+  search settings are missing from it
 - The `TreeBackupConfig` dataclass already defines all tree search fields with correct
   defaults; it just isn't wired into the config hierarchy
 
@@ -22,10 +22,12 @@ Move all `TREE_SEARCH_*` configuration values from `customized_areal/.env` into 
 Add 2 fields to `TreeBackupConfig` in `customized_areal/tree_search/config.py`:
 
 - `enabled: bool = True` — replaces `use_TreeSearchGroupedRolloutWorkflow` env var
-- `max_reasoning_tokens: int = 1000` — replaces `TREE_SEARCH_MAX_REASONING_TOKENS` env var
+- `max_reasoning_tokens: int = 1000` — replaces `TREE_SEARCH_MAX_REASONING_TOKENS` env
+  var
 
-Add `tree_search: TreeBackupConfig` to `TPFCConfig` in `customized_areal/tpfc/tpfc_config.py`.
-Remove the 3 now-redundant flat fields: `cache_dir`, `cache_mode`, `loss_mode`.
+Add `tree_search: TreeBackupConfig` to `TPFCConfig` in
+`customized_areal/tpfc/tpfc_config.py`. Remove the 3 now-redundant flat fields:
+`cache_dir`, `cache_mode`, `loss_mode`.
 
 ### Configuration flow
 
@@ -44,31 +46,33 @@ settings without any `.env` dependency.
 
 ### Code changes
 
-1. **`customized_areal/tree_search/config.py`** — Add `enabled` and `max_reasoning_tokens`
-   fields to `TreeBackupConfig`
+1. **`customized_areal/tree_search/config.py`** — Add `enabled` and
+   `max_reasoning_tokens` fields to `TreeBackupConfig`
 
-2. **`customized_areal/tpfc/tpfc_config.py`** — Remove `cache_dir`, `cache_mode`,
-   `loss_mode`; add `tree_search: TreeBackupConfig = field(default_factory=TreeBackupConfig)`
+1. **`customized_areal/tpfc/tpfc_config.py`** — Remove `cache_dir`, `cache_mode`,
+   `loss_mode`; add
+   `tree_search: TreeBackupConfig = field(default_factory=TreeBackupConfig)`
 
-3. **`areal/infra/remote_inf_engine.py`** — Replace `os.getenv("TREE_SEARCH_*")` reads
+1. **`areal/infra/remote_inf_engine.py`** — Replace `os.getenv("TREE_SEARCH_*")` reads
    (lines 700-785) with `self.config.tree_search.*` attribute access. The
    `TreeSearchGroupedRolloutWorkflow` constructor call stays the same.
 
-4. **Callers of removed fields** — Update references from `config.cache_dir` →
-   `config.tree_search.checkpoint_dir`, `config.cache_mode` → `config.tree_search.cache_mode`,
-   `config.loss_mode` → `config.tree_search.loss_mode` in training scripts and trainer.
+1. **Callers of removed fields** — Update references from `config.cache_dir` →
+   `config.tree_search.checkpoint_dir`, `config.cache_mode` →
+   `config.tree_search.cache_mode`, `config.loss_mode` → `config.tree_search.loss_mode`
+   in training scripts and trainer.
 
-5. **YAML config files** — Add `tree_search:` section with all fields. Remove top-level
+1. **YAML config files** — Add `tree_search:` section with all fields. Remove top-level
    `cache_dir`, `cache_mode`, `loss_mode`.
 
-6. **`customized_areal/.env`** — Remove `use_TreeSearchGroupedRolloutWorkflow` and all
+1. **`customized_areal/.env`** — Remove `use_TreeSearchGroupedRolloutWorkflow` and all
    `TREE_SEARCH_*` lines. Non-tree-search entries (SUPABASE, DAYTONA, etc.) remain.
 
 ### train_id.json
 
 `train_id.json` is unchanged — it stores the runtime-generated `TRAIN_ID` UUID, which is
-runtime identity, not static configuration. It remains in the checkpoint directory written
-by `_write_train_id_sidecar()`.
+runtime identity, not static configuration. It remains in the checkpoint directory
+written by `_write_train_id_sidecar()`.
 
 ## Migration
 

@@ -5,7 +5,6 @@ This module provides a class-based agent interface consistent with AReaL's
 agentic RL training pattern, wrapping the existing run_backend functionality.
 """
 
-import os
 import traceback
 from pathlib import Path
 from typing import Any
@@ -180,7 +179,9 @@ class TPFCAgent:
                 logger.warning(
                     "GAIA reward computation failed: %s\n%s",
                     exc,
-                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                    "".join(
+                        traceback.format_exception(type(exc), exc, exc.__traceback__)
+                    ),
                 )
                 raise
 

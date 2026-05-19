@@ -1,18 +1,26 @@
 # Tree Advantage Skip Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Skip `compute_advantages` in the training loop when tree advantages are already pre-computed by `TreeAdvantageComputer`, and move reward preprocessing into the tree advantage path.
+**Goal:** Skip `compute_advantages` in the training loop when tree advantages are
+already pre-computed by `TreeAdvantageComputer`, and move reward preprocessing into the
+tree advantage path.
 
-**Architecture:** Extract `_compute_advantages_for_batch` from `rl_trainer.py`'s training loop as an overridable method. Override it in `CacheAwarePPOTrainer` to bypass GAE when `advantage_mode == TREE`. Move reward preprocessing (scaling, clipping, overlong penalty) from `actor.py` into `TreeAdvantageComputer.compute()`.
+**Architecture:** Extract `_compute_advantages_for_batch` from `rl_trainer.py`'s
+training loop as an overridable method. Override it in `CacheAwarePPOTrainer` to bypass
+GAE when `advantage_mode == TREE`. Move reward preprocessing (scaling, clipping,
+overlong penalty) from `actor.py` into `TreeAdvantageComputer.compute()`.
 
 **Tech Stack:** Python 3.12+ | PyTorch | pytest
 
----
+______________________________________________________________________
 
 ### Task 1: Add reward preprocessing fields to `TreeBackupConfig`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/config.py:22-29`
 
 - [ ] **Step 1: Add fields to `TreeBackupConfig`**
@@ -36,8 +44,8 @@ class TreeBackupConfig:
 
 - [ ] **Step 2: Run existing tests to verify no breakage**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py -v`
-Expected: All existing tests PASS
+Run: `uv run pytest tests/test_tree_search/test_advantage.py -v` Expected: All existing
+tests PASS
 
 - [ ] **Step 3: Commit**
 
@@ -46,12 +54,14 @@ git add customized_areal/tree_search/config.py
 git commit -m "feat: add reward preprocessing fields to TreeBackupConfig"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Add reward preprocessing to `TreeAdvantageComputer`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/advantage.py`
+
 - Test: `tests/test_tree_search/test_advantage.py`
 
 - [ ] **Step 1: Write failing test for reward scaling and clipping**
@@ -141,7 +151,8 @@ class TestTreeAdvantageComputerRewardPreprocessing:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerRewardPreprocessing -v`
+Run:
+`uv run pytest tests/test_tree_search/test_advantage.py::TestTreeAdvantageComputerRewardPreprocessing -v`
 Expected: FAIL — `TreeAdvantageComputer.__init__()` does not accept the new parameters
 
 - [ ] **Step 3: Implement reward preprocessing in `TreeAdvantageComputer`**
@@ -284,8 +295,8 @@ class TreeAdvantageComputer:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_tree_search/test_advantage.py -v`
-Expected: All tests PASS (both old and new)
+Run: `uv run pytest tests/test_tree_search/test_advantage.py -v` Expected: All tests
+PASS (both old and new)
 
 - [ ] **Step 5: Commit**
 
@@ -294,16 +305,19 @@ git add customized_areal/tree_search/advantage.py tests/test_tree_search/test_ad
 git commit -m "feat: add reward preprocessing to TreeAdvantageComputer"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Pass reward preprocessing params through the workflow
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:194-231`
 
-- [ ] **Step 1: Add reward preprocessing params to `TreeSearchGroupedRolloutWorkflow.__init__`**
+- [ ] **Step 1: Add reward preprocessing params to
+  `TreeSearchGroupedRolloutWorkflow.__init__`**
 
-Change the `__init__` signature and the `TreeAdvantageComputer` construction. Replace lines 194-231:
+Change the `__init__` signature and the `TreeAdvantageComputer` construction. Replace
+lines 194-231:
 
 ```python
     def __init__(
@@ -364,8 +378,7 @@ Change the `__init__` signature and the `TreeAdvantageComputer` construction. Re
 
 - [ ] **Step 2: Run existing tests to verify no breakage**
 
-Run: `uv run pytest tests/test_tree_search/ -v`
-Expected: All tests PASS
+Run: `uv run pytest tests/test_tree_search/ -v` Expected: All tests PASS
 
 - [ ] **Step 3: Commit**
 
@@ -374,11 +387,12 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py
 git commit -m "feat: pass reward preprocessing params through TreeSearchGroupedRolloutWorkflow"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Extract `_compute_advantages_for_batch` in `rl_trainer.py`
 
 **Files:**
+
 - Modify: `areal/trainer/rl_trainer.py:646-655`
 
 - [ ] **Step 1: Replace the `compute_advantages` block with a method call**
@@ -386,6 +400,7 @@ git commit -m "feat: pass reward preprocessing params through TreeSearchGroupedR
 Replace lines 646-655 in `areal/trainer/rl_trainer.py`:
 
 Old:
+
 ```python
             with (
                 stats_tracker.record_timing("compute_advantage"),
@@ -400,6 +415,7 @@ Old:
 ```
 
 New:
+
 ```python
             adv_batch = self._compute_advantages_for_batch(rollout_batch, global_step)
 ```
@@ -425,8 +441,8 @@ Add this method to the `RLTrainer` class (before the `train` method, around line
 
 - [ ] **Step 3: Run existing tests to verify no breakage**
 
-Run: `uv run pytest tests/ -k "not gpu" -x --timeout=60 2>&1 | head -50`
-Expected: No import errors or test failures related to the trainer
+Run: `uv run pytest tests/ -k "not gpu" -x --timeout=60 2>&1 | head -50` Expected: No
+import errors or test failures related to the trainer
 
 - [ ] **Step 4: Commit**
 
@@ -435,16 +451,18 @@ git add areal/trainer/rl_trainer.py
 git commit -m "refactor: extract _compute_advantages_for_batch from training loop"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Override `_compute_advantages_for_batch` in `CacheAwarePPOTrainer`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/trainer.py`
 
 - [ ] **Step 1: Add the override method**
 
-Add the following method to `CacheAwarePPOTrainer` (after `__init__`, before `_create_train_engine`):
+Add the following method to `CacheAwarePPOTrainer` (after `__init__`, before
+`_create_train_engine`):
 
 ```python
     def _compute_advantages_for_batch(self, rollout_batch, global_step):
@@ -454,7 +472,10 @@ Add the following method to `CacheAwarePPOTrainer` (after `__init__`, before `_c
         return super()._compute_advantages_for_batch(rollout_batch, global_step)
 ```
 
-Make sure `AdvantageMode` is imported (it already is via the `TreeBackupConfig` imports, but verify the import includes it). Check the existing imports at the top of the file — `TreeBackupConfig` is imported from `customized_areal.tree_search.config`, and `AdvantageMode` is also defined there. Add it to the import if not present:
+Make sure `AdvantageMode` is imported (it already is via the `TreeBackupConfig` imports,
+but verify the import includes it). Check the existing imports at the top of the file —
+`TreeBackupConfig` is imported from `customized_areal.tree_search.config`, and
+`AdvantageMode` is also defined there. Add it to the import if not present:
 
 ```python
 from customized_areal.tree_search.config import (
@@ -476,21 +497,26 @@ git add customized_areal/tree_search/trainer.py
 git commit -m "feat: override _compute_advantages_for_batch to skip for tree advantages"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Wire reward preprocessing params to the workflow construction sites
 
 There are two sites that construct `TreeSearchGroupedRolloutWorkflow`:
+
 1. `areal/infra/remote_inf_engine.py:743` — uses env vars
-2. The `TreeBackupConfig` params need to flow through to the workflow
+1. The `TreeBackupConfig` params need to flow through to the workflow
 
 **Files:**
+
 - Modify: `areal/infra/remote_inf_engine.py:726-752`
+
 - Modify: `customized_areal/tpfc/scripts/train_tpfc_tree_search.py:128-131`
 
-- [ ] **Step 1: Add env var reads and pass to `TreeSearchGroupedRolloutWorkflow` in `remote_inf_engine.py`**
+- [ ] **Step 1: Add env var reads and pass to `TreeSearchGroupedRolloutWorkflow` in
+  `remote_inf_engine.py`**
 
-Add these lines after line 741 (after `distill_loss_weight`), and update the constructor call:
+Add these lines after line 741 (after `distill_loss_weight`), and update the constructor
+call:
 
 ```python
                 reward_bias = float(
@@ -541,9 +567,11 @@ Add these lines after line 741 (after `distill_loss_weight`), and update the con
                 )
 ```
 
-- [ ] **Step 2: Pass reward preprocessing params in `TreeBackupConfig` construction in training script**
+- [ ] **Step 2: Pass reward preprocessing params in `TreeBackupConfig` construction in
+  training script**
 
-In `train_tpfc_tree_search.py`, update the `TreeBackupConfig` construction to forward the actor config's reward preprocessing params:
+In `train_tpfc_tree_search.py`, update the `TreeBackupConfig` construction to forward
+the actor config's reward preprocessing params:
 
 ```python
     tree_backup_config = TreeBackupConfig(
@@ -558,7 +586,8 @@ In `train_tpfc_tree_search.py`, update the `TreeBackupConfig` construction to fo
     )
 ```
 
-Also set the corresponding env vars so `remote_inf_engine.py` reads them. Add after the `TreeBackupConfig` construction:
+Also set the corresponding env vars so `remote_inf_engine.py` reads them. Add after the
+`TreeBackupConfig` construction:
 
 ```python
     # Set env vars for remote_inf_engine's TreeSearchGroupedRolloutWorkflow construction
@@ -582,7 +611,8 @@ Also set the corresponding env vars so `remote_inf_engine.py` reads them. Add af
 
 - [ ] **Step 3: Verify the config attributes exist**
 
-Run: `uv run python -c "from areal.api.cli_args import load_expr_config; c = load_expr_config('customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml'); print(c.actor.reward_bias, c.actor.reward_scaling, c.actor.reward_clip)"`
+Run:
+`uv run python -c "from areal.api.cli_args import load_expr_config; c = load_expr_config('customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml'); print(c.actor.reward_bias, c.actor.reward_scaling, c.actor.reward_clip)"`
 Expected: Prints `-0.5 10.0 20.0` (or the values from the yaml)
 
 - [ ] **Step 4: Commit**
@@ -592,11 +622,12 @@ git add areal/infra/remote_inf_engine.py customized_areal/tpfc/scripts/train_tpf
 git commit -m "feat: wire reward preprocessing params through env vars and TreeBackupConfig"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Integration verification
 
 **Files:**
+
 - No new files — verification only
 
 - [ ] **Step 1: Run full test suite for tree search**
@@ -606,41 +637,30 @@ Expected: All tests PASS
 
 - [ ] **Step 2: Verify the data flow with a quick smoke test**
 
-Run: `uv run python -c "
-from customized_areal.tree_search.config import TreeBackupConfig, AdvantageMode
-from customized_areal.tree_search.advantage import TreeAdvantageComputer
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-import torch
+Run: \`uv run python -c " from customized_areal.tree_search.config import
+TreeBackupConfig, AdvantageMode from customized_areal.tree_search.advantage import
+TreeAdvantageComputer from customized_areal.tree_search.mcts_tree_store import
+MCTSTreeStore, Node import torch
 
 # Simulate the tree advantage path with preprocessing
-store = MCTSTreeStore()
-computer = TreeAdvantageComputer(
-    store, reward_bias=-0.5, reward_scaling=10.0, reward_clip=20.0,
-)
-n1 = Node(
-    input_ids=[1,2,3], loss_mask=[0,0,1], logprobs=[0,0,0],
-    versions=[-1,-1,0], outcome_reward=1.0, query_id='q1', node_id='n1',
-)
-n2 = Node(
-    input_ids=[4,5,6], loss_mask=[0,0,1], logprobs=[0,0,0],
-    versions=[-1,-1,0], outcome_reward=0.0, query_id='q1', node_id='n2',
-)
-store.insert_batch([n1, n2])
-computer.compute([n1, n2])
-print(f'n1 advantages: {n1.advantages}')
-print(f'n2 advantages: {n2.advantages}')
+
+store = MCTSTreeStore() computer = TreeAdvantageComputer( store, reward_bias=-0.5,
+reward_scaling=10.0, reward_clip=20.0, ) n1 = Node( input_ids=\[1,2,3\],
+loss_mask=\[0,0,1\], logprobs=\[0,0,0\], versions=\[-1,-1,0\], outcome_reward=1.0,
+query_id='q1', node_id='n1', ) n2 = Node( input_ids=\[4,5,6\], loss_mask=\[0,0,1\],
+logprobs=\[0,0,0\], versions=\[-1,-1,0\], outcome_reward=0.0, query_id='q1',
+node_id='n2', ) store.insert_batch(\[n1, n2\]) computer.compute(\[n1, n2\]) print(f'n1
+advantages: {n1.advantages}') print(f'n2 advantages: {n2.advantages}')
+
 # Verify advantages are set (non-zero for two different rewards)
-assert n1.advantages is not None
-assert n2.advantages is not None
-assert not torch.allclose(n1.advantages[2:], n2.advantages[2:])
-print('Integration smoke test PASSED')
-"`
-Expected: Prints advantage values and "Integration smoke test PASSED"
+
+assert n1.advantages is not None assert n2.advantages is not None assert not
+torch.allclose(n1.advantages\[2:\], n2.advantages\[2:\]) print('Integration smoke test
+PASSED') "\` Expected: Prints advantage values and "Integration smoke test PASSED"
 
 - [ ] **Step 3: Run pre-commit**
 
-Run: `pre-commit run --all-files`
-Expected: All checks PASS
+Run: `pre-commit run --all-files` Expected: All checks PASS
 
 - [ ] **Step 4: Final commit (if any formatting fixes needed)**
 

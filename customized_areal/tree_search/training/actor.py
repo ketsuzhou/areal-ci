@@ -6,8 +6,8 @@ GRPO and position-level GRPO loss function for on-policy distillation.
 
 from __future__ import annotations
 
-import functools
 import copy
+import functools
 from typing import Any
 
 import torch

@@ -32,7 +32,7 @@ def split_turns(text: str) -> list[dict]:
         m = re.match(re.escape("<|im_start|>") + r"(\w+)\n?", part)
         if m:
             role = m.group(1)
-            content = part[m.end():]
+            content = part[m.end() :]
             turns.append({"role": role, "content": content})
         else:
             # Fallback: shouldn't happen in well-formed chat text
@@ -70,21 +70,46 @@ def decode_record(tokenizer, rec: dict, include_loss_masked: bool = False) -> di
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert MCTS tree cache episodes to text")
-    parser.add_argument("--data_dir", type=str, required=True, help="Path to mcts_trees directory")
-    parser.add_argument("--tokenizer_path", type=str, required=True, help="Path to tokenizer directory")
-    parser.add_argument("--output_dir", type=str, default="./converted_episodes", help="Output directory")
-    parser.add_argument("--loss_masked_only", action="store_true", help="Include loss-masked text in output")
-    parser.add_argument("--max_files", type=int, default=None, help="Limit number of query files to process")
+    parser = argparse.ArgumentParser(
+        description="Convert MCTS tree cache episodes to text"
+    )
+    parser.add_argument(
+        "--data_dir", type=str, required=True, help="Path to mcts_trees directory"
+    )
+    parser.add_argument(
+        "--tokenizer_path", type=str, required=True, help="Path to tokenizer directory"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./converted_episodes",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "--loss_masked_only",
+        action="store_true",
+        help="Include loss-masked text in output",
+    )
+    parser.add_argument(
+        "--max_files",
+        type=int,
+        default=None,
+        help="Limit number of query files to process",
+    )
     args = parser.parse_args()
 
     print(f"Loading tokenizer from {args.tokenizer_path} ...")
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.tokenizer_path, trust_remote_code=True
+    )
 
     data_dir = Path(args.data_dir)
     files = sorted(
-        f for f in data_dir.iterdir()
-        if f.name.startswith("query_") and f.suffix == ".json" and not f.name.endswith(".tmp")
+        f
+        for f in data_dir.iterdir()
+        if f.name.startswith("query_")
+        and f.suffix == ".json"
+        and not f.name.endswith(".tmp")
     )
     print(f"Found {len(files)} query files in {data_dir}")
 
@@ -110,12 +135,19 @@ def main():
         episodes = []
         for ep_id, records in ep_groups.items():
             records_sorted = sorted(records, key=lambda r: r["turn_idx"])
-            decoded = [decode_record(tokenizer, r, include_loss_masked=not args.loss_masked_only) for r in records_sorted]
-            episodes.append({
-                "episode_id": ep_id,
-                "num_records": len(decoded),
-                "records": decoded,
-            })
+            decoded = [
+                decode_record(
+                    tokenizer, r, include_loss_masked=not args.loss_masked_only
+                )
+                for r in records_sorted
+            ]
+            episodes.append(
+                {
+                    "episode_id": ep_id,
+                    "num_records": len(decoded),
+                    "records": decoded,
+                }
+            )
             total_records += len(decoded)
 
         query_data = {
@@ -129,9 +161,13 @@ def main():
             json.dump(query_data, f, indent=2, ensure_ascii=False)
 
         total_episodes += len(episodes)
-        print(f"  Wrote {out_path} ({len(episodes)} episodes, {sum(len(e['records']) for e in episodes)} records)")
+        print(
+            f"  Wrote {out_path} ({len(episodes)} episodes, {sum(len(e['records']) for e in episodes)} records)"
+        )
 
-    print(f"Done! {total_episodes} episodes, {total_records} records across {len(files)} files.")
+    print(
+        f"Done! {total_episodes} episodes, {total_records} records across {len(files)} files."
+    )
 
 
 if __name__ == "__main__":

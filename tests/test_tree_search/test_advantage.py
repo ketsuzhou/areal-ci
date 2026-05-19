@@ -1,9 +1,9 @@
+import itertools
+
 import torch
 
 from customized_areal.tree_search.advantage import TreeAdvantageComputer
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-
-import itertools
 
 _node_id_counter = itertools.count(1)
 
@@ -112,20 +112,35 @@ class TestTreeAdvantageComputerEpisodeLevel:
         computer = TreeAdvantageComputer(store)
         # Episode A: 2 turns, reward 1.0
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
-            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[-1, -1, 0],
+            outcome_reward=1.0,
+            query_id="q1",
+            node_id="ep_a_1",
+            episode_id="ep_a",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[-1, -1, 0],
-            outcome_reward=1.0, query_id="q1", node_id="ep_a_2", episode_id="ep_a",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[-1, -1, 0],
+            outcome_reward=1.0,
+            query_id="q1",
+            node_id="ep_a_2",
+            episode_id="ep_a",
         )
         # Episode B: 1 turn, reward 0.0
         n3 = Node(
-            input_ids=[7, 8, 9], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.3], versions=[-1, -1, 0],
-            outcome_reward=0.0, query_id="q1", node_id="ep_b_1", episode_id="ep_b",
+            input_ids=[7, 8, 9],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.3],
+            versions=[-1, -1, 0],
+            outcome_reward=0.0,
+            query_id="q1",
+            node_id="ep_b_1",
+            episode_id="ep_b",
         )
         store.insert_batch([n1, n2, n3])
         computer.compute([n1, n2, n3])
@@ -147,14 +162,24 @@ class TestTreeAdvantageComputerEpisodeLevel:
         computer = TreeAdvantageComputer(store)
         # 2 episodes with rewards 1.0 and -1.0 → mean=0, std=1.0
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
-            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[-1, -1, 0],
+            outcome_reward=1.0,
+            query_id="q1",
+            node_id="ep_a_1",
+            episode_id="ep_a",
         )
         n2 = Node(
-            input_ids=[4, 5, 6], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.2], versions=[-1, -1, 0],
-            outcome_reward=-1.0, query_id="q1", node_id="ep_b_1", episode_id="ep_b",
+            input_ids=[4, 5, 6],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.2],
+            versions=[-1, -1, 0],
+            outcome_reward=-1.0,
+            query_id="q1",
+            node_id="ep_b_1",
+            episode_id="ep_b",
         )
         store.insert_batch([n1, n2])
         computer.compute([n1, n2])
@@ -180,9 +205,14 @@ class TestTreeAdvantageComputerEpisodeLevel:
         store = MCTSTreeStore()
         computer = TreeAdvantageComputer(store)
         n1 = Node(
-            input_ids=[1, 2, 3], loss_mask=[0, 0, 1],
-            logprobs=[0.0, 0.0, -0.1], versions=[-1, -1, 0],
-            outcome_reward=1.0, query_id="q1", node_id="ep_a_1", episode_id="ep_a",
+            input_ids=[1, 2, 3],
+            loss_mask=[0, 0, 1],
+            logprobs=[0.0, 0.0, -0.1],
+            versions=[-1, -1, 0],
+            outcome_reward=1.0,
+            query_id="q1",
+            node_id="ep_a_1",
+            episode_id="ep_a",
         )
         store.insert_batch([n1])
         computer.compute([n1])

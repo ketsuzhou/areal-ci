@@ -14,8 +14,10 @@ from customized_areal.tree_search.distill_types import (
     PositionRewardInfo,
 )
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.tree_search_grouped_workflow import TreeSearchGroupedRolloutWorkflow
 from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
+from customized_areal.tree_search.tree_search_grouped_workflow import (
+    TreeSearchGroupedRolloutWorkflow,
+)
 
 __all__ = [
     "AdvantageMode",
