@@ -158,7 +158,9 @@ class GroupedRolloutWorkflow(RolloutWorkflow):
             self.logger.warning(
                 "DEBUG GroupedRolloutWorkflow: concat_padded_tensors succeeded, "
                 "keys=%s",
-                list(concatenated.keys()) if isinstance(concatenated, dict) else "not_dict",
+                list(concatenated.keys())
+                if isinstance(concatenated, dict)
+                else "not_dict",
             )
         except Exception as exc:
             self.logger.warning(
@@ -704,13 +706,9 @@ class RemoteInfEngine(InferenceEngine):
 
         # Wrap with GroupedRolloutWorkflow if group_size > 1
         if group_size > 1:
-            use_tree_search = (
-                tree_search_cfg is not None and tree_search_cfg.enabled
-            )
+            use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
             if use_tree_search:
-                self.logger.warning(
-                    "use TreeSearchGroupedRolloutWorkflow"
-                )
+                self.logger.warning("use TreeSearchGroupedRolloutWorkflow")
 
                 from customized_areal.tree_search.tree_search_grouped_workflow import (
                     TreeSearchGroupedRolloutWorkflow,
@@ -743,9 +741,7 @@ class RemoteInfEngine(InferenceEngine):
                     strict_distill_json=tree_search_cfg.strict_distill_json,
                 )
             else:
-                self.logger.warning(
-                    "use GroupedRolloutWorkflow"
-                )
+                self.logger.warning("use GroupedRolloutWorkflow")
                 resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
 
         return resolved
@@ -1124,7 +1120,10 @@ class RemoteInfEngine(InferenceEngine):
     ) -> int:
         self.logger.info(
             "RemoteInfEngine.submit() called: task_id=%s, workflow=%s, group_size=%d, proxy_addr=%s",
-            task_id, workflow, group_size, proxy_addr,
+            task_id,
+            workflow,
+            group_size,
+            proxy_addr,
         )
         """Submit a request to the inference engine and return immediately.
 

@@ -9,8 +9,9 @@ _project_root = Path(__file__).parent.parent.parent.absolute()
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from areal.api.cli_args import PPOConfig
 from customized_areal.tree_search.config import TreeBackupConfig
+
+from areal.api.cli_args import PPOConfig
 
 
 @dataclass
@@ -66,7 +67,9 @@ class TPFCConfig(PPOConfig):
     agent: AgentConfig = field(default_factory=AgentConfig)
     tree_search: TreeBackupConfig = field(
         default_factory=TreeBackupConfig,
-        metadata={"help": "Tree search configuration (MCTS, cache, loss, teacher, diagnose)."},
+        metadata={
+            "help": "Tree search configuration (MCTS, cache, loss, teacher, diagnose)."
+        },
     )
     assistant_marker: str = field(
         default="",

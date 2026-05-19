@@ -68,7 +68,7 @@ def main(args: list[str] | None = None) -> None:
 
     os.environ["TRAIN_ID"] = uuid.uuid4().hex
     logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
-    
+
     # # Restore train_id from recover checkpoint if available, otherwise generate
     # restored_id = _try_load_train_id_from_checkpoint(config)
     # if restored_id is not None:
