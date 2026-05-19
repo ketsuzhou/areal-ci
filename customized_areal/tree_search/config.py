@@ -22,9 +22,11 @@ class LossMode(str, Enum):
 @dataclass
 class TreeBackupConfig:
     mode: CacheMode = CacheMode.OFF
+    enabled: bool = True
     checkpoint_dir: str = ""
     advantage_mode: AdvantageMode = AdvantageMode.TREE
     loss_mode: LossMode = LossMode.GRPO
+    max_reasoning_tokens: int = 1000
     rl_loss_weight: float = 1.0
     distill_loss_weight: float = 0.005
     reward_bias: float = 0.0
@@ -44,6 +46,8 @@ class TreeBackupConfig:
     diagnose_model_name: str = ""
     diagnose_max_tokens: int = 1024
     diagnose_temperature: float = 0.0
+    diagnose_base_url: str = ""
+    diagnose_api_key: str = ""
     strict_distill_json: bool = True
 
 
