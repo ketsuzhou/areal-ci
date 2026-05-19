@@ -98,7 +98,9 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
                 loss_mask = [0] * resp.input_len + [1] * resp.output_len
                 versions = [-1] * resp.input_len + resp.output_versions
 
-            outcome_reward = interaction.reward if interaction.reward is not None else 0.0
+            outcome_reward = (
+                interaction.reward if interaction.reward is not None else 0.0
+            )
 
             topk_ids: list[list[int]] = []
             topk_logp: list[list[float]] = []
@@ -119,7 +121,9 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
             logprobs = td["logprobs"].squeeze(0).tolist()
             loss_mask = td["loss_mask"].squeeze(0).tolist()
             versions = td["versions"].squeeze(0).tolist()
-            outcome_reward = interaction.reward if interaction.reward is not None else 0.0
+            outcome_reward = (
+                interaction.reward if interaction.reward is not None else 0.0
+            )
             topk_ids = []
             topk_logp = []
         else:
@@ -243,6 +247,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         diagnose_model_name: str = "",
         diagnose_max_tokens: int = 1024,
         diagnose_temperature: float = 0.0,
+        diagnose_base_url: str = "",
+        diagnose_api_key: str = "",
         strict_distill_json: bool = True,
     ) -> None:
         from customized_areal.tree_search.advantage import TreeAdvantageComputer
@@ -271,6 +277,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.diagnose_model_name = diagnose_model_name
         self.diagnose_max_tokens = diagnose_max_tokens
         self.diagnose_temperature = diagnose_temperature
+        self.diagnose_base_url = diagnose_base_url
+        self.diagnose_api_key = diagnose_api_key
         self.strict_distill_json = strict_distill_json
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
@@ -287,7 +295,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
 
-    def _result_to_nodes(self, result: Any, query_id: str, group_idx: int) -> list[Node] | None:
+    def _result_to_nodes(
+        self, result: Any, query_id: str, group_idx: int
+    ) -> list[Node] | None:
         """Convert a single arun_episode result to list[Node]."""
         from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
@@ -361,6 +371,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             diagnose_model_name=self.diagnose_model_name or self.teacher_model_name,
             diagnose_max_tokens=self.diagnose_max_tokens,
             diagnose_temperature=self.diagnose_temperature,
+            diagnose_base_url=self.diagnose_base_url,
+            diagnose_api_key=self.diagnose_api_key,
         )
         return provider, client
 
@@ -380,9 +392,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if not nodes:
             return nodes, {}
         try:
-            context = tokenizer.decode(
-                nodes[-1].input_ids, skip_special_tokens=False
-            )
+            context = tokenizer.decode(nodes[-1].input_ids, skip_special_tokens=False)
         except TypeError:
             context = tokenizer.decode(nodes[-1].input_ids)
         raw = await provider.diagnose_episode(context, str(data.get("answer", "")))
@@ -422,7 +432,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         return nodes, rewards_by_node_id
 
     async def _retry_episode(
-        self, engine, data: dict[str, Any], group_idx: int,
+        self,
+        engine,
+        data: dict[str, Any],
+        group_idx: int,
         max_retries: int = 1,
     ) -> Any:
         """Retry a failed episode until success or max_retries exhausted."""
@@ -435,17 +448,28 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 group_idx,
                 attempt,
                 max_retries,
-                f"failed: {result}" if isinstance(result, Exception) else "returned None",
+                f"failed: {result}"
+                if isinstance(result, Exception)
+                else "returned None",
             )
             if isinstance(result, Exception):
                 logger.warning(
                     "Episode %s retry %d traceback:\n%s",
                     group_idx,
                     attempt,
-                    "".join(traceback.format_exception(type(result), result, result.__traceback__)),
+                    "".join(
+                        traceback.format_exception(
+                            type(result), result, result.__traceback__
+                        )
+                    ),
                 )
-            wait = 2 ** attempt
-            logger.info("Episode %s retry %d — waiting %ds before next attempt", group_idx, attempt, wait)
+            wait = 2**attempt
+            logger.info(
+                "Episode %s retry %d — waiting %ds before next attempt",
+                group_idx,
+                attempt,
+                wait,
+            )
             await asyncio.sleep(wait)
         logger.error(
             "Episode %s exhausted all %d retries — skipping", group_idx, max_retries
@@ -464,7 +488,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         rewards_by_node_id: dict[str, list[Any]] = {}
         for nodes in node_groups:
             try:
-                episode_nodes, episode_rewards = await self._prepare_distill_for_episode(
+                (
+                    episode_nodes,
+                    episode_rewards,
+                ) = await self._prepare_distill_for_episode(
                     nodes=nodes,
                     data=data,
                     engine=engine,
@@ -482,9 +509,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             rewards_by_node_id.update(episode_rewards)
         return prepared_nodes, rewards_by_node_id
 
-    async def arun_episode(
-        self, engine, data: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def arun_episode(self, engine, data: dict[str, Any]) -> dict[str, Any] | None:
         query_id = data.get("query_id") or ""
 
         # 1. Check cache
@@ -515,9 +540,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             for group_idx, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(
-                        "Episode %d unrecoverable: %s", group_idx, result
-                    )
+                    logger.error("Episode %d unrecoverable: %s", group_idx, result)
                     continue
                 if result is None:
                     continue
@@ -542,21 +565,25 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
                 provider, provider_client = await self._build_teacher_provider(engine)
-                fresh_nodes, fresh_rewards = await self._prepare_distill_for_node_groups(
+                (
+                    fresh_nodes,
+                    fresh_rewards,
+                ) = await self._prepare_distill_for_node_groups(
                     _group_nodes_by_episode(fresh_nodes),
                     data,
                     engine,
                     provider,
                     tokenizer,
                 )
-                cached_nodes, cached_rewards = (
-                    await self._prepare_distill_for_node_groups(
-                        _group_nodes_by_episode(cached_nodes),
-                        data,
-                        engine,
-                        provider,
-                        tokenizer,
-                    )
+                (
+                    cached_nodes,
+                    cached_rewards,
+                ) = await self._prepare_distill_for_node_groups(
+                    _group_nodes_by_episode(cached_nodes),
+                    data,
+                    engine,
+                    provider,
+                    tokenizer,
                 )
                 rewards_by_node_id.update(fresh_rewards)
                 rewards_by_node_id.update(cached_rewards)
