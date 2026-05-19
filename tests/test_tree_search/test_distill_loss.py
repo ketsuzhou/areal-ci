@@ -2,7 +2,40 @@ import torch
 
 from customized_areal.tree_search.distill_types import PositionRewardInfo
 from customized_areal.tree_search.training.actor import _distribute_position_rewards
-from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
+from customized_areal.tree_search.training.loss import (
+    _compute_teacher_kl_loss,
+    _select_chosen_logprobs,
+)
+
+
+def test_select_chosen_logprobs_supports_distill_shapes():
+    seq_logprobs = torch.tensor([-1.0, -2.0])
+    seq_mask = torch.tensor([1, 1], dtype=torch.bool)
+    torch.testing.assert_close(
+        _select_chosen_logprobs(seq_logprobs, seq_mask),
+        seq_logprobs,
+    )
+
+    seq_candidate_logprobs = torch.tensor([[-1.0, -1.5], [-2.0, -2.5]])
+    torch.testing.assert_close(
+        _select_chosen_logprobs(seq_candidate_logprobs, seq_mask),
+        torch.tensor([-1.0, -2.0]),
+    )
+
+    batch_logprobs = torch.tensor([[-1.0, -2.0], [-3.0, -4.0]])
+    batch_mask = torch.tensor([[1, 1], [1, 1]], dtype=torch.bool)
+    torch.testing.assert_close(
+        _select_chosen_logprobs(batch_logprobs, batch_mask),
+        batch_logprobs,
+    )
+
+    batch_candidate_logprobs = torch.tensor(
+        [[[-1.0, -1.5], [-2.0, -2.5]], [[-3.0, -3.5], [-4.0, -4.5]]]
+    )
+    torch.testing.assert_close(
+        _select_chosen_logprobs(batch_candidate_logprobs, batch_mask),
+        torch.tensor([[-1.0, -2.0], [-3.0, -4.0]]),
+    )
 
 
 def test_compute_teacher_kl_loss_1d_uses_prompt_len_absolute_positions():

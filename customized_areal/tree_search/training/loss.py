@@ -81,18 +81,16 @@ def grpo_distill_loss_fn(
 
     entropy = entropy.detach()
 
+    chosen_logprobs = _select_chosen_logprobs(logprobs, loss_mask)
+
     coeffs = _resolve_proximal_logp(
         prox_logp_gt=prox_logp_gt,
         prox_logp_method=getattr(config, "prox_clip", "recompute"),
         old_logp=old_logp,
-        logprobs=logprobs.detach() if logprobs.dim() == 1 else logprobs[:, 0].detach(),
+        logprobs=chosen_logprobs.detach(),
         versions=input_data.get("versions"),
         current_version=current_version,
     )
-
-    # For standard GRPO loss, use logprobs of chosen tokens only
-    # If logprobs is 2D [seq_len, num_candidates], use chosen token (index 0)
-    chosen_logprobs = logprobs if logprobs.dim() == 1 else logprobs[:, 0]
 
     loss, stat = _compute_grpo_loss(
         logprobs=chosen_logprobs,
@@ -172,6 +170,26 @@ def grpo_distill_loss_fn(
     )
 
     return loss
+
+
+def _select_chosen_logprobs(
+    logprobs: torch.Tensor,
+    loss_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Select chosen-token logprobs from optional candidate dimensions."""
+    if logprobs.dim() == 1:
+        return logprobs
+    if (
+        logprobs.dim() == 2
+        and loss_mask.dim() == 2
+        and logprobs.shape == loss_mask.shape
+    ):
+        return logprobs
+    if logprobs.dim() == 2:
+        return logprobs[:, 0]
+    if logprobs.dim() == 3:
+        return logprobs[..., 0]
+    raise ValueError(f"Unsupported logprobs shape for distill loss: {logprobs.shape}")
 
 
 def _compute_teacher_kl_loss(
