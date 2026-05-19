@@ -83,6 +83,79 @@ def test_compute_teacher_kl_loss_2d_uses_candidate_columns():
     torch.testing.assert_close(loss, expected)
 
 
+def test_compute_teacher_kl_loss_batched_single_candidate_uses_sample_index():
+    logprobs = torch.tensor(
+        [
+            [-9.0, -1.0, -2.0],
+            [-8.0, -3.0, -4.0],
+        ],
+        requires_grad=True,
+    )
+    loss_mask = torch.tensor(
+        [
+            [0, 1, 1],
+            [0, 1, 1],
+        ],
+        dtype=torch.bool,
+    )
+    position_rewards = [
+        PositionRewardInfo(
+            position=1,
+            teacher_logprobs=[-0.5],
+            sample_index=1,
+        )
+    ]
+
+    loss = _compute_teacher_kl_loss(
+        position_rewards=position_rewards,
+        logprobs=logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[1, 1],
+    )
+
+    torch.testing.assert_close(loss, torch.tensor(-3.5))
+
+
+def test_compute_teacher_kl_loss_batched_multi_candidate_uses_sample_index():
+    logprobs = torch.tensor(
+        [
+            [
+                [-9.0, -9.0],
+                [-1.0, -1.5],
+            ],
+            [
+                [-8.0, -8.5],
+                [-3.0, -3.5],
+            ],
+        ],
+        requires_grad=True,
+    )
+    loss_mask = torch.tensor(
+        [
+            [0, 1],
+            [0, 1],
+        ],
+        dtype=torch.bool,
+    )
+    position_rewards = [
+        PositionRewardInfo(
+            position=0,
+            teacher_logprobs=[-0.5, -1.0],
+            sample_index=1,
+        )
+    ]
+
+    loss = _compute_teacher_kl_loss(
+        position_rewards=position_rewards,
+        logprobs=logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[1, 1],
+    )
+
+    expected = torch.tensor(((-3.0 + 0.5) + (-3.5 + 1.0)) / 2)
+    torch.testing.assert_close(loss, expected)
+
+
 def test_compute_teacher_kl_loss_empty_position_rewards_returns_device_scalar_zero():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logprobs = torch.tensor([-1.0, -2.0], device=device, requires_grad=True)

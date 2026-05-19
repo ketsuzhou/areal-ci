@@ -190,9 +190,13 @@ def _compute_teacher_kl_loss(
         return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
 
     terms = []
-    max_position = logprobs.shape[0]
-    max_candidates = 1 if logprobs.dim() == 1 else logprobs.shape[1]
-    flat_loss_mask = loss_mask.reshape(-1).bool()
+    mask = loss_mask.bool()
+    is_batched_single = logprobs.dim() == 2 and mask.dim() == 2 and logprobs.shape == mask.shape
+    is_batched_multi = (
+        logprobs.dim() == 3
+        and mask.dim() == 2
+        and logprobs.shape[:2] == mask.shape
+    )
 
     for pr in position_rewards:
         teacher_logprobs = getattr(pr, "teacher_logprobs", None)
@@ -209,8 +213,48 @@ def _compute_teacher_kl_loss(
             prompt_len = prompt_lens
 
         position = pr.position + prompt_len
+
+        if is_batched_single:
+            if pr.sample_index < 0 or pr.sample_index >= logprobs.shape[0]:
+                continue
+            if position < 0 or position >= logprobs.shape[1]:
+                continue
+            if not mask[pr.sample_index, position]:
+                continue
+            chosen_index = getattr(pr, "chosen_index", 0)
+            if chosen_index < 0 or chosen_index >= len(teacher_logprobs):
+                continue
+            teacher_t = torch.tensor(
+                teacher_logprobs[chosen_index],
+                dtype=logprobs.dtype,
+                device=logprobs.device,
+            ).detach()
+            terms.append(logprobs[pr.sample_index, position] - teacher_t)
+            continue
+
+        if is_batched_multi:
+            if pr.sample_index < 0 or pr.sample_index >= logprobs.shape[0]:
+                continue
+            if position < 0 or position >= logprobs.shape[1]:
+                continue
+            if not mask[pr.sample_index, position]:
+                continue
+            max_candidates = logprobs.shape[2]
+            num_candidates = min(len(teacher_logprobs), max_candidates)
+            if num_candidates <= 0:
+                continue
+            teacher_t = torch.tensor(
+                teacher_logprobs[:num_candidates],
+                dtype=logprobs.dtype,
+                device=logprobs.device,
+            ).detach()
+            terms.append(logprobs[pr.sample_index, position, :num_candidates] - teacher_t)
+            continue
+
+        max_position = logprobs.shape[0]
         if position < 0 or position >= max_position:
             continue
+        flat_loss_mask = mask.reshape(-1)
         if position < flat_loss_mask.numel() and not flat_loss_mask[position]:
             continue
 
@@ -226,6 +270,7 @@ def _compute_teacher_kl_loss(
             terms.append(logprobs[position] - teacher_t)
             continue
 
+        max_candidates = logprobs.shape[1]
         num_candidates = min(len(teacher_logprobs), max_candidates)
         if num_candidates <= 0:
             continue
