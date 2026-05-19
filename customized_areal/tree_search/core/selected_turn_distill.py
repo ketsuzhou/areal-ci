@@ -14,7 +14,6 @@ from customized_areal.tree_search.distill_types import (
 )
 from customized_areal.tree_search.mcts_tree_store import Node
 
-
 GUIDANCE_PROMPT_TEMPLATE = (
     "\n\nImprove this selected assistant turn using this guidance:\n{guidance}\n\n"
 )

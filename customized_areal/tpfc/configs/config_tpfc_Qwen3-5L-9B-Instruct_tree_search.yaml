@@ -1,5 +1,5 @@
 experiment_name: tpfc-grpo
-trial_name: trial_0518
+trial_name: trial_0519_3
 
 seed: 1
 enable_offload: true

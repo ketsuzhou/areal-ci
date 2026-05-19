@@ -60,6 +60,7 @@ class Node:
     topk_logp: list[list[float]] | None = None
     distill_reward: list[list[float]] | None = None
     teacher_logp: list[list[float]] | None = None
+    guidance: dict[int, str] | None = None  # turn_idx → guidance text for leaf nodes
 
 
 def _find_turn_boundaries(

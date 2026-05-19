@@ -24,6 +24,43 @@ class PositionRewardInfo:
     chosen_index: int = 0
     sample_index: int = 0
 
+    def __post_init__(self):
+        n = len(self.candidates)
+        if n == 0:
+            return
+        if len(self.candidate_token_ids) != n:
+            raise ValueError(
+                f"candidates length ({n}) must match candidate_token_ids "
+                f"length ({len(self.candidate_token_ids)})"
+            )
+        if self.logprobs is not None and len(self.logprobs) != n:
+            raise ValueError(
+                f"candidates length ({n}) must match logprobs "
+                f"length ({len(self.logprobs)})"
+            )
+        if self.rewards and len(self.rewards) != n:
+            raise ValueError(
+                f"candidates length ({n}) must match rewards "
+                f"length ({len(self.rewards)})"
+            )
+        if self.chosen_index < 0 or self.chosen_index >= n:
+            raise ValueError(
+                f"chosen_index ({self.chosen_index}) out of range [0, {n})"
+            )
+
+    @property
+    def chosen_token(self) -> str:
+        return self.candidates[self.chosen_index] if self.candidates else ""
+
+    @property
+    def chosen_reward(self) -> float:
+        return self.rewards[self.chosen_index] if self.rewards else 0.0
+
+    @property
+    def chosen_logprob(self) -> float:
+        return (self.logprobs[self.chosen_index]
+                if self.logprobs is not None else 0.0)
+
 
 @dataclass(frozen=True)
 class DiagnosisTurn:

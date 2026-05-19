@@ -1,5 +1,5 @@
 # customized_areal/tree_search/tree_search_grouped_workflow.py
-"""Tree-search-aware grouped rollout workflow with cache reuse.
+"""Tree-search-aware grouped rollout workflow with cache reuse and teacher distillation.
 
 Consolidates the functionality of QueryIDProxyWorkflow,
 TreeSearchGroupedRolloutWorkflow, and TreeSearchWorkflowExecutor into
@@ -8,6 +8,7 @@ a single class that:
 - Does per-query cache lookup to determine how many fresh episodes are needed (episode-level counting)
 - Generates only the needed fresh episodes (partial cache reuse)
 - Converts fresh results to Nodes, loads cached Nodes, combines them
+- Performs teacher model reward computation (diagnosis + teacher logprob gathering) for distillation
 - Inserts fresh Nodes into tree_store, computes advantages, marks trained
 - Saves tree checkpoint
 - Returns batched tensor dicts that the base WorkflowExecutor handles natively
@@ -162,8 +163,9 @@ def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
     if not nodes:
         return None
 
-    from areal.utils.data import concat_padded_tensors
     from customized_areal.tree_search.mcts_tree_store import _node_to_tensor_dict
+
+    from areal.utils.data import concat_padded_tensors
 
     tensor_dicts = [
         _node_to_tensor_dict(
@@ -203,12 +205,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     1. Check cache: how many untrained episodes exist for this query?
     2. Generate only the needed fresh episodes (group_size - cached_count)
     3. Convert fresh results to Nodes, load cached episode Nodes
-    4. Combine cached + fresh Nodes (total = group_size episodes)
-    5. Insert fresh Nodes into tree_store
-    6. Compute tree advantages per-episode (if advantage_mode == TREE)
-    7. Mark all nodes as trained
-    8. Save tree checkpoint (if cache_mode == CROSS_TRAINING)
-    9. Return batched tensor dict
+    4. Teacher model reward computation (if loss_mode != GRPO):
+       - Diagnose episodes to find turns needing improvement
+       - Get teacher logprobs for candidate tokens at each position
+       - Build PositionRewardInfo with candidate_token_ids, teacher_logprobs, and rewards
+    5. Combine cached + fresh Nodes (total = group_size episodes)
+    6. Insert fresh Nodes into tree_store
+    7. Compute tree advantages per-episode (if advantage_mode == TREE)
+    8. Mark all nodes as trained
+    9. Save tree checkpoint (if cache_mode == CROSS_TRAINING)
+    10. Return batched tensor dict (with distill weights and position_rewards if distilling)
     """
 
     _tokenizer_cache: dict[str, Any] = {}
@@ -382,6 +388,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         raw = await provider.diagnose_episode(context, str(data.get("answer", "")))
         diagnosis = parse_episode_diagnosis(raw)
         selected = diagnosis.selected_turns
+        # Save guidance dict into the leaf node of this episode
+        if selected and nodes:
+            nodes[-1].guidance = dict(selected)
         if not selected:
             if self.loss_mode == LossMode.DISTILL:
                 return [], {}

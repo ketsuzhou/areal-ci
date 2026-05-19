@@ -747,6 +747,37 @@ class RemoteInfEngine(InferenceEngine):
                 max_reasoning_tokens = int(
                     os.getenv("TREE_SEARCH_MAX_REASONING_TOKENS", "1000")
                 )
+                topk_distill = (
+                    os.getenv("TREE_SEARCH_TOPK_DISTILL", "false").lower() == "true"
+                )
+                teacher_provider = os.getenv("TREE_SEARCH_TEACHER_PROVIDER", "external")
+                teacher_base_url = os.getenv(
+                    "TREE_SEARCH_TEACHER_BASE_URL", "http://localhost:8001"
+                )
+                teacher_model_name = os.getenv("TREE_SEARCH_TEACHER_MODEL_NAME", "")
+                teacher_top_k = int(os.getenv("TREE_SEARCH_TEACHER_TOP_K", "10"))
+                teacher_max_retries = int(
+                    os.getenv("TREE_SEARCH_TEACHER_MAX_RETRIES", "3")
+                )
+                teacher_timeout = float(
+                    os.getenv("TREE_SEARCH_TEACHER_TIMEOUT", "60.0")
+                )
+                teacher_missing_logprob = float(
+                    os.getenv("TREE_SEARCH_TEACHER_MISSING_LOGPROB", "-23.0")
+                )
+                diagnose_model_name = os.getenv(
+                    "TREE_SEARCH_DIAGNOSE_MODEL_NAME", teacher_model_name
+                )
+                diagnose_max_tokens = int(
+                    os.getenv("TREE_SEARCH_DIAGNOSE_MAX_TOKENS", "1024")
+                )
+                diagnose_temperature = float(
+                    os.getenv("TREE_SEARCH_DIAGNOSE_TEMPERATURE", "0.0")
+                )
+                strict_distill_json = (
+                    os.getenv("TREE_SEARCH_STRICT_DISTILL_JSON", "true").lower()
+                    == "true"
+                )
 
                 resolved = TreeSearchGroupedRolloutWorkflow(
                     resolved,
@@ -759,6 +790,18 @@ class RemoteInfEngine(InferenceEngine):
                     max_reasoning_tokens=max_reasoning_tokens,
                     rl_loss_weight=rl_loss_weight,
                     distill_loss_weight=distill_loss_weight,
+                    topk_distill=topk_distill,
+                    teacher_provider=teacher_provider,
+                    teacher_base_url=teacher_base_url,
+                    teacher_model_name=teacher_model_name,
+                    teacher_top_k=teacher_top_k,
+                    teacher_max_retries=teacher_max_retries,
+                    teacher_timeout=teacher_timeout,
+                    teacher_missing_logprob=teacher_missing_logprob,
+                    diagnose_model_name=diagnose_model_name,
+                    diagnose_max_tokens=diagnose_max_tokens,
+                    diagnose_temperature=diagnose_temperature,
+                    strict_distill_json=strict_distill_json,
                 )
             else:
                 self.logger.warning(

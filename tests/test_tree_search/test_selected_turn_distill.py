@@ -111,6 +111,8 @@ def test_episode_diagnosis_returns_only_selected_turn_guidance():
 def test_package_exports_selected_turn_diagnosis_types():
     from customized_areal.tree_search import (
         DiagnosisTurn as ExportedDiagnosisTurn,
+    )
+    from customized_areal.tree_search import (
         EpisodeDiagnosis as ExportedEpisodeDiagnosis,
     )
 

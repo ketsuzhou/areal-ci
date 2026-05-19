@@ -176,19 +176,26 @@ def _select_chosen_logprobs(
     logprobs: torch.Tensor,
     loss_mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Select chosen-token logprobs from optional candidate dimensions."""
+    """Select chosen-token logprobs from optional candidate dimensions.
+
+    Assumes ``loss_mask`` is never expanded to match multi-candidate
+    ``logprobs`` shape.  Standard shapes are ``[seq_len]`` or
+    ``[batch, seq_len]``.
+    """
     if logprobs.dim() == 1:
         return logprobs
-    if (
-        logprobs.dim() == 2
-        and loss_mask.dim() == 2
-        and logprobs.shape == loss_mask.shape
-    ):
+
+    # Multi-candidate: logprobs has more dims than loss_mask.
+    if logprobs.dim() > loss_mask.dim():
+        if logprobs.dim() == 2:
+            return logprobs[:, 0]
+        if logprobs.dim() == 3:
+            return logprobs[..., 0]
+
+    # Same dims: single-candidate (return as-is).
+    if logprobs.dim() == loss_mask.dim() and logprobs.dim() == 2:
         return logprobs
-    if logprobs.dim() == 2:
-        return logprobs[:, 0]
-    if logprobs.dim() == 3:
-        return logprobs[..., 0]
+
     raise ValueError(f"Unsupported logprobs shape for distill loss: {logprobs.shape}")
 
 

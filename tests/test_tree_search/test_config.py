@@ -1,4 +1,4 @@
-from customized_areal.tree_search.config import CacheMode, TreeBackupConfig
+from customized_areal.tree_search.config import CacheMode, LossMode, TreeBackupConfig
 
 
 class TestCacheMode:
@@ -22,3 +22,24 @@ class TestCacheMode:
         )
         assert config.mode == CacheMode.CROSS_TRAINING
         assert config.checkpoint_dir == "/tmp/mcts"
+
+
+class TestDistillConfig:
+    def test_distill_env_defaults_are_representable(self):
+        config = TreeBackupConfig(
+            topk_distill=True,
+            teacher_provider="external",
+            teacher_base_url="http://teacher:8001",
+            teacher_model_name="qwen-397b",
+            teacher_top_k=5,
+            diagnose_model_name="qwen-397b",
+        )
+
+        assert config.topk_distill is True
+        assert config.teacher_provider == "external"
+        assert config.teacher_top_k == 5
+
+    def test_loss_mode_enum(self):
+        assert LossMode.GRPO == "grpo"
+        assert LossMode.DISTILL == "distill"
+        assert LossMode.BOTH == "both"

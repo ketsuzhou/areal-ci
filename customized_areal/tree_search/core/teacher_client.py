@@ -148,7 +148,7 @@ class TeacherClient:
             If the client is not open or the API returns an error after
             all retries are exhausted.
         """
-        client = self._ensure_client()
+        self._ensure_client()
 
         num_output_tokens = len(output_ids)
         if len(candidate_token_ids) != num_output_tokens:

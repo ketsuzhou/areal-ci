@@ -164,6 +164,8 @@ class TreeCheckpointManager:
             data["distill_reward"] = node.distill_reward
         if node.teacher_logp is not None:
             data["teacher_logp"] = node.teacher_logp
+        if node.guidance is not None:
+            data["guidance"] = {str(k): v for k, v in node.guidance.items()}
         return data
 
     @staticmethod
@@ -184,6 +186,7 @@ class TreeCheckpointManager:
             topk_logp=data.get("topk_logp"),
             distill_reward=data.get("distill_reward"),
             teacher_logp=data.get("teacher_logp"),
+            guidance={int(k): v for k, v in data.get("guidance", {}).items()} if data.get("guidance") else None,
         )
 
     @staticmethod

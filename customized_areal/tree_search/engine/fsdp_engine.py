@@ -217,10 +217,8 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         prompt_len = 0
         if loss_mask is not None:
             lm_flat = loss_mask.squeeze(0) if loss_mask.dim() > 1 else loss_mask
-            for i in range(lm_flat.shape[0]):
-                if lm_flat[i].item():
-                    prompt_len = i
-                    break
+            # Vectorized: avoid O(seq_len) GPU-CPU sync in a loop.
+            prompt_len = int(lm_flat.bool().int().argmax().item())
 
         # Find max number of candidates across positions
         max_candidates = max(
@@ -284,6 +282,12 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     loss_multiplier,
                 )
             else:
+                # Handle empty tree (dummy trie for DP synchronization).
+                # When trie has no sequences, return zero loss with grad connection.
+                # This ensures backward() works correctly for FSDP synchronization.
+                if ctx.trie_node is None or not ctx.trie_node.all_sequence_ids:
+                    return logits.mean() * 0.0
+
                 # Check if we have multi-candidate data
                 position_rewards = ctx.mb_input.get("position_rewards")
 
