@@ -56,6 +56,18 @@ class TestTreeCheckpointManager:
         manager = TreeCheckpointManager(str(tmp_path / "nonexistent"))
         assert not manager.exists()
 
+    def test_exists_false_when_only_global_metadata(self, tmp_path):
+        import json
+        import os
+
+        mcts_dir = tmp_path / "mcts_trees"
+        os.makedirs(mcts_dir, exist_ok=True)
+        with open(mcts_dir / "metadata.json", "w") as f:
+            json.dump({}, f)
+
+        manager = TreeCheckpointManager(str(tmp_path))
+        assert not manager.exists()
+
     def test_save_creates_directory(self, tmp_path):
         save_dir = str(tmp_path / "new_dir")
         manager = TreeCheckpointManager(save_dir)
@@ -64,6 +76,16 @@ class TestTreeCheckpointManager:
         import os
 
         assert os.path.isdir(os.path.join(save_dir, "mcts_trees"))
+
+    def test_save_does_not_create_global_metadata(self, tmp_path):
+        manager = TreeCheckpointManager(str(tmp_path))
+        store = _make_store_with_data()
+        manager.save(store)
+        import os
+
+        assert not os.path.exists(
+            os.path.join(str(tmp_path), "mcts_trees", "metadata.json")
+        )
 
     def test_load_preserves_node_id_counter(self, tmp_path):
         manager = TreeCheckpointManager(str(tmp_path))
@@ -215,7 +237,6 @@ class TestTreeCheckpointManager:
         assert len(tmp_files) == 0
 
     def test_save_and_load_trained_episodes(self, tmp_path):
-        manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()
         store.current_train_id = "run_001"
         node_ids = store._query_node_ids["q1"]
@@ -250,7 +271,6 @@ class TestTreeCheckpointManager:
         """Verify no .tmp files remain after successful save."""
         import os
 
-        manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()
         store.current_train_id = "run_001"
 

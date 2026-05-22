@@ -704,7 +704,9 @@ class PPOTrainer:
                 self.actor.get_device_stats().log("compute advantages")
 
             # Wait for async checkpoint staging to complete before modifying parameters
+            logger.info("Calling saver.maybe_wait_for_staging()...")
             self.saver.maybe_wait_for_staging()
+            logger.info("saver.maybe_wait_for_staging() completed")
 
             if (
                 config.memory_profiler is not None
@@ -712,6 +714,7 @@ class PPOTrainer:
             ):
                 self.actor.start_memory_profile(config.memory_profiler.max_entries)
 
+            logger.info("Calling actor.ppo_update()...")
             with (
                 stats_tracker.record_timing("train_step"),
                 perf_tracer.trace_scope(
@@ -723,6 +726,7 @@ class PPOTrainer:
                 self.actor.ppo_update(adv_batch)
                 self.actor.step_lr_scheduler()
                 self.actor.get_device_stats().log("ppo update")
+            logger.info("actor.ppo_update() completed")
 
             if (
                 config.memory_profiler is not None
@@ -752,11 +756,16 @@ class PPOTrainer:
                     self._offload_model(self.critic, role="critic")
 
             # pause inference for updating weights, save, and evaluation
+            logger.info("Calling rollout.pause()...")
             self.rollout.pause()
+            logger.info("rollout.pause() completed")
 
             # Actor already onloaded; engine-internal _offload_aware_context
             # calls in update_weights/save are no-ops.
 
+            logger.info(
+                "Calling actor.update_weights(version=%d)...", global_step + 1
+            )
             with (
                 stats_tracker.record_timing("update_weights"),
                 perf_tracer.trace_scope(
@@ -776,6 +785,7 @@ class PPOTrainer:
                 self.rollout.set_version(new_version)
                 if self.eval_rollout is not None:
                     self.eval_rollout.set_version(new_version)
+            logger.info("actor.update_weights() completed")
 
             with (
                 stats_tracker.record_timing("save"),
@@ -805,6 +815,12 @@ class PPOTrainer:
 
             if self._should_offload_rollout:
                 self._onload_rollout(is_eval=True)
+            logger.info(
+                "Calling _evaluate (epoch=%d, step=%d, global_step=%d)...",
+                epoch,
+                step,
+                global_step,
+            )
             with (
                 stats_tracker.record_timing("eval"),
                 perf_tracer.trace_scope(
@@ -820,9 +836,11 @@ class PPOTrainer:
                     epoch_step=step,
                     global_step=global_step,
                 )
+            logger.info("_evaluate completed")
             if self._should_offload_rollout:
                 self._offload_rollout(is_eval=True)
 
+            logger.info("Calling clear_batches...")
             with (
                 stats_tracker.record_timing("clear_batches"),
                 perf_tracer.trace_scope(
@@ -846,7 +864,9 @@ class PPOTrainer:
                         self.ref.clear_batches(rollout_batch)
                     if self.data_controller is not None:
                         self.data_controller.clear_batches()
+            logger.info("clear_batches completed")
 
+            logger.info("Calling _export_and_commit_stats...")
             with perf_tracer.trace_scope(
                 "train.log_stats",
                 category=Category.INSTR,
@@ -855,9 +875,12 @@ class PPOTrainer:
                 self._export_and_commit_stats(
                     epoch=epoch, epoch_step=step, global_step=global_step
                 )
+            logger.info("_export_and_commit_stats completed")
 
             # Resume rollout
+            logger.info("Calling rollout.resume()...")
             self.rollout.resume()
+            logger.info("rollout.resume() completed")
 
             self._save_perf_tracer(step=global_step)
 
@@ -1119,6 +1142,12 @@ class PPOTrainer:
         return path
 
     def _save_hf(self, epoch: int, epoch_step: int, global_step: int):
+        logger.info(
+            "_save_hf: saving HF model (epoch=%d, step=%d, global_step=%d)...",
+            epoch,
+            epoch_step,
+            global_step,
+        )
         # Save as HF models for evaluation
         self.saver.save(
             self.actor,
@@ -1142,8 +1171,15 @@ class PPOTrainer:
         if not self.saver.is_async:
             dist.barrier(group=self.actor.cpu_group)
             current_platform.synchronize()
+        logger.info("_save_hf: completed")
 
     def _save_recover_checkpoint(self, epoch: int, epoch_step: int, global_step: int):
+        logger.info(
+            "_save_recover_checkpoint: saving recover checkpoint (epoch=%d, step=%d, global_step=%d)...",
+            epoch,
+            epoch_step,
+            global_step,
+        )
         # Save recoverable checkpoints
         to_save: dict = dict(default=self.actor)
         if self.critic is not None:
@@ -1167,6 +1203,7 @@ class PPOTrainer:
 
         dist.barrier(group=self.actor.cpu_group)
         current_platform.synchronize()
+        logger.info("_save_recover_checkpoint: completed")
 
     def _evaluate_fn(
         self,

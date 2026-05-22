@@ -170,7 +170,7 @@ def compute_reward(
     verify_ssl=False,
 ):
     if answer is None or ground_truth is None:
-        raise
+        raise ValueError(f"answer and ground_truth are required, got answer={answer}, ground_truth={ground_truth}")
 
     # Resolve judge config: explicit args > env vars > defaults
     _model_name = model_name or os.environ.get(

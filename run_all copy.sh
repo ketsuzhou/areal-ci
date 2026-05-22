@@ -22,3 +22,9 @@ gnome-terminal -- bash -c 'cd /dfs/share-groups/letrain/zhoujie/le-agent-dev_new
 
 # Training - terminal 3
 gnome-terminal -- bash -c 'cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml 2>&1 | tee training.log; exec bash' 
+
+
+# Training - terminal 3
+gnome-terminal -- bash -c 'cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search_v2.yaml 2>&1 | tee training.log; exec bash' 
+
+cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-opd.yaml

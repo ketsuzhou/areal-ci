@@ -1,18 +1,18 @@
-experiment_name: tpfc-grpo
-trial_name: trial_0519_3
+experiment_name: tpfc-distill
+trial_name: trial_0521
 
 seed: 1
-enable_offload: true
 
 # Tree search configuration
 tree_search:
   enabled: true
   checkpoint_dir: customized_areal/tpfc/data/tree_cache
-  mode: cross_training
-  loss_mode: distill
-  advantage_mode: tree
+  mode: CROSS_TRAINING
+  loss_mode: DISTILL
+  advantage_mode: GAE
   rl_loss_weight: 1.0
   distill_loss_weight: 0.005
+  teacher_provider: engine
   max_reasoning_tokens: 1000
   diagnose_model_name: qwen/qwen3.5-397b-a17b
   diagnose_base_url: http://10.254.244.168:8443/service-large-64-1775803465274/llm/v1
@@ -84,7 +84,7 @@ actor:
   trial_name: ${trial_name}
   attn_impl: sdpa
   fsdp:
-    offload_params: true
+    offload_params: false
   # path: /dfs/share-groups/letrain/zhoujie/Qwen3-1.7B
   # path: /dfs/share-groups/letrain/ckpt/Qwen3-VL-8B-Instruct
   path: /dfs/share-groups/letrain/ckpt/Qwen3.5-9B
@@ -95,7 +95,7 @@ actor:
   pad_to_maximum: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 30080
+    max_tokens_per_mb: 15104
   optimizer:
     type: adam
     lr: 1.70e-6
@@ -121,9 +121,9 @@ actor:
     upper: 5.0
   reward_norm: null
   adv_norm:
-    mean_level: batch
-    std_level: batch
-  weight_update_mode: xccl
+    mean_level: group
+    std_level: group
+  weight_update_mode: disk
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker
@@ -147,7 +147,7 @@ ref:
   pad_to_maximum: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 81920
+    max_tokens_per_mb: 15104
   optimizer: null
   scheduling_strategy:
     type: colocation
@@ -198,9 +198,9 @@ saver:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
-  freq_epochs: 1
-  freq_steps: null
-  freq_secs: null
+  freq_epochs: null
+  freq_steps: 2
+  freq_secs: 7200
 
 recover:
   mode: disabled
@@ -226,7 +226,7 @@ stats_logger:
   wandb:
     mode: disabled
   swanlab:
-    project: tpfc-grpo
+    project: tpfc-opd
     mode: cloud
     api_key: WVB9KhdtDjWVAozYQgHu5
 

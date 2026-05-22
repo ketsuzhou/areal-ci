@@ -187,7 +187,7 @@ class RolloutControllerV2:
 
     # -- Initialize --------------------------------------------------------
 
-    _WORKERS_READY_TIMEOUT: float = 30.0
+    _WORKERS_READY_TIMEOUT: float = 120.0
 
     def initialize(
         self,
@@ -1606,6 +1606,13 @@ class RolloutControllerV2:
         from areal.api.workflow_api import RolloutWorkflow
         from areal.utils.dynamic_import import import_from_string
 
+        # Extract tree_search_config so it is not forwarded to
+        # InferenceServiceWorkflow or agent constructors (they don't accept it).
+        tree_search_cfg = None
+        if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
+            workflow_kwargs = dict(workflow_kwargs)
+            tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+
         # External mode only supports online mode (workflow=None)
         if self.external_mode and workflow is not None:
             raise ValueError(
@@ -1636,11 +1643,7 @@ class RolloutControllerV2:
             )
 
             if group_size > 1:
-                from areal.infra.remote_inf_engine import GroupedRolloutWorkflow
-
-                resolved = GroupedRolloutWorkflow(
-                    resolved, group_size, logging.getLogger("RolloutController")
-                )
+                resolved = self._wrap_grouped(resolved, group_size, tree_search_cfg)
 
             return resolved
 
@@ -1676,15 +1679,52 @@ class RolloutControllerV2:
         # (d) Wrap the agent in InferenceServiceWorkflow
         resolved = self._wrap_agent(agent)
 
-        # (e) Optionally wrap in GroupedRolloutWorkflow
+        # (e) Optionally wrap in GroupedRolloutWorkflow or TreeSearchGroupedRolloutWorkflow
         if group_size > 1:
-            from areal.infra.remote_inf_engine import GroupedRolloutWorkflow
-
-            resolved = GroupedRolloutWorkflow(
-                resolved, group_size, logging.getLogger("RolloutController")
-            )
+            resolved = self._wrap_grouped(resolved, group_size, tree_search_cfg)
 
         return resolved
+
+    def _wrap_grouped(self, resolved, group_size, tree_search_cfg):
+        """Wrap in TreeSearchGroupedRolloutWorkflow or GroupedRolloutWorkflow."""
+        use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
+        if use_tree_search:
+            from customized_areal.tree_search.tree_search_grouped_workflow import (
+                TreeSearchGroupedRolloutWorkflow,
+            )
+
+            return TreeSearchGroupedRolloutWorkflow(
+                resolved,
+                group_size,
+                checkpoint_dir=tree_search_cfg.checkpoint_dir,
+                advantage_mode=tree_search_cfg.advantage_mode,
+                loss_mode=tree_search_cfg.loss_mode,
+                cache_mode=tree_search_cfg.mode,
+                tokenizer_path=self.config.tokenizer_path,
+                max_reasoning_tokens=tree_search_cfg.max_reasoning_tokens,
+                rl_loss_weight=tree_search_cfg.rl_loss_weight,
+                distill_loss_weight=tree_search_cfg.distill_loss_weight,
+                topk_distill=tree_search_cfg.topk_distill,
+                teacher_provider=tree_search_cfg.teacher_provider,
+                teacher_base_url=tree_search_cfg.teacher_base_url,
+                teacher_model_name=tree_search_cfg.teacher_model_name,
+                teacher_top_k=tree_search_cfg.teacher_top_k,
+                teacher_max_retries=tree_search_cfg.teacher_max_retries,
+                teacher_timeout=tree_search_cfg.teacher_timeout,
+                teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                diagnose_model_name=tree_search_cfg.diagnose_model_name,
+                diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
+                diagnose_temperature=tree_search_cfg.diagnose_temperature,
+                diagnose_base_url=tree_search_cfg.diagnose_base_url,
+                diagnose_api_key=tree_search_cfg.diagnose_api_key,
+                strict_distill_json=tree_search_cfg.strict_distill_json,
+            )
+        else:
+            from areal.infra.remote_inf_engine import GroupedRolloutWorkflow
+
+            return GroupedRolloutWorkflow(
+                resolved, group_size, logging.getLogger("RolloutController")
+            )
 
     @staticmethod
     def _resolve_should_accept_fn(

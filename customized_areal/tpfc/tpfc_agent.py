@@ -142,7 +142,6 @@ class TPFCAgent:
                 task_id="",
                 gt=gt,
                 tags=tags,
-                user_id=self.user_id,
                 model_name="openrouter/qwen/qwen3-vl-8b-thinking",
                 base_url=base_url,
                 api_key=api_key,

@@ -2336,6 +2336,18 @@ class SwanlabConfig:
             "choices": ["cloud", "local", "disabled", "offline"],
         },
     )
+    resume: str | None = field(
+        default=None,
+        metadata={
+            "help": "Resume mode for SwanLab run: 'must', 'allow', or 'never'. Must be used with 'id'.",
+        },
+    )
+    id: str | None = field(
+        default=None,
+        metadata={
+            "help": "SwanLab run ID to resume. Required when resume='must'.",
+        },
+    )
     # set None to prevent info-leak in docs
     api_key: str | None = None
 
@@ -2346,6 +2358,14 @@ class SwanlabConfig:
             raise ValueError(
                 f"Invalid swanlab mode: '{self.mode}'. Must be one of: {', '.join(valid_modes)}."
             )
+        if self.resume is not None:
+            valid_resume = ("must", "allow", "never")
+            if self.resume not in valid_resume:
+                raise ValueError(
+                    f"Invalid swanlab resume: '{self.resume}'. Must be one of: {', '.join(valid_resume)}."
+                )
+            if self.resume == "must" and self.id is None:
+                raise ValueError("swanlab.id is required when swanlab.resume='must'.")
         if self.api_key is None:
             self.api_key = os.getenv("SWANLAB_API_KEY")
 

@@ -20,7 +20,7 @@ LOG_FORMAT_PLAIN = (
     f"{AREAL_HEADER_PLAIN} %(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 )
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
-LOGLEVEL = logging.INFO
+LOGLEVEL = logging.DEBUG
 LOG_PREFIX_WIDTH = 10  # Fixed width for alignment in merged.log
 
 # NOTE: To use colorlog we should not call colorama.init() anywhere.

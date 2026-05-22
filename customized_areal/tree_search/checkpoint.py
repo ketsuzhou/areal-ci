@@ -7,8 +7,12 @@ Old TrieNode-based checkpoints are incompatible and must be discarded.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
 
@@ -18,53 +22,103 @@ class TreeCheckpointManager:
         self.save_dir = os.path.join(save_dir, "mcts_trees")
 
     def exists(self) -> bool:
-        return os.path.isdir(self.save_dir) and os.path.isfile(
-            os.path.join(self.save_dir, "metadata.json")
+        if not os.path.isdir(self.save_dir):
+            return False
+        return any(
+            filename.startswith("query_") and filename.endswith(".json")
+            for filename in os.listdir(self.save_dir)
         )
 
-    def save(self, tree_store: MCTSTreeStore) -> None:
-        os.makedirs(self.save_dir, exist_ok=True)
+    @contextmanager
+    def _file_lock(self, lock_path: str, *, exclusive: bool) -> Iterator[None]:
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        with open(lock_path, "a") as lock_file:
+            flag = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(lock_file.fileno(), flag)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-        # Save per-query trajectory records (atomic per file)
-        query_id_to_file: dict[str, str] = {}
-        for query_id, records in tree_store.trajectories.items():
-            data = {"records": [self._serialize_record(r) for r in records]}
-            query_id_to_file[query_id] = query_id
-            filepath = os.path.join(self.save_dir, f"query_{query_id}.json")
-            tmp_path = filepath + ".tmp"
+    def _query_path(self, query_id: str) -> str:
+        return os.path.join(self.save_dir, f"query_{query_id}.json")
+
+    def _query_lock_path(self, query_id: str) -> str:
+        return os.path.join(self.save_dir, f"query_{query_id}.lock")
+
+    @staticmethod
+    def _atomic_json_dump(path: str, data: dict) -> None:
+        tmp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
             with open(tmp_path, "w") as f:
                 json.dump(data, f)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, filepath)
+            os.replace(tmp_path, path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-        # Save metadata (atomic)
-        metadata = {
+    @staticmethod
+    def _query_metadata(tree_store: MCTSTreeStore, query_id: str) -> dict:
+        node_ids = list(tree_store._query_node_ids.get(query_id, []))
+        node_id_set = set(node_ids)
+        return {
             "node_id_to_key": {
-                k: [v[0], v[1]] for k, v in tree_store._node_id_to_key.items()
+                k: [v[0], v[1]]
+                for k, v in tree_store._node_id_to_key.items()
+                if v[0] == query_id
             },
-            "query_node_ids": {k: v for k, v in tree_store._query_node_ids.items()},
-            "query_id_to_file": query_id_to_file,
-            "visit_counts": {k: v for k, v in tree_store._visit_counts.items()},
-            "total_values": {k: v for k, v in tree_store._total_values.items()},
-            "q_values": {k: v for k, v in tree_store._q_values.items()},
-            "current_train_id": tree_store.current_train_id,
-            "rewards": {k: v for k, v in tree_store._rewards.items()},
+            "query_node_ids": node_ids,
+            "visit_counts": {
+                k: v for k, v in tree_store._visit_counts.items() if k in node_id_set
+            },
+            "total_values": {
+                k: v for k, v in tree_store._total_values.items() if k in node_id_set
+            },
+            "q_values": {
+                k: v for k, v in tree_store._q_values.items() if k in node_id_set
+            },
+            "rewards": {
+                k: v for k, v in tree_store._rewards.items() if k in node_id_set
+            },
             "normalized_advantages": {
-                k: v for k, v in tree_store._normalized_advantages.items()
+                k: v
+                for k, v in tree_store._normalized_advantages.items()
+                if k in node_id_set
             },
             "normalized_returns": {
-                k: v for k, v in tree_store._normalized_returns.items()
+                k: v
+                for k, v in tree_store._normalized_returns.items()
+                if k in node_id_set
             },
-            "turn_nodes": tree_store._turn_nodes,
+            "turn_nodes": {
+                k: v for k, v in tree_store._turn_nodes.items() if v in node_id_set
+            },
         }
-        meta_path = os.path.join(self.save_dir, "metadata.json")
-        tmp_meta = meta_path + ".tmp"
-        with open(tmp_meta, "w") as f:
-            json.dump(metadata, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_meta, meta_path)
+
+    def save_query(self, tree_store: MCTSTreeStore, query_id: str) -> None:
+        """Save one query file under a per-query inter-process lock."""
+        os.makedirs(self.save_dir, exist_ok=True)
+        records = tree_store.trajectories.get(query_id)
+        if records is None:
+            return
+        data = {
+            "query_id": query_id,
+            "records": [self._serialize_record(r) for r in records],
+            "metadata": self._query_metadata(tree_store, query_id),
+        }
+        filepath = self._query_path(query_id)
+        with self._file_lock(self._query_lock_path(query_id), exclusive=True):
+            self._atomic_json_dump(filepath, data)
+
+    def save(self, tree_store: MCTSTreeStore) -> None:
+        os.makedirs(self.save_dir, exist_ok=True)
+
+        # Save per-query trajectory records. Each query has its own lock so
+        # independent query writers do not block each other.
+        for query_id in tree_store.trajectories:
+            self.save_query(tree_store, query_id)
 
     def load(self) -> MCTSTreeStore:
         store = MCTSTreeStore()
@@ -80,56 +134,40 @@ class TreeCheckpointManager:
                 "trained or untrained for this run."
             )
 
-        with open(os.path.join(self.save_dir, "metadata.json")) as f:
-            metadata = json.load(f)
-
-        node_id_to_key_raw = metadata.get(
-            "node_id_to_key", metadata.get("seq_id_to_key", {})
-        )
-        store._node_id_to_key = {k: (v[0], v[1]) for k, v in node_id_to_key_raw.items()}
-        store._query_node_ids = metadata.get(
-            "query_node_ids", metadata.get("query_seq_ids", {})
-        )
-        store._visit_counts = {
-            k: v for k, v in metadata.get("visit_counts", {}).items()
-        }
-        store._total_values = {
-            k: v for k, v in metadata.get("total_values", {}).items()
-        }
-        store._q_values = {k: v for k, v in metadata.get("q_values", {}).items()}
-        # Keep runtime train_id — metadata's value records which run saved the
-        # checkpoint, but the runtime value identifies this run.
-        store._rewards = {k: v for k, v in metadata.get("rewards", {}).items()}
-        store._normalized_advantages = {
-            k: v for k, v in metadata.get("normalized_advantages", {}).items()
-        }
-        store._normalized_returns = {
-            k: v for k, v in metadata.get("normalized_returns", {}).items()
-        }
-        store._turn_nodes = metadata.get("turn_nodes", {})
-
-        # Build reverse mapping from filenames back to query_ids
-        # (needed for old checkpoints where filename may differ from query_id)
-        query_id_to_file = metadata.get("query_id_to_file", {})
-        file_to_query = {v: k for k, v in query_id_to_file.items()}
-
         # Load per-query trajectory records
         for filename in os.listdir(self.save_dir):
             if not filename.startswith("query_") or not filename.endswith(".json"):
                 continue
             file_key = filename[len("query_") : -len(".json")]
-            # For new checkpoints, file_key == query_id; for old ones, use metadata mapping
-            query_id = file_to_query.get(file_key, file_key)
             filepath = os.path.join(self.save_dir, filename)
             with open(filepath) as f:
                 data = json.load(f)
+            query_id = data.get("query_id", file_key)
             store.trajectories[query_id] = [
                 self._deserialize_record(r) for r in data["records"]
             ]
+            query_metadata = data.get("metadata", {})
+            node_id_to_key_raw = query_metadata.get("node_id_to_key", {})
+            store._node_id_to_key.update(
+                {k: (v[0], v[1]) for k, v in node_id_to_key_raw.items()}
+            )
+            query_node_ids = query_metadata.get("query_node_ids")
+            if query_node_ids is not None:
+                store._query_node_ids[query_id] = query_node_ids
+            store._visit_counts.update(query_metadata.get("visit_counts", {}))
+            store._total_values.update(query_metadata.get("total_values", {}))
+            store._q_values.update(query_metadata.get("q_values", {}))
+            store._rewards.update(query_metadata.get("rewards", {}))
+            store._normalized_advantages.update(
+                query_metadata.get("normalized_advantages", {})
+            )
+            store._normalized_returns.update(
+                query_metadata.get("normalized_returns", {})
+            )
+            store._turn_nodes.update(query_metadata.get("turn_nodes", {}))
 
-        # Rebuild indices from loaded trajectories so that query files on
-        # disk are always visible even if metadata.json is stale (e.g. after
-        # a crash that wrote files but not metadata).
+        # Rebuild indices from loaded trajectories if a query file is missing
+        # per-query metadata.
         for query_id, records in store.trajectories.items():
             for idx, node in enumerate(records):
                 node_id = node.node_id

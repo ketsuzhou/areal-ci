@@ -2,7 +2,6 @@ experiment_name: tpfc-grpo
 trial_name: trial0
 
 seed: 1
-enable_offload: true
 
 # Tree search configuration
 tree_search:
@@ -19,7 +18,6 @@ eval_workflow: ${workflow}
 
 agent:
   trial_name: ${trial_name}
-  user_id: ""
   model_name: null
   judge_model_name: null
   judge_base_url: null
@@ -116,7 +114,7 @@ actor:
   adv_norm:
     mean_level: batch
     std_level: batch
-  weight_update_mode: xccl
+  weight_update_mode: disk
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker
@@ -191,9 +189,9 @@ saver:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
-  freq_epochs: 1
-  freq_steps: null
-  freq_secs: null
+  freq_epochs: null
+  freq_steps: 2
+  freq_secs: 7200
 
 recover:
   mode: disabled

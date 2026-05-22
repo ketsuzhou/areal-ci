@@ -3,7 +3,7 @@
 Usage:
     python convert_episodes_to_text.py \
         --data_dir /dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/data/tree_cache/mcts_trees \
-        --tokenizer_path /dfs/share-groups/letrain/ckpt/Qwen3-VL-8B-Instruct \
+        --tokenizer_path /dfs/share-groups/letrain/ckpt/Qwen3.5-9B \
         --output_dir ./converted_episodes
 
 Output: one .json file per query, containing a list of episodes with decoded text and metadata.
