@@ -235,3 +235,60 @@ class TestTurnIdxCheckpoint:
         loaded_nodes = loaded.trajectories.get("q1", [])
         assert len(loaded_nodes) == 1
         assert loaded_nodes[0].turn_idx == 3
+
+
+class TestPackExtraDataSubsetsBatchDimTensors:
+    """Bug #3: _pack_extra_data should subset batch-dim tensors per tree."""
+
+    def test_batch_dim_non_packable_subset_per_tree(self):
+        import torch
+        from areal.models.tree_attn.tree import _pack_extra_data, TrieNode
+
+        # Build a simple trie with 2 sequences (seq_ids 0, 1)
+        trie = TrieNode(tree_id=0, start_idx=0)
+        trie.sequence_ids = [0, 1]
+
+        # Full batch has 4 sequences, but this tree only has 0 and 1
+        N = 4
+        data = {
+            "input_ids": torch.randint(0, 100, (N, 10)),
+            "topk_ids": torch.randint(0, 100, (N, 5, 3)),
+            "teacher_logp": torch.randn(N, 5, 3),
+            "some_scalar": 42,
+        }
+        sequence_lens = torch.tensor([8, 7, 9, 6], dtype=torch.int32)
+        packable_keys = set()
+        non_packable_keys = {"topk_ids", "teacher_logp", "some_scalar"}
+
+        result = _pack_extra_data(trie, data, sequence_lens, packable_keys, non_packable_keys)
+
+        # topk_ids and teacher_logp should be subsetted to [2, 5, 3]
+        assert result["topk_ids"].shape == (2, 5, 3)
+        assert result["teacher_logp"].shape == (2, 5, 3)
+        # Values should match the original sequences 0 and 1
+        torch.testing.assert_close(result["topk_ids"], data["topk_ids"][[0, 1]])
+        torch.testing.assert_close(result["teacher_logp"], data["teacher_logp"][[0, 1]])
+        # Non-tensor scalars should be copied as-is
+        assert result["some_scalar"] == 42
+
+    def test_cu_seqlens_added_to_tree_extra_data(self):
+        import torch
+        from areal.models.tree_attn.tree import _pack_extra_data, TrieNode
+
+        trie = TrieNode(tree_id=0, start_idx=0)
+        trie.sequence_ids = [0, 2]  # sequences 0 and 2
+
+        N = 4
+        data = {
+            "input_ids": torch.randint(0, 100, (N, 10)),
+        }
+        sequence_lens = torch.tensor([8, 7, 9, 6], dtype=torch.int32)
+        packable_keys = set()
+        non_packable_keys = set()
+
+        result = _pack_extra_data(trie, data, sequence_lens, packable_keys, non_packable_keys)
+
+        # cu_seqlens should be [0, 8, 17] (cumsum of [8, 9])
+        assert "cu_seqlens" in result
+        expected = torch.tensor([0, 8, 17], dtype=torch.int32)
+        torch.testing.assert_close(result["cu_seqlens"], expected)
