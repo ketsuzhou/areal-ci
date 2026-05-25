@@ -292,3 +292,83 @@ class TestPackExtraDataSubsetsBatchDimTensors:
         assert "cu_seqlens" in result
         expected = torch.tensor([0, 8, 17], dtype=torch.int32)
         torch.testing.assert_close(result["cu_seqlens"], expected)
+
+
+class TestTeacherKLLossPackedFormat:
+    """Bug #5: _compute_teacher_kl_loss must handle 1D packed logprobs with cu_seqlens."""
+
+    def test_packed_1d_format_with_cu_seqlens(self):
+        import torch
+        from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
+
+        # 2 sequences packed into 1D: seq0 has prompt_len=2 resp_len=3, seq1 has prompt_len=1 resp_len=2
+        # Total packed len = 5 + 3 = 8
+        loss_mask = torch.tensor([0, 0, 1, 1, 1, 0, 1, 1], dtype=torch.float32)
+        cu_seqlens = torch.tensor([0, 5, 8], dtype=torch.int32)
+
+        # Student logprobs: 1D [8] (single-candidate for simplicity)
+        logprobs = torch.tensor([-1.0, -2.0, -0.5, -0.6, -0.7, -3.0, -0.8, -0.9])
+
+        # Teacher: [2, max_resp, 1] where max_resp=3 (max resp across sequences)
+        # seq0 has resp_len=3, seq1 has resp_len=2
+        teacher_logprobs = torch.tensor([
+            [[-0.4], [-0.5], [-0.6]],  # seq0, 3 response positions
+            [[-0.7], [-0.8], [0.0]],   # seq1, 2 response positions (3rd is padding)
+        ])
+
+        loss = _compute_teacher_kl_loss(
+            teacher_logprobs=teacher_logprobs,
+            logprobs=logprobs,
+            loss_mask=loss_mask,
+            prompt_lens=[2, 1],
+            input_data={"cu_seqlens": cu_seqlens},
+        )
+
+        # Loss should be non-zero and finite
+        assert abs(loss.item()) > 0
+        assert torch.isfinite(loss)
+
+    def test_packed_1d_multi_candidate(self):
+        import torch
+        from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
+
+        # 2 sequences, multi-candidate (3 candidates per position)
+        loss_mask = torch.tensor([0, 1, 1, 0, 1, 1], dtype=torch.float32)
+        cu_seqlens = torch.tensor([0, 3, 6], dtype=torch.int32)
+
+        # Student logprobs: [6, 3] (multi-candidate)
+        logprobs = torch.randn(6, 3)
+
+        # Teacher: [2, 2, 3]
+        teacher_logprobs = torch.randn(2, 2, 3)
+
+        loss = _compute_teacher_kl_loss(
+            teacher_logprobs=teacher_logprobs,
+            logprobs=logprobs,
+            loss_mask=loss_mask,
+            prompt_lens=[1, 1],
+            input_data={"cu_seqlens": cu_seqlens},
+        )
+
+        assert abs(loss.item()) > 0
+        assert torch.isfinite(loss)
+
+    def test_batched_2d_format_unchanged(self):
+        """Existing batched [batch, seq] format should still work."""
+        import torch
+        from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
+
+        # 2D batched format (existing code path)
+        loss_mask = torch.tensor([[0, 1, 1], [0, 1, 1]], dtype=torch.float32)
+        logprobs = torch.tensor([[-1.0, -0.5, -0.6], [-2.0, -0.7, -0.8]])
+        teacher_logprobs = torch.tensor([[[-0.4], [-0.5]], [[-0.6], [-0.7]]])
+
+        loss = _compute_teacher_kl_loss(
+            teacher_logprobs=teacher_logprobs,
+            logprobs=logprobs,
+            loss_mask=loss_mask,
+            prompt_lens=[1, 1],
+        )
+
+        assert abs(loss.item()) > 0
+        assert torch.isfinite(loss)

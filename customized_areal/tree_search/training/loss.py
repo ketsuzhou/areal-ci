@@ -77,64 +77,80 @@ def grpo_distill_loss_fn(
     advantages = input_data["advantages"]
     loss_mask = input_data["loss_mask"].bool()
 
+    teacher_logprobs = input_data.get("teacher_logp")
+    rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
+    distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
+
+    # Determine prompt length per sample from loss_mask (0 = prompt, 1 = output)
+    if loss_mask.dim() > 1:
+        # [batch, seq_len] -> per-sample prompt_len
+        first_true = loss_mask.bool().cumsum(dim=1) == 1
+        prompt_lens = first_true.int().argmax(dim=1).tolist()
+    else:
+        # [seq_len] -> single sample
+        prompt_len = (
+            (loss_mask.bool().cumsum(dim=0) == 1).int().argmax(dim=0).item()
+        )
+        prompt_lens = [prompt_len]
+
     prox_logp_gt = input_data.get("prox_logp")
-
     entropy = entropy.detach()
-
     chosen_logprobs = _select_chosen_logprobs(logprobs, loss_mask)
 
-    coeffs = _resolve_proximal_logp(
-        prox_logp_gt=prox_logp_gt,
-        prox_logp_method=getattr(config, "prox_clip", "recompute"),
-        old_logp=old_logp,
-        logprobs=chosen_logprobs.detach(),
-        versions=input_data.get("versions"),
-        current_version=current_version,
-    )
-
-    loss, stat = _compute_grpo_loss(
-        logprobs=chosen_logprobs,
-        old_logp=old_logp,
-        advantages=advantages,
-        eps_clip=config.eps_clip,
-        eps_clip_higher=config.eps_clip_higher,
-        loss_mask=loss_mask,
-        c_clip=config.c_clip,
-        proximal_logprobs=coeffs,
-        rejection_sampling=getattr(config, "rejection_sampling", None),
-        importance_sampling_level=config.importance_sampling_level,
-        cu_seqlens=input_data.get("cu_seqlens"),
-    )
-
-    position_rewards = input_data.get("position_rewards")
     distill_stat = None
 
-    if position_rewards is not None:
-        rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
-        distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
-
-        # Determine prompt length per sample from loss_mask (0 = prompt, 1 = output)
-        # Vectorized: find first True position per sample
-        if loss_mask.dim() > 1:
-            # [batch, seq_len] -> per-sample prompt_len
-            first_true = loss_mask.bool().cumsum(dim=1) == 1
-            prompt_lens = first_true.int().argmax(dim=1).tolist()
-        else:
-            # [seq_len] -> single sample
-            prompt_len = (
-                (loss_mask.bool().cumsum(dim=0) == 1).int().argmax(dim=0).item()
-            )
-            prompt_lens = [prompt_len]
-
+    if rl_loss_weight == 0 and teacher_logprobs is not None:
+        # DISTILL mode: only teacher KL loss, no GRPO loss.
         teacher_kl_loss = _compute_teacher_kl_loss(
-            position_rewards=position_rewards,
+            teacher_logprobs=teacher_logprobs,
             logprobs=logprobs,
             loss_mask=loss_mask,
             prompt_lens=prompt_lens,
+            input_data=input_data,
+        )
+        loss = distill_loss_weight * teacher_kl_loss
+        distill_stat = teacher_kl_loss.detach()
+        stat = {
+            "loss": torch.zeros_like(loss),
+            "clip_mask": torch.zeros_like(loss_mask),
+            "dual_clip_mask": torch.zeros_like(loss_mask),
+            "importance_weight": torch.zeros_like(chosen_logprobs.float()),
+            "approx_kl": torch.zeros_like(chosen_logprobs.float()),
+        }
+    else:
+        coeffs = _resolve_proximal_logp(
+            prox_logp_gt=prox_logp_gt,
+            prox_logp_method=getattr(config, "prox_clip", "recompute"),
+            old_logp=old_logp,
+            logprobs=chosen_logprobs.detach(),
+            versions=input_data.get("versions"),
+            current_version=current_version,
         )
 
-        loss = rl_loss_weight * loss + distill_loss_weight * teacher_kl_loss
-        distill_stat = teacher_kl_loss.detach()
+        loss, stat = _compute_grpo_loss(
+            logprobs=chosen_logprobs,
+            old_logp=old_logp,
+            advantages=advantages,
+            eps_clip=config.eps_clip,
+            eps_clip_higher=config.eps_clip_higher,
+            loss_mask=loss_mask,
+            c_clip=config.c_clip,
+            proximal_logprobs=coeffs,
+            rejection_sampling=getattr(config, "rejection_sampling", None),
+            importance_sampling_level=config.importance_sampling_level,
+            cu_seqlens=input_data.get("cu_seqlens"),
+        )
+
+        if teacher_logprobs is not None:
+            teacher_kl_loss = _compute_teacher_kl_loss(
+                teacher_logprobs=teacher_logprobs,
+                logprobs=logprobs,
+                loss_mask=loss_mask,
+                prompt_lens=prompt_lens,
+                input_data=input_data,
+            )
+            loss = rl_loss_weight * loss + distill_loss_weight * teacher_kl_loss
+            distill_stat = teacher_kl_loss.detach()
 
     stats_tracker.denominator(
         n_tokens=infer_token_denominator(input_data, loss_mask),
@@ -200,118 +216,108 @@ def _select_chosen_logprobs(
 
 
 def _compute_teacher_kl_loss(
-    position_rewards: list,
+    teacher_logprobs: torch.Tensor,
     logprobs: torch.Tensor,
     loss_mask: torch.Tensor,
-    prompt_lens: list[int] | int,
+    prompt_lens: list[int],
+    input_data: dict | None = None,
 ) -> torch.Tensor:
-    """Compute direct teacher KL distillation loss from stored teacher logprobs.
+    """Compute teacher KL distillation loss from batched teacher_logprobs tensor.
 
-    This intentionally matches the existing BOTH-mode distillation convention in
-    `areal.trainer.ppo.actor`: add mean(student_logp - teacher_logp) to the
-    minimized actor loss. Pure KD can use a different weighting/sign upstream.
+    teacher_logprobs is response-aligned with shape [batch, resp_len, max_candidates].
+    Position i in the response maps to absolute sequence position prompt_len + i.
+
+    Supports both batched (loss_mask 2D) and 1D packed (loss_mask 1D + cu_seqlens)
+    formats for logprobs and loss_mask.
     """
-    if not position_rewards:
-        return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
+    if teacher_logprobs.numel() == 0:
+        return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
 
-    terms = []
+    terms: list[torch.Tensor] = []
     mask = loss_mask.bool()
-    is_batched_single = (
-        logprobs.dim() == 2 and mask.dim() == 2 and logprobs.shape == mask.shape
-    )
-    is_batched_multi = (
-        logprobs.dim() == 3 and mask.dim() == 2 and logprobs.shape[:2] == mask.shape
+    batch_size = teacher_logprobs.shape[0]
+    max_resp = teacher_logprobs.shape[1]
+
+    is_multi_candidate = logprobs.dim() > loss_mask.dim() or (
+        logprobs.dim() == loss_mask.dim() and logprobs.shape != loss_mask.shape
     )
 
-    for pr in position_rewards:
-        teacher_logprobs = getattr(pr, "teacher_logprobs", None)
-        if not teacher_logprobs:
+    # 1D packed format: use cu_seqlens for per-sequence boundaries
+    cu_seqlens = (input_data or {}).get("cu_seqlens")
+    if mask.dim() == 1 and cu_seqlens is not None:
+        for b in range(len(cu_seqlens) - 1):
+            if b >= batch_size:
+                break
+            start = cu_seqlens[b].item()
+            end = cu_seqlens[b + 1].item()
+            # Recompute prompt_len from loss_mask for this segment
+            seg_mask = mask[start:end]
+            pl = prompt_lens[b] if b < len(prompt_lens) else 0
+            if seg_mask.any():
+                pl = int(seg_mask.int().argmax().item())
+            resp_len = (end - start) - pl
+            n_pos = min(resp_len, max_resp)
+            if n_pos == 0:
+                continue
+
+            if is_multi_candidate:
+                num_cand = min(
+                    teacher_logprobs.shape[2],
+                    logprobs.shape[1] if logprobs.dim() == 2 else logprobs.shape[2],
+                )
+                student = logprobs[start + pl : start + pl + n_pos, :num_cand]
+                teacher = teacher_logprobs[b, :n_pos, :num_cand]
+                valid = teacher.abs().sum(dim=-1) > 1e-8
+                if valid.any():
+                    terms.append((student[valid] - teacher[valid]).reshape(-1))
+            else:
+                student = logprobs[start + pl : start + pl + n_pos]
+                teacher = teacher_logprobs[b, :n_pos, 0]
+                valid = teacher.abs() > 1e-8
+                if valid.any():
+                    terms.append((student[valid] - teacher[valid]).reshape(-1))
+
+        if not terms:
+            return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
+        return torch.cat(terms).mean()
+
+    # Original batched format: loss_mask is 2D [batch, seq_len]
+    is_batched = mask.dim() == 2 or logprobs.dim() >= 3
+
+    for b in range(batch_size):
+        pl = prompt_lens[b] if b < len(prompt_lens) else 0
+        resp_len = mask[b, pl:].sum().item() if is_batched else mask[pl:].sum().item()
+        n_pos = min(resp_len, max_resp)
+        if n_pos == 0:
             continue
 
-        if isinstance(prompt_lens, list):
-            prompt_len = (
-                prompt_lens[pr.sample_index]
-                if pr.sample_index < len(prompt_lens)
-                else 0
+        if is_multi_candidate:
+            num_cand = min(
+                teacher_logprobs.shape[2],
+                logprobs.shape[2] if logprobs.dim() == 3 else logprobs.shape[1],
             )
+            if is_batched:
+                student = logprobs[b, pl : pl + n_pos, :num_cand]
+            else:
+                student = logprobs[pl : pl + n_pos, :num_cand]
+            teacher = teacher_logprobs[b, :n_pos, :num_cand]
+            valid = teacher.abs().sum(dim=-1) > 1e-8
+            if valid.any():
+                terms.append((student[valid] - teacher[valid]).reshape(-1))
         else:
-            prompt_len = prompt_lens
-
-        position = pr.position + prompt_len
-
-        if is_batched_single:
-            if pr.sample_index < 0 or pr.sample_index >= logprobs.shape[0]:
-                continue
-            if position < 0 or position >= logprobs.shape[1]:
-                continue
-            if not mask[pr.sample_index, position]:
-                continue
-            chosen_index = getattr(pr, "chosen_index", 0)
-            if chosen_index < 0 or chosen_index >= len(teacher_logprobs):
-                continue
-            teacher_t = torch.tensor(
-                teacher_logprobs[chosen_index],
-                dtype=logprobs.dtype,
-                device=logprobs.device,
-            ).detach()
-            terms.append(logprobs[pr.sample_index, position] - teacher_t)
-            continue
-
-        if is_batched_multi:
-            if pr.sample_index < 0 or pr.sample_index >= logprobs.shape[0]:
-                continue
-            if position < 0 or position >= logprobs.shape[1]:
-                continue
-            if not mask[pr.sample_index, position]:
-                continue
-            max_candidates = logprobs.shape[2]
-            num_candidates = min(len(teacher_logprobs), max_candidates)
-            if num_candidates <= 0:
-                continue
-            teacher_t = torch.tensor(
-                teacher_logprobs[:num_candidates],
-                dtype=logprobs.dtype,
-                device=logprobs.device,
-            ).detach()
-            terms.append(
-                logprobs[pr.sample_index, position, :num_candidates] - teacher_t
-            )
-            continue
-
-        max_position = logprobs.shape[0]
-        if position < 0 or position >= max_position:
-            continue
-        flat_loss_mask = mask.reshape(-1)
-        if position < flat_loss_mask.numel() and not flat_loss_mask[position]:
-            continue
-
-        if logprobs.dim() == 1:
-            chosen_index = getattr(pr, "chosen_index", 0)
-            if chosen_index < 0 or chosen_index >= len(teacher_logprobs):
-                continue
-            teacher_t = torch.tensor(
-                teacher_logprobs[chosen_index],
-                dtype=logprobs.dtype,
-                device=logprobs.device,
-            ).detach()
-            terms.append(logprobs[position] - teacher_t)
-            continue
-
-        max_candidates = logprobs.shape[1]
-        num_candidates = min(len(teacher_logprobs), max_candidates)
-        if num_candidates <= 0:
-            continue
-        teacher_t = torch.tensor(
-            teacher_logprobs[:num_candidates],
-            dtype=logprobs.dtype,
-            device=logprobs.device,
-        ).detach()
-        terms.append(logprobs[position, :num_candidates] - teacher_t)
+            if is_batched:
+                student = logprobs[b, pl : pl + n_pos]
+            else:
+                student = logprobs[pl : pl + n_pos]
+            teacher = teacher_logprobs[b, :n_pos, 0]
+            valid = teacher.abs() > 1e-8
+            if valid.any():
+                terms.append((student[valid] - teacher[valid]).reshape(-1))
 
     if not terms:
-        return torch.tensor(0.0, dtype=torch.float32, device=logprobs.device)
+        return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
 
-    return torch.cat([term.reshape(-1) for term in terms]).mean()
+    return torch.cat(terms).mean()
 
 
 def _resolve_proximal_logp(
