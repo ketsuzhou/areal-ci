@@ -33,9 +33,14 @@ class MultiCandidateFSDPEngine(FSDPEngine):
     2. Prepares 2D labels: [seq_len, num_candidates] for multi-candidate positions
     3. Passes multi-candidate logprobs directly to loss function
 
+    Multi-candidate gathering is only supported in the non-tree training path.
+    For tree training (enable_tree_training=True), the logprobs are computed
+    per-sequence via gather_packed_tree_logprobs_entropy and the distill loss
+    is handled by the loss function reading topk_ids/teacher_logp from mb_input.
+
     Usage:
         engine = MultiCandidateFSDPEngine(config)
-        # Input data should contain position_rewards with candidate_token_ids
+        # Input data should contain topk_ids tensor [batch, resp_len, max_candidates]
     """
 
     def _compute_logprobs_entropy(
@@ -176,78 +181,115 @@ class MultiCandidateFSDPEngine(FSDPEngine):
     def _prepare_multi_candidate_labels(
         self,
         model_inputs: dict[str, Any],
-        position_rewards: list,
+        mb_input: dict[str, Any],
         seq_len: int,
     ) -> torch.Tensor | None:
         """Prepare 2D labels for multi-candidate logprob gathering.
 
-        Creates a labels tensor of shape [seq_len, max_num_candidates] where each row
-        contains the candidate token IDs for that position.
+        Reads the response-aligned topk_ids tensor from mb_input and
+        expands it to full-sequence labels [seq_len, max_candidates].
+        Position i in topk_ids maps to absolute sequence position prompt_len + i.
 
-        Parameters
-        ----------
-        model_inputs : dict[str, Any]
-            Standard model inputs (for fallback to single-candidate).
-            Must contain "loss_mask" to determine prompt length.
-        position_rewards : list
-            List of PositionRewardInfo with candidate_token_ids.
-        seq_len : int
-            Sequence length.
+        Positions where topk_ids has -1 sentinel (no distill data for
+        that node) are filled with the actual next token from
+        rolled_input_ids so the engine gathers single-candidate-equivalent
+        logprobs at those positions.
 
-        Returns
-        -------
-        torch.Tensor | None
-            2D labels tensor [seq_len, max_num_candidates] or None if not available.
+        Handles both single-sequence (mb_bs=1) and multi-sequence packed
+        (mb_bs > 1 with cu_seqlens) micro-batches.
         """
-        if not position_rewards:
+        topk_ids = mb_input.get("topk_ids")
+        if topk_ids is None or topk_ids.numel() == 0:
             return None
 
-        # Check if any position has candidate_token_ids
-        has_candidates = any(
-            hasattr(pr, "candidate_token_ids") and pr.candidate_token_ids
-            for pr in position_rewards
-        )
-        if not has_candidates:
+        # topk_ids: [mb_bs, resp_len, max_cand]
+        if topk_ids.dim() != 3:
             return None
 
-        # Determine prompt length from loss_mask (0=prompt, 1=output)
-        # PositionRewardInfo.position is 0-indexed from the first output token,
-        # but labels[seq_len, max_candidates] includes prompt token positions.
+        mb_bs, resp_len, max_candidates = topk_ids.shape
+
+        # If every response position has -1 sentinel across all sequences, no distill data
+        if (topk_ids[:, :, 0] < 0).all():
+            return None
+
         loss_mask = model_inputs.get("loss_mask")
-        prompt_len = 0
-        if loss_mask is not None:
-            lm_flat = loss_mask.squeeze(0) if loss_mask.dim() > 1 else loss_mask
-            # Vectorized: avoid O(seq_len) GPU-CPU sync in a loop.
-            prompt_len = int(lm_flat.bool().int().argmax().item())
+        input_ids = model_inputs.get("input_ids")
+        cu_seqlens = model_inputs.get("cu_seqlens")
 
-        # Find max number of candidates across positions
-        max_candidates = max(
-            len(pr.candidate_token_ids)
-            if hasattr(pr, "candidate_token_ids") and pr.candidate_token_ids
-            else 1
-            for pr in position_rewards
-        )
+        device = topk_ids.device
 
-        # Create 2D labels tensor filled with ignore_index (-100)
-        device = model_inputs.get("input_ids", torch.tensor([])).device
-        labels = torch.full(
-            (seq_len, max_candidates), -100, dtype=torch.long, device=device
-        )
+        if mb_bs == 1 or cu_seqlens is None:
+            # Single-sequence or no cu_seqlens: original path
+            topk_2d = topk_ids.squeeze(0)  # [resp_len, max_cand]
+            if topk_2d.dim() != 2:
+                return None
 
-        # Fill in candidate token IDs for each position
-        for pr in position_rewards:
-            # Offset position: PositionRewardInfo.position is 0-indexed from
-            # the first output token, but labels includes prompt positions.
-            position = pr.position + prompt_len
-            if position >= seq_len:
-                continue
-            if hasattr(pr, "candidate_token_ids") and pr.candidate_token_ids:
-                num_candidates = len(pr.candidate_token_ids)
-                labels[position, :num_candidates] = torch.tensor(
-                    pr.candidate_token_ids, dtype=torch.long, device=device
-                )
+            prompt_len = 0
+            if loss_mask is not None:
+                lm_flat = loss_mask.squeeze(0) if loss_mask.dim() > 1 else loss_mask
+                prompt_len = int(lm_flat.bool().int().argmax().item())
 
-        return labels
+            # Get rolled_input_ids for prompt and non-distill positions
+            rolled = None
+            if input_ids is not None:
+                ids_flat = input_ids.squeeze(0) if input_ids.dim() > 1 else input_ids
+                rolled = torch.roll(ids_flat, shifts=-1)[:seq_len]
+
+            labels = torch.zeros(seq_len, max_candidates, dtype=torch.long, device=device)
+            if rolled is not None:
+                labels[:, 0] = rolled
+                for c in range(1, max_candidates):
+                    labels[:, c] = rolled
+
+            end = min(prompt_len + resp_len, seq_len)
+            if end > prompt_len:
+                chunk = topk_2d[: end - prompt_len]
+                valid = chunk[:, 0] >= 0
+                if valid.any():
+                    labels[prompt_len:end][valid] = chunk[valid]
+
+            return labels
+
+        # Multi-sequence packed: use cu_seqlens to build labels per sequence
+        labels_parts = []
+        ids_flat = input_ids.squeeze(0) if input_ids is not None and input_ids.dim() > 1 else input_ids
+
+        for b in range(mb_bs):
+            start = cu_seqlens[b].item()
+            end = cu_seqlens[b + 1].item()
+            seq_len_i = end - start
+
+            # Compute prompt_len from loss_mask segment
+            prompt_len_i = 0
+            if loss_mask is not None:
+                lm_flat = loss_mask.squeeze(0) if loss_mask.dim() > 1 else loss_mask
+                seg = lm_flat[start:end]
+                if seg.bool().any():
+                    prompt_len_i = int(seg.bool().int().argmax().item())
+
+            # Create rolled input_ids for this sequence
+            if ids_flat is not None:
+                seg_ids = ids_flat[start:end]
+                rolled_i = torch.roll(seg_ids, shifts=-1)
+            else:
+                rolled_i = torch.zeros(seq_len_i, dtype=torch.long, device=device)
+
+            labels_i = torch.zeros(seq_len_i, max_candidates, dtype=torch.long, device=device)
+            labels_i[:, 0] = rolled_i
+            for c in range(1, max_candidates):
+                labels_i[:, c] = rolled_i
+
+            # Overwrite response positions with topk_ids for this sequence
+            end_resp = min(prompt_len_i + resp_len, seq_len_i)
+            if end_resp > prompt_len_i:
+                chunk = topk_ids[b, : end_resp - prompt_len_i]
+                valid = chunk[:, 0] >= 0
+                if valid.any():
+                    labels_i[prompt_len_i:end_resp][valid] = chunk[valid]
+
+            labels_parts.append(labels_i)
+
+        return torch.cat(labels_parts, dim=0)
 
     def _compute_logprobs_and_loss(
         self,
@@ -261,7 +303,7 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         """Compute logprobs/entropy and return scaled loss with multi-candidate support.
 
         This method overrides the parent to:
-        1. Prepare multi-candidate labels from position_rewards
+        1. Prepare multi-candidate labels from topk_ids tensor
         2. Compute multi-candidate logprobs
         3. Pass multi-candidate logprobs to loss function
         """
@@ -288,11 +330,7 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 if ctx.trie_node is None or not ctx.trie_node.all_sequence_ids:
                     return logits.mean() * 0.0
 
-                # Check if we have multi-candidate data
-                position_rewards = ctx.mb_input.get("position_rewards")
-
                 # Robust seq_len extraction from logits tensor
-                # logits can be 2D [seq_len, vocab] or 3D [batch, seq_len, vocab]
                 if logits.ndim == 2:
                     seq_len = logits.shape[0]
                 elif logits.ndim == 3:
@@ -303,16 +341,14 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                         f"Expected 2D [seq_len, vocab] or 3D [batch, seq_len, vocab]"
                     )
 
-                # Explicit None check and non-empty check for position_rewards
-                if position_rewards is not None and len(position_rewards) > 0:
-                    # Prepare multi-candidate labels
+                # Check for multi-candidate data from topk_ids tensor
+                topk_ids = ctx.mb_input.get("topk_ids")
+                if topk_ids is not None and topk_ids.numel() > 0:
                     multi_candidate_labels = self._prepare_multi_candidate_labels(
-                        ctx.model_inputs, position_rewards, seq_len
+                        ctx.model_inputs, ctx.mb_input, seq_len
                     )
 
                     if multi_candidate_labels is not None:
-                        # Pass multi-candidate labels directly without mutating
-                        # ctx.model_inputs, avoiding potential race conditions.
                         logprobs, entropy = self._compute_logprobs_entropy(
                             logits,
                             ctx.model_inputs,
@@ -320,12 +356,10 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                             labels_override=multi_candidate_labels,
                         )
                     else:
-                        # Fallback to standard single-candidate
                         logprobs, entropy = self._compute_logprobs_entropy(
                             logits, ctx.model_inputs, ctx.ulysses_pad_size
                         )
                 else:
-                    # Standard single-candidate path
                     logprobs, entropy = self._compute_logprobs_entropy(
                         logits, ctx.model_inputs, ctx.ulysses_pad_size
                     )

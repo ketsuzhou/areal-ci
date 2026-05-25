@@ -372,3 +372,109 @@ class TestTeacherKLLossPackedFormat:
 
         assert abs(loss.item()) > 0
         assert torch.isfinite(loss)
+
+
+class TestPrepareMultiCandidateLabelsPacked:
+    """Bug #2: _prepare_multi_candidate_labels must handle mb_bs > 1."""
+
+    def _make_engine(self):
+        """Create a minimal MultiCandidateFSDPEngine for testing."""
+        from unittest.mock import MagicMock
+        from customized_areal.tree_search.engine.fsdp_engine import MultiCandidateFSDPEngine
+        engine = MagicMock(spec=MultiCandidateFSDPEngine)
+        engine._prepare_multi_candidate_labels = MultiCandidateFSDPEngine._prepare_multi_candidate_labels.__get__(engine)
+        engine.config = MagicMock()
+        return engine
+
+    def test_single_sequence_still_works(self):
+        import torch
+        engine = self._make_engine()
+
+        model_inputs = {
+            "input_ids": torch.tensor([[10, 20, 30, 40, 50]]),  # [1, 5]
+            "loss_mask": torch.tensor([[0, 0, 1, 1, 1]], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 5], dtype=torch.int32),
+        }
+        mb_input = {
+            "topk_ids": torch.tensor([[[100, 101, 102], [200, 201, 202], [300, 301, 302]]]),
+            # [1, 3, 3] — 1 sequence, 3 response positions, 3 candidates
+        }
+
+        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=5)
+
+        assert labels is not None
+        assert labels.shape == (5, 3)
+        # Positions 0-1 (prompt): should have rolled input_ids
+        assert labels[0, 0].item() == 20  # rolled(10)
+        assert labels[1, 0].item() == 30  # rolled(20)
+        # Positions 2-4 (response): should have topk_ids
+        assert labels[2, 0].item() == 100
+        assert labels[2, 1].item() == 101
+
+    def test_two_sequences_packed(self):
+        import torch
+        engine = self._make_engine()
+
+        # 2 sequences packed: seq0=[10,20,30,40], seq1=[50,60,70]
+        # cu_seqlens = [0, 4, 7]
+        model_inputs = {
+            "input_ids": torch.tensor([[10, 20, 30, 40, 50, 60, 70]]),  # [1, 7]
+            "loss_mask": torch.tensor([[0, 1, 1, 1, 0, 1, 1]], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 4, 7], dtype=torch.int32),
+        }
+        mb_input = {
+            # 2 sequences, each with 3 response positions, 3 candidates
+            # seq0: prompt_len=1, resp_len=3 (from loss_mask)
+            # seq1: prompt_len=1, resp_len=2 (from loss_mask)
+            "topk_ids": torch.tensor([
+                [[100, 101, 102], [200, 201, 202], [300, 301, 302]],  # seq0
+                [[400, 401, 402], [500, 501, 502], [-1, -1, -1]],     # seq1 (3rd pos is padding/sentinel)
+            ]),
+            # [2, 3, 3]
+        }
+
+        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=7)
+
+        assert labels is not None
+        assert labels.shape == (7, 3)
+        # seq0 position 0 (prompt): rolled input_ids
+        assert labels[0, 0].item() == 20
+        # seq0 positions 1-3 (response): from topk_ids[0]
+        assert labels[1, 0].item() == 100
+        assert labels[2, 0].item() == 200
+        assert labels[3, 0].item() == 300
+        # seq1 position 4 (prompt): rolled input_ids
+        assert labels[4, 0].item() == 60
+        # seq1 positions 5-6 (response): from topk_ids[1]
+        assert labels[5, 0].item() == 400
+        assert labels[6, 0].item() == 500
+
+    def test_returns_none_when_no_topk_ids(self):
+        import torch
+        engine = self._make_engine()
+
+        model_inputs = {
+            "input_ids": torch.tensor([[10, 20, 30]]),
+            "loss_mask": torch.tensor([[0, 1, 1]], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 3], dtype=torch.int32),
+        }
+        mb_input = {}
+
+        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=3)
+        assert labels is None
+
+    def test_returns_none_when_all_sentinel(self):
+        import torch
+        engine = self._make_engine()
+
+        model_inputs = {
+            "input_ids": torch.tensor([[10, 20, 30]]),
+            "loss_mask": torch.tensor([[0, 1, 1]], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 3], dtype=torch.int32),
+        }
+        mb_input = {
+            "topk_ids": torch.tensor([[[-1], [-1]]]),  # all -1 sentinel
+        }
+
+        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=3)
+        assert labels is None
