@@ -176,10 +176,10 @@ def compute_reward(
     _model_name = model_name or os.environ.get(
         "TPFC_JUDGE_MODEL", "qwen/qwen3.5-397b-a17b"
     )
-    _base_url = base_url or os.environ.get(
+    _base_url = os.environ.get(
         "WORKSPACE_OPENAI_API_BASE", "https://openrouter.ai/api/v1"
     )
-    _api_key = api_key or os.environ.get("WORKSPACE_OPENAI_API_KEY", "")
+    _api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY", "")
 
     try:
         judge_result = evaluate_final_answer(

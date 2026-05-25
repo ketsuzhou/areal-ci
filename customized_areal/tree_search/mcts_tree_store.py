@@ -58,9 +58,9 @@ class Node:
     # Response-only (aligned to loss_mask==1 positions)
     topk_ids: list[list[int]] | None = None
     topk_logp: list[list[float]] | None = None
-    distill_reward: list[list[float]] | None = None
     teacher_logp: list[list[float]] | None = None
     guidance: dict[int, str] | None = None  # turn_idx → guidance text for leaf nodes
+
 
 
 def _find_turn_boundaries(
@@ -131,15 +131,47 @@ def _optional_tensor_field(
 
 
 def _node_to_tensor_dict(
-    node: Node, query_id: str, node_id: str, num_turns_in_episode: int = 1
+    node: Node, query_id: str, node_id: str, num_turns_in_episode: int = 1,
+    max_tokens: int = 0,
 ) -> dict[str, Any]:
-    """Convert a single Node to a tensor dict with shape [1, seq_len]."""
-    seq_len = len(node.input_ids)
+    """Convert a single Node to a tensor dict with shape [1, seq_len].
+
+    If max_tokens > 0, the sequence is truncated to the last max_tokens
+    tokens before conversion (full-sequence fields sliced, response-aligned
+    fields trimmed to remaining output positions).
+    """
+    input_ids = node.input_ids
+    logprobs = node.logprobs
+    loss_mask = node.loss_mask
+    versions = node.versions
+    topk_ids = node.topk_ids
+    topk_logp = node.topk_logp
+    teacher_logp = node.teacher_logp
+
+    if max_tokens > 0 and len(input_ids) > max_tokens:
+        truncate_len = len(input_ids) - max_tokens
+        input_ids = input_ids[truncate_len:]
+        logprobs = logprobs[truncate_len:]
+        loss_mask = loss_mask[truncate_len:]
+        versions = versions[truncate_len:]
+
+        output_kept = sum(1 for m in loss_mask if m == 1)
+
+        def _trim(field: list | None) -> list | None:
+            if field is not None and output_kept < len(field):
+                return field[-output_kept:] if output_kept > 0 else []
+            return field
+
+        topk_ids = _trim(topk_ids)
+        topk_logp = _trim(topk_logp)
+        teacher_logp = _trim(teacher_logp)
+
+    seq_len = len(input_ids)
     traj: dict[str, Any] = {
-        "input_ids": torch.tensor(node.input_ids, dtype=torch.int32).unsqueeze(0),
-        "loss_mask": torch.tensor(node.loss_mask, dtype=torch.int32).unsqueeze(0),
-        "logprobs": torch.tensor(node.logprobs, dtype=torch.float32).unsqueeze(0),
-        "versions": torch.tensor(node.versions, dtype=torch.int32).unsqueeze(0),
+        "input_ids": torch.tensor(input_ids, dtype=torch.int32).unsqueeze(0),
+        "loss_mask": torch.tensor(loss_mask, dtype=torch.int32).unsqueeze(0),
+        "logprobs": torch.tensor(logprobs, dtype=torch.float32).unsqueeze(0),
+        "versions": torch.tensor(versions, dtype=torch.int32).unsqueeze(0),
         "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
         "rewards": torch.tensor(node.outcome_reward, dtype=torch.float32).unsqueeze(0),
         "query_id": [query_id],
@@ -148,47 +180,43 @@ def _node_to_tensor_dict(
         "turn_idx": [node.turn_idx or 0],
     }
     # Response-only fields: extract response portion from full sequence
-    resp_start, resp_end = _response_span(node.loss_mask)
-    _optional_tensor_field(
-        traj,
-        "topk_ids",
-        node.topk_ids,
-        torch.int32,
-        resp_start,
-        resp_end,
-        node.loss_mask,
-    )
-    _optional_tensor_field(
-        traj,
-        "topk_logp",
-        node.topk_logp,
-        torch.float32,
-        resp_start,
-        resp_end,
-        node.loss_mask,
-    )
-    _optional_tensor_field(
-        traj,
-        "distill_reward",
-        node.distill_reward,
-        torch.float32,
-        resp_start,
-        resp_end,
-        node.loss_mask,
-    )
-    _optional_tensor_field(
-        traj,
-        "teacher_logp",
-        node.teacher_logp,
-        torch.float32,
-        resp_start,
-        resp_end,
-        node.loss_mask,
-    )
+    resp_start, resp_end = _response_span(loss_mask)
+    resp_len = resp_end - resp_start
+
+    # topk_ids and teacher_logp are always emitted for key consistency
+    # across the batch. Nodes without distill data get zero-filled tensors.
+    if topk_ids is not None:
+        _optional_tensor_field(
+            traj,
+            "topk_ids",
+            topk_ids,
+            torch.int32,
+            resp_start,
+            resp_end,
+            loss_mask,
+        )
+    else:
+        # -1 sentinel: _prepare_multi_candidate_labels detects this and
+        # fills those positions with the actual next token instead.
+        traj["topk_ids"] = torch.full((1, resp_len, 1), -1, dtype=torch.int32)
+
+    if teacher_logp is not None:
+        _optional_tensor_field(
+            traj,
+            "teacher_logp",
+            teacher_logp,
+            torch.float32,
+            resp_start,
+            resp_end,
+            loss_mask,
+        )
+    else:
+        traj["teacher_logp"] = torch.zeros(1, resp_len, 0, dtype=torch.float32)
+
     # Derived from logprobs for response tokens
     if resp_end > resp_start:
         traj["logp"] = torch.tensor(
-            node.logprobs[resp_start:resp_end], dtype=torch.float32
+            logprobs[resp_start:resp_end], dtype=torch.float32
         ).unsqueeze(0)
     # Carry advantages if set by advantage computer
     if node.advantages is not None:

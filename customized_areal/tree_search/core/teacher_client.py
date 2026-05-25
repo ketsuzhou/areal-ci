@@ -45,6 +45,7 @@ class TeacherConfig:
 
     teacher_base_url: str = "http://localhost:8001"
     teacher_model_name: str = ""
+    teacher_api_key: str = ""
     teacher_top_k: int = 10
     teacher_max_retries: int = 3
     teacher_timeout: float = 60.0
@@ -69,9 +70,18 @@ class TeacherClient:
 
     def __init__(self, config: TeacherConfig) -> None:
         self.config = config
+        if not config.teacher_base_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"teacher_base_url must start with http:// or https://, "
+                f"got: {config.teacher_base_url!r}"
+            )
+        headers: dict[str, str] = {}
+        if config.teacher_api_key:
+            headers["Authorization"] = f"Bearer {config.teacher_api_key}"
         self._client = httpx.AsyncClient(
             base_url=config.teacher_base_url,
             timeout=httpx.Timeout(config.teacher_timeout),
+            headers=headers,
         )
 
     async def close(self) -> None:
@@ -229,6 +239,43 @@ class TeacherClient:
             raise RuntimeError("Teacher API completion choice contained no text")
         raise RuntimeError("Teacher API completion choice contained no text string")
 
+    async def chat_complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> str:
+        """Call the LLM via chat completions API using teacher_api_key and teacher_base_url."""
+        payload: dict[str, Any] = {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        selected_model = model or self.config.teacher_model_name
+        if selected_model:
+            payload["model"] = selected_model
+
+        response_data = await self._post_with_retries_chat(payload)
+        choices = response_data.get("choices", [])
+        if not choices:
+            raise RuntimeError("Teacher chat API returned no choices")
+
+        choice = choices[0]
+        if not isinstance(choice, Mapping):
+            raise RuntimeError("Teacher chat choice must be a mapping")
+
+        message = choice.get("message")
+        if not isinstance(message, Mapping):
+            raise RuntimeError("Teacher chat message must be a mapping")
+
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+
+        raise RuntimeError("Teacher chat completion choice contained no text content")
+
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the completions endpoint with retry logic."""
         max_retries = self.config.teacher_max_retries
@@ -257,6 +304,40 @@ class TeacherClient:
 
         raise RuntimeError(
             f"Teacher API request failed after {max_retries} retries: {last_exc}"
+        ) from last_exc
+
+    async def _post_with_retries_chat(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """POST to the chat completions endpoint with retry logic."""
+        max_retries = self.config.teacher_max_retries
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await self._client.post(
+                    "/v1/chat/completions", json=payload
+                )
+                response.raise_for_status()
+                return response.json()
+            except (
+                httpx.HTTPStatusError,
+                httpx.RequestError,
+                httpx.TimeoutException,
+            ) as exc:
+                last_exc = exc
+                logger.warning(
+                    "Teacher chat API request failed (attempt %d/%d): %s",
+                    attempt,
+                    max_retries,
+                    exc,
+                )
+                if attempt < max_retries:
+                    backoff = 2 ** (attempt - 1)
+                    await asyncio.sleep(backoff)
+
+        raise RuntimeError(
+            f"Teacher chat API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
 

@@ -20,10 +20,10 @@ import asyncio
 import traceback
 import uuid
 from typing import Any
-
+import os
 from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
 from customized_areal.tree_search.mcts_tree_store import Node
-
+import re
 from areal.api import RolloutWorkflow
 from areal.utils import logging
 
@@ -161,12 +161,17 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
     return nodes
 
 
-def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
+def _nodes_to_batched_tensor_dict(
+    nodes: list[Node], max_tokens: int = 0
+) -> dict[str, Any] | None:
     """Convert list[Node] to a batched tensor dict with metadata.
 
     Each Node is converted to a [1, seq_len] tensor dict via
     _node_to_tensor_dict, then all are concatenated via
     concat_padded_tensors into a single [N, seq_len] batched dict.
+
+    If max_tokens > 0, each node's sequence is truncated to max_tokens
+    from the beginning before conversion.
 
     Returns None if nodes is empty.
     """
@@ -182,6 +187,7 @@ def _nodes_to_batched_tensor_dict(nodes: list[Node]) -> dict[str, Any] | None:
             node,
             query_id=node.query_id or "",
             node_id=node.node_id,
+            max_tokens=max_tokens,
         )
         for node in nodes
     ]
@@ -206,6 +212,58 @@ def _set_position_reward_sample_indices(
             reward.sample_index = sample_index
             all_rewards.append(reward)
     return all_rewards
+
+
+def _input_ids_to_messages(
+    input_ids: list[int], tokenizer: Any
+) -> list[dict[str, str]]:
+    """Convert full-context token IDs to a list of role/content message dicts.
+
+    Uses ``apply_chat_template`` on a dummy conversation to derive the
+    format markers, then parses the decoded token sequence with those
+    markers.  Falls back to a single-user-message format for unrecognized
+    templates.
+    """
+    # Derive the chat-template markers from a dummy round-trip.
+    _DUMMY = [{"role": "user", "content": "X"}]
+    try:
+        formatted = tokenizer.apply_chat_template(_DUMMY, tokenize=False)
+    except Exception:
+        formatted = "<|im_start|>user\nX<|im_end|>\n"
+    m_start = re.search(r"(<\S+?>)(system|user|assistant)", formatted)
+    start_token = m_start.group(1) if m_start else "<|im_start|>"
+    m_end = re.search(r"(<\S+?>)", formatted[::-1])
+    end_token = m_end.group(1)[::-1] if m_end else "<|im_end|>"
+
+    try:
+        raw = tokenizer.decode(input_ids, skip_special_tokens=False)
+    except TypeError:
+        raw = tokenizer.decode(input_ids)
+
+    pattern = re.compile(
+        re.escape(start_token)
+        + r"(system|user|assistant|tool)\s*\n(.*?)"
+        + re.escape(end_token),
+        re.DOTALL,
+    )
+
+    messages: list[dict[str, str]] = []
+    for match in pattern.finditer(raw):
+        role = match.group(1)
+        content = match.group(2).strip()
+        if content:
+            if role == "tool":
+                role = "user"
+            messages.append({"role": role, "content": content})
+
+    if not messages:
+        try:
+            fallback = tokenizer.decode(input_ids, skip_special_tokens=True)
+        except TypeError:
+            fallback = tokenizer.decode(input_ids)
+        messages = [{"role": "user", "content": fallback}]
+
+    return messages
 
 
 class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
@@ -246,6 +304,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         teacher_provider: str = "external",
         teacher_base_url: str = "http://localhost:8001",
         teacher_model_name: str = "",
+        teacher_api_key: str = "",
         teacher_top_k: int = 10,
         teacher_max_retries: int = 3,
         teacher_timeout: float = 60.0,
@@ -256,6 +315,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         diagnose_base_url: str = "",
         diagnose_api_key: str = "",
         strict_distill_json: bool = True,
+        max_tokens: int = 0,
     ) -> None:
         from customized_areal.tree_search.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.checkpoint import TreeCheckpointManager
@@ -276,6 +336,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.teacher_provider = teacher_provider
         self.teacher_base_url = teacher_base_url
         self.teacher_model_name = teacher_model_name
+        self.teacher_api_key = teacher_api_key
         self.teacher_top_k = teacher_top_k
         self.teacher_max_retries = teacher_max_retries
         self.teacher_timeout = teacher_timeout
@@ -286,6 +347,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.diagnose_base_url = diagnose_base_url
         self.diagnose_api_key = diagnose_api_key
         self.strict_distill_json = strict_distill_json
+        self.max_tokens = max_tokens
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 
@@ -349,7 +411,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 self._tokenizer_cache[self.tokenizer_path] = tokenizer
             return tokenizer
 
-    async def _build_teacher_provider(self, engine):
+    async def _setup_distill_provider(self, engine):
         from customized_areal.tree_search.core.teacher_client import (
             TeacherClient,
             TeacherConfig,
@@ -359,47 +421,49 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
 
         if self.teacher_provider == "engine":
-            # Use the engine's proxy gateway address and admin API key —
-            # the same credentials that OpenAIProxyWorkflow uses to
-            # route LLM calls through the proxy.
             proxy_addr = getattr(engine, "_proxy_gateway_addr", "") or ""
             admin_api_key = getattr(engine.config, "admin_api_key", "") or ""
+            teacher_base_url = proxy_addr or self.teacher_base_url
+
+            if not teacher_base_url.startswith(("http://", "https://")):
+                raise ValueError(
+                    f"teacher_base_url must start with http:// or https://, "
+                    f"got: {teacher_base_url!r}"
+                )
+
             config = TeacherConfig(
-                teacher_base_url=proxy_addr,
+                teacher_base_url=teacher_base_url,
                 teacher_model_name=self.teacher_model_name,
+                teacher_api_key=admin_api_key,
                 teacher_top_k=self.teacher_top_k,
                 teacher_max_retries=self.teacher_max_retries,
                 teacher_timeout=self.teacher_timeout,
                 teacher_missing_logprob=self.teacher_missing_logprob,
             )
             client = TeacherClient(config)
-            provider = ExternalTeacherProvider(
-                client=client,
-                diagnose_model_name=self.diagnose_model_name or self.teacher_model_name,
-                diagnose_max_tokens=self.diagnose_max_tokens,
-                diagnose_temperature=self.diagnose_temperature,
-                diagnose_base_url=proxy_addr,
-                diagnose_api_key=admin_api_key,
+        else:
+            config = TeacherConfig(
+                teacher_base_url=self.teacher_base_url,
+                teacher_model_name=self.teacher_model_name,
+                teacher_api_key=self.teacher_api_key,
+                teacher_top_k=self.teacher_top_k,
+                teacher_max_retries=self.teacher_max_retries,
+                teacher_timeout=self.teacher_timeout,
+                teacher_missing_logprob=self.teacher_missing_logprob,
             )
-            return provider, client
+            client = TeacherClient(config)
 
-        config = TeacherConfig(
-            teacher_base_url=self.teacher_base_url,
-            teacher_model_name=self.teacher_model_name,
-            teacher_top_k=self.teacher_top_k,
-            teacher_max_retries=self.teacher_max_retries,
-            teacher_timeout=self.teacher_timeout,
-            teacher_missing_logprob=self.teacher_missing_logprob,
-        )
-        client = TeacherClient(config)
+        diagnose_model_name = "qwen/qwen3.5-397b-a17b"
+        diagnose_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY")
+        diagnose_base_url = os.environ.get("WORKSPACE_OPENAI_API_BASE")
         provider = ExternalTeacherProvider(
             client=client,
-            diagnose_model_name=self.diagnose_model_name or self.teacher_model_name,
-            diagnose_max_tokens=self.diagnose_max_tokens,
-            diagnose_temperature=self.diagnose_temperature,
-            diagnose_base_url=self.diagnose_base_url,
-            diagnose_api_key=self.diagnose_api_key,
+            diagnose_model_name=diagnose_model_name,
+            diagnose_temperature=0,
+            diagnose_base_url=diagnose_base_url,
+            diagnose_api_key=diagnose_api_key,
         )
+
         return provider, client
 
     async def _prepare_distill_for_episode(
@@ -417,16 +481,50 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         if not nodes:
             return nodes, {}
-        try:
-            context = tokenizer.decode(nodes[-1].input_ids, skip_special_tokens=False)
-        except TypeError:
-            context = tokenizer.decode(nodes[-1].input_ids)
-        raw = await provider.diagnose_episode(context, str(data.get("answer", "")))
-        diagnosis = parse_episode_diagnosis(raw)
-        selected = diagnosis.selected_turns
-        # Save guidance dict into the leaf node of this episode
-        if selected and nodes:
-            nodes[-1].guidance = dict(selected)
+        # Reuse cached guidance from a previous diagnosis to avoid the
+        # expensive diagnose_episode call across training iterations.
+        if nodes[-1].guidance:
+            selected = nodes[-1].guidance
+        else:
+            # Build structured messages from the last node's full context,
+            # then append the diagnosis instruction as the final user message.
+            conversation = _input_ids_to_messages(
+                nodes[-1].input_ids, tokenizer
+            )
+            gold_answer = str(data.get("answer", ""))
+
+            raw = None
+            diagnosis = None
+            max_retries = 3
+            base_temp = 0.7
+            for retry in range(max_retries):
+                try:
+                    temp = base_temp + retry * 0.3
+                    raw = await provider.diagnose_episode(
+                        conversation, gold_answer, temperature=temp
+                    )
+                    diagnosis = parse_episode_diagnosis(raw)
+                    break
+                except ValueError:
+                    if retry < max_retries - 1:
+                        logger.warning(
+                            "Diagnose parse failed (attempt %d/%d), retrying "
+                            "with temperature=%.1f",
+                            retry + 1,
+                            max_retries,
+                            base_temp + (retry + 1) * 0.3,
+                        )
+                    else:
+                        logger.error(
+                            "Diagnose parse failed after %d attempts for "
+                            "episode_id=%s",
+                            max_retries,
+                            nodes[0].episode_id,
+                        )
+                        raise
+            selected = diagnosis.selected_turns
+            if selected:
+                nodes[-1].guidance = dict(selected)
         if not selected:
             if self.loss_mode == LossMode.DISTILL:
                 return [], {}
@@ -448,10 +546,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
             if not rewards:
                 return None
-            node.distill_reward = [reward.rewards for reward in rewards]
             node.teacher_logp = [
                 reward.teacher_logprobs or [] for reward in rewards
             ]
+            node.topk_ids = [reward.candidate_token_ids for reward in rewards]
             return node.node_id, rewards
 
         # Run the last node first to warm the KV cache, then parallelize
@@ -607,47 +705,33 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
             # Reset versions to 0 so decoupled PPO treats cached rollouts
             # as coming from the current behavior policy
-            for node in cached_nodes:
-                node.versions = [0 if m == 1 else -1 for m in node.loss_mask]
+            # for node in cached_nodes:
+            #     node.versions = [0 if m == 1 else -1 for m in node.loss_mask]
 
-        rewards_by_node_id: dict[str, list[Any]] = {}
         provider_client = None
         try:
-            if self.loss_mode != LossMode.GRPO:
-                tokenizer = await self._get_tokenizer()
-                provider, provider_client = await self._build_teacher_provider(engine)
-                (
-                    fresh_nodes,
-                    fresh_rewards,
-                ) = await self._prepare_distill_for_node_groups(
-                    _group_nodes_by_episode(fresh_nodes),
-                    data,
-                    engine,
-                    provider,
-                    tokenizer,
-                )
-                (
-                    cached_nodes,
-                    cached_rewards,
-                ) = await self._prepare_distill_for_node_groups(
-                    _group_nodes_by_episode(cached_nodes),
-                    data,
-                    engine,
-                    provider,
-                    tokenizer,
-                )
-                rewards_by_node_id.update(fresh_rewards)
-                rewards_by_node_id.update(cached_rewards)
+            # 4. Insert fresh nodes into tree
+            if fresh_nodes:
+                self.tree_store.insert_batch(fresh_nodes)
 
-            # 4. Combine
+            # 5. Combine
             all_nodes = fresh_nodes + cached_nodes
 
             if not all_nodes:
                 return None
 
-            # 5. Insert fresh nodes into tree
-            if fresh_nodes:
-                self.tree_store.insert_batch(fresh_nodes)
+            if self.loss_mode != LossMode.GRPO:
+                tokenizer = await self._get_tokenizer()
+                provider, provider_client = await self._setup_distill_provider(engine)
+                all_nodes, _ = (
+                    await self._prepare_distill_for_node_groups(
+                        _group_nodes_by_episode(all_nodes),
+                        data,
+                        engine,
+                        provider,
+                        tokenizer,
+                    )
+                )
 
             # 6. Compute tree advantages
             if self.advantage_mode == AdvantageMode.TREE:
@@ -659,31 +743,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     self.tree_store.set_trained(node.node_id, True)
 
             # 8. Save tree checkpoint
-            if self.cache_mode == CacheMode.CROSS_TRAINING:
-                if query_id:
-                    self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
-                else:
-                    self.tree_checkpoint_manager.save(self.tree_store)
+            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
 
             # 9. Convert to batched tensor dict
-            result_dict = _nodes_to_batched_tensor_dict(all_nodes)
+            result_dict = _nodes_to_batched_tensor_dict(
+                all_nodes, max_tokens=self.max_tokens
+            )
 
-            if result_dict is None:
-                return None
-            # 10. Inject distill loss weights and position rewards
-            elif result_dict is not None and self.loss_mode != LossMode.GRPO:
-                if self.loss_mode == LossMode.DISTILL:
-                    result_dict["rl_loss_weight"] = 0.0
-                else:
-                    result_dict["rl_loss_weight"] = self.rl_loss_weight
-                result_dict["distill_loss_weight"] = self.distill_loss_weight
-                position_rewards = _set_position_reward_sample_indices(
-                    all_nodes, rewards_by_node_id
-                )
-                if position_rewards:
-                    result_dict["position_rewards"] = position_rewards
-
-            return result_dict
+            return result_dict if result_dict else None
         finally:
             if provider_client is not None:
                 await provider_client.close()

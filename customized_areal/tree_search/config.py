@@ -39,6 +39,7 @@ class TreeBackupConfig:
     teacher_provider: str = "external"
     teacher_base_url: str = "http://localhost:8001"
     teacher_model_name: str = ""
+    teacher_api_key: str = ""
     teacher_top_k: int = 10
     teacher_max_retries: int = 3
     teacher_timeout: float = 60.0

@@ -5,6 +5,7 @@ This module provides a class-based agent interface consistent with AReaL's
 agentic RL training pattern, wrapping the existing run_backend functionality.
 """
 
+import asyncio
 import traceback
 from pathlib import Path
 from typing import Any
@@ -99,7 +100,7 @@ class TPFCAgent:
             RuntimeError: If agent run fails to start.
             TimeoutError: If agent run doesn't complete within timeout.
         """
-        try:
+        async def _do_run() -> float:
             # Extract task description from dataset query field (clean query text)
             task_description = data.get("query", "")
             query_id = data.get("query_id", "")
@@ -166,7 +167,6 @@ class TPFCAgent:
                     break
 
             # Calculate reward using gaia_final_reward.compute_reward
-            # (env var resolution and OpenRouter fallback live inside compute_reward)
             try:
                 result = compute_reward(
                     ground_truth=gt,
@@ -192,6 +192,12 @@ class TPFCAgent:
             )
 
             return float(reward)
+
+        try:
+            return await asyncio.wait_for(_do_run(), timeout=900)
+        except asyncio.TimeoutError:
+            logger.warning("TPFCAgent run timed out after 15 minutes")
+            raise
         except Exception as exc:
             logger.warning(
                 "TPFCAgent run failed: %s\n%s",

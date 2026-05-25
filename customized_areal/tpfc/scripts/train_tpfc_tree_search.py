@@ -64,7 +64,22 @@ def main(args: list[str] | None = None) -> None:
 
     logger.info("Starting TPFC tree search training")
 
+    # Load .env before config so env vars are available
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
+    except Exception:
+        pass
+
     config, _ = load_expr_config(args, TPFCConfig)
+
+    # Inject diagnose API key from environment if configured
+    if not config.tree_search.diagnose_api_key:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if api_key:
+            config.tree_search.diagnose_api_key = api_key
+            logger.info("Using OPENROUTER_API_KEY from environment for diagnose")
 
     # os.environ["TRAIN_ID"] = uuid.uuid4().hex
     # logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])
@@ -130,6 +145,7 @@ def main(args: list[str] | None = None) -> None:
         temperature=config.gconfig.temperature,
         top_p=getattr(config.gconfig, "top_p", 1.0),
         max_completion_tokens=config.gconfig.max_new_tokens,
+        max_tokens=config.gconfig.max_tokens,
         tree_search_config=tree_backup_config,
     )
     eval_workflow_kwargs = workflow_kwargs.copy()

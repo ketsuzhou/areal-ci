@@ -198,8 +198,6 @@ class TreeCheckpointManager:
             data["topk_ids"] = node.topk_ids
         if node.topk_logp is not None:
             data["topk_logp"] = node.topk_logp
-        if node.distill_reward is not None:
-            data["distill_reward"] = node.distill_reward
         if node.teacher_logp is not None:
             data["teacher_logp"] = node.teacher_logp
         if node.guidance is not None:
@@ -222,7 +220,6 @@ class TreeCheckpointManager:
             train_id=data.get("train_id", ""),
             topk_ids=data.get("topk_ids"),
             topk_logp=data.get("topk_logp"),
-            distill_reward=data.get("distill_reward"),
             teacher_logp=data.get("teacher_logp"),
             guidance={int(k): v for k, v in data.get("guidance", {}).items()}
             if data.get("guidance")

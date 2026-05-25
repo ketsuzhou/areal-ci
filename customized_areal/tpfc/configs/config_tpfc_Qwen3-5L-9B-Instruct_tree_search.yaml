@@ -1,5 +1,5 @@
 experiment_name: tpfc-grpo
-trial_name: trial_0522_new2
+trial_name: trial_0525
 seed: 1
 
 # Tree search configuration
@@ -44,10 +44,10 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 5
-  queue_size: 256
+  max_concurrent_rollouts: 8
+  queue_size: 240
   consumer_batch_size: ${train_dataset.batch_size}
-  max_head_offpolicyness: 20
+  max_head_offpolicyness: 40
   enable_rollout_tracing: false
   scheduling_spec: ${actor.scheduling_spec}
   dump_to_file: true
@@ -59,13 +59,13 @@ rollout:
     reasoning_parser: qwen3
     export_style: individual
     turn_discount: 1.0
-    engine_max_tokens: 15000
+    engine_max_tokens: 12032
 
 gconfig:
   n_samples: 8
   min_new_tokens: 0
   max_new_tokens: 1024
-  max_tokens: 15000
+  max_tokens: 12032
   greedy: false
   temperature: 1.0
 
@@ -86,7 +86,7 @@ actor:
   pad_to_maximum: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 15104
+    max_tokens_per_mb: 12032
   optimizer:
     type: adam
     lr: 1.70e-6
@@ -138,7 +138,7 @@ ref:
   pad_to_maximum: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 30080
+    max_tokens_per_mb: 12032
   optimizer: null
   scheduling_strategy:
     type: colocation
@@ -168,13 +168,13 @@ vllm:
 # TPFC dataset configuration - uses generated_training_final.parquet
 # NOTE: All samples have ~1034-1366 tokens due to long system prompts
 train_dataset:
-  batch_size: 8
+  batch_size: 32
   shuffle: false
   pin_memory: true
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 15000
+  max_length: 12032
 
 valid_dataset:
   batch_size: 4
@@ -182,7 +182,7 @@ valid_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 15000
+  max_length: 12032
 
 # Utilities
 saver:

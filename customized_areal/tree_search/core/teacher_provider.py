@@ -9,13 +9,18 @@ from typing import Protocol
 import httpx
 from openai import OpenAI
 
+from areal.utils import logging
 from customized_areal.tree_search.core.teacher_client import TeacherClient
+
+logger = logging.getLogger("TeacherProvider")
 
 
 class TeacherProvider(Protocol):
     """Interface for teacher diagnosis and token logprob providers."""
 
-    async def diagnose_episode(self, context: str, gold_answer: str) -> str:
+    async def diagnose_episode(
+        self, conversation: list[dict[str, str]], gold_answer: str
+    ) -> str:
         """Return a teacher diagnosis for an episode."""
         ...
 
@@ -59,16 +64,38 @@ class ExternalTeacherProvider:
             )
         return self._openai_client
 
-    async def diagnose_episode(self, context: str, gold_answer: str) -> str:
-        prompt = (
-            "You are diagnosing a multi-turn assistant trajectory. "
-            "Return strict JSON with a top-level key 'turns'. Each turn must "
-            "include 'turn_idx', 'should_improve', and 'guidance'. Select only "
-            "turns where the assistant generation can be improved toward the "
-            "gold answer.\n\n"
-            f"Gold answer:\n{gold_answer}\n\n"
-            f"Episode context:\n{context}\n"
+    async def diagnose_episode(
+        self,
+        conversation: list[dict[str, str]],
+        gold_answer: str,
+        temperature: float | None = None,
+    ) -> str:
+        instruction = (
+            "You are diagnosing a multi-turn assistant trajectory above. "
+            "Analyze each assistant turn and identify which ones can be "
+            "improved toward the gold answer. "
+            "You MUST output ONLY a JSON object (no extra text) wrapped in "
+            "```json fences. The JSON must have a top-level key 'turns' "
+            "containing a list of objects, each with 'turn_idx' (int start from 1), "
+            "'should_improve' (bool), and 'guidance' (string). "
+            "Only include turns that should be improved.\n\n"
+            f"Gold answer: {gold_answer}\n\n"
+            "Example response format:\n"
+            "```json\n"
+            "{\n"
+            '  "turns": [\n'
+            "    {\n"
+            '      "turn_idx": 1,\n'
+            '      "should_improve": true,\n'
+            '      "guidance": "In turn 1, the assistant should have verified '
+            'the URL before finalizing the answer."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "```"
         )
+        messages = list(conversation) + [{"role": "user", "content": instruction}]
+        temp = temperature if temperature is not None else self.diagnose_temperature
         if self.diagnose_base_url:
             client = self._get_openai_client()
             loop = asyncio.get_event_loop()
@@ -76,17 +103,46 @@ class ExternalTeacherProvider:
                 None,
                 lambda: client.chat.completions.create(
                     model=self.diagnose_model_name,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,
                     max_tokens=self.diagnose_max_tokens,
-                    temperature=self.diagnose_temperature,
+                    temperature=temp,
+                    extra_body={"enable_thinking": False},
                 ),
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if not content:
+                finish_reason = response.choices[0].finish_reason
+                raise RuntimeError(
+                    f"Diagnose API returned empty content "
+                    f"(finish_reason={finish_reason}, "
+                    f"model={self.diagnose_model_name})"
+                )
+            logger.debug(
+                "Diagnose API response (len=%d, first 300): %s",
+                len(content),
+                content[:300],
+            )
+            if len(content) > 600:
+                logger.debug(
+                    "Diagnose API response (last 300): %s",
+                    content[-300:],
+                )
+            return content
+        if self.client.config.teacher_base_url:
+            return await self.client.chat_complete(
+                messages=messages,
+                model=self.diagnose_model_name or None,
+                max_tokens=self.diagnose_max_tokens,
+                temperature=temp,
+            )
+        prompt = "\n".join(
+            f"{m['role']}: {m['content']}" for m in messages
+        )
         return await self.client.complete_text(
             prompt,
             model=self.diagnose_model_name or None,
             max_tokens=self.diagnose_max_tokens,
-            temperature=self.diagnose_temperature,
+            temperature=temp,
         )
 
     async def get_logprobs_for_prompt(
@@ -120,13 +176,18 @@ class EngineTeacherProvider:
             )
         self.engine = engine
 
-    async def diagnose_episode(self, context: str, gold_answer: str) -> str:
+    async def diagnose_episode(
+        self, conversation: list[dict[str, str]], gold_answer: str
+    ) -> str:
         diagnose_episode = getattr(self.engine, "diagnose_episode", None)
         if not inspect.iscoroutinefunction(diagnose_episode):
             raise NotImplementedError(
                 "engine-backed teacher provider requires async coroutine function "
                 "engine.diagnose_episode"
             )
+        context = "\n".join(
+            f"{m['role']}: {m['content']}" for m in conversation
+        )
         return await diagnose_episode(
             context=context,
             gold_answer=gold_answer,

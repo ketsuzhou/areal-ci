@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from typing import Any
 
 from customized_areal.tree_search.core.teacher_provider import TeacherProvider
@@ -14,16 +15,119 @@ from customized_areal.tree_search.distill_types import (
 )
 from customized_areal.tree_search.mcts_tree_store import Node
 
+from areal.utils import logging
+
+logger = logging.getLogger("SelectedTurnDistill")
+
 GUIDANCE_PROMPT_TEMPLATE = (
     "\n\nImprove this selected assistant turn using this guidance:\n{guidance}\n\n"
 )
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.DOTALL)
+_TURNS_JSON_RE = re.compile(r'\{\s*"turns"\s*:', re.DOTALL)
+# " "turns" (extra space before key)
+_BROKEN_TURNS_RE = re.compile(r'\{\s*"\s+"turns"\s*:', re.DOTALL)
+# Find the last code fence marker
+_LAST_FENCE_RE = re.compile(r"```(?:json)?\s*", re.DOTALL)
 
-def parse_episode_diagnosis(raw_text: str) -> EpisodeDiagnosis:
-    """Parse strict teacher diagnosis JSON into an EpisodeDiagnosis."""
+
+def _extract_json_from_markdown(text: str) -> str:
+    """Extract JSON content from markdown code fences or plain text.
+
+    Reasoning models often output chain-of-thought text before the JSON.
+    Handles: complete fences, incomplete fences (no closing ```),
+    bare JSON objects, and models that wrap output in XML tags.
+    """
+    # 1. Try complete code fences: ```json ... ```
+    match = _FENCE_RE.search(text)
+    if match:
+        content = match.group(1).strip()
+        if content:
+            # Strip stray leading "json" / non-JSON prefixes before {
+            brace = content.find("{")
+            bracket = content.find("[")
+            first = brace if brace >= 0 and (bracket < 0 or brace < bracket) else bracket
+            if first >= 0:
+                content = content[first:]
+            return content
+
+    # 2. Try incomplete code fence — opening ``` exists but no closing ```
+    #    Take everything after the *last* opening fence marker.
+    fence_markers = list(_LAST_FENCE_RE.finditer(text))
+    if fence_markers:
+        after_fence = text[fence_markers[-1].end() :]
+    else:
+        after_fence = text
+
+    # 3. Strip leading XML/thinking tags (</think>, </reasoning>, </analysis>)
+    after_fence = re.sub(
+        r"</(?:think|reasoning|analysis|thought)>", "", after_fence
+    ).strip()
+
+    # 4. Search for JSON object with "turns" key in remaining text
+    for pattern in (_TURNS_JSON_RE, _BROKEN_TURNS_RE):
+        obj_match = pattern.search(after_fence)
+        if obj_match:
+            start = obj_match.start()
+            depth = 0
+            end = start
+            for i, ch in enumerate(after_fence[start:], start=start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end > start:
+                raw = after_fence[start:end].strip()
+                # Fix " "turns" → "turns"
+                raw = re.sub(r'"\s+"turns"', '"turns"', raw)
+                return raw
+
+    # 5. Fall back to original text for the bare-JSON search
+    for pattern in (_TURNS_JSON_RE, _BROKEN_TURNS_RE):
+        obj_match = pattern.search(text)
+        if obj_match:
+            start = obj_match.start()
+            depth = 0
+            end = start
+            for i, ch in enumerate(text[start:], start=start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end > start:
+                raw = text[start:end].strip()
+                raw = re.sub(r'"\s+"turns"', '"turns"', raw)
+                return raw
+
+    return text.strip()
+
+
+def parse_episode_diagnosis(raw_text: str | None) -> EpisodeDiagnosis:
+    """Parse teacher diagnosis into an EpisodeDiagnosis.
+
+    Handles JSON wrapped in markdown code fences and empty responses.
+    """
+    if not raw_text or not raw_text.strip():
+        raise ValueError("episode diagnosis is empty — the model returned no content")
+
+    cleaned = _extract_json_from_markdown(raw_text)
     try:
-        payload = json.loads(raw_text)
+        payload = json.loads(cleaned)
     except json.JSONDecodeError as exc:
+        tail = raw_text[-300:] if len(raw_text) > 600 else ""
+        logger.error(
+            "Failed to parse episode diagnosis as JSON. "
+            "len=%d, first 300=%r, last 300=%r",
+            len(raw_text),
+            raw_text[:300],
+            tail,
+        )
         raise ValueError("episode diagnosis must be valid JSON") from exc
 
     if not isinstance(payload, dict):
