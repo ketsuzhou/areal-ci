@@ -306,6 +306,11 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         1. Prepare multi-candidate labels from topk_ids tensor
         2. Compute multi-candidate logprobs
         3. Pass multi-candidate logprobs to loss function
+
+        For tree training (enable_tree_training=True), delegates to the base
+        FSDPEngine which uses gather_packed_tree_logprobs_entropy to correctly
+        unpack per-sequence logprobs from the trie structure. Multi-candidate
+        logprob gathering is only supported in the non-tree training path.
         """
 
         if self.config.is_critic and self.enable_tree_training:
@@ -315,21 +320,7 @@ class MultiCandidateFSDPEngine(FSDPEngine):
 
         if not self.config.is_critic:
             if not self.enable_tree_training:
-                return super()._compute_logprobs_and_loss(
-                    logits,
-                    ctx,
-                    loss_fn,
-                    loss_weight_fn,
-                    total_loss_weight,
-                    loss_multiplier,
-                )
-            else:
-                # Handle empty tree (dummy trie for DP synchronization).
-                # When trie has no sequences, return zero loss with grad connection.
-                # This ensures backward() works correctly for FSDP synchronization.
-                if ctx.trie_node is None or not ctx.trie_node.all_sequence_ids:
-                    return logits.mean() * 0.0
-
+                # Standard path: prepare multi-candidate labels and compute logprobs
                 # Robust seq_len extraction from logits tensor
                 if logits.ndim == 2:
                     seq_len = logits.shape[0]
@@ -375,15 +366,24 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     vocab_min_logits = vocab_min_logits[: -ctx.pad_length]
                     vocab_max_logits = vocab_max_logits[: -ctx.pad_length]
 
-            # Pass multi-candidate logprobs to loss function
-            # The loss function receives logprobs with gradients already computed
-            loss = loss_fn(
-                logprobs,
-                entropy,
-                ctx.mb_input,
-                vocab_min_logits=vocab_min_logits,
-                vocab_max_logits=vocab_max_logits,
-            )
+                loss = loss_fn(
+                    logprobs,
+                    entropy,
+                    ctx.mb_input,
+                    vocab_min_logits=vocab_min_logits,
+                    vocab_max_logits=vocab_max_logits,
+                )
+            else:
+                # Tree training: delegate to base FSDPEngine which correctly
+                # uses gather_packed_tree_logprobs_entropy
+                return super()._compute_logprobs_and_loss(
+                    logits,
+                    ctx,
+                    loss_fn,
+                    loss_weight_fn,
+                    total_loss_weight,
+                    loss_multiplier,
+                )
         else:
             values = self._compute_values(logits.squeeze(-1), ctx.ulysses_pad_size)
             if ctx.pad_length > 0:
