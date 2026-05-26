@@ -88,39 +88,39 @@ These two trees are **unrelated data structures** that operate at different laye
 
 Dataclasses controlling tree backup, caching, and advantage computation.
 
-| Class                | Field                    | Type            | Default                   | Description                              |
-| -------------------- | ------------------------ | --------------- | ------------------------- | ---------------------------------------- |
-| `TreeBackupConfig`   | `mode`                   | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates  |
-|                      | `enabled`                | `bool`          | `True`                    | Enable/disable tree backup               |
-|                      | `checkpoint_dir`         | `str`           | `""`                      | Directory for MCTS tree checkpoints      |
-|                      | `advantage_mode`         | `AdvantageMode` | `TREE`                    | TREE (Q-values) or GAE advantages        |
-|                      | `loss_mode`              | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                   |
-|                      | `max_reasoning_tokens`   | `int`           | `1000`                    | Max tokens for reasoning                 |
-|                      | `rl_loss_weight`         | `float`         | `1.0`                     | Weight for RL loss in BOTH mode          |
-|                      | `distill_loss_weight`    | `float`         | `0.005`                   | Weight for distillation loss             |
-|                      | `reward_bias`            | `float`         | `0.0`                     | Bias added to outcome rewards            |
-|                      | `reward_scaling`         | `float`         | `1.0`                     | Scaling factor for outcome rewards       |
-|                      | `reward_clip`            | `float`         | `20.0`                    | Reward clipping threshold                |
-|                      | `overlong_reward_penalty`| `bool`          | `False`                   | Apply penalty for overlong episodes      |
-|                      | `overlong_tokens`        | `int \| None`   | `None`                    | Token threshold for overlong penalty     |
-|                      | `overlong_penalty_factor`| `float \| None` | `None`                    | Penalty factor for overlong episodes     |
-|                      | `topk_distill`           | `bool`          | `False`                   | Use top-k distillation                   |
-|                      | `teacher_provider`       | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`) |
-|                      | `teacher_base_url`       | `str`           | `"http://localhost:8001"` | Teacher API endpoint                     |
-|                      | `teacher_model_name`     | `str`           | `""`                      | Teacher model identifier                 |
-|                      | `teacher_top_k`          | `int`           | `10`                      | Top-k tokens from teacher                |
-|                      | `teacher_max_retries`    | `int`           | `3`                       | Max retries for teacher requests         |
-|                      | `teacher_timeout`        | `float`         | `60.0`                    | Timeout for teacher requests             |
-|                      | `teacher_missing_logprob`| `float`         | `-23.0`                   | Default logprob for missing teacher tokens |
-|                      | `diagnose_model_name`    | `str`           | `""`                      | Model name for episode diagnosis         |
-|                      | `diagnose_max_tokens`    | `int`           | `1024`                    | Max tokens for diagnosis responses       |
-|                      | `diagnose_temperature`   | `float`         | `0.0`                     | Temperature for diagnosis sampling       |
-|                      | `diagnose_base_url`      | `str`           | `""`                      | Base URL for diagnosis API               |
-|                      | `diagnose_api_key`       | `str`           | `""`                      | API key for diagnosis endpoint           |
-|                      | `strict_distill_json`    | `bool`          | `True`                    | Enforce strict JSON parsing in distillation |
-| `RolloutCacheConfig` | `cache_dir`           | `str`           | `""`                      | Directory for rollout cache             |
-|                      | `enabled`             | `bool`          | `True`                    | Enable/disable caching                  |
-|                      | `n_samples`           | `int`           | `1`                       | Number of rollout samples per prompt    |
+| Class                | Field                     | Type            | Default                   | Description                                        |
+| -------------------- | ------------------------- | --------------- | ------------------------- | -------------------------------------------------- |
+| `TreeBackupConfig`   | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates            |
+|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable tree backup                         |
+|                      | `checkpoint_dir`          | `str`           | `""`                      | Directory for MCTS tree checkpoints                |
+|                      | `advantage_mode`          | `AdvantageMode` | `TREE`                    | TREE (Q-values) or GAE advantages                  |
+|                      | `loss_mode`               | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                             |
+|                      | `max_reasoning_tokens`    | `int`           | `1000`                    | Max tokens for reasoning                           |
+|                      | `rl_loss_weight`          | `float`         | `1.0`                     | Weight for RL loss in BOTH mode                    |
+|                      | `distill_loss_weight`     | `float`         | `0.005`                   | Weight for distillation loss                       |
+|                      | `reward_bias`             | `float`         | `0.0`                     | Bias added to outcome rewards                      |
+|                      | `reward_scaling`          | `float`         | `1.0`                     | Scaling factor for outcome rewards                 |
+|                      | `reward_clip`             | `float`         | `20.0`                    | Reward clipping threshold                          |
+|                      | `overlong_reward_penalty` | `bool`          | `False`                   | Apply penalty for overlong episodes                |
+|                      | `overlong_tokens`         | `int \| None`   | `None`                    | Token threshold for overlong penalty               |
+|                      | `overlong_penalty_factor` | `float \| None` | `None`                    | Penalty factor for overlong episodes               |
+|                      | `topk_distill`            | `bool`          | `False`                   | Use top-k distillation                             |
+|                      | `teacher_provider`        | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`) |
+|                      | `teacher_base_url`        | `str`           | `"http://localhost:8001"` | Teacher API endpoint                               |
+|                      | `teacher_model_name`      | `str`           | `""`                      | Teacher model identifier                           |
+|                      | `teacher_top_k`           | `int`           | `10`                      | Top-k tokens from teacher                          |
+|                      | `teacher_max_retries`     | `int`           | `3`                       | Max retries for teacher requests                   |
+|                      | `teacher_timeout`         | `float`         | `60.0`                    | Timeout for teacher requests                       |
+|                      | `teacher_missing_logprob` | `float`         | `-23.0`                   | Default logprob for missing teacher tokens         |
+|                      | `diagnose_model_name`     | `str`           | `""`                      | Model name for episode diagnosis                   |
+|                      | `diagnose_max_tokens`     | `int`           | `1024`                    | Max tokens for diagnosis responses                 |
+|                      | `diagnose_temperature`    | `float`         | `0.0`                     | Temperature for diagnosis sampling                 |
+|                      | `diagnose_base_url`       | `str`           | `""`                      | Base URL for diagnosis API                         |
+|                      | `diagnose_api_key`        | `str`           | `""`                      | API key for diagnosis endpoint                     |
+|                      | `strict_distill_json`     | `bool`          | `True`                    | Enforce strict JSON parsing in distillation        |
+| `RolloutCacheConfig` | `cache_dir`               | `str`           | `""`                      | Directory for rollout cache                        |
+|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable caching                             |
+|                      | `n_samples`               | `int`           | `1`                       | Number of rollout samples per prompt               |
 
 **`CacheMode`** values:
 
@@ -150,26 +150,26 @@ A `Node` represents one assistant response turn with its full conversation conte
 tokens from the beginning through this turn's response). Nodes are linked via `node_id`
 / `parent_node_id` and grouped into episodes via `episode_id`.
 
-| Field            | Type                              | Description                                     |
-| ---------------- | --------------------------------- | ----------------------------------------------- |
-| `input_ids`      | `list[int]`                       | Full token sequence (prompt + response)         |
-| `loss_mask`      | `list[int]`                       | 0=prompt tokens, 1=response tokens              |
-| `logprobs`       | `list[float]`                     | Per-token log probabilities                     |
-| `versions`       | `list[int]`                       | Policy version per token (-1 on prompt)         |
-| `node_id`        | `str`                             | Globally unique interaction ID (UUID)           |
-| `parent_node_id` | `str \| None`                     | Parent interaction ID (None for root)           |
-| `episode_id`     | `str`                             | Groups turns into a trajectory path             |
-| `turn_idx`       | `int`                             | 1-based turn position within episode            |
-| `query_id`       | `str`                             | Dataset query identifier                        |
-| `train_id`       | `str`                             | Training run that trained this node ("" = untrained) |
-| `outcome_reward` | `float`                           | Trajectory-level reward                         |
-| `advantages`     | `torch.Tensor \| None`            | Tree-computed per-token advantages              |
-| `returns`        | `torch.Tensor \| None`            | Tree-computed per-token returns                 |
-| `topk_ids`       | `list[list[int]] \| None`         | Top-k candidate token IDs per response position |
-| `topk_logp`      | `list[list[float]] \| None`       | Top-k candidate log probabilities               |
-| `distill_reward` | `list[list[float]] \| None`       | Per-position distillation rewards               |
-| `teacher_logp`   | `list[list[float]] \| None`       | Teacher log probabilities per position          |
-| `guidance`       | `dict[int, str] \| None`         | Turn index → guidance text map (on leaf nodes)  |
+| Field            | Type                        | Description                                          |
+| ---------------- | --------------------------- | ---------------------------------------------------- |
+| `input_ids`      | `list[int]`                 | Full token sequence (prompt + response)              |
+| `loss_mask`      | `list[int]`                 | 0=prompt tokens, 1=response tokens                   |
+| `logprobs`       | `list[float]`               | Per-token log probabilities                          |
+| `versions`       | `list[int]`                 | Policy version per token (-1 on prompt)              |
+| `node_id`        | `str`                       | Globally unique interaction ID (UUID)                |
+| `parent_node_id` | `str \| None`               | Parent interaction ID (None for root)                |
+| `episode_id`     | `str`                       | Groups turns into a trajectory path                  |
+| `turn_idx`       | `int`                       | 1-based turn position within episode                 |
+| `query_id`       | `str`                       | Dataset query identifier                             |
+| `train_id`       | `str`                       | Training run that trained this node ("" = untrained) |
+| `outcome_reward` | `float`                     | Trajectory-level reward                              |
+| `advantages`     | `torch.Tensor \| None`      | Tree-computed per-token advantages                   |
+| `returns`        | `torch.Tensor \| None`      | Tree-computed per-token returns                      |
+| `topk_ids`       | `list[list[int]] \| None`   | Top-k candidate token IDs per response position      |
+| `topk_logp`      | `list[list[float]] \| None` | Top-k candidate log probabilities                    |
+| `distill_reward` | `list[list[float]] \| None` | Per-position distillation rewards                    |
+| `teacher_logp`   | `list[list[float]] \| None` | Teacher log probabilities per position               |
+| `guidance`       | `dict[int, str] \| None`    | Turn index → guidance text map (on leaf nodes)       |
 
 **Turn boundaries** are derived from `loss_mask` transitions (0→1 = response start, 1→0
 = response end) via `_find_turn_boundaries()`, rather than using tokenizer-specific
@@ -177,21 +177,21 @@ assistant markers.
 
 #### Store Methods
 
-| Method                                           | Description                                                                |
-| ------------------------------------------------ | -------------------------------------------------------------------------- |
-| `insert_batch(trajectories)`                     | Insert trajectories (Node objects) from rollout; skip already-cached nodes |
-| `get_q_value(node_id)`                           | Raw Q-value (mean reward) for a trajectory                                 |
-| `set_trained(node_id)` / `is_trained(node_id)`   | Mark/check whether a single node has been trained                          |
-| `get_untrained_count(query_id)`                  | Count untrained nodes for a query                                          |
-| `get_untrained_episode_count(query_id)`          | Count untrained episodes for a query (used by workflow)                    |
-| `get_untrained_node_ids(query_id, n)`            | Get up to N untrained node IDs                                             |
-| `load_untrained_episodes(query_id, n_episodes)`  | Load untrained Node objects grouped by episode (used by workflow)          |
-| `load_trajectories(query_id, n_samples)`         | Load untrained Node objects by sample count                                |
-| `reset_trained_flags()`                          | Reset all trained flags (for fresh training run)                           |
-| `mark_episodes_trained(episode_ids)`             | Mark trained by episode ID set (for recover checkpoint restore)            |
-| `clear()`                                        | Reset all state                                                            |
-| `set/get_normalized_advantage(node_id)`          | Store/retrieve GRPO-normalized advantage                                   |
-| `set/get_normalized_return(node_id)`             | Store/retrieve GRPO-normalized return                                      |
+| Method                                          | Description                                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------------- |
+| `insert_batch(trajectories)`                    | Insert trajectories (Node objects) from rollout; skip already-cached nodes |
+| `get_q_value(node_id)`                          | Raw Q-value (mean reward) for a trajectory                                 |
+| `set_trained(node_id)` / `is_trained(node_id)`  | Mark/check whether a single node has been trained                          |
+| `get_untrained_count(query_id)`                 | Count untrained nodes for a query                                          |
+| `get_untrained_episode_count(query_id)`         | Count untrained episodes for a query (used by workflow)                    |
+| `get_untrained_node_ids(query_id, n)`           | Get up to N untrained node IDs                                             |
+| `load_untrained_episodes(query_id, n_episodes)` | Load untrained Node objects grouped by episode (used by workflow)          |
+| `load_trajectories(query_id, n_samples)`        | Load untrained Node objects by sample count                                |
+| `reset_trained_flags()`                         | Reset all trained flags (for fresh training run)                           |
+| `mark_episodes_trained(episode_ids)`            | Mark trained by episode ID set (for recover checkpoint restore)            |
+| `clear()`                                       | Reset all state                                                            |
+| `set/get_normalized_advantage(node_id)`         | Store/retrieve GRPO-normalized advantage                                   |
+| `set/get_normalized_return(node_id)`            | Store/retrieve GRPO-normalized return                                      |
 
 **MCTS backup** (`_backup`): Each trajectory gets a single Q-value = mean reward (visit
 count = 1 currently). Stored in `_visit_counts`, `_total_values`, `_q_values`.
@@ -223,13 +223,13 @@ Handles Node objects directly, setting attributes on the Node dataclass.
 
 Serializes/deserializes the full MCTS tree state to disk.
 
-| Method                              | Description                                                                                                                              |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `save(tree_store)`                  | Save self-contained per-query trajectory records as `query_{sanitized_id}.json` files with per-query metadata                            |
-| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                                                    |
-| `exists()`                          | Check if a checkpoint directory exists                                                                                                   |
-| `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                                                 |
-| `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                                               |
+| Method                              | Description                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `save(tree_store)`                  | Save self-contained per-query trajectory records as `query_{sanitized_id}.json` files with per-query metadata |
+| `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                         |
+| `exists()`                          | Check if a checkpoint directory exists                                                                        |
+| `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                      |
+| `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                    |
 
 ### 5. Tree Search Grouped Rollout Workflow (`tree_search_grouped_workflow.py`)
 
@@ -240,16 +240,16 @@ to provide tree-search-aware rollout with cache reuse.
 
 Accepts the full set of configuration parameters (see `TreeBackupConfig` above), plus:
 
-| Parameter              | Type              | Description                                          |
-| ---------------------- | ----------------- | ---------------------------------------------------- |
-| `workflow`             | `RolloutWorkflow` | Base workflow for episode generation                 |
-| `group_size`           | `int`             | Number of episodes per query (must be >= 1)          |
-| `checkpoint_dir`       | `str`             | Directory for tree checkpoint persistence            |
-| `advantage_mode`       | `AdvantageMode`   | TREE or GAE advantage computation                    |
-| `loss_mode`            | `LossMode`        | GRPO, DISTILL, or BOTH                               |
-| `cache_mode`           | `CacheMode`       | OFF, IN_TRAINING, or CROSS_TRAINING                  |
-| `tokenizer_path`       | `str`             | Path to HF tokenizer (required for distillation)     |
-| ...                    | ...               | All `TreeBackupConfig` fields (see config table)     |
+| Parameter        | Type              | Description                                      |
+| ---------------- | ----------------- | ------------------------------------------------ |
+| `workflow`       | `RolloutWorkflow` | Base workflow for episode generation             |
+| `group_size`     | `int`             | Number of episodes per query (must be >= 1)      |
+| `checkpoint_dir` | `str`             | Directory for tree checkpoint persistence        |
+| `advantage_mode` | `AdvantageMode`   | TREE or GAE advantage computation                |
+| `loss_mode`      | `LossMode`        | GRPO, DISTILL, or BOTH                           |
+| `cache_mode`     | `CacheMode`       | OFF, IN_TRAINING, or CROSS_TRAINING              |
+| `tokenizer_path` | `str`             | Path to HF tokenizer (required for distillation) |
+| ...              | ...               | All `TreeBackupConfig` fields (see config table) |
 
 - Creates `TreeCheckpointManager` and `MCTSTreeStore`
 - On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
@@ -269,7 +269,8 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
    behavior policy rollouts
 1. **Teacher model reward computation** (if `loss_mode != GRPO`):
    - Load tokenizer from `tokenizer_path`
-   - Build teacher provider (external API or engine-based) via `_build_teacher_provider()`
+   - Build teacher provider (external API or engine-based) via
+     `_build_teacher_provider()`
    - For each episode group, diagnose to find turns needing improvement
      (`_prepare_distill_for_episode()` → `provider.diagnose_episode()`)
    - For selected turns, get teacher logprobs for candidate tokens
@@ -293,17 +294,17 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
 
 **Utility functions:**
 
-| Function                               | Description                                                             |
-| -------------------------------------- | ----------------------------------------------------------------------- |
-| `interactions_dict_to_nodes()`         | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
-| `_result_to_nodes()`                   | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata |
-| `_nodes_to_batched_tensor_dict()`      | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors` |
-| `_retry_episode()`                     | Retry a failed episode with exponential backoff (up to 1 retry)         |
-| `_prepare_distill_for_episode()`       | Diagnose one episode and compute position-level teacher rewards         |
-| `_prepare_distill_for_node_groups()`   | Apply distillation to multiple episode groups with error handling       |
-| `_group_nodes_by_episode()`            | Group a flat list of Nodes by `episode_id`                              |
-| `_filter_distill_episode_failure()`    | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged |
-| `_set_position_reward_sample_indices()`| Assign `sample_index` to each `PositionRewardInfo` based on node position in batch |
+| Function                                | Description                                                                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `interactions_dict_to_nodes()`          | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
+| `_result_to_nodes()`                    | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                 |
+| `_nodes_to_batched_tensor_dict()`       | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                   |
+| `_retry_episode()`                      | Retry a failed episode with exponential backoff (up to 1 retry)                                                                           |
+| `_prepare_distill_for_episode()`        | Diagnose one episode and compute position-level teacher rewards                                                                           |
+| `_prepare_distill_for_node_groups()`    | Apply distillation to multiple episode groups with error handling                                                                         |
+| `_group_nodes_by_episode()`             | Group a flat list of Nodes by `episode_id`                                                                                                |
+| `_filter_distill_episode_failure()`     | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                            |
+| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                        |
 
 ### 6. Trainer (`trainer.py`)
 

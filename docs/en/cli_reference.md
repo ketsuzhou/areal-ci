@@ -809,6 +809,8 @@ Configuration for SwanLab experiment tracking and monitoring.
 | `config`  | `dict` \| None | `None`       | -                                                                                                                      |
 | `logdir`  | string \| None | `None`       | -                                                                                                                      |
 | `mode`    | string         | `"disabled"` | Tracking mode. One of 'cloud', 'local', 'disabled', or 'offline'. **Choices:** `cloud`, `local`, `disabled`, `offline` |
+| `resume`  | string \| None | `None`       | Resume mode for SwanLab run: 'must', 'allow', or 'never'. Must be used with 'id'.                                      |
+| `id`      | string \| None | `None`       | SwanLab run ID to resume. Required when resume='must'.                                                                 |
 | `api_key` | string \| None | `None`       | -                                                                                                                      |
 
 (section-tensor-board)=

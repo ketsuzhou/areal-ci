@@ -41,8 +41,8 @@ def main():
     )
     args = parser.parse_args()
 
-    empty_loss_masked = []   # loss_masked_text is ''
-    no_assistant_turn = []   # turns contain no assistant role
+    empty_loss_masked = []  # loss_masked_text is ''
+    no_assistant_turn = []  # turns contain no assistant role
     no_asst_marker_in_full = []  # <|im_start|>assistant not in full text
 
     total = 0
@@ -79,20 +79,26 @@ def main():
     print(f"Total records: {total}")
     print(f"Records with empty loss_masked_text:          {len(empty_loss_masked)}")
     print(f"Records without assistant turn:               {len(no_assistant_turn)}")
-    print(f"Records with loss_mask but no asst in full:   {len(no_asst_marker_in_full)}")
+    print(
+        f"Records with loss_mask but no asst in full:   {len(no_asst_marker_in_full)}"
+    )
 
     if empty_loss_masked:
         print("\n--- Empty loss_masked_text (first 20) ---")
         for r in empty_loss_masked[:20]:
-            print(f"  {r['file']} query={r['query_id']} ep={r['episode_id']} "
-                  f"node={r['node_id']} turn={r['turn_idx']} "
-                  f"tokens={r['num_tokens']} loss_tokens={r['num_loss_tokens']}")
+            print(
+                f"  {r['file']} query={r['query_id']} ep={r['episode_id']} "
+                f"node={r['node_id']} turn={r['turn_idx']} "
+                f"tokens={r['num_tokens']} loss_tokens={r['num_loss_tokens']}"
+            )
 
     if no_assistant_turn:
         print("\n--- No assistant turn (first 20) ---")
         for r in no_assistant_turn[:20]:
-            print(f"  {r['file']} query={r['query_id']} ep={r['episode_id']} "
-                  f"node={r['node_id']} turn={r['turn_idx']} roles={r['roles']}")
+            print(
+                f"  {r['file']} query={r['query_id']} ep={r['episode_id']} "
+                f"node={r['node_id']} turn={r['turn_idx']} roles={r['roles']}"
+            )
 
     if args.output:
         summary = {

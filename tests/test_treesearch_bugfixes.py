@@ -242,7 +242,8 @@ class TestPackExtraDataSubsetsBatchDimTensors:
 
     def test_batch_dim_non_packable_subset_per_tree(self):
         import torch
-        from areal.models.tree_attn.tree import _pack_extra_data, TrieNode
+
+        from areal.models.tree_attn.tree import TrieNode, _pack_extra_data
 
         # Build a simple trie with 2 sequences (seq_ids 0, 1)
         trie = TrieNode(tree_id=0, start_idx=0)
@@ -260,7 +261,9 @@ class TestPackExtraDataSubsetsBatchDimTensors:
         packable_keys = set()
         non_packable_keys = {"topk_ids", "teacher_logp", "some_scalar"}
 
-        result = _pack_extra_data(trie, data, sequence_lens, packable_keys, non_packable_keys)
+        result = _pack_extra_data(
+            trie, data, sequence_lens, packable_keys, non_packable_keys
+        )
 
         # topk_ids and teacher_logp should be subsetted to [2, 5, 3]
         assert result["topk_ids"].shape == (2, 5, 3)
@@ -273,7 +276,8 @@ class TestPackExtraDataSubsetsBatchDimTensors:
 
     def test_cu_seqlens_added_to_tree_extra_data(self):
         import torch
-        from areal.models.tree_attn.tree import _pack_extra_data, TrieNode
+
+        from areal.models.tree_attn.tree import TrieNode, _pack_extra_data
 
         trie = TrieNode(tree_id=0, start_idx=0)
         trie.sequence_ids = [0, 2]  # sequences 0 and 2
@@ -286,7 +290,9 @@ class TestPackExtraDataSubsetsBatchDimTensors:
         packable_keys = set()
         non_packable_keys = set()
 
-        result = _pack_extra_data(trie, data, sequence_lens, packable_keys, non_packable_keys)
+        result = _pack_extra_data(
+            trie, data, sequence_lens, packable_keys, non_packable_keys
+        )
 
         # cu_seqlens should be [0, 8, 17] (cumsum of [8, 9])
         assert "cu_seqlens" in result
@@ -299,6 +305,7 @@ class TestTeacherKLLossPackedFormat:
 
     def test_packed_1d_format_with_cu_seqlens(self):
         import torch
+
         from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
 
         # 2 sequences packed into 1D: seq0 has prompt_len=2 resp_len=3, seq1 has prompt_len=1 resp_len=2
@@ -311,10 +318,12 @@ class TestTeacherKLLossPackedFormat:
 
         # Teacher: [2, max_resp, 1] where max_resp=3 (max resp across sequences)
         # seq0 has resp_len=3, seq1 has resp_len=2
-        teacher_logprobs = torch.tensor([
-            [[-0.4], [-0.5], [-0.6]],  # seq0, 3 response positions
-            [[-0.7], [-0.8], [0.0]],   # seq1, 2 response positions (3rd is padding)
-        ])
+        teacher_logprobs = torch.tensor(
+            [
+                [[-0.4], [-0.5], [-0.6]],  # seq0, 3 response positions
+                [[-0.7], [-0.8], [0.0]],  # seq1, 2 response positions (3rd is padding)
+            ]
+        )
 
         loss = _compute_teacher_kl_loss(
             teacher_logprobs=teacher_logprobs,
@@ -330,6 +339,7 @@ class TestTeacherKLLossPackedFormat:
 
     def test_packed_1d_multi_candidate(self):
         import torch
+
         from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
 
         # 2 sequences, multi-candidate (3 candidates per position)
@@ -356,6 +366,7 @@ class TestTeacherKLLossPackedFormat:
     def test_batched_2d_format_unchanged(self):
         """Existing batched [batch, seq] format should still work."""
         import torch
+
         from customized_areal.tree_search.training.loss import _compute_teacher_kl_loss
 
         # 2D batched format (existing code path)
@@ -380,14 +391,21 @@ class TestPrepareMultiCandidateLabelsPacked:
     def _make_engine(self):
         """Create a minimal MultiCandidateFSDPEngine for testing."""
         from unittest.mock import MagicMock
-        from customized_areal.tree_search.engine.fsdp_engine import MultiCandidateFSDPEngine
+
+        from customized_areal.tree_search.engine.fsdp_engine import (
+            MultiCandidateFSDPEngine,
+        )
+
         engine = MagicMock(spec=MultiCandidateFSDPEngine)
-        engine._prepare_multi_candidate_labels = MultiCandidateFSDPEngine._prepare_multi_candidate_labels.__get__(engine)
+        engine._prepare_multi_candidate_labels = (
+            MultiCandidateFSDPEngine._prepare_multi_candidate_labels.__get__(engine)
+        )
         engine.config = MagicMock()
         return engine
 
     def test_single_sequence_still_works(self):
         import torch
+
         engine = self._make_engine()
 
         model_inputs = {
@@ -396,11 +414,15 @@ class TestPrepareMultiCandidateLabelsPacked:
             "cu_seqlens": torch.tensor([0, 5], dtype=torch.int32),
         }
         mb_input = {
-            "topk_ids": torch.tensor([[[100, 101, 102], [200, 201, 202], [300, 301, 302]]]),
+            "topk_ids": torch.tensor(
+                [[[100, 101, 102], [200, 201, 202], [300, 301, 302]]]
+            ),
             # [1, 3, 3] — 1 sequence, 3 response positions, 3 candidates
         }
 
-        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=5)
+        labels = engine._prepare_multi_candidate_labels(
+            model_inputs, mb_input, seq_len=5
+        )
 
         assert labels is not None
         assert labels.shape == (5, 3)
@@ -413,6 +435,7 @@ class TestPrepareMultiCandidateLabelsPacked:
 
     def test_two_sequences_packed(self):
         import torch
+
         engine = self._make_engine()
 
         # 2 sequences packed: seq0=[10,20,30,40], seq1=[50,60,70]
@@ -426,14 +449,22 @@ class TestPrepareMultiCandidateLabelsPacked:
             # 2 sequences, each with 3 response positions, 3 candidates
             # seq0: prompt_len=1, resp_len=3 (from loss_mask)
             # seq1: prompt_len=1, resp_len=2 (from loss_mask)
-            "topk_ids": torch.tensor([
-                [[100, 101, 102], [200, 201, 202], [300, 301, 302]],  # seq0
-                [[400, 401, 402], [500, 501, 502], [-1, -1, -1]],     # seq1 (3rd pos is padding/sentinel)
-            ]),
+            "topk_ids": torch.tensor(
+                [
+                    [[100, 101, 102], [200, 201, 202], [300, 301, 302]],  # seq0
+                    [
+                        [400, 401, 402],
+                        [500, 501, 502],
+                        [-1, -1, -1],
+                    ],  # seq1 (3rd pos is padding/sentinel)
+                ]
+            ),
             # [2, 3, 3]
         }
 
-        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=7)
+        labels = engine._prepare_multi_candidate_labels(
+            model_inputs, mb_input, seq_len=7
+        )
 
         assert labels is not None
         assert labels.shape == (7, 3)
@@ -451,6 +482,7 @@ class TestPrepareMultiCandidateLabelsPacked:
 
     def test_returns_none_when_no_topk_ids(self):
         import torch
+
         engine = self._make_engine()
 
         model_inputs = {
@@ -460,11 +492,14 @@ class TestPrepareMultiCandidateLabelsPacked:
         }
         mb_input = {}
 
-        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=3)
+        labels = engine._prepare_multi_candidate_labels(
+            model_inputs, mb_input, seq_len=3
+        )
         assert labels is None
 
     def test_returns_none_when_all_sentinel(self):
         import torch
+
         engine = self._make_engine()
 
         model_inputs = {
@@ -476,5 +511,7 @@ class TestPrepareMultiCandidateLabelsPacked:
             "topk_ids": torch.tensor([[[-1], [-1]]]),  # all -1 sentinel
         }
 
-        labels = engine._prepare_multi_candidate_labels(model_inputs, mb_input, seq_len=3)
+        labels = engine._prepare_multi_candidate_labels(
+            model_inputs, mb_input, seq_len=3
+        )
         assert labels is None

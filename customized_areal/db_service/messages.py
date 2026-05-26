@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
 
+import httpx
+
 from .connection import DBConnection
+
+logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2.0
 
 # ── Table constants ──
 
@@ -47,10 +56,13 @@ async def get_llm_messages(
         if return_raw:
             return raw_messages
         return _parse_messages(raw_messages)
+    except httpx.ReadTimeout as e:
+        logger.error(
+            "ReadTimeout fetching messages for task %s after retries: %s",
+            task_id, e, exc_info=True,
+        )
+        raise
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(f"Failed to get messages for task {task_id}: {e}", exc_info=True)
         return []
 
@@ -116,10 +128,11 @@ async def _query_messages_by_task(
 
     while True:
         query = client.table(TABLE_MESSAGES).select(columns).eq("task_id", task_id)
-        result = (
-            await query.order("created_at", desc=(order == "desc"))
-            .range(offset, offset + batch_size - 1)
-            .execute()
+        result = await _execute_with_retry(
+            query.order("created_at", desc=(order == "desc"))
+            .range(offset, offset + batch_size - 1),
+            task_id=task_id,
+            offset=offset,
         )
         if not result.data:
             break
@@ -129,6 +142,23 @@ async def _query_messages_by_task(
         offset += batch_size
 
     return all_messages
+
+
+async def _execute_with_retry(query, *, task_id: str, offset: int, max_retries: int = _MAX_RETRIES):
+    """Execute a query with exponential backoff retry on transient timeouts."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await query.execute()
+        except httpx.ReadTimeout:
+            if attempt == max_retries:
+                raise
+            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            logger.warning(
+                "ReadTimeout querying messages (task=%s, offset=%d), "
+                "retry %d/%d in %.1fs",
+                task_id, offset, attempt + 1, max_retries, delay,
+            )
+            await asyncio.sleep(delay)
 
 
 def _parse_messages(raw_messages: list[dict]) -> list[dict[str, Any]]:

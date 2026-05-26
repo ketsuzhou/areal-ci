@@ -744,6 +744,11 @@ def split_padded_tensor_dict_into_mb_list(
         ):
             # NOTE: qwen2.5-vl position_ids.numel() == bs * max_seqlen * 3
             to_split[key] = value
+        elif torch.is_tensor(value) and value.ndim >= 2 and value.shape[0] == bs:
+            # 3D+ tensors whose first dim matches batch (e.g. topk_ids,
+            # teacher_logp with shape [bs, resp_len, max_cand]) need to be
+            # split along dim 0 even though numel != bs * max_seqlen.
+            to_split[key] = value
         else:
             not_to_split[key] = value
 

@@ -702,20 +702,14 @@ def _pack_extra_data(
     # For non-packable data, subset batch-dim tensors to this tree's sequences
     for key in non_packable_keys:
         value = data[key]
-        if (
-            torch.is_tensor(value)
-            and value.ndim >= 2
-            and value.shape[0] == batch_size
-        ):
+        if torch.is_tensor(value) and value.ndim >= 2 and value.shape[0] == batch_size:
             extra_data[key] = value[seq_ids]
         else:
             extra_data[key] = value
 
     # Add cu_seqlens for per-sequence boundary info (used by loss function)
     if "cu_seqlens" not in extra_data and len(lens) > 0:
-        cu = torch.cumsum(
-            torch.tensor(lens, dtype=torch.int32), dim=0
-        )
+        cu = torch.cumsum(torch.tensor(lens, dtype=torch.int32), dim=0)
         cu = torch.nn.functional.pad(cu, (1, 0), value=0).to(torch.int32)
         extra_data["cu_seqlens"] = cu
 

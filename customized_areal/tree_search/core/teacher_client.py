@@ -306,18 +306,14 @@ class TeacherClient:
             f"Teacher API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
-    async def _post_with_retries_chat(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _post_with_retries_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the chat completions endpoint with retry logic."""
         max_retries = self.config.teacher_max_retries
         last_exc: Exception | None = None
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = await self._client.post(
-                    "/v1/chat/completions", json=payload
-                )
+                response = await self._client.post("/v1/chat/completions", json=payload)
                 response.raise_for_status()
                 return response.json()
             except (

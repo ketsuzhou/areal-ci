@@ -8,6 +8,7 @@ tree_search:
   checkpoint_dir: customized_areal/tpfc/data/tree_cache
   mode: CROSS_TRAINING
   loss_mode: GRPO
+  teacher_provider: engine
 
 total_train_epochs: 4
 tokenizer_path: ${actor.path}
@@ -44,7 +45,7 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 8
+  max_concurrent_rollouts: 2
   queue_size: 240
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 40

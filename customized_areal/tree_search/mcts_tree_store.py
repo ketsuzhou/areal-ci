@@ -62,7 +62,6 @@ class Node:
     guidance: dict[int, str] | None = None  # turn_idx → guidance text for leaf nodes
 
 
-
 def _find_turn_boundaries(
     loss_mask: list[int],
 ) -> tuple[list[int], list[int]]:
@@ -131,7 +130,10 @@ def _optional_tensor_field(
 
 
 def _node_to_tensor_dict(
-    node: Node, query_id: str, node_id: str, num_turns_in_episode: int = 1,
+    node: Node,
+    query_id: str,
+    node_id: str,
+    num_turns_in_episode: int = 1,
     max_tokens: int = 0,
 ) -> dict[str, Any]:
     """Convert a single Node to a tensor dict with shape [1, seq_len].
@@ -211,7 +213,7 @@ def _node_to_tensor_dict(
             loss_mask,
         )
     else:
-        traj["teacher_logp"] = torch.zeros(1, resp_len, 0, dtype=torch.float32)
+        traj["teacher_logp"] = torch.zeros(1, resp_len, 1, dtype=torch.float32)
 
     # Derived from logprobs for response tokens
     if resp_end > resp_start:

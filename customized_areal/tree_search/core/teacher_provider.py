@@ -9,8 +9,9 @@ from typing import Protocol
 import httpx
 from openai import OpenAI
 
-from areal.utils import logging
 from customized_areal.tree_search.core.teacher_client import TeacherClient
+
+from areal.utils import logging
 
 logger = logging.getLogger("TeacherProvider")
 
@@ -135,9 +136,7 @@ class ExternalTeacherProvider:
                 max_tokens=self.diagnose_max_tokens,
                 temperature=temp,
             )
-        prompt = "\n".join(
-            f"{m['role']}: {m['content']}" for m in messages
-        )
+        prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
         return await self.client.complete_text(
             prompt,
             model=self.diagnose_model_name or None,
@@ -185,9 +184,7 @@ class EngineTeacherProvider:
                 "engine-backed teacher provider requires async coroutine function "
                 "engine.diagnose_episode"
             )
-        context = "\n".join(
-            f"{m['role']}: {m['content']}" for m in conversation
-        )
+        context = "\n".join(f"{m['role']}: {m['content']}" for m in conversation)
         return await diagnose_episode(
             context=context,
             gold_answer=gold_answer,

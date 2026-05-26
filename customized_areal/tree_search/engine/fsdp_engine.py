@@ -235,7 +235,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 ids_flat = input_ids.squeeze(0) if input_ids.dim() > 1 else input_ids
                 rolled = torch.roll(ids_flat, shifts=-1)[:seq_len]
 
-            labels = torch.zeros(seq_len, max_candidates, dtype=torch.long, device=device)
+            labels = torch.zeros(
+                seq_len, max_candidates, dtype=torch.long, device=device
+            )
             if rolled is not None:
                 labels[:, 0] = rolled
                 for c in range(1, max_candidates):
@@ -252,7 +254,11 @@ class MultiCandidateFSDPEngine(FSDPEngine):
 
         # Multi-sequence packed: use cu_seqlens to build labels per sequence
         labels_parts = []
-        ids_flat = input_ids.squeeze(0) if input_ids is not None and input_ids.dim() > 1 else input_ids
+        ids_flat = (
+            input_ids.squeeze(0)
+            if input_ids is not None and input_ids.dim() > 1
+            else input_ids
+        )
 
         for b in range(mb_bs):
             start = cu_seqlens[b].item()
@@ -274,7 +280,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             else:
                 rolled_i = torch.zeros(seq_len_i, dtype=torch.long, device=device)
 
-            labels_i = torch.zeros(seq_len_i, max_candidates, dtype=torch.long, device=device)
+            labels_i = torch.zeros(
+                seq_len_i, max_candidates, dtype=torch.long, device=device
+            )
             labels_i[:, 0] = rolled_i
             for c in range(1, max_candidates):
                 labels_i[:, c] = rolled_i

@@ -88,9 +88,7 @@ def grpo_distill_loss_fn(
         prompt_lens = first_true.int().argmax(dim=1).tolist()
     else:
         # [seq_len] -> single sample
-        prompt_len = (
-            (loss_mask.bool().cumsum(dim=0) == 1).int().argmax(dim=0).item()
-        )
+        prompt_len = (loss_mask.bool().cumsum(dim=0) == 1).int().argmax(dim=0).item()
         prompt_lens = [prompt_len]
 
     prox_logp_gt = input_data.get("prox_logp")

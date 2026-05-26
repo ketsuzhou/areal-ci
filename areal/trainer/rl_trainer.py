@@ -763,9 +763,7 @@ class PPOTrainer:
             # Actor already onloaded; engine-internal _offload_aware_context
             # calls in update_weights/save are no-ops.
 
-            logger.info(
-                "Calling actor.update_weights(version=%d)...", global_step + 1
-            )
+            logger.info("Calling actor.update_weights(version=%d)...", global_step + 1)
             with (
                 stats_tracker.record_timing("update_weights"),
                 perf_tracer.trace_scope(

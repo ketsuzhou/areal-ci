@@ -642,53 +642,76 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
     return agent_id
 
 
+_TRANSIENT_HTTP_ERRORS = (
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.ConnectError,
+)
+
+
 async def _start_agent_run(
     api_base_url: str,
     auth_token: str,
     form_data: dict,
     task_file_path: list[str] | None,
+    max_retries: int = 3,
 ) -> dict:
     """Start the agent run via HTTP and return the JSON response."""
-    async with httpx.AsyncClient(timeout=300.0) as http_client:
-        files = []
-        file_handles = []
+    retry_delay = 5.0
+    for attempt in range(max_retries + 1):
         try:
-            if task_file_path:
-                for file_path in task_file_path:
-                    if os.path.exists(file_path):
-                        fh = open(file_path, "rb")
-                        file_handles.append(fh)
-                        files.append(("files", (os.path.basename(file_path), fh, None)))
-                    else:
-                        logger.warning("File not found: %s", file_path)
+            async with httpx.AsyncClient(timeout=300.0) as http_client:
+                files = []
+                file_handles = []
+                try:
+                    if task_file_path:
+                        for file_path in task_file_path:
+                            if os.path.exists(file_path):
+                                fh = open(file_path, "rb")
+                                file_handles.append(fh)
+                                files.append(("files", (os.path.basename(file_path), fh, None)))
+                            else:
+                                logger.warning("File not found: %s", file_path)
 
-            response = await http_client.post(
-                f"{api_base_url}/api/agent/start",
-                headers={"Authorization": f"Bearer {auth_token}"},
-                data=form_data,
-                files=files if files else None,
-            )
-        finally:
-            for fh in file_handles:
-                fh.close()
+                    response = await http_client.post(
+                        f"{api_base_url}/api/agent/start",
+                        headers={"Authorization": f"Bearer {auth_token}"},
+                        data=form_data,
+                        files=files if files else None,
+                    )
+                finally:
+                    for fh in file_handles:
+                        fh.close()
 
-        if response.status_code in _AUTH_ERROR_STATUS_CODES:
-            raise AuthTokenExpiredError(
-                f"Backend rejected auth token while starting agent run: "
-                f"{response.status_code} - {response.text}"
-            )
+                if response.status_code in _AUTH_ERROR_STATUS_CODES:
+                    raise AuthTokenExpiredError(
+                        f"Backend rejected auth token while starting agent run: "
+                        f"{response.status_code} - {response.text}"
+                    )
 
-        if response.status_code != 200:
-            logger.error(
-                "Failed to start agent run via API: status_code=%s, response=%s",
-                response.status_code,
-                response.text,
-            )
-            raise RuntimeError(
-                f"Failed to start agent run: {response.status_code} - {response.text}"
-            )
+                if response.status_code != 200:
+                    logger.error(
+                        "Failed to start agent run via API: status_code=%s, response=%s",
+                        response.status_code,
+                        response.text,
+                    )
+                    raise RuntimeError(
+                        f"Failed to start agent run: {response.status_code} - {response.text}"
+                    )
 
-        return response.json()
+                return response.json()
+        except _TRANSIENT_HTTP_ERRORS as exc:
+            if attempt < max_retries:
+                logger.warning(
+                    "Transient HTTP error starting agent run (attempt %d/%d), "
+                    "retrying in %.1fs: %s",
+                    attempt + 1, max_retries + 1, retry_delay, exc,
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60.0)
+            else:
+                raise
 
 
 async def _start_agent_run_with_refresh(
@@ -1000,7 +1023,6 @@ def _extract_final_answer(messages: list[dict]) -> str | None:
 
     return None
 
-
 async def run_backend(
     task_description: str | None,
     task_file_path: list[str] | None,
@@ -1017,6 +1039,7 @@ async def run_backend(
     api_key: str | None = None,
     refresh_token: str | None = DEFAULT_REFRESH_TOKEN,
 ):
+
     db = DBConnection()
     client = await db.client
 
@@ -1035,7 +1058,8 @@ async def run_backend(
     )
     logger.info("Task created: %s", task_id)
 
-    try:
+
+    async def _do_run():
         token_manager = SharedTokenManager(
             refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
         )
@@ -1082,8 +1106,12 @@ async def run_backend(
         final_boxed_answer = _extract_final_answer(messages)
 
         return messages, final_boxed_answer, log_path, None
-    except Exception:
-        logger.exception("Exception in run_backend for task_id=%s", task_id)
+
+
+    try:
+        return await asyncio.wait_for(_do_run(), timeout=900)
+    except TimeoutError:
+        logger.warning("TPFCAgent run timed out after 15 minutes for task_id=%s", task_id)
         raise
     finally:
         # Guaranteed to run on normal exit, exception, or CancelledError

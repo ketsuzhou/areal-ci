@@ -1,24 +1,36 @@
 # topk_ids/teacher_logp Data Flow Fix Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix 5 bugs in the data flow for topk_ids/teacher_logp so that multi-candidate distillation works correctly in both standard and tree training paths.
+**Goal:** Fix 5 bugs in the data flow for topk_ids/teacher_logp so that multi-candidate
+distillation works correctly in both standard and tree training paths.
 
-**Architecture:** The standard path (enable_tree_training=False) uses packed 1D tensors with cu_seqlens. The tree path (enable_tree_training=True) uses trie-packed logits unpacked to 1D per-sequence-concatenated format. Both paths produce 1D logprobs + cu_seqlens, so the loss function gets a unified 1D code path. The MultiCandidateFSDPEngine tree branch is removed (delegated to base class). The `_pack_extra_data` function subsets batch-dim tensors per tree.
+**Architecture:** The standard path (enable_tree_training=False) uses packed 1D tensors
+with cu_seqlens. The tree path (enable_tree_training=True) uses trie-packed logits
+unpacked to 1D per-sequence-concatenated format. Both paths produce 1D logprobs +
+cu_seqlens, so the loss function gets a unified 1D code path. The
+MultiCandidateFSDPEngine tree branch is removed (delegated to base class). The
+`_pack_extra_data` function subsets batch-dim tensors per tree.
 
 **Tech Stack:** Python 3.12+, PyTorch, FSDP2
 
----
+______________________________________________________________________
 
 ### Task 1: Fix `_pack_extra_data` to subset batch-dim tensors per tree
 
 **Files:**
+
 - Modify: `areal/models/tree_attn/tree.py:675-705`
 - Test: `tests/test_treesearch_bugfixes.py`
 
-This fixes Bug 3: non-packable keys like `topk_ids` and `teacher_logp` currently get the full batch `[N, resp_len, max_cand]` copied to every tree. After this fix, each tree gets only its own sequences `[num_seqs_in_tree, resp_len, max_cand]`.
+This fixes Bug 3: non-packable keys like `topk_ids` and `teacher_logp` currently get the
+full batch `[N, resp_len, max_cand]` copied to every tree. After this fix, each tree
+gets only its own sequences `[num_seqs_in_tree, resp_len, max_cand]`.
 
-Also adds `cu_seqlens` to the tree micro-batch's `extra_data` (part of Fix 5), so the loss function can determine per-sequence boundaries in the 1D packed format.
+Also adds `cu_seqlens` to the tree micro-batch's `extra_data` (part of Fix 5), so the
+loss function can determine per-sequence boundaries in the 1D packed format.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -84,8 +96,10 @@ class TestPackExtraDataSubsetsBatchDimTensors:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPackExtraDataSubsetsBatchDimTensors -v`
-Expected: FAIL — `result["topk_ids"].shape` will be `(4, 5, 3)` (full batch), not `(2, 5, 3)`.
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPackExtraDataSubsetsBatchDimTensors -v`
+Expected: FAIL — `result["topk_ids"].shape` will be `(4, 5, 3)` (full batch), not
+`(2, 5, 3)`.
 
 - [ ] **Step 3: Implement the fix**
 
@@ -143,15 +157,18 @@ def _pack_extra_data(
 ```
 
 Add import at the top of `tree.py` if `torch.nn.functional` is not already imported:
+
 ```python
 import torch.nn.functional as F
 ```
 
-Check existing imports first — if `F` is already imported, use `F.pad` instead of `torch.nn.functional.pad`.
+Check existing imports first — if `F` is already imported, use `F.pad` instead of
+`torch.nn.functional.pad`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPackExtraDataSubsetsBatchDimTensors -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPackExtraDataSubsetsBatchDimTensors -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -166,15 +183,19 @@ batch. Also adds cu_seqlens to extra_data for per-sequence boundary
 info used by the loss function."
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Fix `_compute_teacher_kl_loss` for 1D packed format
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/training/loss.py:216-270`
 - Test: `tests/test_treesearch_bugfixes.py`
 
-This fixes Bug 5: the loss function iterates `for b in range(batch_size)` using `teacher_logprobs.shape[0]`, which is wrong when logprobs and loss_mask are 1D concatenated (not batched). After this fix, when `loss_mask` is 1D and `cu_seqlens` is available, the function uses `cu_seqlens` to split per-sequence.
+This fixes Bug 5: the loss function iterates `for b in range(batch_size)` using
+`teacher_logprobs.shape[0]`, which is wrong when logprobs and loss_mask are 1D
+concatenated (not batched). After this fix, when `loss_mask` is 1D and `cu_seqlens` is
+available, the function uses `cu_seqlens` to split per-sequence.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -261,16 +282,20 @@ class TestTeacherKLLossPackedFormat:
         assert torch.isfinite(loss)
 ```
 
-Note: The existing `_compute_teacher_kl_loss` signature doesn't accept `input_data`. We need to add it. The test will initially fail because the function doesn't accept `input_data` and doesn't handle 1D format.
+Note: The existing `_compute_teacher_kl_loss` signature doesn't accept `input_data`. We
+need to add it. The test will initially fail because the function doesn't accept
+`input_data` and doesn't handle 1D format.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestTeacherKLLossPackedFormat -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestTeacherKLLossPackedFormat -v`
 Expected: FAIL — `TypeError` for unexpected `input_data` keyword argument.
 
 - [ ] **Step 3: Implement the fix**
 
-Modify `_compute_teacher_kl_loss` in `customized_areal/tree_search/training/loss.py` (lines 216-270). Replace the entire function:
+Modify `_compute_teacher_kl_loss` in `customized_areal/tree_search/training/loss.py`
+(lines 216-270). Replace the entire function:
 
 ```python
 def _compute_teacher_kl_loss(
@@ -378,7 +403,8 @@ def _compute_teacher_kl_loss(
     return torch.cat(terms).mean()
 ```
 
-Also update the two call sites in `grpo_distill_loss_fn` (lines 104-108 and 144-150) to pass `input_data`:
+Also update the two call sites in `grpo_distill_loss_fn` (lines 104-108 and 144-150) to
+pass `input_data`:
 
 ```python
 # Line ~104 (DISTILL mode)
@@ -402,7 +428,8 @@ teacher_kl_loss = _compute_teacher_kl_loss(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestTeacherKLLossPackedFormat -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestTeacherKLLossPackedFormat -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -417,15 +444,20 @@ remains unchanged. Fixes teacher KL loss computation in both
 standard (mb_bs > 1) and tree training paths."
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Fix `_prepare_multi_candidate_labels` for `mb_bs > 1`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/engine/fsdp_engine.py:181-246`
 - Test: `tests/test_treesearch_bugfixes.py`
 
-This fixes Bug 2: when multiple sequences are packed into one micro-batch (`mb_bs > 1`), `_prepare_multi_candidate_labels` currently fails because it only squeezes when `shape[0] == 1`. The fix uses `cu_seqlens` from `model_inputs` to locate each sequence's position range and creates per-sequence labels, then concatenates them into `[total_len, max_cand]`.
+This fixes Bug 2: when multiple sequences are packed into one micro-batch (`mb_bs > 1`),
+`_prepare_multi_candidate_labels` currently fails because it only squeezes when
+`shape[0] == 1`. The fix uses `cu_seqlens` from `model_inputs` to locate each sequence's
+position range and creates per-sequence labels, then concatenates them into
+`[total_len, max_cand]`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -540,12 +572,16 @@ class TestPrepareMultiCandidateLabelsPacked:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPrepareMultiCandidateLabelsPacked -v`
-Expected: FAIL — `test_two_sequences_packed` will fail because `_prepare_multi_candidate_labels` returns `None` when `topk_ids.shape[0] > 1` (the squeeze condition `shape[0] == 1` fails, then `dim() != 2` check triggers).
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPrepareMultiCandidateLabelsPacked -v`
+Expected: FAIL — `test_two_sequences_packed` will fail because
+`_prepare_multi_candidate_labels` returns `None` when `topk_ids.shape[0] > 1` (the
+squeeze condition `shape[0] == 1` fails, then `dim() != 2` check triggers).
 
 - [ ] **Step 3: Implement the fix**
 
-Replace `_prepare_multi_candidate_labels` in `customized_areal/tree_search/engine/fsdp_engine.py` (lines 181-246):
+Replace `_prepare_multi_candidate_labels` in
+`customized_areal/tree_search/engine/fsdp_engine.py` (lines 181-246):
 
 ```python
 def _prepare_multi_candidate_labels(
@@ -664,7 +700,8 @@ def _prepare_multi_candidate_labels(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPrepareMultiCandidateLabelsPacked -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py::TestPrepareMultiCandidateLabelsPacked -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -679,24 +716,34 @@ concatenates into [total_len, max_cand]. Single-sequence path
 unchanged."
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Remove broken tree branch from `MultiCandidateFSDPEngine._compute_logprobs_and_loss`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/engine/fsdp_engine.py:248-349`
 
-This fixes Bug 4: the custom engine's `_compute_logprobs_and_loss` tree branch tries to use `_prepare_multi_candidate_labels` with tree-packed logits, which is fundamentally wrong. The base FSDPEngine already handles the tree path correctly using `gather_packed_tree_logprobs_entropy`. The custom engine should delegate to the base class when `enable_tree_training=True`.
+This fixes Bug 4: the custom engine's `_compute_logprobs_and_loss` tree branch tries to
+use `_prepare_multi_candidate_labels` with tree-packed logits, which is fundamentally
+wrong. The base FSDPEngine already handles the tree path correctly using
+`gather_packed_tree_logprobs_entropy`. The custom engine should delegate to the base
+class when `enable_tree_training=True`.
 
 - [ ] **Step 1: Write the failing test**
 
-This is a code removal/simplification task. The test is that the tree path now delegates to the base class correctly. Since we can't easily instantiate the full engine in a unit test, we verify by reading the code structure. However, we can test that the method no longer has the broken tree-specific code path.
+This is a code removal/simplification task. The test is that the tree path now delegates
+to the base class correctly. Since we can't easily instantiate the full engine in a unit
+test, we verify by reading the code structure. However, we can test that the method no
+longer has the broken tree-specific code path.
 
-We'll rely on the integration test (Task 5) to verify correctness. For now, we make the code change and verify it doesn't break existing tests.
+We'll rely on the integration test (Task 5) to verify correctness. For now, we make the
+code change and verify it doesn't break existing tests.
 
 - [ ] **Step 2: Implement the fix**
 
-Replace `_compute_logprobs_and_loss` in `customized_areal/tree_search/engine/fsdp_engine.py` (lines 248-349):
+Replace `_compute_logprobs_and_loss` in
+`customized_areal/tree_search/engine/fsdp_engine.py` (lines 248-349):
 
 ```python
 def _compute_logprobs_and_loss(
@@ -803,13 +850,19 @@ def _compute_logprobs_and_loss(
 ```
 
 Key changes:
-1. Tree training branch now delegates to `super()._compute_logprobs_and_loss()` instead of trying to use `_prepare_multi_candidate_labels`
-2. Standard path multi-candidate label preparation is kept (but now also handles `mb_bs > 1` from Task 3)
-3. The `vocab_min_logits`/`vocab_max_logits` and `loss_fn` call are moved inside the `if not self.enable_tree_training` block for the standard path only (the tree path handles them in the base class)
+
+1. Tree training branch now delegates to `super()._compute_logprobs_and_loss()` instead
+   of trying to use `_prepare_multi_candidate_labels`
+1. Standard path multi-candidate label preparation is kept (but now also handles
+   `mb_bs > 1` from Task 3)
+1. The `vocab_min_logits`/`vocab_max_logits` and `loss_fn` call are moved inside the
+   `if not self.enable_tree_training` block for the standard path only (the tree path
+   handles them in the base class)
 
 - [ ] **Step 3: Run existing tests to verify no regression**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py -v`
 Expected: All existing tests PASS
 
 - [ ] **Step 4: Commit**
@@ -825,11 +878,12 @@ gather_packed_tree_logprobs_entropy. Multi-candidate logprob gathering
 is only supported in the non-tree training path."
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Run pre-commit and final verification
 
 **Files:**
+
 - All modified files
 
 - [ ] **Step 1: Run pre-commit hooks**
@@ -839,7 +893,8 @@ Expected: All checks PASS. Fix any formatting issues.
 
 - [ ] **Step 2: Run full test suite for modified modules**
 
-Run: `cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py -v`
+Run:
+`cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run pytest tests/test_treesearch_bugfixes.py -v`
 Expected: All tests PASS
 
 - [ ] **Step 3: Commit any formatting fixes if needed**
@@ -852,7 +907,13 @@ git commit -m "style: apply pre-commit formatting fixes"
 - [ ] **Step 4: Verify all bugs are fixed by reviewing changes**
 
 Review all modified files and verify:
-1. `areal/utils/data.py`: 3D+ tensors with `shape[0] == bs` are split per micro-batch (already done)
-2. `areal/models/tree_attn/tree.py`: `_pack_extra_data` subsets batch-dim tensors and adds `cu_seqlens`
-3. `customized_areal/tree_search/training/loss.py`: `_compute_teacher_kl_loss` handles 1D packed format via `cu_seqlens`
-4. `customized_areal/tree_search/engine/fsdp_engine.py`: `_prepare_multi_candidate_labels` handles `mb_bs > 1` and tree path delegates to base class
+
+1. `areal/utils/data.py`: 3D+ tensors with `shape[0] == bs` are split per micro-batch
+   (already done)
+1. `areal/models/tree_attn/tree.py`: `_pack_extra_data` subsets batch-dim tensors and
+   adds `cu_seqlens`
+1. `customized_areal/tree_search/training/loss.py`: `_compute_teacher_kl_loss` handles
+   1D packed format via `cu_seqlens`
+1. `customized_areal/tree_search/engine/fsdp_engine.py`:
+   `_prepare_multi_candidate_labels` handles `mb_bs > 1` and tree path delegates to base
+   class

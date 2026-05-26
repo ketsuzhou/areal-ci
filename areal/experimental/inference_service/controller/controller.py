@@ -1609,9 +1609,11 @@ class RolloutControllerV2:
         # Extract tree_search_config so it is not forwarded to
         # InferenceServiceWorkflow or agent constructors (they don't accept it).
         tree_search_cfg = None
+        max_tokens = 0
         if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
             workflow_kwargs = dict(workflow_kwargs)
             tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+            max_tokens = workflow_kwargs.pop("max_tokens", 0)
 
         # External mode only supports online mode (workflow=None)
         if self.external_mode and workflow is not None:
@@ -1643,7 +1645,9 @@ class RolloutControllerV2:
             )
 
             if group_size > 1:
-                resolved = self._wrap_grouped(resolved, group_size, tree_search_cfg)
+                resolved = self._wrap_grouped(
+                    resolved, group_size, tree_search_cfg, max_tokens
+                )
 
             return resolved
 
@@ -1681,11 +1685,13 @@ class RolloutControllerV2:
 
         # (e) Optionally wrap in GroupedRolloutWorkflow or TreeSearchGroupedRolloutWorkflow
         if group_size > 1:
-            resolved = self._wrap_grouped(resolved, group_size, tree_search_cfg)
+            resolved = self._wrap_grouped(
+                resolved, group_size, tree_search_cfg, max_tokens
+            )
 
         return resolved
 
-    def _wrap_grouped(self, resolved, group_size, tree_search_cfg):
+    def _wrap_grouped(self, resolved, group_size, tree_search_cfg, max_tokens=0):
         """Wrap in TreeSearchGroupedRolloutWorkflow or GroupedRolloutWorkflow."""
         use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
         if use_tree_search:
@@ -1708,6 +1714,7 @@ class RolloutControllerV2:
                 teacher_provider=tree_search_cfg.teacher_provider,
                 teacher_base_url=tree_search_cfg.teacher_base_url,
                 teacher_model_name=tree_search_cfg.teacher_model_name,
+                teacher_api_key=tree_search_cfg.teacher_api_key,
                 teacher_top_k=tree_search_cfg.teacher_top_k,
                 teacher_max_retries=tree_search_cfg.teacher_max_retries,
                 teacher_timeout=tree_search_cfg.teacher_timeout,
@@ -1718,6 +1725,7 @@ class RolloutControllerV2:
                 diagnose_base_url=tree_search_cfg.diagnose_base_url,
                 diagnose_api_key=tree_search_cfg.diagnose_api_key,
                 strict_distill_json=tree_search_cfg.strict_distill_json,
+                max_tokens=max_tokens,
             )
         else:
             from areal.infra.remote_inf_engine import GroupedRolloutWorkflow

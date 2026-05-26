@@ -100,6 +100,7 @@ class TPFCAgent:
             RuntimeError: If agent run fails to start.
             TimeoutError: If agent run doesn't complete within timeout.
         """
+
         async def _do_run() -> float:
             # Extract task description from dataset query field (clean query text)
             task_description = data.get("query", "")
@@ -195,7 +196,7 @@ class TPFCAgent:
 
         try:
             return await asyncio.wait_for(_do_run(), timeout=900)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("TPFCAgent run timed out after 15 minutes")
             raise
         except Exception as exc:

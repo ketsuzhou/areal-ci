@@ -50,9 +50,9 @@ class SyncDBConnection:
                 "environment variables must be set."
             )
 
-        # Increased connect timeout for unstable VPN connections
+        # Increased timeouts for unstable VPN connections and large queries
         httpx_client = SyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
+            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
         )
         options = SyncClientOptions(httpx_client=httpx_client)
         self._client = create_client(supabase_url, supabase_key, options)
@@ -129,9 +129,9 @@ class DBConnection:
                 "environment variables must be set."
             )
 
-        # Increased connect timeout for unstable VPN connections
+        # Increased timeouts for unstable VPN connections and large queries
         httpx_client = AsyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
+            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
         )
         options = AsyncClientOptions(httpx_client=httpx_client)
         self._client = await create_async_client(

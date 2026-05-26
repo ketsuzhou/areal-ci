@@ -17,13 +17,15 @@ a single class that:
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import traceback
 import uuid
 from typing import Any
-import os
+
 from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
 from customized_areal.tree_search.mcts_tree_store import Node
-import re
+
 from areal.api import RolloutWorkflow
 from areal.utils import logging
 
@@ -422,8 +424,19 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         if self.teacher_provider == "engine":
             proxy_addr = getattr(engine, "_proxy_gateway_addr", "") or ""
+            engine_addrs = getattr(engine, "addresses", None) or []
             admin_api_key = getattr(engine.config, "admin_api_key", "") or ""
-            teacher_base_url = proxy_addr or self.teacher_base_url
+            if proxy_addr:
+                teacher_base_url = proxy_addr
+            elif engine_addrs:
+                teacher_base_url = f"http://{engine_addrs[0]}"
+            else:
+                teacher_base_url = self.teacher_base_url
+
+            logger.info(
+                "Teacher provider=engine, resolved teacher_base_url=%s",
+                teacher_base_url,
+            )
 
             if not teacher_base_url.startswith(("http://", "https://")):
                 raise ValueError(
@@ -488,9 +501,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         else:
             # Build structured messages from the last node's full context,
             # then append the diagnosis instruction as the final user message.
-            conversation = _input_ids_to_messages(
-                nodes[-1].input_ids, tokenizer
-            )
+            conversation = _input_ids_to_messages(nodes[-1].input_ids, tokenizer)
             gold_answer = str(data.get("answer", ""))
 
             raw = None
@@ -516,8 +527,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                         )
                     else:
                         logger.error(
-                            "Diagnose parse failed after %d attempts for "
-                            "episode_id=%s",
+                            "Diagnose parse failed after %d attempts for episode_id=%s",
                             max_retries,
                             nodes[0].episode_id,
                         )
@@ -546,9 +556,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
             if not rewards:
                 return None
-            node.teacher_logp = [
-                reward.teacher_logprobs or [] for reward in rewards
-            ]
+            node.teacher_logp = [reward.teacher_logprobs or [] for reward in rewards]
             node.topk_ids = [reward.candidate_token_ids for reward in rewards]
             return node.node_id, rewards
 
@@ -621,7 +629,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         provider: Any,
         tokenizer: Any,
     ) -> tuple[list[Node], dict[str, list[Any]]]:
-        async def _run_one(nodes: list[Node]) -> tuple[list[Node], dict[str, list[Any]]]:
+        async def _run_one(
+            nodes: list[Node],
+        ) -> tuple[list[Node], dict[str, list[Any]]]:
             try:
                 return await self._prepare_distill_for_episode(
                     nodes=nodes,
@@ -723,14 +733,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
                 provider, provider_client = await self._setup_distill_provider(engine)
-                all_nodes, _ = (
-                    await self._prepare_distill_for_node_groups(
-                        _group_nodes_by_episode(all_nodes),
-                        data,
-                        engine,
-                        provider,
-                        tokenizer,
-                    )
+                all_nodes, _ = await self._prepare_distill_for_node_groups(
+                    _group_nodes_by_episode(all_nodes),
+                    data,
+                    engine,
+                    provider,
+                    tokenizer,
                 )
 
             # 6. Compute tree advantages

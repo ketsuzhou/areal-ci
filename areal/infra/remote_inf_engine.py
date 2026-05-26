@@ -599,9 +599,11 @@ class RemoteInfEngine(InferenceEngine):
         # Extract tree_search_config from workflow_kwargs so it is not
         # forwarded to inner workflow constructors (they don't accept it).
         tree_search_cfg = None
+        max_tokens = 0
         if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
             workflow_kwargs = dict(workflow_kwargs)
             tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+            max_tokens = workflow_kwargs.pop("max_tokens", 0)
 
         # 0. None workflow = online mode (config-driven)
         if workflow is None:
@@ -729,6 +731,7 @@ class RemoteInfEngine(InferenceEngine):
                     teacher_provider=tree_search_cfg.teacher_provider,
                     teacher_base_url=tree_search_cfg.teacher_base_url,
                     teacher_model_name=tree_search_cfg.teacher_model_name,
+                    teacher_api_key=tree_search_cfg.teacher_api_key,
                     teacher_top_k=tree_search_cfg.teacher_top_k,
                     teacher_max_retries=tree_search_cfg.teacher_max_retries,
                     teacher_timeout=tree_search_cfg.teacher_timeout,
@@ -739,6 +742,7 @@ class RemoteInfEngine(InferenceEngine):
                     diagnose_base_url=tree_search_cfg.diagnose_base_url,
                     diagnose_api_key=tree_search_cfg.diagnose_api_key,
                     strict_distill_json=tree_search_cfg.strict_distill_json,
+                    max_tokens=max_tokens,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

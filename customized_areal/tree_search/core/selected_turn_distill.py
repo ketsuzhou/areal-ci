@@ -46,7 +46,9 @@ def _extract_json_from_markdown(text: str) -> str:
             # Strip stray leading "json" / non-JSON prefixes before {
             brace = content.find("{")
             bracket = content.find("[")
-            first = brace if brace >= 0 and (bracket < 0 or brace < bracket) else bracket
+            first = (
+                brace if brace >= 0 and (bracket < 0 or brace < bracket) else bracket
+            )
             if first >= 0:
                 content = content[first:]
             return content

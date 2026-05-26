@@ -248,7 +248,7 @@ _MAX_FETCH_BATCH_SIZE = 100
 # Timeout for shutting down threads
 _SHUTDOWN_TIMEOUT_SECONDS = 2.0
 # Timeout for "wait" and "wait_for_task" if timeout parameter is None
-_DEFAULT_WAIT_TIMEOUT_SECONDS = float(7 * 24 * 3600)
+_DEFAULT_WAIT_TIMEOUT_SECONDS = float(30 * 60)
 
 
 class WithTaskID(Protocol):
