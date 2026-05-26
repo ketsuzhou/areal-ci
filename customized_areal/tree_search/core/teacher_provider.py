@@ -75,27 +75,32 @@ class ExternalTeacherProvider:
             "You are diagnosing a multi-turn assistant trajectory above. "
             "Analyze each assistant turn and identify which ones can be "
             "improved toward the gold answer. "
-            "You MUST output ONLY a JSON object (no extra text) wrapped in "
-            "```json fences. The JSON must have a top-level key 'turns' "
-            "containing a list of objects, each with 'turn_idx' (int start from 1), "
-            "'should_improve' (bool), and 'guidance' (string). "
+            "You MUST output ONLY XML (no extra text) wrapped in "
+            "```xml fences. The XML must have a top-level <diagnosis> element "
+            "containing a <turns> element. Each <turn> must include "
+            "<turn_idx> (int start from 1), <should_improve> (true/false), "
+            "and <guidance> (string). "
             "Only include turns that should be improved.\n\n"
             f"Gold answer: {gold_answer}\n\n"
             "Example response format:\n"
-            "```json\n"
-            "{\n"
-            '  "turns": [\n'
-            "    {\n"
-            '      "turn_idx": 1,\n'
-            '      "should_improve": true,\n'
-            '      "guidance": "In turn 1, the assistant should have verified '
-            'the URL before finalizing the answer."\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
+            "```xml\n"
+            "<diagnosis>\n"
+            "  <turns>\n"
+            "    <turn>\n"
+            "      <turn_idx>1</turn_idx>\n"
+            "      <should_improve>true</should_improve>\n"
+            "      <guidance>In turn 1, the assistant should have verified "
+            "the URL before finalizing the answer.</guidance>\n"
+            "    </turn>\n"
+            "  </turns>\n"
+            "</diagnosis>\n"
             "```"
         )
-        messages = list(conversation) + [{"role": "user", "content": instruction}]
+        if isinstance(conversation, str):
+            conversation_messages = [{"role": "user", "content": conversation}]
+        else:
+            conversation_messages = list(conversation)
+        messages = conversation_messages + [{"role": "user", "content": instruction}]
         temp = temperature if temperature is not None else self.diagnose_temperature
         if self.diagnose_base_url:
             client = self._get_openai_client()
@@ -129,7 +134,9 @@ class ExternalTeacherProvider:
                     content[-300:],
                 )
             return content
-        if self.client.config.teacher_base_url:
+
+        client_config = getattr(self.client, "config", None)
+        if client_config is not None and getattr(client_config, "teacher_base_url", ""):
             return await self.client.chat_complete(
                 messages=messages,
                 model=self.diagnose_model_name or None,

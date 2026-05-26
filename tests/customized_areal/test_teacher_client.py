@@ -560,7 +560,9 @@ class FakeTeacherClient:
             "temperature": temperature,
         }
         return (
-            '{"turns":[{"turn_idx":1,"should_improve":true,"guidance":"Be precise."}]}'
+            "<diagnosis><turns><turn><turn_idx>1</turn_idx>"
+            "<should_improve>true</should_improve>"
+            "<guidance>Be precise.</guidance></turn></turns></diagnosis>"
         )
 
     async def get_logprobs_for_candidates(

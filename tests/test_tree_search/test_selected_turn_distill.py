@@ -209,17 +209,54 @@ def test_parse_episode_diagnosis_keeps_only_selected_turns():
 
     diagnosis = parse_episode_diagnosis(
         """
-        {
-          "turns": [
-            {"turn_idx": 1, "should_improve": true, "guidance": "Use exact units."},
-            {"turn_idx": 2, "should_improve": false, "guidance": "Ignore this."},
-            {"turn_idx": 3, "should_improve": true, "guidance": "   "}
-          ]
-        }
+        <diagnosis>
+          <turns>
+            <turn>
+              <turn_idx>1</turn_idx>
+              <should_improve>true</should_improve>
+              <guidance>Use exact units.</guidance>
+            </turn>
+            <turn>
+              <turn_idx>2</turn_idx>
+              <should_improve>false</should_improve>
+              <guidance>Ignore this.</guidance>
+            </turn>
+            <turn>
+              <turn_idx>3</turn_idx>
+              <should_improve>true</should_improve>
+              <guidance>   </guidance>
+            </turn>
+          </turns>
+        </diagnosis>
         """
     )
 
     assert diagnosis.selected_turns == {1: "Use exact units."}
+
+
+def test_parse_episode_diagnosis_extracts_xml_fence_after_reasoning():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        parse_episode_diagnosis,
+    )
+
+    diagnosis = parse_episode_diagnosis(
+        """
+        </think>
+        ```xml
+        <diagnosis>
+          <turns>
+            <turn>
+              <turn_idx>4</turn_idx>
+              <should_improve>true</should_improve>
+              <guidance>Check the cited answer.</guidance>
+            </turn>
+          </turns>
+        </diagnosis>
+        ```
+        """
+    )
+
+    assert diagnosis.selected_turns == {4: "Check the cited answer."}
 
 
 def test_response_token_span_returns_current_contiguous_one_span():

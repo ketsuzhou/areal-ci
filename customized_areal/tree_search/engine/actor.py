@@ -41,6 +41,19 @@ class MultiCandidateFSDPPPOActor(MultiCandidateFSDPEngine):
 
         super().__init__(config)
         self.actor = PPOActor(config, self)
+
+        # Patch PPOActor._ppo_update on the worker process to use
+        # grpo_distill_loss_fn.  The controller-side patch in
+        # CacheAwarePPOTrainer.train() only affects the controller process;
+        # workers receive ppo_update via RPC and run the original
+        # _ppo_update → grpo_loss_fn, which crashes on teacher_logp shape
+        # mismatch (response-aligned vs full-sequence-length).
+        from customized_areal.tree_search.training.actor import (
+            patch_ppo_actor_class_to_use_distill_loss,
+        )
+
+        patch_ppo_actor_class_to_use_distill_loss()
+
         logger.info("MultiCandidateFSDPPPOActor initialized")
 
     @torch.no_grad()

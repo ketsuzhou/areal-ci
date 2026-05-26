@@ -1,5 +1,5 @@
 experiment_name: tpfc-distill
-trial_name: trial_0521
+trial_name: trial_0526
 
 seed: 1
 
@@ -12,7 +12,15 @@ tree_search:
   advantage_mode: GAE
   rl_loss_weight: 1.0
   distill_loss_weight: 0.005
-  teacher_provider: engine
+  teacher_provider: external
+  teacher_base_url: http://localhost:32735
+  teacher_backend: sglang
+  teacher_model_name: ""
+  teacher_api_key: ""
+  teacher_top_k: 10
+  teacher_max_retries: 3
+  teacher_timeout: 300.0
+  teacher_missing_logprob: -23.0
   max_reasoning_tokens: 1000
   diagnose_api_key: ""
 total_train_epochs: 4
@@ -52,7 +60,7 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 5
+  max_concurrent_rollouts: 2
   queue_size: 5
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 2
@@ -67,13 +75,13 @@ rollout:
     reasoning_parser: qwen3
     export_style: individual
     turn_discount: 1.0
-    engine_max_tokens: 15000
+    engine_max_tokens: 10112 
 
 gconfig:
   n_samples: 2
   min_new_tokens: 0
   max_new_tokens: 1024
-  max_tokens: 15000
+  max_tokens: 10112 
   greedy: false
   temperature: 1.0
 
@@ -94,7 +102,7 @@ actor:
   pad_to_maximum: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 15104
+    max_tokens_per_mb: 10112 
   optimizer:
     type: adam
     lr: 1.70e-6
@@ -146,7 +154,7 @@ ref:
   pad_to_maximum: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 15104
+    max_tokens_per_mb: 10112 
   optimizer: null
   scheduling_strategy:
     type: colocation
@@ -182,7 +190,7 @@ train_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 15000
+  max_length: 10112 
 
 valid_dataset:
   batch_size: 4
@@ -190,7 +198,7 @@ valid_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 15000
+  max_length: 10112 
 
 # Utilities
 saver:

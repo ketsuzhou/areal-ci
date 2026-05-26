@@ -1,7 +1,7 @@
 """Async client for calling a remote teacher model inference API.
 
 This module provides TeacherConfig and TeacherClient for querying a remote
-teacher model (vLLM/SGLang compatible) to get logprobs for student candidate
+teacher model (vLLM or SGLang) to get logprobs for student candidate
 tokens during on-policy distillation.
 """
 
@@ -32,6 +32,8 @@ class TeacherConfig:
         Base URL of the teacher model inference server.
     teacher_model_name : str
         Model name to pass in API requests (empty for single-model servers).
+    teacher_api_key : str
+        API key for authentication.
     teacher_top_k : int
         Number of top logprobs to request from the teacher.
     teacher_max_retries : int
@@ -41,6 +43,9 @@ class TeacherConfig:
     teacher_missing_logprob : float
         Logprob value assigned to candidate tokens not found in the
         teacher's top-k response.
+    teacher_backend : str
+        Backend type: ``"openai"`` (vLLM-compatible /v1/completions) or
+        ``"sglang"`` (SGLang native /generate).
     """
 
     teacher_base_url: str = "http://localhost:8001"
@@ -48,15 +53,20 @@ class TeacherConfig:
     teacher_api_key: str = ""
     teacher_top_k: int = 10
     teacher_max_retries: int = 3
-    teacher_timeout: float = 60.0
+    teacher_timeout: float = 300.0
     teacher_missing_logprob: float = _DEFAULT_MISSING_LOGPROB
+    teacher_backend: str = "openai"
 
 
 class TeacherClient:
     """Async client for calling a remote teacher model inference API.
 
-    Uses the vLLM/SGLang compatible completions endpoint to retrieve
-    top-k logprobs from the teacher model for given candidate token IDs.
+    Supports two backends:
+
+    - ``"openai"`` (default): vLLM-compatible ``/v1/completions`` endpoint
+      with ``echo=True`` and text/token prompts.
+    - ``"sglang"``: SGLang native ``/generate`` endpoint with ``input_ids``
+      and ``top_k_logprobs_num``.
 
     The underlying httpx.AsyncClient is created in __init__ so the client
     is ready to use immediately — no async context manager needed.
@@ -99,11 +109,6 @@ class TeacherClient:
     ) -> list[dict[int, float]]:
         """Get teacher logprobs for student candidate tokens at each position.
 
-        Calls the teacher completions API with echo=True to get logprobs for
-        all output positions, then maps the student's candidate token IDs to
-        teacher logprobs. Tokens not found in the teacher's top-k get the
-        configured ``missing_logprob`` value.
-
         Parameters
         ----------
         input_ids : list[int]
@@ -127,16 +132,119 @@ class TeacherClient:
         RuntimeError
             If the API returns an error after all retries are exhausted.
         """
-        num_output_tokens = len(output_ids)
-        if len(candidate_token_ids) != num_output_tokens:
-            raise ValueError(
-                f"candidate_token_ids length ({len(candidate_token_ids)}) "
-                f"must match output_ids length ({num_output_tokens})"
+        if self.config.teacher_backend == "sglang":
+            return await self._get_logprobs_sglang(
+                input_ids, output_ids, candidate_token_ids
             )
+        return await self._get_logprobs_openai(
+            input_ids, output_ids, candidate_token_ids
+        )
+
+    async def _get_logprobs_sglang(
+        self,
+        input_ids: list[int],
+        output_ids: list[int],
+        candidate_token_ids: list[list[int]],
+    ) -> list[dict[int, float]]:
+        """Get teacher logprobs for student output tokens via SGLang /generate.
+
+        Sends the full student sequence (input_ids + output_ids) as the prompt
+        with ``logprob_start_len=len(input_ids)`` so SGLang returns top-k
+        logprobs for the output positions.  The teacher model evaluates the
+        student's tokens (forward pass over the full sequence) and we extract
+        the teacher's probability distribution at each student output position.
+        """
+        num_output_tokens = len(output_ids)
+        prompt_len = len(input_ids)
+        all_ids = input_ids + output_ids
 
         payload: dict[str, Any] = {
-            "prompt": input_ids,
-            "max_tokens": num_output_tokens,
+            "input_ids": all_ids,
+            "sampling_params": {
+                "max_new_tokens": 1,
+                "temperature": 0.0,
+            },
+            "return_logprob": True,
+            "logprob_start_len": prompt_len,
+            "top_logprobs_num": self.config.teacher_top_k,
+            "stream": False,
+        }
+
+        response_data = await self._post_with_retries(payload)
+
+        meta_info = response_data.get("meta_info", {})
+        # SGLang returns input_top_logprobs for prompt positions covered
+        # by logprob_start_len, and output_top_logprobs for generated tokens.
+        input_top_logprobs = meta_info.get("input_top_logprobs")
+        output_top_logprobs = meta_info.get("output_top_logprobs")
+
+        # Combine: student output positions are in input_top_logprobs
+        # (they are part of the "prompt" sent to SGLang).  The single
+        # generated token's logprobs go in output_top_logprobs.
+        all_top_logprobs: list[Any] = []
+        if input_top_logprobs is not None:
+            all_top_logprobs.extend(input_top_logprobs)
+        if output_top_logprobs is not None:
+            all_top_logprobs.extend(output_top_logprobs)
+
+        if len(all_top_logprobs) < num_output_tokens:
+            logger.warning(
+                "SGLang teacher returned fewer logprob positions (%d) than "
+                "expected (%d). Padding with missing_logprob.",
+                len(all_top_logprobs),
+                num_output_tokens,
+            )
+
+        result: list[dict[int, float]] = []
+        missing_logprob = self.config.teacher_missing_logprob
+
+        for pos_idx in range(num_output_tokens):
+            teacher_logprob_map: dict[int, float] = {}
+            if (
+                pos_idx < len(all_top_logprobs)
+                and all_top_logprobs[pos_idx] is not None
+            ):
+                pos_data = all_top_logprobs[pos_idx]
+                # SGLang returns list of (logprob, token_id, token_text) tuples
+                if isinstance(pos_data, list):
+                    for entry in pos_data:
+                        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                            lp, tid = entry[0], entry[1]
+                            if isinstance(tid, int):
+                                teacher_logprob_map[tid] = float(lp)
+                elif isinstance(pos_data, dict):
+                    for key, value in pos_data.items():
+                        if isinstance(key, int):
+                            teacher_logprob_map[key] = float(value)
+
+            candidate_map: dict[int, float] = {}
+            for tid in candidate_token_ids[pos_idx]:
+                candidate_map[tid] = teacher_logprob_map.get(tid, missing_logprob)
+            result.append(candidate_map)
+
+        return result
+
+    async def _get_logprobs_openai(
+        self,
+        input_ids: list[int],
+        output_ids: list[int],
+        candidate_token_ids: list[list[int]],
+    ) -> list[dict[int, float]]:
+        """Get teacher logprobs for student output tokens via vLLM /v1/completions.
+
+        Sends the full student sequence (input_ids + output_ids) as the prompt
+        with ``echo=True`` and ``max_tokens=1`` so the teacher model runs a
+        forward pass over the entire student sequence.  The top-k logprobs
+        at the student's output positions give the teacher's evaluation of the
+        student's token choices.
+        """
+        num_output_tokens = len(output_ids)
+        prompt_len = len(input_ids)
+        all_ids = input_ids + output_ids
+
+        payload: dict[str, Any] = {
+            "prompt": all_ids,
+            "max_tokens": 1,
             "temperature": 0.0,
             "logprobs": self.config.teacher_top_k,
             "echo": True,
@@ -277,6 +385,55 @@ class TeacherClient:
         raise RuntimeError("Teacher chat completion choice contained no text content")
 
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST with retry logic, dispatching to the correct endpoint."""
+        if self.config.teacher_backend == "sglang":
+            return await self._post_sglang_with_retries(payload)
+        return await self._post_openai_with_retries(payload)
+
+    async def _post_sglang_with_retries(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """POST to SGLang /generate endpoint with retry logic."""
+        max_retries = self.config.teacher_max_retries
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await self._client.post("/generate", json=payload)
+                response.raise_for_status()
+                logger.info(
+                    "SGLang teacher /generate success (attempt %d/%d, "
+                    "prompt_len=%d, output_len=%d)",
+                    attempt,
+                    max_retries,
+                    len(payload.get("input_ids", [])),
+                    payload.get("sampling_params", {}).get("max_new_tokens", 0),
+                )
+                return response.json()
+            except (
+                httpx.HTTPStatusError,
+                httpx.RequestError,
+                httpx.TimeoutException,
+            ) as exc:
+                last_exc = exc
+                logger.warning(
+                    "SGLang teacher API request failed (attempt %d/%d): %s",
+                    attempt,
+                    max_retries,
+                    exc,
+                )
+                if attempt < max_retries:
+                    backoff = 2 ** (attempt - 1)
+                    await asyncio.sleep(backoff)
+
+        raise RuntimeError(
+            f"SGLang teacher API request failed after {max_retries} retries: "
+            f"{last_exc}"
+        ) from last_exc
+
+    async def _post_openai_with_retries(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """POST to the completions endpoint with retry logic."""
         max_retries = self.config.teacher_max_retries
         last_exc: Exception | None = None
@@ -285,6 +442,9 @@ class TeacherClient:
             try:
                 response = await self._client.post("/v1/completions", json=payload)
                 response.raise_for_status()
+                logger.info(
+                    "Teacher /v1/completions success (attempt %d/%d)", attempt, max_retries
+                )
                 return response.json()
             except (
                 httpx.HTTPStatusError,

@@ -13,6 +13,7 @@ from typing import Any
 import torch
 
 from areal.engine.fsdp_engine import FSDPEngine
+from areal.models.tree_attn.functional import gather_packed_tree_vocab_stats
 from areal.utils import logging
 
 from ..training.logprobs import gather_logprobs_entropy_multi_candidates
@@ -177,6 +178,113 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         """
         logprobs, _ = self._compute_logprobs_entropy(logits, inputs, ulysses_pad_size)
         return logprobs
+
+    def _compute_tree_multi_candidate_logprobs_entropy(
+        self,
+        logits: torch.Tensor,
+        mb_input: dict[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Gather multi-candidate logprobs from packed-tree logits.
+
+        The packed tree stores shared-prefix logits once, while the loss expects
+        per-sequence-concatenated logprobs in ``trie.all_sequence_ids`` order.
+        This mirrors ``gather_packed_tree_logprobs_entropy`` but replaces
+        response-position labels with ``topk_ids`` candidates.
+        """
+        trie = mb_input.get("trie_node")
+        topk_ids = mb_input.get("topk_ids")
+        tree_input_ids = mb_input.get("input_ids")
+        loss_mask = mb_input.get("loss_mask")
+        cu_seqlens = mb_input.get("cu_seqlens")
+
+        if (
+            trie is None
+            or topk_ids is None
+            or tree_input_ids is None
+            or loss_mask is None
+            or cu_seqlens is None
+            or topk_ids.numel() == 0
+            or topk_ids.dim() != 3
+            or not trie.all_sequence_ids
+        ):
+            return None
+        if (topk_ids[:, :, 0] < 0).all():
+            return None
+
+        tree_input_ids = tree_input_ids.squeeze(0)
+        loss_mask = loss_mask.squeeze(0) if loss_mask.dim() > 1 else loss_mask
+        mb_bs, resp_len, max_candidates = topk_ids.shape
+        if mb_bs != len(trie.all_sequence_ids):
+            logger.warning(
+                "Tree topk_ids batch size (%d) does not match trie sequence count (%d); "
+                "falling back to chosen-token tree logprobs.",
+                mb_bs,
+                len(trie.all_sequence_ids),
+            )
+            return None
+
+        logprob_parts: list[torch.Tensor] = []
+        entropy_parts: list[torch.Tensor] = []
+        tp_group = (
+            self.parallel_helper.tp_group if self.parallel_helper.tp_size > 1 else None
+        )
+
+        for b, seq_id in enumerate(trie.all_sequence_ids):
+            indices = trie.get_sequence_tree_indices(seq_id)
+            if not indices:
+                continue
+
+            pred_positions: list[int] = []
+            label_positions: list[int] = []
+            for i, (start, end) in enumerate(indices):
+                pred_positions.extend(range(start, end))
+                label_positions.extend(range(start + 1, end + 1))
+                next_start = indices[i + 1][0] if i + 1 < len(indices) else 0
+                pred_positions.append(end)
+                label_positions.append(next_start)
+
+            if not pred_positions:
+                continue
+
+            pred_idx = torch.tensor(
+                pred_positions, dtype=torch.long, device=logits.device
+            )
+            label_idx = torch.tensor(
+                label_positions, dtype=torch.long, device=tree_input_ids.device
+            )
+            seq_logits = logits[pred_idx]
+            labels = (
+                tree_input_ids[label_idx]
+                .long()
+                .unsqueeze(-1)
+                .expand(-1, max_candidates)
+                .clone()
+            )
+
+            start = int(cu_seqlens[b].item())
+            end = int(cu_seqlens[b + 1].item())
+            seg_mask = loss_mask[start:end].bool()
+            prompt_len = int(seg_mask.int().argmax().item()) if seg_mask.any() else 0
+            end_resp = min(prompt_len + resp_len, labels.shape[0])
+            if end_resp > prompt_len:
+                chunk = topk_ids[b, : end_resp - prompt_len].to(labels.device)
+                valid = chunk[:, 0] >= 0
+                if valid.any():
+                    labels[prompt_len:end_resp][valid] = chunk[valid].long()
+
+            seq_logprobs, seq_entropy = gather_logprobs_entropy_multi_candidates(
+                seq_logits,
+                labels,
+                temperature=self.config.temperature,
+                tp_group=tp_group,
+            )
+            logprob_parts.append(seq_logprobs)
+            entropy_parts.append(seq_entropy)
+
+        if not logprob_parts:
+            return None
+
+        return torch.cat(logprob_parts, dim=0), torch.cat(entropy_parts, dim=0)
 
     def _prepare_multi_candidate_labels(
         self,
@@ -382,15 +490,31 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     vocab_max_logits=vocab_max_logits,
                 )
             else:
-                # Tree training: delegate to base FSDPEngine which correctly
-                # uses gather_packed_tree_logprobs_entropy
-                return super()._compute_logprobs_and_loss(
+                tree_multi = self._compute_tree_multi_candidate_logprobs_entropy(
                     logits,
-                    ctx,
-                    loss_fn,
-                    loss_weight_fn,
-                    total_loss_weight,
-                    loss_multiplier,
+                    ctx.mb_input,
+                )
+                if tree_multi is None:
+                    return super()._compute_logprobs_and_loss(
+                        logits,
+                        ctx,
+                        loss_fn,
+                        loss_weight_fn,
+                        total_loss_weight,
+                        loss_multiplier,
+                    )
+
+                logprobs, entropy = tree_multi
+                vocab_min_logits, vocab_max_logits = gather_packed_tree_vocab_stats(
+                    logits,
+                    ctx.trie_node,
+                )
+                loss = loss_fn(
+                    logprobs,
+                    entropy,
+                    ctx.mb_input,
+                    vocab_min_logits=vocab_min_logits,
+                    vocab_max_logits=vocab_max_logits,
                 )
         else:
             values = self._compute_values(logits.squeeze(-1), ctx.ulysses_pad_size)

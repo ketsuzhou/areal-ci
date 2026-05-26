@@ -50,18 +50,19 @@ def patch_ppo_actor_class_to_use_distill_loss() -> None:
         # Log reward stats before removing them (Bug 2 fix)
         reward_score = data.get("rewards")
         if reward_score is not None and isinstance(reward_score, torch.Tensor):
+            correct_n = (reward_score > 0).bool()
+            incorrect_n = (reward_score <= 0).bool()
+            stats_tracker.denominator(
+                n_seqs=torch.ones_like(reward_score, dtype=torch.bool),
+                correct_n_seqs=correct_n,
+                incorrect_n_seqs=incorrect_n,
+            )
             attn_mask = data.get("attention_mask")
             if attn_mask is not None:
                 stats_tracker.stat(
                     task_reward=reward_score.float(),
                     denominator="n_seqs",
                 )
-            correct_n = (reward_score > 0).bool()
-            incorrect_n = (reward_score <= 0).bool()
-            stats_tracker.denominator(
-                correct_n_seqs=correct_n,
-                incorrect_n_seqs=incorrect_n,
-            )
 
         for key in ["rewards", "tot_rewards", "kl_rewards"]:
             data.pop(key, None)

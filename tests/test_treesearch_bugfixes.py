@@ -194,28 +194,6 @@ class TestTurnIdxInInteractionsToNodes:
         assert nodes[1].turn_idx == 2
 
 
-class TestTurnIdxInTensorDict:
-    """_node_to_tensor_dict uses node.turn_idx and num_turns_in_episode."""
-
-    def test_tensor_dict_uses_turn_idx(self):
-        from customized_areal.tree_search.mcts_tree_store import _node_to_tensor_dict
-
-        node = _make_node()
-        node.turn_idx = 2
-        traj = _node_to_tensor_dict(node, "q1", 1, num_turns_in_episode=3)
-        assert traj["_turn_idx_in_episode"] == 2
-        assert traj["_num_turns_in_episode"] == 3
-
-    def test_tensor_dict_defaults(self):
-        from customized_areal.tree_search.mcts_tree_store import _node_to_tensor_dict
-
-        node = _make_node()
-        # turn_idx=0 (default), num_turns_in_episode defaults to 1
-        traj = _node_to_tensor_dict(node, "q1", 1)
-        assert traj["_turn_idx_in_episode"] == 0
-        assert traj["_num_turns_in_episode"] == 1
-
-
 class TestTurnIdxCheckpoint:
     """turn_idx survives checkpoint save/load."""
 
@@ -333,9 +311,8 @@ class TestTeacherKLLossPackedFormat:
             input_data={"cu_seqlens": cu_seqlens},
         )
 
-        # Loss should be non-zero and finite
-        assert abs(loss.item()) > 0
-        assert torch.isfinite(loss)
+        expected = torch.tensor(-0.1)
+        torch.testing.assert_close(loss, expected, rtol=1e-6, atol=1e-6)
 
     def test_packed_1d_multi_candidate(self):
         import torch
@@ -347,10 +324,24 @@ class TestTeacherKLLossPackedFormat:
         cu_seqlens = torch.tensor([0, 3, 6], dtype=torch.int32)
 
         # Student logprobs: [6, 3] (multi-candidate)
-        logprobs = torch.randn(6, 3)
+        logprobs = torch.tensor(
+            [
+                [-9.0, -9.1, -9.2],
+                [-1.0, -1.1, -1.2],
+                [-2.0, -2.1, -2.2],
+                [-8.0, -8.1, -8.2],
+                [-3.0, -3.1, -3.2],
+                [-4.0, -4.1, -4.2],
+            ]
+        )
 
         # Teacher: [2, 2, 3]
-        teacher_logprobs = torch.randn(2, 2, 3)
+        teacher_logprobs = torch.tensor(
+            [
+                [[-0.9, -1.0, -1.1], [-1.8, -1.9, -2.0]],
+                [[-2.7, -2.8, -2.9], [-3.6, -3.7, -3.8]],
+            ]
+        )
 
         loss = _compute_teacher_kl_loss(
             teacher_logprobs=teacher_logprobs,
@@ -360,8 +351,18 @@ class TestTeacherKLLossPackedFormat:
             input_data={"cu_seqlens": cu_seqlens},
         )
 
-        assert abs(loss.item()) > 0
-        assert torch.isfinite(loss)
+        expected_terms = torch.cat(
+            [
+                (logprobs[1:3] - teacher_logprobs[0]).reshape(-1),
+                (logprobs[4:6] - teacher_logprobs[1]).reshape(-1),
+            ]
+        )
+        torch.testing.assert_close(
+            loss,
+            expected_terms.mean(),
+            rtol=1e-6,
+            atol=1e-6,
+        )
 
     def test_batched_2d_format_unchanged(self):
         """Existing batched [batch, seq] format should still work."""
@@ -515,3 +516,113 @@ class TestPrepareMultiCandidateLabelsPacked:
             model_inputs, mb_input, seq_len=3
         )
         assert labels is None
+
+
+class TestTreeMultiCandidateLogprobs:
+    """Tree path should gather all topk_ids candidate columns."""
+
+    def _make_engine(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.engine.fsdp_engine import (
+            MultiCandidateFSDPEngine,
+        )
+
+        engine = MagicMock(spec=MultiCandidateFSDPEngine)
+        engine._compute_tree_multi_candidate_logprobs_entropy = MultiCandidateFSDPEngine._compute_tree_multi_candidate_logprobs_entropy.__get__(
+            engine
+        )
+        engine.config = MagicMock()
+        engine.config.temperature = 1.0
+        engine.parallel_helper = MagicMock()
+        engine.parallel_helper.tp_size = 1
+        engine.parallel_helper.tp_group = None
+        return engine
+
+    def test_tree_logprob_gather_uses_non_chosen_candidate_columns(self):
+        import torch
+
+        from areal.models.tree_attn.tree import TrieNode
+
+        engine = self._make_engine()
+
+        root = TrieNode(tree_id=0)
+        root.nodes = [
+            TrieNode(
+                tree_id=0,
+                start_idx=0,
+                end_idx=2,
+                tokens=[1, 2, 3],
+                sequence_ids=[0],
+            )
+        ]
+
+        logits = torch.arange(24, dtype=torch.float32).reshape(3, 8)
+        mb_input = {
+            "trie_node": root,
+            "input_ids": torch.tensor([1, 2, 3]),
+            "loss_mask": torch.tensor([0, 1, 1], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 3], dtype=torch.int32),
+            "topk_ids": torch.tensor([[[3, 4], [5, 6]]]),
+        }
+
+        result = engine._compute_tree_multi_candidate_logprobs_entropy(
+            logits,
+            mb_input,
+        )
+
+        assert result is not None
+        logprobs, entropy = result
+        expected_labels = torch.tensor([[2, 2], [3, 4], [5, 6]])
+        expected_logprobs = torch.log_softmax(logits, dim=-1).gather(
+            dim=-1,
+            index=expected_labels,
+        )
+        expected_entropy = -(
+            torch.softmax(logits, dim=-1) * torch.log_softmax(logits, dim=-1)
+        ).sum(dim=-1)
+
+        assert logprobs.shape == (3, 2)
+        torch.testing.assert_close(logprobs, expected_logprobs, rtol=1e-6, atol=1e-6)
+        torch.testing.assert_close(entropy, expected_entropy, rtol=1e-6, atol=1e-6)
+
+    def test_tree_logprob_gather_accepts_int32_input_ids(self):
+        import torch
+
+        from areal.models.tree_attn.tree import TrieNode
+
+        engine = self._make_engine()
+
+        root = TrieNode(tree_id=0)
+        root.nodes = [
+            TrieNode(
+                tree_id=0,
+                start_idx=0,
+                end_idx=2,
+                tokens=[1, 2, 3],
+                sequence_ids=[0],
+            )
+        ]
+
+        logits = torch.arange(24, dtype=torch.float32).reshape(3, 8)
+        mb_input = {
+            "trie_node": root,
+            "input_ids": torch.tensor([1, 2, 3], dtype=torch.int32),
+            "loss_mask": torch.tensor([0, 1, 1], dtype=torch.float32),
+            "cu_seqlens": torch.tensor([0, 3], dtype=torch.int32),
+            "topk_ids": torch.tensor([[[3, 4], [5, 6]]], dtype=torch.long),
+        }
+
+        result = engine._compute_tree_multi_candidate_logprobs_entropy(
+            logits,
+            mb_input,
+        )
+
+        assert result is not None
+        logprobs, _ = result
+        expected_labels = torch.tensor([[2, 2], [3, 4], [5, 6]], dtype=torch.long)
+        expected_logprobs = torch.log_softmax(logits, dim=-1).gather(
+            dim=-1,
+            index=expected_labels,
+        )
+        torch.testing.assert_close(logprobs, expected_logprobs, rtol=1e-6, atol=1e-6)

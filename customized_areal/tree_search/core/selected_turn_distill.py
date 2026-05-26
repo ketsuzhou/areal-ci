@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import inspect
-import json
 import re
 from typing import Any
+from xml.etree import ElementTree
 
 from customized_areal.tree_search.core.teacher_provider import TeacherProvider
 from customized_areal.tree_search.distill_types import (
@@ -23,32 +23,28 @@ GUIDANCE_PROMPT_TEMPLATE = (
     "\n\nImprove this selected assistant turn using this guidance:\n{guidance}\n\n"
 )
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.DOTALL)
-_TURNS_JSON_RE = re.compile(r'\{\s*"turns"\s*:', re.DOTALL)
-# " "turns" (extra space before key)
-_BROKEN_TURNS_RE = re.compile(r'\{\s*"\s+"turns"\s*:', re.DOTALL)
+_FENCE_RE = re.compile(r"```(?:xml)?\s*\n?(.*?)```", re.DOTALL)
+_DIAGNOSIS_XML_RE = re.compile(
+    r"<(?P<tag>diagnosis|turns)\b[^>]*>.*?</(?P=tag)>", re.DOTALL
+)
 # Find the last code fence marker
-_LAST_FENCE_RE = re.compile(r"```(?:json)?\s*", re.DOTALL)
+_LAST_FENCE_RE = re.compile(r"```(?:xml)?\s*", re.DOTALL)
 
 
-def _extract_json_from_markdown(text: str) -> str:
-    """Extract JSON content from markdown code fences or plain text.
+def _extract_xml_from_markdown(text: str) -> str:
+    """Extract XML content from markdown code fences or plain text.
 
-    Reasoning models often output chain-of-thought text before the JSON.
+    Reasoning models often output chain-of-thought text before the XML.
     Handles: complete fences, incomplete fences (no closing ```),
-    bare JSON objects, and models that wrap output in XML tags.
+    bare XML documents, and models that wrap output in thinking tags.
     """
-    # 1. Try complete code fences: ```json ... ```
+    # 1. Try complete code fences: ```xml ... ```
     match = _FENCE_RE.search(text)
     if match:
         content = match.group(1).strip()
         if content:
-            # Strip stray leading "json" / non-JSON prefixes before {
-            brace = content.find("{")
-            bracket = content.find("[")
-            first = (
-                brace if brace >= 0 and (bracket < 0 or brace < bracket) else bracket
-            )
+            # Strip stray language labels / non-XML prefixes before <
+            first = content.find("<")
             if first >= 0:
                 content = content[first:]
             return content
@@ -66,94 +62,84 @@ def _extract_json_from_markdown(text: str) -> str:
         r"</(?:think|reasoning|analysis|thought)>", "", after_fence
     ).strip()
 
-    # 4. Search for JSON object with "turns" key in remaining text
-    for pattern in (_TURNS_JSON_RE, _BROKEN_TURNS_RE):
-        obj_match = pattern.search(after_fence)
-        if obj_match:
-            start = obj_match.start()
-            depth = 0
-            end = start
-            for i, ch in enumerate(after_fence[start:], start=start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-            if end > start:
-                raw = after_fence[start:end].strip()
-                # Fix " "turns" → "turns"
-                raw = re.sub(r'"\s+"turns"', '"turns"', raw)
-                return raw
+    # 4. Search for XML diagnosis in remaining text
+    xml_match = _DIAGNOSIS_XML_RE.search(after_fence)
+    if xml_match:
+        return xml_match.group(0).strip()
 
-    # 5. Fall back to original text for the bare-JSON search
-    for pattern in (_TURNS_JSON_RE, _BROKEN_TURNS_RE):
-        obj_match = pattern.search(text)
-        if obj_match:
-            start = obj_match.start()
-            depth = 0
-            end = start
-            for i, ch in enumerate(text[start:], start=start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-            if end > start:
-                raw = text[start:end].strip()
-                raw = re.sub(r'"\s+"turns"', '"turns"', raw)
-                return raw
+    # 5. Fall back to original text for the bare-XML search
+    xml_match = _DIAGNOSIS_XML_RE.search(text)
+    if xml_match:
+        return xml_match.group(0).strip()
 
     return text.strip()
+
+
+def _child_text(element: ElementTree.Element, tag: str) -> str | None:
+    child = element.find(tag)
+    if child is None:
+        return None
+    return "".join(child.itertext())
+
+
+def _parse_xml_bool(value: str | None, field_name: str) -> bool:
+    if value is None:
+        raise ValueError(f"{field_name} must be a boolean")
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError(f"{field_name} must be a boolean")
 
 
 def parse_episode_diagnosis(raw_text: str | None) -> EpisodeDiagnosis:
     """Parse teacher diagnosis into an EpisodeDiagnosis.
 
-    Handles JSON wrapped in markdown code fences and empty responses.
+    Handles XML wrapped in markdown code fences and empty responses.
     """
     if not raw_text or not raw_text.strip():
         raise ValueError("episode diagnosis is empty — the model returned no content")
 
-    cleaned = _extract_json_from_markdown(raw_text)
+    cleaned = _extract_xml_from_markdown(raw_text)
     try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
+        root = ElementTree.fromstring(cleaned)
+    except ElementTree.ParseError as exc:
         tail = raw_text[-300:] if len(raw_text) > 600 else ""
         logger.error(
-            "Failed to parse episode diagnosis as JSON. "
+            "Failed to parse episode diagnosis as XML. "
             "len=%d, first 300=%r, last 300=%r",
             len(raw_text),
             raw_text[:300],
             tail,
         )
-        raise ValueError("episode diagnosis must be valid JSON") from exc
+        raise ValueError("episode diagnosis must be valid XML") from exc
 
-    if not isinstance(payload, dict):
-        raise ValueError("episode diagnosis must be a JSON object")
+    if root.tag == "diagnosis":
+        turns_parent = root.find("turns")
+    elif root.tag == "turns":
+        turns_parent = root
+    else:
+        raise ValueError("episode diagnosis must have a diagnosis root element")
 
-    turns_payload = payload.get("turns")
-    if not isinstance(turns_payload, list):
-        raise ValueError("episode diagnosis must contain a top-level turns list")
+    if turns_parent is None:
+        raise ValueError("episode diagnosis must contain a top-level turns element")
 
     turns: list[DiagnosisTurn] = []
-    for index, turn_payload in enumerate(turns_payload):
-        if not isinstance(turn_payload, dict):
-            raise ValueError(f"turns[{index}] must be a JSON object")
+    for index, turn_payload in enumerate(turns_parent.findall("turn")):
+        turn_idx_text = _child_text(turn_payload, "turn_idx")
+        should_improve_text = _child_text(turn_payload, "should_improve")
+        guidance = _child_text(turn_payload, "guidance") or ""
 
-        turn_idx = turn_payload.get("turn_idx")
-        should_improve = turn_payload.get("should_improve")
-        guidance = turn_payload.get("guidance", "")
-
-        if not isinstance(turn_idx, int) or isinstance(turn_idx, bool):
+        try:
+            turn_idx = int(turn_idx_text.strip()) if turn_idx_text is not None else None
+        except ValueError as exc:
+            raise ValueError(f"turns[{index}].turn_idx must be an integer") from exc
+        if turn_idx is None:
             raise ValueError(f"turns[{index}].turn_idx must be an integer")
-        if not isinstance(should_improve, bool):
-            raise ValueError(f"turns[{index}].should_improve must be a boolean")
-        if not isinstance(guidance, str):
-            raise ValueError(f"turns[{index}].guidance must be a string")
+        should_improve = _parse_xml_bool(
+            should_improve_text, f"turns[{index}].should_improve"
+        )
 
         turns.append(
             DiagnosisTurn(

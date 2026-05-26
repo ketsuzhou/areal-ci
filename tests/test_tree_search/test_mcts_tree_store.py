@@ -886,11 +886,6 @@ class TestNodeToTensorDict:
         assert result["topk_logp"].shape == (1, 3, 2)
         assert result["distill_reward"].shape == (1, 3, 1)
         assert result["teacher_logp"].shape == (1, 3, 1)
-        # Metadata fields are single-element lists
-        assert result["query_id"] == ["q1"]
-        assert result["node_id"] == ["t1"]
-        assert result["episode_id"] == [""]  # default: node.episode_id is empty
-        assert result["turn_idx"] == [0]  # default: node.turn_idx is 0
 
     def test_current_response_only_fields_export_for_multiturn_node(self):
         from customized_areal.tree_search.mcts_tree_store import (
@@ -950,5 +945,3 @@ class TestNodeToTensorDict:
         )
         result = _node_to_tensor_dict(node, "q1", "t1")
         assert result["logp"].shape == (1, 3)
-        assert result["query_id"] == ["q1"]
-        assert result["node_id"] == ["t1"]

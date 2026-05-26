@@ -195,7 +195,7 @@ class TPFCAgent:
             return float(reward)
 
         try:
-            return await asyncio.wait_for(_do_run(), timeout=900)
+            return await asyncio.wait_for(_do_run(), timeout=1000)
         except TimeoutError:
             logger.warning("TPFCAgent run timed out after 15 minutes")
             raise

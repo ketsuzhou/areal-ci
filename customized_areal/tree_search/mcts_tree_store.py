@@ -133,8 +133,8 @@ def _node_to_tensor_dict(
     node: Node,
     query_id: str,
     node_id: str,
-    num_turns_in_episode: int = 1,
     max_tokens: int = 0,
+    loss_mode: str | None = None,
 ) -> dict[str, Any]:
     """Convert a single Node to a tensor dict with shape [1, seq_len].
 
@@ -176,17 +176,13 @@ def _node_to_tensor_dict(
         "versions": torch.tensor(versions, dtype=torch.int32).unsqueeze(0),
         "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
         "rewards": torch.tensor(node.outcome_reward, dtype=torch.float32).unsqueeze(0),
-        "query_id": [query_id],
-        "node_id": [node_id],
-        "episode_id": [node.episode_id or ""],
-        "turn_idx": [node.turn_idx or 0],
     }
     # Response-only fields: extract response portion from full sequence
     resp_start, resp_end = _response_span(loss_mask)
     resp_len = resp_end - resp_start
 
-    # topk_ids and teacher_logp are always emitted for key consistency
-    # across the batch. Nodes without distill data get zero-filled tensors.
+    # topk_ids is always emitted for key consistency across the batch.
+    # teacher_logp is only emitted when loss_mode != "grpo".
     if topk_ids is not None:
         _optional_tensor_field(
             traj,
@@ -202,24 +198,20 @@ def _node_to_tensor_dict(
         # fills those positions with the actual next token instead.
         traj["topk_ids"] = torch.full((1, resp_len, 1), -1, dtype=torch.int32)
 
-    if teacher_logp is not None:
-        _optional_tensor_field(
-            traj,
-            "teacher_logp",
-            teacher_logp,
-            torch.float32,
-            resp_start,
-            resp_end,
-            loss_mask,
-        )
-    else:
-        traj["teacher_logp"] = torch.zeros(1, resp_len, 1, dtype=torch.float32)
+    if loss_mode != "grpo":
+        if teacher_logp is not None:
+            _optional_tensor_field(
+                traj,
+                "teacher_logp",
+                teacher_logp,
+                torch.float32,
+                resp_start,
+                resp_end,
+                loss_mask,
+            )
+        else:
+            traj["teacher_logp"] = torch.zeros(1, resp_len, 1, dtype=torch.float32)
 
-    # Derived from logprobs for response tokens
-    if resp_end > resp_start:
-        traj["logp"] = torch.tensor(
-            logprobs[resp_start:resp_end], dtype=torch.float32
-        ).unsqueeze(0)
     # Carry advantages if set by advantage computer
     if node.advantages is not None:
         traj["advantages"] = (
@@ -227,19 +219,6 @@ def _node_to_tensor_dict(
             if node.advantages.dim() == 1
             else node.advantages
         )
-    if node.returns is not None:
-        traj["returns"] = (
-            node.returns.unsqueeze(0) if node.returns.dim() == 1 else node.returns
-        )
-    # Turn metadata
-    traj["_turn_id"] = node.node_id
-    if node.parent_node_id is not None:
-        traj["_parent_turn_id"] = node.parent_node_id
-    traj["_turn_reward"] = node.outcome_reward
-    traj["_outcome_reward"] = node.outcome_reward
-    traj["_episode_idx"] = 0
-    traj["_turn_idx_in_episode"] = node.turn_idx
-    traj["_num_turns_in_episode"] = num_turns_in_episode
     return traj
 
 

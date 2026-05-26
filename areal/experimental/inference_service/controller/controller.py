@@ -1713,6 +1713,7 @@ class RolloutControllerV2:
                 topk_distill=tree_search_cfg.topk_distill,
                 teacher_provider=tree_search_cfg.teacher_provider,
                 teacher_base_url=tree_search_cfg.teacher_base_url,
+                teacher_backend=tree_search_cfg.teacher_backend,
                 teacher_model_name=tree_search_cfg.teacher_model_name,
                 teacher_api_key=tree_search_cfg.teacher_api_key,
                 teacher_top_k=tree_search_cfg.teacher_top_k,

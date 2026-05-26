@@ -164,7 +164,7 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
 
 
 def _nodes_to_batched_tensor_dict(
-    nodes: list[Node], max_tokens: int = 0
+    nodes: list[Node], max_tokens: int = 0, loss_mode: str | None = None
 ) -> dict[str, Any] | None:
     """Convert list[Node] to a batched tensor dict with metadata.
 
@@ -190,6 +190,7 @@ def _nodes_to_batched_tensor_dict(
             query_id=node.query_id or "",
             node_id=node.node_id,
             max_tokens=max_tokens,
+            loss_mode=loss_mode,
         )
         for node in nodes
     ]
@@ -305,11 +306,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         topk_distill: bool = False,
         teacher_provider: str = "external",
         teacher_base_url: str = "http://localhost:8001",
+        teacher_backend: str = "openai",
         teacher_model_name: str = "",
         teacher_api_key: str = "",
         teacher_top_k: int = 10,
         teacher_max_retries: int = 3,
-        teacher_timeout: float = 60.0,
+        teacher_timeout: float = 300.0,
         teacher_missing_logprob: float = -23.0,
         diagnose_model_name: str = "",
         diagnose_max_tokens: int = 1024,
@@ -337,6 +339,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.topk_distill = topk_distill
         self.teacher_provider = teacher_provider
         self.teacher_base_url = teacher_base_url
+        self.teacher_backend = teacher_backend
         self.teacher_model_name = teacher_model_name
         self.teacher_api_key = teacher_api_key
         self.teacher_top_k = teacher_top_k
@@ -433,9 +436,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             else:
                 teacher_base_url = self.teacher_base_url
 
+            # Detect backend type from engine's backend attribute
+            backend_obj = getattr(engine, "backend", None)
+            backend_cls_name = type(backend_obj).__name__ if backend_obj else ""
+            if backend_cls_name == "SGLangBackend":
+                teacher_backend = "sglang"
+                # SGLang /generate is not available on the proxy gateway;
+                # use the direct SGLang server address instead.
+                if engine_addrs:
+                    teacher_base_url = f"http://{engine_addrs[0]}"
+            else:
+                teacher_backend = "openai"
+
             logger.info(
-                "Teacher provider=engine, resolved teacher_base_url=%s",
+                "Teacher provider=engine, resolved teacher_base_url=%s, "
+                "teacher_backend=%s",
                 teacher_base_url,
+                teacher_backend,
             )
 
             if not teacher_base_url.startswith(("http://", "https://")):
@@ -452,6 +469,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 teacher_max_retries=self.teacher_max_retries,
                 teacher_timeout=self.teacher_timeout,
                 teacher_missing_logprob=self.teacher_missing_logprob,
+                teacher_backend=teacher_backend,
             )
             client = TeacherClient(config)
         else:
@@ -463,6 +481,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 teacher_max_retries=self.teacher_max_retries,
                 teacher_timeout=self.teacher_timeout,
                 teacher_missing_logprob=self.teacher_missing_logprob,
+                teacher_backend=self.teacher_backend,
             )
             client = TeacherClient(config)
 
@@ -755,7 +774,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             # 9. Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
-                all_nodes, max_tokens=self.max_tokens
+                all_nodes, max_tokens=self.max_tokens,
+                loss_mode=self.loss_mode.value,
             )
 
             return result_dict if result_dict else None

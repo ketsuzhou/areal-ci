@@ -106,6 +106,31 @@ def test_bug11_no_item_in_distill_stat():
             )
 
 
+def test_distill_loss_uses_prox_logp_method_config():
+    """Distill loss should follow PPOActorConfig.prox_logp_method."""
+    source = inspect.getsource(
+        __import__(
+            "customized_areal.tree_search.training.loss",
+            fromlist=["grpo_distill_loss_fn"],
+        ).grpo_distill_loss_fn
+    )
+    assert "prox_logp_method" in source
+    assert "prox_clip" not in source
+
+
+def test_distill_actor_registers_n_seqs_before_task_reward_stat():
+    """Custom PPO update must register n_seqs before logging task_reward."""
+    source = inspect.getsource(
+        __import__(
+            "customized_areal.tree_search.training.actor",
+            fromlist=["patch_ppo_actor_class_to_use_distill_loss"],
+        ).patch_ppo_actor_class_to_use_distill_loss
+    )
+    denominator_idx = source.index("n_seqs=torch.ones_like")
+    stat_idx = source.index("task_reward=reward_score.float()")
+    assert denominator_idx < stat_idx
+
+
 def test_bug8_no_model_inputs_mutation():
     """Bug 8: _compute_logprobs_and_loss should not mutate ctx.model_inputs
     by temporarily overriding rolled_input_ids. Pass labels separately."""

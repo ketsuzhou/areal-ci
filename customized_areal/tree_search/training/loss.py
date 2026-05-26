@@ -118,7 +118,7 @@ def grpo_distill_loss_fn(
     else:
         coeffs = _resolve_proximal_logp(
             prox_logp_gt=prox_logp_gt,
-            prox_logp_method=getattr(config, "prox_clip", "recompute"),
+            prox_logp_method=getattr(config, "prox_logp_method", "recompute"),
             old_logp=old_logp,
             logprobs=chosen_logprobs.detach(),
             versions=input_data.get("versions"),
