@@ -13,10 +13,10 @@ tree_search:
   rl_loss_weight: 1.0
   distill_loss_weight: 0.005
   teacher_provider: external
-  teacher_base_url: http://localhost:32735
-  teacher_backend: sglang
-  teacher_model_name: ""
-  teacher_api_key: ""
+  teacher_base_url: http://10.254.244.168:8443/service-large-64-1775803465274/llm
+  teacher_backend: openai
+  teacher_model_name: "Qwen3.5_397B_A17B_FP8"
+  teacher_api_key: "aH6867Z7ppZWqN7NQGsaPhSlMrk68AGQnr18Z66KsSL0864mkjaBP7Tr868pKvnCJcWa0VvHZDHk64MrKG5Z5gWrZGx88mrmAv7pk88p786gFB6XXr6MrtSckKs9QJsr"
   teacher_top_k: 10
   teacher_max_retries: 3
   teacher_timeout: 300.0

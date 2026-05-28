@@ -80,16 +80,19 @@ class TeacherClient:
 
     def __init__(self, config: TeacherConfig) -> None:
         self.config = config
-        if not config.teacher_base_url.startswith(("http://", "https://")):
+        base_url = config.teacher_base_url
+        if not base_url.startswith(("http://", "https://")):
             raise ValueError(
                 f"teacher_base_url must start with http:// or https://, "
                 f"got: {config.teacher_base_url!r}"
             )
+        if not base_url.endswith("/"):
+            base_url += "/"
         headers: dict[str, str] = {}
         if config.teacher_api_key:
             headers["Authorization"] = f"Bearer {config.teacher_api_key}"
         self._client = httpx.AsyncClient(
-            base_url=config.teacher_base_url,
+            base_url=base_url,
             timeout=httpx.Timeout(config.teacher_timeout),
             headers=headers,
         )
@@ -399,7 +402,7 @@ class TeacherClient:
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = await self._client.post("/generate", json=payload)
+                response = await self._client.post("generate", json=payload)
                 response.raise_for_status()
                 logger.info(
                     "SGLang teacher /generate success (attempt %d/%d, "
@@ -439,7 +442,7 @@ class TeacherClient:
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = await self._client.post("/v1/completions", json=payload)
+                response = await self._client.post("v1/completions", json=payload)
                 response.raise_for_status()
                 logger.info(
                     "Teacher /v1/completions success (attempt %d/%d)",
@@ -474,7 +477,7 @@ class TeacherClient:
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = await self._client.post("/v1/chat/completions", json=payload)
+                response = await self._client.post("v1/chat/completions", json=payload)
                 response.raise_for_status()
                 return response.json()
             except (
