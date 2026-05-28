@@ -228,6 +228,15 @@ class OpenAIProxyWorkflow(RolloutWorkflow):
                 logger.warning("Agent task failed. This trajectory will be rejected.")
                 raise
 
+            # Unpack structured result (e.g. TPFCAgentResult) so metadata
+            # propagates to data dict in the parent process — critical for
+            # subproc mode where data mutations are lost across process boundary.
+            # Use duck-typing to avoid areal -> customized_areal import dependency.
+            if hasattr(rewards, "task_id") and hasattr(rewards, "raw_messages"):
+                data["_backend_run_task_id"] = rewards.task_id
+                data["_backend_run_raw_messages"] = rewards.raw_messages
+                rewards = rewards.reward
+
             # Assign rewards back according to user code output
             if isinstance(rewards, dict):
                 for completion_id, reward in rewards.items():

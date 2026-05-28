@@ -500,3 +500,41 @@ def test_tpfca_agent_result_default_fields():
     result = TPFCAgentResult(reward=0.5)
     assert result.task_id == ""
     assert result.raw_messages == []
+
+
+def test_with_episode_metadata_extracts_tpfca_result():
+    """_with_episode_metadata should read _backend_run_task_id and _backend_run_raw_messages from data."""
+    from customized_areal.tree_search.tree_search_grouped_workflow import (
+        EpisodeRunResult,
+        _with_episode_metadata,
+    )
+
+    data = {
+        "_backend_run_task_id": "task-xyz",
+        "_backend_run_raw_messages": [{"role": "assistant", "content": "hi"}],
+    }
+    result = _with_episode_metadata("some_result", data)
+    assert isinstance(result, EpisodeRunResult)
+    assert result.task_id == "task-xyz"
+    assert result.raw_messages == [{"role": "assistant", "content": "hi"}]
+    assert result.result == "some_result"
+
+
+def test_tpfca_agent_result_propagates_to_data_dict():
+    """Simulate what arun_episode does when it receives TPFCAgentResult."""
+    data = {"query_id": "q1"}
+    rewards = TPFCAgentResult(
+        reward=0.9,
+        task_id="task-abc",
+        raw_messages=[{"role": "assistant", "content": "response"}],
+    )
+
+    # This is the duck-typing logic added to arun_episode:
+    if hasattr(rewards, "task_id") and hasattr(rewards, "raw_messages"):
+        data["_backend_run_task_id"] = rewards.task_id
+        data["_backend_run_raw_messages"] = rewards.raw_messages
+        rewards = rewards.reward
+
+    assert rewards == 0.9
+    assert data["_backend_run_task_id"] == "task-abc"
+    assert data["_backend_run_raw_messages"] == [{"role": "assistant", "content": "response"}]
