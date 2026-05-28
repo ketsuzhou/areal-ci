@@ -61,7 +61,11 @@ def test_truncate_messages_before_high_entropy_assistant_turn():
             "content": {"role": "assistant", "content": "step 1"},
             "metadata": {"entropy_stats": {"max_entropy": 0.1}},
         },
-        {"message_id": "t1", "role": "tool", "content": {"role": "tool", "content": "obs"}},
+        {
+            "message_id": "t1",
+            "role": "tool",
+            "content": {"role": "tool", "content": "obs"},
+        },
         {
             "message_id": "a2",
             "role": "assistant",
@@ -412,7 +416,9 @@ async def test_build_branch_task_uses_sandbox_directly_without_clone(monkeypatch
 
 @pytest.mark.asyncio
 async def test_run_fresh_episode_falls_back_to_scratch_when_branch_prep_errors():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     workflow.sample_source = SampleSource.BRANCH
     workflow.branch_probability = 1.0
 
@@ -446,7 +452,9 @@ async def test_run_fresh_episode_falls_back_to_scratch_when_branch_prep_errors()
 
 @pytest.mark.asyncio
 async def test_run_fresh_episode_uses_isolated_data_for_scratch_metadata():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     workflow.sample_source = SampleSource.SCRATCH
     workflow.branch_probability = 0.0
     workflow.tree_store = type("Store", (), {"trajectories": {"q": []}})()
@@ -531,7 +539,9 @@ def test_tpfca_agent_result_propagates_to_data_dict():
 
     assert rewards == 0.9
     assert data["_backend_run_task_id"] == "task-abc"
-    assert data["_backend_run_raw_messages"] == [{"role": "assistant", "content": "response"}]
+    assert data["_backend_run_raw_messages"] == [
+        {"role": "assistant", "content": "response"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -546,7 +556,9 @@ async def test_cleanup_branch_deletes_sandbox_and_clears_node_state(monkeypatch)
         fake_delete_sandbox,
     )
 
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     candidate = _node(2)
     candidate.need_branch = True
     candidate.branch_sandbox_id = "sb-to-delete"
@@ -568,7 +580,9 @@ async def test_cleanup_branch_tolerates_delete_failure(monkeypatch):
         failing_delete,
     )
 
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     candidate = _node(2)
     candidate.need_branch = True
     candidate.branch_sandbox_id = "sb-failing"
@@ -582,7 +596,9 @@ async def test_cleanup_branch_tolerates_delete_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cleanup_branch_skips_delete_when_no_sandbox_id():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     candidate = _node(2)
     candidate.need_branch = True
     candidate.branch_sandbox_id = None
@@ -607,7 +623,9 @@ def test_select_branch_candidate_ignores_cleaned_up_node():
 
 @pytest.mark.asyncio
 async def test_run_fresh_episode_calls_cleanup_after_branch():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
     workflow.sample_source = SampleSource.BRANCH
     workflow.branch_probability = 1.0
 

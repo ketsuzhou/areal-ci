@@ -1023,7 +1023,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             # 9. Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
-                all_nodes, max_tokens=self.max_tokens,
+                all_nodes,
+                max_tokens=self.max_tokens,
                 loss_mode=self.loss_mode.value,
             )
 
