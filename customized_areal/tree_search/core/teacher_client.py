@@ -427,8 +427,7 @@ class TeacherClient:
                     await asyncio.sleep(backoff)
 
         raise RuntimeError(
-            f"SGLang teacher API request failed after {max_retries} retries: "
-            f"{last_exc}"
+            f"SGLang teacher API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
     async def _post_openai_with_retries(
@@ -443,7 +442,9 @@ class TeacherClient:
                 response = await self._client.post("/v1/completions", json=payload)
                 response.raise_for_status()
                 logger.info(
-                    "Teacher /v1/completions success (attempt %d/%d)", attempt, max_retries
+                    "Teacher /v1/completions success (attempt %d/%d)",
+                    attempt,
+                    max_retries,
                 )
                 return response.json()
             except (

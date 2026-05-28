@@ -7,7 +7,7 @@ import threading
 
 from httpx import AsyncClient as AsyncHttpxClient
 from httpx import Client as SyncHttpxClient
-from httpx import Timeout
+from httpx import Limits, Timeout
 from supabase import AsyncClient, Client, create_async_client, create_client
 from supabase.lib.client_options import AsyncClientOptions, SyncClientOptions
 
@@ -50,9 +50,14 @@ class SyncDBConnection:
                 "environment variables must be set."
             )
 
-        # Increased timeouts for unstable VPN connections and large queries
+        # Pool sized for general-purpose (non-rollout) usage
         httpx_client = SyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
+            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+            limits=Limits(
+                max_connections=100,
+                max_keepalive_connections=50,
+                keepalive_expiry=30,
+            ),
         )
         options = SyncClientOptions(httpx_client=httpx_client)
         self._client = create_client(supabase_url, supabase_key, options)
@@ -129,9 +134,14 @@ class DBConnection:
                 "environment variables must be set."
             )
 
-        # Increased timeouts for unstable VPN connections and large queries
+        # Pool sized for general-purpose (non-rollout) usage
         httpx_client = AsyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
+            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+            limits=Limits(
+                max_connections=100,
+                max_keepalive_connections=50,
+                keepalive_expiry=30,
+            ),
         )
         options = AsyncClientOptions(httpx_client=httpx_client)
         self._client = await create_async_client(

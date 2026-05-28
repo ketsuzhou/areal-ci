@@ -32,16 +32,16 @@ Configured as the external teacher for config_tpfc_Qwen3-5L-9B-opd.yaml:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 import time
-import signal
 
 import requests
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 
 from areal.api.cli_args import SGLangConfig
@@ -122,7 +122,9 @@ def test_teacher_generate(base_url: str, top_k: int = 10) -> bool:
         "stream": False,
     }
 
-    print(f"  Sending /generate with {len(all_ids)} tokens, logprob_start_len={prompt_len}, top_k={top_k}")
+    print(
+        f"  Sending /generate with {len(all_ids)} tokens, logprob_start_len={prompt_len}, top_k={top_k}"
+    )
     resp = requests.post(f"{base_url}/generate", json=payload, timeout=120)
 
     if resp.status_code != 200:
@@ -137,30 +139,51 @@ def test_teacher_generate(base_url: str, top_k: int = 10) -> bool:
 
     n_input = len(input_top) if input_top else 0
     n_output = len(output_top) if output_top else 0
-    print(f"  Response OK — input_top_logprobs positions: {n_input}, output_top_logprobs positions: {n_output}")
+    print(
+        f"  Response OK — input_top_logprobs positions: {n_input}, output_top_logprobs positions: {n_output}"
+    )
 
     if input_top and len(input_top) > 0 and input_top[0] is not None:
         sample = input_top[0]
         print(f"  Sample logprobs at position 0: {len(sample)} entries")
         if sample:
-            print(f"    First entry: logprob={sample[0][0]:.4f}, token_id={sample[0][1]}")
+            print(
+                f"    First entry: logprob={sample[0][0]:.4f}, token_id={sample[0][1]}"
+            )
 
     return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Launch SGLang server for external teacher distillation")
-    parser.add_argument("--model-path", type=str, default=DEFAULT_MODEL_PATH, help="Path to model weights")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port for SGLang server")
+    parser = argparse.ArgumentParser(
+        description="Launch SGLang server for external teacher distillation"
+    )
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default=DEFAULT_MODEL_PATH,
+        help="Path to model weights",
+    )
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_PORT, help="Port for SGLang server"
+    )
     parser.add_argument("--gpu-id", type=int, default=0, help="GPU device ID")
-    parser.add_argument("--top-k", type=int, default=10, help="Top-k logprobs for teacher distill test")
-    parser.add_argument("--timeout", type=int, default=300, help="Server startup timeout in seconds")
-    parser.add_argument("--serve-only", action="store_true", help="Only start the server, skip self-test")
+    parser.add_argument(
+        "--top-k", type=int, default=10, help="Top-k logprobs for teacher distill test"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=300, help="Server startup timeout in seconds"
+    )
+    parser.add_argument(
+        "--serve-only",
+        action="store_true",
+        help="Only start the server, skip self-test",
+    )
     args = parser.parse_args()
 
     os.environ["TEST_MODEL_PATH"] = args.model_path
 
-    print(f"=== SGLang Teacher Server (External Provider) ===")
+    print("=== SGLang Teacher Server (External Provider) ===")
     print(f"Model: {args.model_path}")
     print(f"Port:  {args.port}")
     print(f"GPU:   {args.gpu_id}")
@@ -201,18 +224,20 @@ def main():
             sys.exit(1)
 
         # Health check
-        print(f"\n--- Health check ---")
+        print("\n--- Health check ---")
         resp = requests.get(f"{base_url}/v1/models", timeout=10)
         print(f"  /v1/models: {resp.status_code}")
 
         if args.serve_only:
             print(f"\nServer is running at {base_url}")
-            print(f"Config: teacher_base_url=http://localhost:{args.port}, teacher_backend=sglang")
-            print(f"Press Ctrl+C to stop.")
+            print(
+                f"Config: teacher_base_url=http://localhost:{args.port}, teacher_backend=sglang"
+            )
+            print("Press Ctrl+C to stop.")
             proc.wait()
         else:
             # Run self-test
-            print(f"\n--- Teacher distill /generate test ---")
+            print("\n--- Teacher distill /generate test ---")
             ok = test_teacher_generate(base_url, top_k=args.top_k)
 
             if ok:

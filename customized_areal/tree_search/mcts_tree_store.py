@@ -47,6 +47,10 @@ class Node:
     turn_idx: int = 0  # 1-based turn position within episode
     query_id: str = ""  # dataset query identifier
     train_id: str = ""  # training run that trained this node; "" means untrained
+    task_id: str = ""  # TPFC backend task that produced this node
+    entropy_stats: dict[str, Any] | None = None
+    need_branch: bool = False
+    branch_sandbox_id: str | None = None
 
     # Reward
     outcome_reward: float = 0.0

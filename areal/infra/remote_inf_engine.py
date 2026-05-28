@@ -744,6 +744,8 @@ class RemoteInfEngine(InferenceEngine):
                     diagnose_api_key=tree_search_cfg.diagnose_api_key,
                     strict_distill_json=tree_search_cfg.strict_distill_json,
                     max_tokens=max_tokens,
+                    sample_source=tree_search_cfg.sample_source,
+                    branch_probability=tree_search_cfg.branch_probability,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

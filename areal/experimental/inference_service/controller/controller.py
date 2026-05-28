@@ -1727,6 +1727,8 @@ class RolloutControllerV2:
                 diagnose_api_key=tree_search_cfg.diagnose_api_key,
                 strict_distill_json=tree_search_cfg.strict_distill_json,
                 max_tokens=max_tokens,
+                sample_source=tree_search_cfg.sample_source,
+                branch_probability=tree_search_cfg.branch_probability,
             )
         else:
             from areal.infra.remote_inf_engine import GroupedRolloutWorkflow

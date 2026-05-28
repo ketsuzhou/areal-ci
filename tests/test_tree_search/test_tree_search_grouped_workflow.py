@@ -77,7 +77,7 @@ def _make_node(
 def _make_model_response(
     seq_len: int = 50,
     response_len: int = 10,
-) -> "ModelResponse":
+) -> ModelResponse:
     """Create a ModelResponse with correct constructor (no input_len/output_len)."""
     from areal.api import ModelResponse
 
@@ -121,7 +121,7 @@ def _make_workflow(
     cache_mode: CacheMode = CacheMode.CROSS_TRAINING,
     checkpoint_dir: str = "/tmp/test_tree_search_ckpt",
     teacher_provider: str = "external",
-) -> "TreeSearchGroupedRolloutWorkflow":
+) -> TreeSearchGroupedRolloutWorkflow:
     """Create a workflow instance with a mock inner workflow."""
     from customized_areal.tree_search.tree_search_grouped_workflow import (
         TreeSearchGroupedRolloutWorkflow,
@@ -176,11 +176,11 @@ class TestInteractionsDictToNodes:
 
     def test_concat_mode_with_parent(self):
         """Test concat mode where parent logprobs are carried forward."""
-        from areal.experimental.openai.types import InteractionWithTokenLogpReward
-
         from customized_areal.tree_search.tree_search_grouped_workflow import (
             interactions_dict_to_nodes,
         )
+
+        from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
         # First interaction (root)
         resp1 = _make_model_response(seq_len=20, response_len=10)
@@ -219,11 +219,11 @@ class TestInteractionsDictToNodes:
 
     def test_with_top_logprobs(self):
         """output_top_logprobs on ModelResponse is converted to topk_ids/topk_logp."""
-        from areal.experimental.openai.types import InteractionWithTokenLogpReward
-
         from customized_areal.tree_search.tree_search_grouped_workflow import (
             interactions_dict_to_nodes,
         )
+
+        from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
         resp = _make_model_response(seq_len=10, response_len=3)
         # Set output_top_logprobs dynamically (not a dataclass field)
@@ -299,10 +299,13 @@ class TestSetupDistillProvider:
         mock_engine.config = MagicMock()
         mock_engine.config.admin_api_key = ""
 
-        with patch.dict("os.environ", {
-            "WORKSPACE_OPENAI_API_KEY": "test-key",
-            "WORKSPACE_OPENAI_API_BASE": "http://test:8080/v1",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "WORKSPACE_OPENAI_API_KEY": "test-key",
+                "WORKSPACE_OPENAI_API_BASE": "http://test:8080/v1",
+            },
+        ):
             provider, client = await wf._setup_distill_provider(mock_engine)
 
         assert provider is not None
@@ -320,10 +323,13 @@ class TestSetupDistillProvider:
         mock_engine.backend = MagicMock()
         type(mock_engine.backend).__name__ = "SGLangBackend"
 
-        with patch.dict("os.environ", {
-            "WORKSPACE_OPENAI_API_KEY": "test-key",
-            "WORKSPACE_OPENAI_API_BASE": "http://test:8080/v1",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "WORKSPACE_OPENAI_API_KEY": "test-key",
+                "WORKSPACE_OPENAI_API_BASE": "http://test:8080/v1",
+            },
+        ):
             provider, client = await wf._setup_distill_provider(mock_engine)
 
         assert client.config.teacher_backend == "sglang"
@@ -360,9 +366,7 @@ class TestPrepareDistillForEpisode:
 
         mock_provider = AsyncMock()
         mock_provider.diagnose_episode = AsyncMock()
-        mock_provider.get_logprobs_for_prompt = AsyncMock(
-            return_value=[[-1.0]] * 5
-        )
+        mock_provider.get_logprobs_for_prompt = AsyncMock(return_value=[[-1.0]] * 5)
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.encode.return_value = [1, 2, 3]
@@ -397,16 +401,16 @@ class TestPrepareDistillForEpisode:
         nodes[0].guidance = None  # explicit
 
         mock_provider = AsyncMock()
-        mock_provider.diagnose_episode = AsyncMock(return_value=(
-            "```xml\n"
-            "<diagnosis><turns><turn><turn_idx>1</turn_idx>"
-            "<should_improve>true</should_improve>"
-            "<guidance>Fix this</guidance></turn></turns></diagnosis>\n"
-            "```"
-        ))
-        mock_provider.get_logprobs_for_prompt = AsyncMock(
-            return_value=[[-1.5]] * 5
+        mock_provider.diagnose_episode = AsyncMock(
+            return_value=(
+                "```xml\n"
+                "<diagnosis><turns><turn><turn_idx>1</turn_idx>"
+                "<should_improve>true</should_improve>"
+                "<guidance>Fix this</guidance></turn></turns></diagnosis>\n"
+                "```"
+            )
         )
+        mock_provider.get_logprobs_for_prompt = AsyncMock(return_value=[[-1.5]] * 5)
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.encode.return_value = [1, 2, 3]
@@ -439,9 +443,9 @@ class TestPrepareDistillForEpisode:
         nodes = [_make_node(node_id="n1", turn_idx=1, seq_len=30, response_len=5)]
 
         mock_provider = AsyncMock()
-        mock_provider.diagnose_episode = AsyncMock(return_value=(
-            "```xml\n<diagnosis><turns /></diagnosis>\n```"
-        ))
+        mock_provider.diagnose_episode = AsyncMock(
+            return_value=("```xml\n<diagnosis><turns /></diagnosis>\n```")
+        )
         mock_tokenizer = MagicMock()
 
         with patch(
@@ -467,16 +471,16 @@ class TestPrepareDistillForEpisode:
         nodes[0].guidance = None
 
         mock_provider = AsyncMock()
-        mock_provider.diagnose_episode = AsyncMock(return_value=(
-            "```xml\n"
-            "<diagnosis><turns><turn><turn_idx>1</turn_idx>"
-            "<should_improve>true</should_improve>"
-            "<guidance>Fix this</guidance></turn></turns></diagnosis>\n"
-            "```"
-        ))
-        mock_provider.get_logprobs_for_prompt = AsyncMock(
-            return_value=[[-1.5]] * 5
+        mock_provider.diagnose_episode = AsyncMock(
+            return_value=(
+                "```xml\n"
+                "<diagnosis><turns><turn><turn_idx>1</turn_idx>"
+                "<should_improve>true</should_improve>"
+                "<guidance>Fix this</guidance></turn></turns></diagnosis>\n"
+                "```"
+            )
         )
+        mock_provider.get_logprobs_for_prompt = AsyncMock(return_value=[[-1.5]] * 5)
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.encode.return_value = [1, 2, 3]
@@ -514,8 +518,12 @@ class TestPrepareDistillForNodeGroups:
     @pytest.mark.asyncio
     async def test_parallel_episodes(self):
         wf = _make_workflow()
-        ep1 = [_make_node(node_id="a", episode_id="ep1", turn_idx=1, guidance={1: "fix"})]
-        ep2 = [_make_node(node_id="b", episode_id="ep2", turn_idx=1, guidance={1: "fix"})]
+        ep1 = [
+            _make_node(node_id="a", episode_id="ep1", turn_idx=1, guidance={1: "fix"})
+        ]
+        ep2 = [
+            _make_node(node_id="b", episode_id="ep2", turn_idx=1, guidance={1: "fix"})
+        ]
 
         mock_provider = AsyncMock()
         mock_tokenizer = MagicMock()
@@ -820,9 +828,9 @@ class TestFullArunEpisode:
         wf.workflow.arun_episode = AsyncMock(return_value=interactions)
 
         mock_provider = AsyncMock()
-        mock_provider.diagnose_episode = AsyncMock(return_value=(
-            "```xml\n<diagnosis><turns /></diagnosis>\n```"
-        ))
+        mock_provider.diagnose_episode = AsyncMock(
+            return_value=("```xml\n<diagnosis><turns /></diagnosis>\n```")
+        )
 
         mock_client = AsyncMock()
         mock_client.close = AsyncMock()
@@ -832,12 +840,14 @@ class TestFullArunEpisode:
 
         with (
             patch.object(
-                wf, "_setup_distill_provider",
+                wf,
+                "_setup_distill_provider",
                 new_callable=AsyncMock,
                 return_value=(mock_provider, mock_client),
             ),
             patch.object(
-                wf, "_get_tokenizer",
+                wf,
+                "_get_tokenizer",
                 new_callable=AsyncMock,
                 return_value=mock_tokenizer,
             ),
@@ -926,11 +936,11 @@ class TestProfiling:
     @pytest.mark.asyncio
     async def test_profile_stages(self):
         """Time each pipeline stage with synthetic data."""
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
-            _nodes_to_batched_tensor_dict,
-            _group_nodes_by_episode,
-        )
         from customized_areal.tree_search.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.tree_search_grouped_workflow import (
+            _group_nodes_by_episode,
+            _nodes_to_batched_tensor_dict,
+        )
 
         N_EPISODES = 4
         TURNS_PER_EP = 3
@@ -953,7 +963,9 @@ class TestProfiling:
                 )
                 all_nodes.append(n)
         t1 = time.perf_counter()
-        print(f"\n[PROFILE] Node creation ({N_EPISODES * TURNS_PER_EP} nodes): {t1 - t0:.4f}s")
+        print(
+            f"\n[PROFILE] Node creation ({N_EPISODES * TURNS_PER_EP} nodes): {t1 - t0:.4f}s"
+        )
 
         # Stage 2: Tree store insert
         store = MCTSTreeStore()
@@ -967,7 +979,9 @@ class TestProfiling:
         count = store.get_untrained_episode_count("q1")
         cached = store.load_untrained_episodes("q1", count)
         t1 = time.perf_counter()
-        print(f"[PROFILE] Cache lookup ({count} episodes, {len(cached)} nodes): {t1 - t0:.4f}s")
+        print(
+            f"[PROFILE] Cache lookup ({count} episodes, {len(cached)} nodes): {t1 - t0:.4f}s"
+        )
 
         # Stage 4: Advantage computation
         computer = TreeAdvantageComputer(store)
@@ -980,7 +994,9 @@ class TestProfiling:
         t0 = time.perf_counter()
         groups = _group_nodes_by_episode(all_nodes)
         t1 = time.perf_counter()
-        print(f"[PROFILE] Group nodes by episode ({len(groups)} groups): {t1 - t0:.4f}s")
+        print(
+            f"[PROFILE] Group nodes by episode ({len(groups)} groups): {t1 - t0:.4f}s"
+        )
 
         # Stage 6: Tensor dict conversion
         t0 = time.perf_counter()
@@ -1016,12 +1032,10 @@ class TestInputIdsToMessages:
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.apply_chat_template.return_value = (
-            "<|im_start|>user\nHello<|im_end|>\n"
-            "<|im_start|>assistant\nHi<|im_end|>"
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHi<|im_end|>"
         )
         mock_tokenizer.decode.return_value = (
-            "<|im_start|>user\nHello<|im_end|>\n"
-            "<|im_start|>assistant\nHi<|im_end|>"
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHi<|im_end|>"
         )
 
         messages = _input_ids_to_messages(list(range(20)), mock_tokenizer)

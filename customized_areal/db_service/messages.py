@@ -20,6 +20,7 @@ _RETRY_BASE_DELAY = 2.0
 
 TABLE_MESSAGES = "messages"
 COLUMNS_PUBLIC = "message_id, role, content, created_at, updated_at"
+COPY_EXCLUDED_COLUMNS = {"message_id", "task_id", "created_at", "updated_at"}
 
 _db = DBConnection()
 
@@ -59,7 +60,9 @@ async def get_llm_messages(
     except httpx.ReadTimeout as e:
         logger.error(
             "ReadTimeout fetching messages for task %s after retries: %s",
-            task_id, e, exc_info=True,
+            task_id,
+            e,
+            exc_info=True,
         )
         raise
     except Exception as e:
@@ -111,6 +114,52 @@ async def add_message(
         raise
 
 
+def truncate_messages_before_turn(
+    raw_messages: list[dict[str, Any]],
+    assistant_turn_idx: int,
+) -> list[dict[str, Any]]:
+    """Return sanitized raw messages before the 1-indexed assistant turn."""
+    if assistant_turn_idx < 1:
+        raise ValueError("assistant_turn_idx must be >= 1")
+
+    assistant_count = 0
+    prefix: list[dict[str, Any]] = []
+    for row in raw_messages:
+        if row.get("role") == "assistant":
+            assistant_count += 1
+            if assistant_count == assistant_turn_idx:
+                return prefix
+        copied = {
+            key: value for key, value in row.items() if key not in COPY_EXCLUDED_COLUMNS
+        }
+        prefix.append(copied)
+    raise ValueError(
+        f"assistant turn {assistant_turn_idx} not found; found {assistant_count} assistant turns"
+    )
+
+
+async def copy_messages_to_task(
+    client,
+    *,
+    task_id: str,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Copy raw messages to a task after stripping source DB identity columns."""
+    if not messages:
+        return
+
+    rows = []
+    for message in messages:
+        row = {
+            key: value
+            for key, value in message.items()
+            if key not in COPY_EXCLUDED_COLUMNS
+        }
+        row["task_id"] = task_id
+        rows.append(row)
+    await client.table(TABLE_MESSAGES).insert(rows).execute()
+
+
 # ── Private: query helpers ──
 
 
@@ -129,8 +178,9 @@ async def _query_messages_by_task(
     while True:
         query = client.table(TABLE_MESSAGES).select(columns).eq("task_id", task_id)
         result = await _execute_with_retry(
-            query.order("created_at", desc=(order == "desc"))
-            .range(offset, offset + batch_size - 1),
+            query.order("created_at", desc=(order == "desc")).range(
+                offset, offset + batch_size - 1
+            ),
             task_id=task_id,
             offset=offset,
         )
@@ -144,7 +194,9 @@ async def _query_messages_by_task(
     return all_messages
 
 
-async def _execute_with_retry(query, *, task_id: str, offset: int, max_retries: int = _MAX_RETRIES):
+async def _execute_with_retry(
+    query, *, task_id: str, offset: int, max_retries: int = _MAX_RETRIES
+):
     """Execute a query with exponential backoff retry on transient timeouts."""
     for attempt in range(max_retries + 1):
         try:
@@ -152,11 +204,15 @@ async def _execute_with_retry(query, *, task_id: str, offset: int, max_retries: 
         except httpx.ReadTimeout:
             if attempt == max_retries:
                 raise
-            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            delay = _RETRY_BASE_DELAY * (2**attempt)
             logger.warning(
                 "ReadTimeout querying messages (task=%s, offset=%d), "
                 "retry %d/%d in %.1fs",
-                task_id, offset, attempt + 1, max_retries, delay,
+                task_id,
+                offset,
+                attempt + 1,
+                max_retries,
+                delay,
             )
             await asyncio.sleep(delay)
 

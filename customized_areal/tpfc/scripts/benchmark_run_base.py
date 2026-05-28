@@ -14,8 +14,6 @@ from typing import Any, TypedDict
 
 import aiofiles
 import dotenv
-
-dotenv.load_dotenv()
 import openai
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field
@@ -23,6 +21,8 @@ from pydantic import BaseModel, Field
 # from summary_time_cost import generate_summary
 from customized_areal.tpfc.backend_run import run_backend
 from customized_areal.tpfc.eval_utils import verify_answer_for_datasets
+
+dotenv.load_dotenv()
 
 
 class TaskStatus(StrEnum):
@@ -77,6 +77,27 @@ class BenchmarkResult(BaseModel):
     attempts: list[AttemptStats] = Field(default_factory=list)  # Store all attempts
     pass_at_k_success: bool = False  # Whether task passed using pass@k evaluation
     k_value: int = 1  # The k value used for this evaluation
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, list):
+        return "".join(
+            _message_content_to_text(part)
+            if isinstance(part, (dict, list))
+            else str(part)
+            for part in content
+        )
+    if isinstance(content, dict):
+        value = content.get("text", content.get("content", ""))
+        return _message_content_to_text(value)
+    return str(content) if content is not None else ""
+
+
+def _last_assistant_content(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        if message.get("role") == "assistant":
+            return _message_content_to_text(message.get("content", ""))
+    return ""
 
 
 class BenchmarkEvaluator(ABC):
@@ -182,12 +203,7 @@ class BenchmarkEvaluator(ABC):
                     retry_count = 0
                     while final_boxed_answer == "" and retry_count < max_retries:
                         try:
-                            (
-                                response,
-                                final_boxed_answer,
-                                log_file_path,
-                                _trace,
-                            ) = await run_backend(
+                            run_result = await run_backend(
                                 task_file_path=task_file_path,
                                 task_description=task_description,
                                 log_path=self.output_dir
@@ -203,6 +219,9 @@ class BenchmarkEvaluator(ABC):
                                 api_key=api_key,
                                 model_name=cfg.llm.model_name,
                             )
+                            response = _last_assistant_content(run_result.messages)
+                            final_boxed_answer = run_result.final_answer or ""
+                            log_file_path = run_result.log_path
                             retry_count += 1
                             if final_boxed_answer == "" and retry_count < max_retries:
                                 print(

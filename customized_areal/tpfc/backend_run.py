@@ -8,11 +8,16 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+from httpx import AsyncClient as AsyncHttpxClient
+from httpx import Limits, Timeout
+from supabase import create_async_client
+from supabase.lib.client_options import AsyncClientOptions
 
 # Add parent of 'customized_areal' to Python path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -29,11 +34,9 @@ except ImportError:
 from customized_areal.db_service import (
     AgentCreateRequest,
     AgentService,
-    DBConnection,
     cleanup_sandbox_for_task,
     create_task,
     get_agent_loader,
-    get_llm_messages,
 )
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -61,8 +64,39 @@ _REFRESH_WAIT_TIMEOUT = 30  # seconds to wait for another process to finish refr
 _REFRESH_WAIT_INTERVAL = 1  # seconds between token re-reads while waiting
 _AUTH_ERROR_STATUS_CODES = {401, 403}
 _TOKEN_HTTP_TIMEOUT = 30.0
+_RUN_TIMEOUT = 1500
+_TERMINAL_STATUSES = {"completed", "failed", "stopped", "canceled"}
 
 _SHARED_TOKEN_FILE = Path(__file__).parent / ".shared_auth_token.json"
+
+
+def _agent_start_http_timeout() -> Timeout:
+    return Timeout(connect=30.0, read=_RUN_TIMEOUT, write=300.0, pool=60.0)
+
+
+@dataclass(frozen=True)
+class BackendRunResult:
+    messages: list[dict[str, Any]]
+    final_answer: str | None
+    log_path: str
+    task_id: str
+    raw_messages: list[dict[str, Any]] = field(default_factory=list)
+    trace: Any | None = None
+
+    @property
+    def _legacy_tuple(
+        self,
+    ) -> tuple[list[dict[str, Any]], str | None, str, Any | None]:
+        return (self.messages, self.final_answer, self.log_path, self.trace)
+
+    def __iter__(self):
+        return iter(self._legacy_tuple)
+
+    def __len__(self) -> int:
+        return 4
+
+    def __getitem__(self, index):
+        return self._legacy_tuple[index]
 
 
 class _FileLock:
@@ -644,9 +678,12 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
 
 _TRANSIENT_HTTP_ERRORS = (
     httpx.ReadTimeout,
+    httpx.ReadError,
     httpx.ConnectTimeout,
     httpx.PoolTimeout,
     httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.WriteTimeout,
 )
 
 
@@ -661,7 +698,9 @@ async def _start_agent_run(
     retry_delay = 5.0
     for attempt in range(max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=300.0) as http_client:
+            async with httpx.AsyncClient(
+                timeout=_agent_start_http_timeout()
+            ) as http_client:
                 files = []
                 file_handles = []
                 try:
@@ -670,7 +709,9 @@ async def _start_agent_run(
                             if os.path.exists(file_path):
                                 fh = open(file_path, "rb")
                                 file_handles.append(fh)
-                                files.append(("files", (os.path.basename(file_path), fh, None)))
+                                files.append(
+                                    ("files", (os.path.basename(file_path), fh, None))
+                                )
                             else:
                                 logger.warning("File not found: %s", file_path)
 
@@ -700,13 +741,16 @@ async def _start_agent_run(
                         f"Failed to start agent run: {response.status_code} - {response.text}"
                     )
 
-                return response.json()
+                return _safe_response_json(response)
         except _TRANSIENT_HTTP_ERRORS as exc:
             if attempt < max_retries:
                 logger.warning(
                     "Transient HTTP error starting agent run (attempt %d/%d), "
                     "retrying in %.1fs: %s",
-                    attempt + 1, max_retries + 1, retry_delay, exc,
+                    attempt + 1,
+                    max_retries + 1,
+                    retry_delay,
+                    exc,
                 )
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60.0)
@@ -757,12 +801,174 @@ async def _start_agent_run_with_refresh(
                 )
                 return result, login_token
             except AuthTokenExpiredError:
+                legacy_token = _mint_legacy_hs256_auth_token(login_token)
+                if legacy_token:
+                    logger.warning(
+                        "Backend rejected login-issued token; trying HS256 "
+                        "compatibility token"
+                    )
+                    try:
+                        result = await _start_agent_run(
+                            api_base_url=api_base_url,
+                            auth_token=legacy_token,
+                            form_data=form_data,
+                            task_file_path=task_file_path,
+                        )
+                        return result, legacy_token
+                    except AuthTokenExpiredError:
+                        pass
                 raise AuthTokenExpiredError(
                     "Backend rejected both refreshed and login-issued Supabase "
                     f"tokens. Check that LE_AGENT_API_URL={api_base_url!r} uses "
                     "the same SUPABASE_URL/SUPABASE_ANON_KEY project as this "
                     f"client. Token diagnostics: {_token_diagnostics(login_token)}"
                 )
+
+
+async def _start_branch_agent_run_for_task(
+    *,
+    client,
+    api_base_url: str,
+    auth_token: str,
+    task_id: str,
+    account_id: str,
+    model_name: str,
+    base_url: str | None,
+    api_key: str | None,
+) -> dict[str, Any]:
+    """Start a run for an existing task whose messages are already in the DB."""
+    del client, account_id
+    endpoint = os.environ.get("LE_AGENT_BRANCH_RUN_ENDPOINT", "/api/agent/start-branch")
+    url = (
+        endpoint
+        if endpoint.startswith(("http://", "https://"))
+        else f"{api_base_url}{endpoint}"
+    )
+    async with httpx.AsyncClient(timeout=_agent_start_http_timeout()) as http_client:
+        response = await http_client.post(
+            url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={
+                "task_id": task_id,
+                "model_name": model_name,
+                "proxy_base_url": base_url,
+                "proxy_api_key": api_key,
+                "stream": False,
+            },
+        )
+    if response.status_code in _AUTH_ERROR_STATUS_CODES:
+        raise AuthTokenExpiredError(
+            f"Backend rejected auth token while starting branch task run: "
+            f"{response.status_code} - {response.text}"
+        )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Failed to start branch task run: {response.status_code} - {response.text}"
+        )
+    return _safe_response_json(response)
+
+
+async def _start_branch_agent_run_for_task_with_refresh(
+    *,
+    client,
+    api_base_url: str,
+    token_manager: SharedTokenManager,
+    auth_token: str,
+    task_id: str,
+    account_id: str,
+    model_name: str,
+    base_url: str | None,
+    api_key: str | None,
+) -> tuple[dict[str, Any], str]:
+    """Start a branch task run with the same auth fallbacks as the normal path."""
+
+    async def _start_with_token(token: str) -> dict[str, Any]:
+        return await _start_branch_agent_run_for_task(
+            client=client,
+            api_base_url=api_base_url,
+            auth_token=token,
+            task_id=task_id,
+            account_id=account_id,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+    try:
+        return await _start_with_token(auth_token), auth_token
+    except AuthTokenExpiredError:
+        logger.warning(
+            "Backend auth token expired while starting branch run; refreshing token"
+        )
+        fresh_token = await token_manager.get_valid_token(force_refresh=True)
+        try:
+            return await _start_with_token(fresh_token), fresh_token
+        except AuthTokenExpiredError:
+            logger.warning(
+                "Backend rejected refreshed auth token for branch run; "
+                "attempting credential login"
+            )
+            login_token = await token_manager.login_and_store_token()
+            try:
+                return await _start_with_token(login_token), login_token
+            except AuthTokenExpiredError:
+                legacy_token = _mint_legacy_hs256_auth_token(login_token)
+                if legacy_token:
+                    logger.warning(
+                        "Backend rejected login-issued token for branch run; "
+                        "trying HS256 compatibility token"
+                    )
+                    try:
+                        return await _start_with_token(legacy_token), legacy_token
+                    except AuthTokenExpiredError:
+                        pass
+                raise AuthTokenExpiredError(
+                    "Backend rejected refreshed and login-issued tokens while "
+                    f"starting branch run. Token diagnostics: "
+                    f"{_token_diagnostics(login_token)}"
+                )
+
+
+async def _unused_start_branch_agent_run_for_task_with_refresh_old(
+    *,
+    client,
+    api_base_url: str,
+    token_manager: SharedTokenManager,
+    auth_token: str,
+    task_id: str,
+    account_id: str,
+    model_name: str,
+    base_url: str | None,
+    api_key: str | None,
+) -> tuple[dict[str, Any], str]:
+    try:
+        result = await _start_branch_agent_run_for_task(
+            client=client,
+            api_base_url=api_base_url,
+            auth_token=auth_token,
+            task_id=task_id,
+            account_id=account_id,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        return result, auth_token
+    except AuthTokenExpiredError:
+        logger.warning(
+            "Backend auth token expired while starting branch run; refreshing token"
+        )
+        fresh_token = await token_manager.get_valid_token(force_refresh=True)
+        result = await _start_branch_agent_run_for_task(
+            client=client,
+            api_base_url=api_base_url,
+            auth_token=fresh_token,
+            task_id=task_id,
+            account_id=account_id,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        return result, fresh_token
 
 
 TERMINAL_SSE_EVENTS = {"task_end", "error"}
@@ -885,7 +1091,7 @@ async def _wait_for_agent_run(
                                         )
                                     current_event = "message"
 
-                            if status in {"completed", "failed", "stopped"}:
+                            if status in _TERMINAL_STATUSES:
                                 break
                             # Stream ended without terminal event — may need reconnect
                             if current_event not in TERMINAL_SSE_EVENTS:
@@ -939,7 +1145,7 @@ async def _wait_for_agent_run(
                 sse_retry_delay = min(sse_retry_delay * 2, 30.0)
                 continue
 
-    if not streamed or status not in {"completed", "failed", "stopped"}:
+    if not streamed or status not in _TERMINAL_STATUSES:
         retry_delay = 1.0
         while _time_left() > 0:
             try:
@@ -966,7 +1172,7 @@ async def _wait_for_agent_run(
                     task_data = getattr(task_row, "data", None)
                     if isinstance(task_data, dict) and "status" in task_data:
                         task_status = task_data["status"]
-                        if task_status in {"completed", "failed", "stopped"}:
+                        if task_status in _TERMINAL_STATUSES:
                             status = task_status
             except Exception as exc:
                 if _time_left() <= 0:
@@ -982,23 +1188,133 @@ async def _wait_for_agent_run(
                 retry_delay = min(retry_delay * 2, 30.0)
                 continue
 
-            if status in {"completed", "failed", "stopped"}:
+            if status in _TERMINAL_STATUSES:
                 break
 
             if _time_left() <= 0:
                 break
             await asyncio.sleep(min(30.0, _time_left()))
             retry_delay = 1.0
-        else:
-            logger.error(
-                "Timeout waiting for agent run to complete: task_id=%s",
-                task_id,
-            )
-            raise TimeoutError(
-                f"Agent run {agent_run_id} did not complete within {timeout} seconds"
-            )
+    if status not in _TERMINAL_STATUSES:
+        logger.error(
+            "Timeout waiting for agent run to complete: task_id=%s",
+            task_id,
+        )
+        raise TimeoutError(
+            f"Agent run {agent_run_id} did not complete within {timeout} seconds"
+        )
 
     return status
+
+
+async def _get_llm_messages_with_client(client, task_id: str) -> list[dict[str, Any]]:
+    """Fetch raw LLM messages using the caller-owned Supabase client."""
+    all_messages: list[dict[str, Any]] = []
+    batch_size = 1000
+    offset = 0
+
+    while True:
+        query = (
+            client.table("messages")
+            .select("message_id, role, content, created_at, updated_at")
+            .eq("task_id", task_id)
+            .order("created_at", desc=False)
+            .range(offset, offset + batch_size - 1)
+        )
+        result = await _execute_message_query_with_retry(
+            query, task_id=task_id, offset=offset
+        )
+        data = getattr(result, "data", None) or []
+        all_messages.extend(data)
+        if len(data) < batch_size:
+            break
+        offset += batch_size
+
+    return all_messages
+
+
+async def _get_raw_messages_with_client(client, task_id: str) -> list[dict[str, Any]]:
+    all_messages: list[dict[str, Any]] = []
+    batch_size = 1000
+    offset = 0
+
+    while True:
+        query = (
+            client.table("messages")
+            .select("message_id, role, content, created_at, updated_at, metadata")
+            .eq("task_id", task_id)
+            .order("created_at", desc=False)
+            .range(offset, offset + batch_size - 1)
+        )
+        result = await _execute_message_query_with_retry(
+            query, task_id=task_id, offset=offset
+        )
+        data = getattr(result, "data", None) or []
+        if not data:
+            break
+        all_messages.extend(data)
+        offset += batch_size
+
+    return all_messages
+
+
+async def _execute_message_query_with_retry(
+    query, *, task_id: str, offset: int, max_retries: int = 3
+):
+    """Execute a message query with retry on transient read failures."""
+    retry_delay = 2.0
+    for attempt in range(max_retries + 1):
+        try:
+            return await query.execute()
+        except _TRANSIENT_HTTP_ERRORS:
+            if attempt == max_retries:
+                raise
+            logger.warning(
+                "Transient error querying messages (task=%s, offset=%d), "
+                "retry %d/%d in %.1fs",
+                task_id,
+                offset,
+                attempt + 1,
+                max_retries,
+                retry_delay,
+            )
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 30.0)
+
+
+async def _get_terminal_error(client, task_id: str, agent_run_id: str | None) -> str:
+    """Return a concise backend error for a terminal non-success status."""
+    try:
+        if agent_run_id:
+            result = (
+                await client.table("agent_runs")
+                .select("error, status")
+                .eq("id", agent_run_id)
+                .maybe_single()
+                .execute()
+            )
+            data = getattr(result, "data", None)
+            if isinstance(data, dict) and data.get("error"):
+                return str(data["error"])
+
+        result = (
+            await client.table("tasks")
+            .select("error, status")
+            .eq("task_id", task_id)
+            .maybe_single()
+            .execute()
+        )
+        data = getattr(result, "data", None)
+        if isinstance(data, dict) and data.get("error"):
+            return str(data["error"])
+    except Exception as exc:
+        logger.warning(
+            "Failed to fetch terminal error for task_id=%s: %s",
+            task_id,
+            exc,
+        )
+
+    return "no backend error details available"
 
 
 def _extract_final_answer(messages: list[dict]) -> str | None:
@@ -1023,6 +1339,44 @@ def _extract_final_answer(messages: list[dict]) -> str | None:
 
     return None
 
+
+async def _create_shortlived_db_client():
+    """Create a fresh Supabase async client with a per-run connection pool.
+
+    The returned client (and its underlying httpx pool) should be closed by the
+    caller via ``await _close_db_client(client)`` once the run finishes.
+    """
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get(
+        "SUPABASE_ANON_KEY"
+    )
+    if not supabase_url or not supabase_key:
+        raise RuntimeError(
+            "SUPABASE_URL and a key (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY) "
+            "environment variables must be set."
+        )
+    httpx_client = AsyncHttpxClient(
+        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+        limits=Limits(
+            max_connections=10,
+            max_keepalive_connections=5,
+            keepalive_expiry=30,
+        ),
+    )
+    options = AsyncClientOptions(httpx_client=httpx_client)
+    return await create_async_client(supabase_url, supabase_key, options)
+
+
+async def _close_db_client(client) -> None:
+    """Close a Supabase async client and its underlying httpx pool."""
+    try:
+        httpx_client = getattr(getattr(client, "options", None), "httpx_client", None)
+        if httpx_client is not None:
+            await httpx_client.aclose()
+    except Exception as exc:
+        logger.warning("Error closing DB client: %s", exc)
+
+
 async def run_backend(
     task_description: str | None,
     task_file_path: list[str] | None,
@@ -1038,85 +1392,147 @@ async def run_backend(
     base_url: str | None = None,
     api_key: str | None = None,
     refresh_token: str | None = DEFAULT_REFRESH_TOKEN,
+    seed_messages_already_inserted: bool = False,
 ):
-
-    db = DBConnection()
-    client = await db.client
+    # Per-run client: avoids exhausting the singleton pool under concurrent rollouts
+    client = await _create_shortlived_db_client()
+    terminal_status: str | None = None
+    agent_started = False
 
     user_id = user_id or DEFAULT_USER_ID
     if not user_id:
+        await _close_db_client(client)
         raise ValueError(
             "user_id is required. Set TPFC_USER_ID env var or pass user_id argument."
         )
-    resolved_agent_id = await _resolve_agent_id(client, user_id, agent_id)
-
-    task_id = await create_task(
-        client=client,
-        account_id=user_id,
-        agent_id=resolved_agent_id,
-        name=task_description[:100] if task_description else None,
-    )
-    logger.info("Task created: %s", task_id)
-
-
-    async def _do_run():
-        token_manager = SharedTokenManager(
-            refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
-        )
-        auth_token = await token_manager.get_valid_token()
-
-        form_data = _prepare_form_data(
-            task_id=task_id,
-            task_description=task_description,
-            agent_id=resolved_agent_id,
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-            tags=tags,
-        )
-
-        result, auth_token = await _start_agent_run_with_refresh(
-            api_base_url=LE_AGENT_API_URL,
-            token_manager=token_manager,
-            auth_token=auth_token,
-            form_data=form_data,
-            task_file_path=task_file_path,
-        )
-        logger.info("Agent run started via API: %s", result)
-
-        agent_run_id = result.get("agent_run_id")
-        start_status = result.get("status")
-
-        if start_status == "queued" and not agent_run_id:
-            logger.warning(
-                "Agent run queued (slot occupied) for task_id=%s, waiting via task stream",
-                task_id,
+    if seed_messages_already_inserted:
+        if not task_id:
+            await _close_db_client(client)
+            raise ValueError(
+                "task_id is required when seed_messages_already_inserted=True"
+            )
+        if not model_name:
+            await _close_db_client(client)
+            raise ValueError(
+                "model_name is required when seed_messages_already_inserted=True"
             )
 
-        await _wait_for_agent_run(
-            client,
-            task_id=task_id,
-            agent_run_id=agent_run_id,
-            api_base_url=LE_AGENT_API_URL,
-            auth_token=auth_token,
-            token_manager=token_manager,
-        )
-
-        messages = await get_llm_messages(task_id, return_raw=True)
-        final_boxed_answer = _extract_final_answer(messages)
-
-        return messages, final_boxed_answer, log_path, None
-
-
     try:
-        return await asyncio.wait_for(_do_run(), timeout=900)
-    except TimeoutError:
-        logger.warning("TPFCAgent run timed out after 15 minutes for task_id=%s", task_id)
-        raise
+        resolved_agent_id = None
+        if not seed_messages_already_inserted:
+            resolved_agent_id = await _resolve_agent_id(client, user_id, agent_id)
+
+            task_id = await create_task(
+                client=client,
+                account_id=user_id,
+                agent_id=resolved_agent_id,
+                name=task_description[:100] if task_description else None,
+            )
+            logger.info("Task created: %s", task_id)
+
+        async def _do_run():
+            nonlocal agent_started, terminal_status
+            token_manager = SharedTokenManager(
+                refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
+            )
+            auth_token = await token_manager.get_valid_token()
+
+            if seed_messages_already_inserted:
+                (
+                    result,
+                    auth_token,
+                ) = await _start_branch_agent_run_for_task_with_refresh(
+                    client=client,
+                    api_base_url=LE_AGENT_API_URL,
+                    token_manager=token_manager,
+                    auth_token=auth_token,
+                    task_id=task_id,
+                    account_id=user_id,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+                logger.info("Branch agent run started for task: %s", result)
+            else:
+                form_data = _prepare_form_data(
+                    task_id=task_id,
+                    task_description=task_description,
+                    agent_id=resolved_agent_id,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    tags=tags,
+                )
+
+                result, auth_token = await _start_agent_run_with_refresh(
+                    api_base_url=LE_AGENT_API_URL,
+                    token_manager=token_manager,
+                    auth_token=auth_token,
+                    form_data=form_data,
+                    task_file_path=task_file_path,
+                )
+                logger.info("Agent run started via API: %s", result)
+            agent_started = True
+
+            agent_run_id = result.get("agent_run_id")
+            start_status = result.get("status")
+
+            if start_status == "queued" and not agent_run_id:
+                logger.warning(
+                    "Agent run queued (slot occupied) for task_id=%s, waiting via task stream",
+                    task_id,
+                )
+
+            terminal_status = await _wait_for_agent_run(
+                client,
+                task_id=task_id,
+                agent_run_id=agent_run_id,
+                api_base_url=LE_AGENT_API_URL,
+                auth_token=auth_token,
+                token_manager=token_manager,
+                timeout=_RUN_TIMEOUT,
+            )
+
+            if terminal_status != "completed":
+                error = await _get_terminal_error(client, task_id, agent_run_id)
+                raise RuntimeError(
+                    f"Agent run ended with status={terminal_status!r} "
+                    f"for task_id={task_id}: {error}"
+                )
+
+            messages = await _get_llm_messages_with_client(client, task_id)
+            raw_messages = await _get_raw_messages_with_client(client, task_id)
+            final_boxed_answer = _extract_final_answer(messages)
+
+            return BackendRunResult(
+                messages=messages,
+                raw_messages=raw_messages,
+                final_answer=final_boxed_answer,
+                log_path=log_path,
+                task_id=task_id,
+            )
+
+        try:
+            return await asyncio.wait_for(_do_run(), timeout=_RUN_TIMEOUT)
+        except TimeoutError:
+            logger.warning(
+                "TPFCAgent run timed out after 25 minutes for task_id=%s", task_id
+            )
+            raise
+        finally:
+            # Guaranteed to run on normal exit, exception, or CancelledError
+            # (the latter fires when asyncio.run() is cancelled by SIGINT/Ctrl+C).
+            if terminal_status in _TERMINAL_STATUSES or not agent_started:
+                await cleanup_sandbox_for_task(client, task_id)
+            else:
+                logger.warning(
+                    "Skipping sandbox cleanup for task_id=%s because the backend "
+                    "run may still be active (last_status=%s)",
+                    task_id,
+                    terminal_status,
+                )
     finally:
-        # Guaranteed to run on normal exit, exception, or CancelledError
-        # (the latter fires when asyncio.run() is cancelled by SIGINT/Ctrl+C).
-        await cleanup_sandbox_for_task(client, task_id)
+        await _close_db_client(client)
 
 
 if __name__ == "__main__":

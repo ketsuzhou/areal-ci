@@ -75,13 +75,13 @@ rollout:
     reasoning_parser: qwen3
     export_style: individual
     turn_discount: 1.0
-    engine_max_tokens: 10112 
+    engine_max_tokens: 10112
 
 gconfig:
   n_samples: 2
   min_new_tokens: 0
   max_new_tokens: 1024
-  max_tokens: 10112 
+  max_tokens: 10112
   greedy: false
   temperature: 1.0
 
@@ -102,7 +102,7 @@ actor:
   pad_to_maximum: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 10112 
+    max_tokens_per_mb: 10112
   optimizer:
     type: adam
     lr: 1.70e-6
@@ -130,7 +130,7 @@ actor:
   adv_norm:
     mean_level: group
     std_level: group
-  weight_update_mode: disk
+  weight_update_mode: xccl
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker
@@ -154,7 +154,7 @@ ref:
   pad_to_maximum: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 10112 
+    max_tokens_per_mb: 10112
   optimizer: null
   scheduling_strategy:
     type: colocation
@@ -190,7 +190,7 @@ train_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 10112 
+  max_length: 10112
 
 valid_dataset:
   batch_size: 4
@@ -198,7 +198,7 @@ valid_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 10112 
+  max_length: 10112
 
 # Utilities
 saver:

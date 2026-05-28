@@ -86,6 +86,7 @@ def main(args: list[str] | None = None) -> None:
 
     # Restore train_id from recover checkpoint if available, otherwise generate
     restored_id = _try_load_train_id_from_checkpoint(config)
+    # restored_id = None
     if restored_id is not None:
         os.environ["TRAIN_ID"] = restored_id
         logger.info("Restored Train ID from checkpoint: %s", restored_id)

@@ -9,6 +9,8 @@ tree_search:
   mode: CROSS_TRAINING
   loss_mode: GRPO
   teacher_provider: engine
+  sample_source: SCRATCH
+  branch_probability: 0.5
 
 total_train_epochs: 4
 tokenizer_path: ${actor.path}
@@ -45,7 +47,7 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 3
+  max_concurrent_rollouts: 5
   queue_size: 240
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 40
@@ -115,7 +117,7 @@ actor:
   adv_norm:
     mean_level: group
     std_level: group
-  weight_update_mode: disk
+  weight_update_mode: xccl
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker

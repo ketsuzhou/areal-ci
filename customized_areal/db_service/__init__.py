@@ -17,9 +17,19 @@ This module provides:
 from .agent_loader import AgentConfig, AgentData, AgentLoader, get_agent_loader
 from .agent_service import AgentFilters, AgentService, get_agent_service
 from .connection import DBConnection, SyncDBConnection
-from .messages import add_message, get_llm_messages
+from .messages import (
+    add_message,
+    copy_messages_to_task,
+    get_llm_messages,
+    truncate_messages_before_turn,
+)
 from .pagination import PaginationParams
-from .sandbox import cleanup_sandbox_for_task, delete_sandbox
+from .sandbox import (
+    bind_sandbox_to_task,
+    cleanup_sandbox_for_task,
+    clone_sandbox,
+    delete_sandbox,
+)
 from .schemas import AgentCreateRequest, AgentResponse, AgentUpdateRequest
 from .tasks import TaskStatus, create_task
 
@@ -29,6 +39,10 @@ __all__ = [
     "create_task",
     "get_llm_messages",
     "add_message",
+    "copy_messages_to_task",
+    "truncate_messages_before_turn",
+    "bind_sandbox_to_task",
+    "clone_sandbox",
     "cleanup_sandbox_for_task",
     "delete_sandbox",
     "TaskStatus",

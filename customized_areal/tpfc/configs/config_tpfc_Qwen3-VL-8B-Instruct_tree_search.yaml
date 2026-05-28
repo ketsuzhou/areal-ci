@@ -9,6 +9,8 @@ tree_search:
   checkpoint_dir: customized_areal/tpfc/data/tree_cache
   mode: cross_training
   loss_mode: grpo
+  sample_source: SCRATCH
+  branch_probability: 0.5
 total_train_epochs: 5
 tokenizer_path: ${actor.path}
 
@@ -114,7 +116,7 @@ actor:
   adv_norm:
     mean_level: batch
     std_level: batch
-  weight_update_mode: disk
+  weight_update_mode: xccl
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker

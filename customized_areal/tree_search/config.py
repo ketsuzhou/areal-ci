@@ -19,6 +19,12 @@ class LossMode(str, Enum):
     BOTH = "both"
 
 
+class SampleSource(str, Enum):
+    SCRATCH = "scratch"
+    BRANCH = "branch"
+    MIXED = "mixed"
+
+
 @dataclass
 class TreeBackupConfig:
     mode: CacheMode = CacheMode.OFF
@@ -51,6 +57,8 @@ class TreeBackupConfig:
     diagnose_base_url: str = ""
     diagnose_api_key: str = ""
     strict_distill_json: bool = True
+    sample_source: SampleSource = SampleSource.SCRATCH
+    branch_probability: float = 0.5
 
 
 @dataclass

@@ -164,7 +164,7 @@ class OnPolicyDistillAgent:
 
         try:
             # Execute the backend run
-            completion_messages = await run_backend(
+            run_result = await run_backend(
                 task_description=task_description,
                 task_file_path=[],
                 log_path="./log.json",
@@ -179,6 +179,7 @@ class OnPolicyDistillAgent:
                 api_key=api_key,
                 rebuild_llm_client=True,
             )
+            completion_messages = run_result.messages
 
             # Compute position-level rewards using teacher model
             position_rewards: list[PositionRewardInfo] = []

@@ -193,6 +193,10 @@ class TreeCheckpointManager:
             "turn_idx": node.turn_idx,
             "query_id": node.query_id,
             "train_id": node.train_id,
+            "task_id": node.task_id,
+            "entropy_stats": node.entropy_stats,
+            "need_branch": node.need_branch,
+            "branch_sandbox_id": node.branch_sandbox_id,
         }
         if node.topk_ids is not None:
             data["topk_ids"] = node.topk_ids
@@ -218,6 +222,10 @@ class TreeCheckpointManager:
             turn_idx=data.get("turn_idx", 0),
             query_id=data.get("query_id", ""),
             train_id=data.get("train_id", ""),
+            task_id=data.get("task_id", ""),
+            entropy_stats=data.get("entropy_stats"),
+            need_branch=bool(data.get("need_branch", False)),
+            branch_sandbox_id=data.get("branch_sandbox_id"),
             topk_ids=data.get("topk_ids"),
             topk_logp=data.get("topk_logp"),
             teacher_logp=data.get("teacher_logp"),
