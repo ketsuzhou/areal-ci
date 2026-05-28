@@ -1,7 +1,9 @@
-"""Custom PPO Actor that uses grpo_distill_loss_fn.
+"""Custom PPO Actor with distill-loss patching and multi-candidate support.
 
-This module provides a custom PPO actor that uses combined
-GRPO and position-level GRPO loss function for on-policy distillation.
+This module provides:
+- MultiCandidateFSDPPPOActor: PPO actor using MultiCandidateFSDPEngine for
+  on-policy distillation with multi-candidate logprob gathering.
+- patch/unpatch functions to swap PPOActor._ppo_update with grpo_distill_loss_fn.
 """
 
 from __future__ import annotations
@@ -12,15 +14,79 @@ from typing import Any
 
 import torch
 
-from areal.api.cli_args import MicroBatchSpec
+from areal.api import Scheduler
+from areal.api.cli_args import MicroBatchSpec, PPOActorConfig
 from areal.trainer.ppo.actor import PPOActor
 from areal.utils import logging, stats_tracker
 from areal.utils.data import split_padded_tensor_dict_into_mb_list
+
+from ..engine.fsdp_engine import MultiCandidateFSDPEngine
 
 logger = logging.getLogger("OnPolicyDistill")
 
 _patch_applied = False
 _original_ppo_update = None
+
+
+class MultiCandidateFSDPPPOActor(MultiCandidateFSDPEngine):
+    """PPO Actor implementation using MultiCandidateFSDPEngine backend.
+
+    This actor extends MultiCandidateFSDPEngine instead of standard FSDPEngine
+    to enable multi-candidate logprob gathering for on-policy distillation.
+
+    The key difference from FSDPPPOActor:
+    - Uses MultiCandidateFSDPEngine as base class
+    - Supports position-level rewards via _prepare_multi_candidate_labels
+    - Computes logprobs for all candidate tokens, not just chosen tokens
+
+    Example usage:
+        actor = MultiCandidateFSDPPPOActor(config)
+        actor.initialize(role="actor", ...)
+        actor.ppo_update(batch)  # Uses grpo_distill_loss_fn
+    """
+
+    def __init__(self, config: PPOActorConfig):
+        super().__init__(config)
+        self.actor = PPOActor(config, self)
+
+        # Patch PPOActor._ppo_update on the worker process to use
+        # grpo_distill_loss_fn.  The controller-side patch in
+        # CustomizedPPOTrainer.train() only affects the controller process;
+        # workers receive ppo_update via RPC and run the original
+        # _ppo_update → grpo_loss_fn, which crashes on teacher_logp shape
+        # mismatch (response-aligned vs full-sequence-length).
+        patch_ppo_actor_class_to_use_distill_loss()
+
+        logger.info("MultiCandidateFSDPPPOActor initialized")
+
+    @torch.no_grad()
+    def compute_logp(self, *args, **kwargs) -> list[torch.Tensor] | None:
+        """Compute log probabilities for given trajectories."""
+        return self.actor.compute_logp(*args, **kwargs)
+
+    @torch.no_grad()
+    def compute_advantages(self, *args, **kwargs) -> list[dict[str, Any]]:
+        """Compute advantages for given trajectories."""
+        return self.actor.compute_advantages(*args, **kwargs)
+
+    def ppo_update(self, *args, **kwargs) -> None:
+        """Perform PPO update on the given batch."""
+        self.actor.ppo_update(*args, **kwargs)
+
+    @classmethod
+    def as_controller(cls, config: PPOActorConfig, scheduler: Scheduler):
+        """Create a controller for this actor class.
+
+        This method is used by the trainer to create a controller
+        that manages distributed workers.
+        """
+        from areal.trainer.ppo.actor import PPOActorController
+
+        return PPOActorController(
+            train_engine=cls,
+            config=config,
+            scheduler=scheduler,
+        )
 
 
 def patch_ppo_actor_class_to_use_distill_loss() -> None:
@@ -45,7 +111,7 @@ def patch_ppo_actor_class_to_use_distill_loss() -> None:
 
     def _ppo_update_with_distill_loss(self, data: dict[str, Any]) -> None:
         """PPO update using grpo_distill_loss_fn."""
-        from ..training.loss import grpo_distill_loss_fn
+        from .loss import grpo_distill_loss_fn
 
         # Log reward stats before removing them (Bug 2 fix)
         reward_score = data.get("rewards")

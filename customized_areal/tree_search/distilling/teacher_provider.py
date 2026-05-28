@@ -9,7 +9,7 @@ from typing import Protocol
 import httpx
 from openai import OpenAI
 
-from customized_areal.tree_search.core.teacher_client import TeacherClient
+from customized_areal.tree_search.distilling.teacher_client import TeacherClient
 
 from areal.utils import logging
 

@@ -1,4 +1,4 @@
-# customized_areal/tree_search/trainer.py
+# customized_areal/tree_search/training/trainer.py
 """PPOTrainer with tree-search-aware rollout via .env flag.
 
 All cache logic, tree ops, and checkpoint saving happen inside
@@ -34,7 +34,7 @@ from areal.utils.saver import Saver
 logger = logging.getLogger("TreeBackupPPOTrainer")
 
 
-class CacheAwarePPOTrainer(PPOTrainer):
+class CustomizedPPOTrainer(PPOTrainer):
     """PPOTrainer with tree-search-aware rollout via .env flag.
 
     All cache logic, tree ops, and checkpoint saving happen inside
@@ -91,12 +91,12 @@ class CacheAwarePPOTrainer(PPOTrainer):
     ):
         """Train with distill loss patch applied if needed."""
         logger.info(
-            "CacheAwarePPOTrainer.train() called: workflow=%s, loss_mode=%s",
+            "CustomizedPPOTrainer.train() called: workflow=%s, loss_mode=%s",
             workflow,
             self.tree_backup_config.loss_mode.value,
         )
         if self.tree_backup_config.loss_mode != LossMode.GRPO:
-            from customized_areal.tree_search.training.actor import (
+            from .actor import (
                 patch_ppo_actor_class_to_use_distill_loss,
                 unpatch_ppo_actor_distill_loss,
             )

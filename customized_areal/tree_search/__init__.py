@@ -14,14 +14,14 @@ from customized_areal.tree_search.distill_types import (
     PositionRewardInfo,
 )
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
+from customized_areal.tree_search.training.trainer import CustomizedPPOTrainer
 from customized_areal.tree_search.tree_search_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
 )
 
 __all__ = [
     "AdvantageMode",
-    "CacheAwarePPOTrainer",
+    "CustomizedPPOTrainer",
     "DiagnosisTurn",
     "EpisodeDiagnosis",
     "InteractionWithTokenLevelReward",
@@ -41,19 +41,19 @@ __all__ = [
 def __getattr__(name):
     # Lazy imports for distillation components
     if name == "OnPolicyDistillConfig":
-        from .core.config import OnPolicyDistillConfig
+        from .distilling.config import OnPolicyDistillConfig
 
         return OnPolicyDistillConfig
     if name == "OnPolicyDistillAgent":
-        from .core.agent import OnPolicyDistillAgent
+        from .distilling.agent import OnPolicyDistillAgent
 
         return OnPolicyDistillAgent
     if name == "TeacherConfig":
-        from .core.teacher_client import TeacherConfig
+        from .distilling.teacher_client import TeacherConfig
 
         return TeacherConfig
     if name == "TeacherClient":
-        from .core.teacher_client import TeacherClient
+        from .distilling.teacher_client import TeacherClient
 
         return TeacherClient
     if name == "MultiCandidateFSDPEngine":
@@ -73,7 +73,7 @@ def __getattr__(name):
 
         return gather_logprobs_entropy_multi_candidates
     if name == "_compute_token_rewards":
-        from .core.reward_compute import _compute_token_rewards
+        from .distilling.reward_compute import _compute_token_rewards
 
         return _compute_token_rewards
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

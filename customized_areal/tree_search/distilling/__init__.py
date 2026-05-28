@@ -1,4 +1,4 @@
-"""Core components for on-policy distillation.
+"""Distilling components for on-policy distillation.
 
 This module contains:
 - config.py: OnPolicyDistillConfig

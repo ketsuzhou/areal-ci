@@ -575,11 +575,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             return tokenizer
 
     async def _setup_distill_provider(self, engine):
-        from customized_areal.tree_search.core.teacher_client import (
+        from customized_areal.tree_search.distilling.teacher_client import (
             TeacherClient,
             TeacherConfig,
         )
-        from customized_areal.tree_search.core.teacher_provider import (
+        from customized_areal.tree_search.distilling.teacher_provider import (
             ExternalTeacherProvider,
         )
 
@@ -664,7 +664,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         provider: Any,
         tokenizer: Any,
     ) -> tuple[list[Node], dict[str, list[Any]]]:
-        from customized_areal.tree_search.core.selected_turn_distill import (
+        from customized_areal.tree_search.distilling.selected_turn_distill import (
             parse_episode_diagnosis,
             selected_turn_to_position_rewards,
         )

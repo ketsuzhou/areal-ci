@@ -8,10 +8,10 @@ agentic RL training pattern, using the run_backend function from tpfc.
 from typing import Any
 
 from customized_areal.tpfc.backend_run import run_backend
-from customized_areal.tree_search.core.reward_compute import (
+from customized_areal.tree_search.distilling.reward_compute import (
     _compute_token_rewards,
 )
-from customized_areal.tree_search.core.teacher_client import (
+from customized_areal.tree_search.distilling.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )

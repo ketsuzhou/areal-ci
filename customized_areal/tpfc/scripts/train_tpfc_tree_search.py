@@ -1,6 +1,6 @@
 """Training script for TPFC Agent with MCTS tree backup and rollout caching.
 
-Uses CacheAwarePPOTrainer from tree_search to combine the TPFC agent and
+Uses CustomizedPPOTrainer from tree_search to combine the TPFC agent and
 dataset with MCTS tree backup advantages and rollout caching.  Cached
 trajectories are reused across training steps; only missing rollouts are
 newly generated.
@@ -22,7 +22,7 @@ sys.path.insert(0, str(project_root))
 from customized_areal.tpfc.tpfc_config import TPFCConfig
 from customized_areal.tpfc.tpfc_dataset import get_tpfc_rl_dataset
 from customized_areal.tree_search.config import RolloutCacheConfig
-from customized_areal.tree_search.trainer import CacheAwarePPOTrainer
+from customized_areal.tree_search.training.trainer import CustomizedPPOTrainer
 
 from areal.api.cli_args import load_expr_config
 from areal.utils import logging
@@ -152,7 +152,7 @@ def main(args: list[str] | None = None) -> None:
     eval_workflow_kwargs = workflow_kwargs.copy()
     eval_workflow_kwargs["temperature"] = 0.6
 
-    with CacheAwarePPOTrainer(
+    with CustomizedPPOTrainer(
         config,
         cache_config=cache_config,
         tree_backup_config=tree_backup_config,
