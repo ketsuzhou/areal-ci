@@ -18,18 +18,163 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import re
 import traceback
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
-from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
+from customized_areal.db_service import (
+    bind_sandbox_to_task,
+    copy_messages_to_task,
+    create_task,
+    delete_sandbox,
+    truncate_messages_before_turn,
+)
+from customized_areal.tpfc.backend_run import _get_raw_messages_with_client
+from customized_areal.tree_search.config import (
+    AdvantageMode,
+    CacheMode,
+    LossMode,
+    SampleSource,
+)
 from customized_areal.tree_search.mcts_tree_store import Node
 
 from areal.api import RolloutWorkflow
 from areal.utils import logging
 
 logger = logging.getLogger("TreeSearchGroupedWorkflow")
+
+
+@dataclass(frozen=True)
+class EpisodeRunResult:
+    result: Any
+    task_id: str
+    raw_messages: list[dict[str, Any]]
+
+
+def _with_episode_metadata(
+    result: Any,
+    data: dict[str, Any],
+) -> Any:
+    task_id = data.get("_backend_run_task_id")
+    raw_messages = data.get("_backend_run_raw_messages")
+    if isinstance(task_id, str) and isinstance(raw_messages, list):
+        return EpisodeRunResult(
+            result=result,
+            task_id=task_id,
+            raw_messages=raw_messages,
+        )
+    return result
+
+
+def choose_sample_source(
+    mode: SampleSource,
+    *,
+    branch_probability: float,
+    has_candidate: bool,
+    random_value: float,
+) -> SampleSource:
+    if mode == SampleSource.SCRATCH or not has_candidate:
+        return SampleSource.SCRATCH
+    if mode == SampleSource.BRANCH:
+        return SampleSource.BRANCH
+    if mode == SampleSource.MIXED and random_value < branch_probability:
+        return SampleSource.BRANCH
+    return SampleSource.SCRATCH
+
+
+def _max_entropy(node: Node) -> float:
+    stats = node.entropy_stats or {}
+    value = stats.get("max_entropy") if isinstance(stats, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.0
+    return float(value)
+
+
+def select_branch_candidate(nodes: list[Node], query_id: str) -> Node | None:
+    candidates = [
+        node
+        for node in nodes
+        if node.query_id == query_id
+        and node.need_branch
+        and bool(node.task_id)
+        and bool(node.branch_sandbox_id)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_max_entropy)
+
+
+async def build_branch_task(
+    *,
+    client: Any,
+    account_id: str,
+    agent_id: str,
+    candidate: Node,
+    name: str | None,
+) -> str | None:
+    if not candidate.task_id or not candidate.branch_sandbox_id:
+        return None
+
+    raw_messages = await _get_raw_messages_with_client(client, candidate.task_id)
+    prefix = truncate_messages_before_turn(raw_messages, candidate.turn_idx)
+    branch_sandbox_id = candidate.branch_sandbox_id
+
+    branch_task_id = await create_task(
+        client=client,
+        account_id=account_id,
+        agent_id=agent_id,
+        name=name,
+    )
+    await bind_sandbox_to_task(
+        client,
+        sandbox_id=branch_sandbox_id,
+        task_id=branch_task_id,
+        account_id=account_id,
+    )
+    await copy_messages_to_task(client, task_id=branch_task_id, messages=prefix)
+
+    return branch_task_id
+
+
+def _assistant_metadata(raw_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    metadata_by_turn: list[dict[str, Any]] = []
+    for row in raw_messages:
+        if row.get("role") != "assistant":
+            continue
+        metadata = row.get("metadata") or {}
+        metadata_by_turn.append(metadata if isinstance(metadata, dict) else {})
+    return metadata_by_turn
+
+
+def annotate_nodes_from_run(
+    nodes: list[Node],
+    *,
+    task_id: str,
+    raw_messages: list[dict[str, Any]],
+) -> None:
+    """Copy TPFC assistant-message metadata onto Nodes by 1-indexed turn_idx."""
+    assistant_meta = _assistant_metadata(raw_messages)
+    for node in nodes:
+        node.task_id = task_id
+        if node.turn_idx < 1:
+            continue
+        idx = node.turn_idx - 1
+        if idx >= len(assistant_meta):
+            continue
+
+        metadata = assistant_meta[idx]
+        entropy_stats = metadata.get("entropy_stats")
+        node.entropy_stats = entropy_stats if isinstance(entropy_stats, dict) else None
+        node.need_branch = bool(metadata.get("need_branch"))
+        branch_sandbox_id = metadata.get("branch_sandbox_id")
+        node.branch_sandbox_id = (
+            branch_sandbox_id
+            if isinstance(branch_sandbox_id, str) and branch_sandbox_id
+            else None
+        )
 
 
 def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
@@ -320,6 +465,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         diagnose_api_key: str = "",
         strict_distill_json: bool = True,
         max_tokens: int = 0,
+        sample_source: SampleSource = SampleSource.SCRATCH,
+        branch_probability: float = 0.5,
     ) -> None:
         from customized_areal.tree_search.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.checkpoint import TreeCheckpointManager
@@ -353,6 +500,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.diagnose_api_key = diagnose_api_key
         self.strict_distill_json = strict_distill_json
         self.max_tokens = max_tokens
+        self.sample_source = SampleSource(sample_source)
+        self.branch_probability = branch_probability
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 
@@ -373,6 +522,13 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     ) -> list[Node] | None:
         """Convert a single arun_episode result to list[Node]."""
         from areal.experimental.openai.types import InteractionWithTokenLogpReward
+
+        task_id: str | None = None
+        raw_messages: list[dict[str, Any]] | None = None
+        if isinstance(result, EpisodeRunResult):
+            task_id = result.task_id
+            raw_messages = result.raw_messages
+            result = result.result
 
         if isinstance(result, dict) and all(
             isinstance(v, InteractionWithTokenLogpReward) for v in result.values()
@@ -398,6 +554,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             node.query_id = query_id
             if not node.turn_idx:
                 node.turn_idx = turn_idx
+        if isinstance(task_id, str) and isinstance(raw_messages, list):
+            annotate_nodes_from_run(nodes, task_id=task_id, raw_messages=raw_messages)
         return nodes
 
     async def _get_tokenizer(self):
@@ -640,6 +798,82 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
         return None
 
+    async def _run_fresh_episode(
+        self,
+        engine,
+        data: dict[str, Any],
+        group_idx: int,
+        query_id: str,
+    ) -> Any:
+        episode_data = dict(data)
+        all_query_nodes = self.tree_store.trajectories.get(query_id, [])
+        candidate = select_branch_candidate(all_query_nodes, query_id)
+        source = choose_sample_source(
+            self.sample_source,
+            branch_probability=self.branch_probability,
+            has_candidate=candidate is not None,
+            random_value=random.random(),
+        )
+        if source == SampleSource.BRANCH and candidate is not None:
+            branch_data = dict(episode_data)
+            try:
+                branch_task_id = await self._prepare_branch_task(branch_data, candidate)
+            except Exception as exc:
+                logger.warning(
+                    "Branch task preparation errored for query_id=%s; "
+                    "falling back to scratch: %s",
+                    query_id,
+                    exc,
+                )
+                branch_task_id = None
+            if branch_task_id:
+                branch_data["task_id"] = branch_task_id
+                branch_data["seed_messages_already_inserted"] = True
+                result = await self._retry_episode(engine, branch_data, group_idx)
+                return _with_episode_metadata(result, branch_data)
+            logger.warning(
+                "Branch task preparation failed for query_id=%s; falling back to scratch",
+                query_id,
+            )
+        result = await self._retry_episode(engine, episode_data, group_idx)
+        return _with_episode_metadata(result, episode_data)
+
+    async def _prepare_branch_task(
+        self,
+        data: dict[str, Any],
+        candidate: Node,
+    ) -> str | None:
+        from customized_areal.tpfc.backend_run import (
+            DEFAULT_AGENT_ID,
+            DEFAULT_USER_ID,
+            _close_db_client,
+            _create_shortlived_db_client,
+            _resolve_agent_id,
+        )
+
+        account_id = str(data.get("user_id") or DEFAULT_USER_ID or "")
+        if not account_id:
+            logger.warning("Cannot branch TPFC episode without user/account id")
+            return None
+
+        client = await _create_shortlived_db_client()
+        try:
+            agent_id = await _resolve_agent_id(
+                client,
+                account_id,
+                data.get("agent_id") or DEFAULT_AGENT_ID,
+            )
+            query = data.get("query")
+            return await build_branch_task(
+                client=client,
+                account_id=account_id,
+                agent_id=agent_id,
+                candidate=candidate,
+                name=str(query)[:100] if query else None,
+            )
+        finally:
+            await _close_db_client(client)
+
     async def _prepare_distill_for_node_groups(
         self,
         node_groups: list[list[Node]],
@@ -710,7 +944,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if need_gen > 0:
             results = await asyncio.gather(
                 *[
-                    self._retry_episode(engine, data, group_idx)
+                    self._run_fresh_episode(engine, data, group_idx, query_id)
                     for group_idx in range(need_gen)
                 ],
                 return_exceptions=True,

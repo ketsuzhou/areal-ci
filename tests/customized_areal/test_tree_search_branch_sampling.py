@@ -318,7 +318,8 @@ def test_select_branch_candidate_filters_invalid_nodes_and_tolerates_bad_entropy
 
 
 @pytest.mark.asyncio
-async def test_build_branch_task_clones_sandbox_and_copies_prefix(monkeypatch):
+async def test_build_branch_task_uses_sandbox_directly_without_clone(monkeypatch):
+    """build_branch_task should bind candidate.branch_sandbox_id directly, not clone it."""
     created = []
     copied = []
 
@@ -328,7 +329,7 @@ async def test_build_branch_task_clones_sandbox_and_copies_prefix(monkeypatch):
     candidate = _node(2)
     candidate.task_id = "source-task"
     candidate.turn_idx = 2
-    candidate.branch_sandbox_id = "source-sandbox"
+    candidate.branch_sandbox_id = "direct-sandbox-id"
 
     raw_messages = [
         {
@@ -357,10 +358,6 @@ async def test_build_branch_task_clones_sandbox_and_copies_prefix(monkeypatch):
         created.append(kwargs)
         return "branch-task"
 
-    async def fake_clone_sandbox(sandbox_id):
-        assert sandbox_id == "source-sandbox"
-        return "cloned-sandbox"
-
     async def fake_bind_sandbox_to_task(client, *, sandbox_id, task_id, account_id):
         assert isinstance(client, FakeClient)
         copied.append(("bind", sandbox_id, task_id, account_id))
@@ -376,10 +373,6 @@ async def test_build_branch_task_clones_sandbox_and_copies_prefix(monkeypatch):
     monkeypatch.setattr(
         "customized_areal.tree_search.tree_search_grouped_workflow.create_task",
         fake_create_task,
-    )
-    monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.clone_sandbox",
-        fake_clone_sandbox,
     )
     monkeypatch.setattr(
         "customized_areal.tree_search.tree_search_grouped_workflow.bind_sandbox_to_task",
@@ -402,7 +395,8 @@ async def test_build_branch_task_clones_sandbox_and_copies_prefix(monkeypatch):
     assert created[0]["account_id"] == "account"
     assert created[0]["agent_id"] == "agent"
     assert created[0]["name"] == "branch"
-    assert copied[0] == ("bind", "cloned-sandbox", "branch-task", "account")
+    # Key assertion: sandbox bound is the DIRECT sandbox, not a clone
+    assert copied[0] == ("bind", "direct-sandbox-id", "branch-task", "account")
     assert copied[1] == (
         "messages",
         "branch-task",
