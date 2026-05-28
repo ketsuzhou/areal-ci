@@ -830,6 +830,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 branch_data["task_id"] = branch_task_id
                 branch_data["seed_messages_already_inserted"] = True
                 result = await self._retry_episode(engine, branch_data, group_idx)
+                await self._cleanup_branch(candidate)
                 return _with_episode_metadata(result, branch_data)
             logger.warning(
                 "Branch task preparation failed for query_id=%s; falling back to scratch",
@@ -873,6 +874,20 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
         finally:
             await _close_db_client(client)
+
+    async def _cleanup_branch(self, candidate: Node) -> None:
+        """Delete branch sandbox and mark node as branched to prevent re-use."""
+        if candidate.branch_sandbox_id:
+            try:
+                await delete_sandbox(candidate.branch_sandbox_id)
+            except Exception:
+                logger.warning(
+                    "Failed to delete branch sandbox_id=%s",
+                    candidate.branch_sandbox_id,
+                    exc_info=True,
+                )
+        candidate.need_branch = False
+        candidate.branch_sandbox_id = None
 
     async def _prepare_distill_for_node_groups(
         self,

@@ -532,3 +532,109 @@ def test_tpfca_agent_result_propagates_to_data_dict():
     assert rewards == 0.9
     assert data["_backend_run_task_id"] == "task-abc"
     assert data["_backend_run_raw_messages"] == [{"role": "assistant", "content": "response"}]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_branch_deletes_sandbox_and_clears_node_state(monkeypatch):
+    deleted_ids = []
+
+    async def fake_delete_sandbox(sandbox_id):
+        deleted_ids.append(sandbox_id)
+
+    monkeypatch.setattr(
+        "customized_areal.tree_search.tree_search_grouped_workflow.delete_sandbox",
+        fake_delete_sandbox,
+    )
+
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    candidate = _node(2)
+    candidate.need_branch = True
+    candidate.branch_sandbox_id = "sb-to-delete"
+
+    await workflow._cleanup_branch(candidate)
+
+    assert deleted_ids == ["sb-to-delete"]
+    assert candidate.need_branch is False
+    assert candidate.branch_sandbox_id is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_branch_tolerates_delete_failure(monkeypatch):
+    async def failing_delete(sandbox_id):
+        raise RuntimeError("sandbox API down")
+
+    monkeypatch.setattr(
+        "customized_areal.tree_search.tree_search_grouped_workflow.delete_sandbox",
+        failing_delete,
+    )
+
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    candidate = _node(2)
+    candidate.need_branch = True
+    candidate.branch_sandbox_id = "sb-failing"
+
+    await workflow._cleanup_branch(candidate)
+
+    # Node state should still be cleared even if delete fails
+    assert candidate.need_branch is False
+    assert candidate.branch_sandbox_id is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_branch_skips_delete_when_no_sandbox_id():
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    candidate = _node(2)
+    candidate.need_branch = True
+    candidate.branch_sandbox_id = None
+
+    await workflow._cleanup_branch(candidate)
+
+    assert candidate.need_branch is False
+    assert candidate.branch_sandbox_id is None
+
+
+def test_select_branch_candidate_ignores_cleaned_up_node():
+    """After _cleanup_branch, node should not be a branch candidate."""
+    cleaned = _node(2)
+    cleaned.query_id = "q"
+    cleaned.task_id = "task-cleaned"
+    cleaned.need_branch = False  # cleared by _cleanup_branch
+    cleaned.branch_sandbox_id = None  # cleared by _cleanup_branch
+    cleaned.entropy_stats = {"max_entropy": 5.0}
+
+    assert select_branch_candidate([cleaned], "q") is None
+
+
+@pytest.mark.asyncio
+async def test_run_fresh_episode_calls_cleanup_after_branch():
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(TreeSearchGroupedRolloutWorkflow)
+    workflow.sample_source = SampleSource.BRANCH
+    workflow.branch_probability = 1.0
+
+    candidate = _node(2)
+    candidate.query_id = "q"
+    candidate.task_id = "source-task"
+    candidate.need_branch = True
+    candidate.branch_sandbox_id = "sb-branch"
+    workflow.tree_store = type("Store", (), {"trajectories": {"q": [candidate]}})()
+
+    cleanup_called = []
+
+    async def fake_prepare_branch_task(data, candidate_arg):
+        return "branch-task-id"
+
+    async def fake_retry_episode(engine, episode_data, group_idx):
+        return {"branch": True}
+
+    async def fake_cleanup(candidate_arg):
+        cleanup_called.append(candidate_arg)
+
+    workflow._prepare_branch_task = fake_prepare_branch_task
+    workflow._retry_episode = fake_retry_episode
+    workflow._cleanup_branch = fake_cleanup
+
+    data = {"query_id": "q"}
+    result = await workflow._run_fresh_episode(None, data, 0, "q")
+
+    assert len(cleanup_called) == 1
+    assert cleanup_called[0] is candidate
