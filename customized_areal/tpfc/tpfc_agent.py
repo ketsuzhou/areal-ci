@@ -7,19 +7,34 @@ agentic RL training pattern, wrapping the existing run_backend functionality.
 
 import asyncio
 import traceback
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from customized_areal.tpfc.backend_run import run_backend
 from customized_areal.tpfc.gaia_final_reward import compute_reward
 
 from areal.utils import logging
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 logger = logging.getLogger("TPFCAgent")
+
+
+@dataclass
+class TPFCAgentResult:
+    """Structured result from TPFCAgent.run() that survives subprocess pickling.
+
+    Unlike data dict mutations (which are lost across process boundaries),
+    this return value is picklable and propagates task_id and raw_messages
+    back to the parent process in subproc mode.
+    """
+
+    reward: float
+    task_id: str = ""
+    raw_messages: list[dict[str, Any]] = field(default_factory=list)
 
 
 class TPFCAgent:
@@ -71,7 +86,7 @@ class TPFCAgent:
         self,
         data: dict[str, Any],
         **extra_kwargs,
-    ) -> float:
+    ) -> TPFCAgentResult:
         """
         Execute a single agent run and return the reward.
 
@@ -137,35 +152,22 @@ class TPFCAgent:
                 tags.append(f"user_id={self.user_id}")
 
             # Execute the backend run
-            completion_messages, _final_answer, _log_path, _trace = await run_backend(
+            run_result = await run_backend(
                 task_description=task_description,
                 task_file_path=task_file_path,
                 log_path="./log.json",
-                task_id="",
+                task_id=data.get("task_id", ""),
                 gt=gt,
                 tags=tags,
                 model_name="openrouter/qwen/qwen3-vl-8b-thinking",
                 base_url=base_url,
                 api_key=api_key,
+                seed_messages_already_inserted=bool(
+                    data.get("seed_messages_already_inserted", False)
+                ),
             )
-
-            # Extract response text from the last assistant message
-            response_text = ""
-            for msg in reversed(completion_messages):
-                if msg.get("role") == "assistant":
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        response_text = "".join(
-                            p.get("text", p.get("content", ""))
-                            if isinstance(p, dict)
-                            else str(p)
-                            for p in content
-                        )
-                    elif isinstance(content, dict):
-                        response_text = content.get("text", content.get("content", ""))
-                    else:
-                        response_text = content
-                    break
+            completion_messages = run_result.messages
+            _final_answer = run_result.final_answer
 
             # Calculate reward using gaia_final_reward.compute_reward
             try:
@@ -192,12 +194,16 @@ class TPFCAgent:
                 reward,
             )
 
-            return float(reward)
+            return TPFCAgentResult(
+                reward=float(reward),
+                task_id=run_result.task_id,
+                raw_messages=run_result.raw_messages,
+            )
 
         try:
-            return await asyncio.wait_for(_do_run(), timeout=1000)
+            return await asyncio.wait_for(_do_run(), timeout=1500)
         except TimeoutError:
-            logger.warning("TPFCAgent run timed out after 15 minutes")
+            logger.warning("TPFCAgent run timed out after 25 minutes")
             raise
         except Exception as exc:
             logger.warning(
