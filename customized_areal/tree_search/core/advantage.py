@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 from areal.utils import logging
 

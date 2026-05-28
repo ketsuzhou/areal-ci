@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# customized_areal/tree_search/mcts_tree_store.py
+# customized_areal/tree_search/core/tree_store.py
 """Flat trajectory store with MCTS statistics.
 
 Replaces the TrieNode-based trie with a per-query list of Node

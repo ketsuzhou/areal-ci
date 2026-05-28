@@ -1,4 +1,4 @@
-# customized_areal/tree_search/tree_search_grouped_workflow.py
+# customized_areal/tree_search/core/customized_grouped_workflow.py
 """Tree-search-aware grouped rollout workflow with cache reuse and teacher distillation.
 
 Consolidates the functionality of QueryIDProxyWorkflow,
@@ -39,7 +39,7 @@ from customized_areal.tree_search.config import (
     LossMode,
     SampleSource,
 )
-from customized_areal.tree_search.mcts_tree_store import Node
+from customized_areal.tree_search.core.tree_store import Node
 
 from areal.api import RolloutWorkflow
 from areal.utils import logging
@@ -325,7 +325,7 @@ def _nodes_to_batched_tensor_dict(
     if not nodes:
         return None
 
-    from customized_areal.tree_search.mcts_tree_store import _node_to_tensor_dict
+    from customized_areal.tree_search.core.tree_store import _node_to_tensor_dict
 
     from areal.utils.data import concat_padded_tensors
 
@@ -468,9 +468,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         sample_source: SampleSource = SampleSource.SCRATCH,
         branch_probability: float = 0.5,
     ) -> None:
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
-        from customized_areal.tree_search.checkpoint import TreeCheckpointManager
-        from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
+        from customized_areal.tree_search.core.tree_store import MCTSTreeStore
 
         if group_size < 1:
             raise ValueError(f"group_size must be >= 1, got {group_size}")

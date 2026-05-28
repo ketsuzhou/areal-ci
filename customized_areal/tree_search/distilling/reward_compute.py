@@ -27,7 +27,7 @@ Example
 
 from __future__ import annotations
 
-from customized_areal.tree_search.distill_types import PositionRewardInfo
+from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
 
 from areal.utils import logging
 

@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 
 class TreeCheckpointManager:
