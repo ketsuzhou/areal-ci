@@ -59,6 +59,31 @@ class TreeBackupConfig:
     strict_distill_json: bool = True
     sample_source: SampleSource = SampleSource.SCRATCH
     branch_probability: float = 0.5
+    dynamic_group_size: bool = False
+    initial_group_size: int = 4
+    max_group_size: int = 64
+    uncertainty_threshold: float = 0.05
+    reward_type: str = "binary"
+
+    def __post_init__(self) -> None:
+        if self.initial_group_size < 1:
+            raise ValueError(
+                f"initial_group_size must be >= 1, got {self.initial_group_size}"
+            )
+        if self.max_group_size < self.initial_group_size:
+            raise ValueError(
+                f"max_group_size ({self.max_group_size}) must be >= "
+                f"initial_group_size ({self.initial_group_size})"
+            )
+        if self.uncertainty_threshold < 0:
+            raise ValueError(
+                f"uncertainty_threshold must be >= 0, got {self.uncertainty_threshold}"
+            )
+        if self.reward_type not in {"binary", "continuous"}:
+            raise ValueError(
+                f"reward_type must be 'binary' or 'continuous', "
+                f"got {self.reward_type!r}"
+            )
 
 
 @dataclass
