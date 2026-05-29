@@ -333,3 +333,174 @@ class TestZeroVarianceDiscard:
         wf._result_to_nodes = make_nodes
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_single"})
         assert result is not None
+
+
+class TestDynamicSamplingLoop:
+    @pytest.mark.asyncio
+    async def test_stops_at_threshold(self):
+        """Dynamic mode samples until uncertainty drops below threshold."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=10,
+            uncertainty_threshold=0.5,
+            reward_type="binary",
+        )
+
+        episode_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal episode_count
+            episode_count += 1
+            # Mixed rewards: as episodes grow, Beta posterior narrows
+            reward = 1.0 if episode_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{episode_count}"
+                node.node_id = f"node_{episode_count}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_dyn1"})
+        # Should have sampled at least initial_group_size
+        assert episode_count >= 2
+        # Should have a result (mixed rewards = not discarded)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_respects_max_group_size(self):
+        """Dynamic mode caps at max_group_size even if uncertainty is high."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=4,
+            uncertainty_threshold=1e-12,
+            reward_type="binary",
+        )
+
+        episode_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal episode_count
+            episode_count += 1
+            # Always alternating → uncertainty stays high
+            reward = 1.0 if episode_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(3):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{episode_count}"
+                node.node_id = f"node_{episode_count}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_dyn2"})
+        # Should cap at max_group_size
+        assert episode_count <= 4
+
+    @pytest.mark.asyncio
+    async def test_tolerates_failed_extra_samples(self):
+        """Dynamic loop continues if an extra episode fails."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        # First call succeeds, second call fails (returns None)
+        base.arun_episode = AsyncMock(side_effect=[{}, None, {}, None, {}])
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=6,
+            uncertainty_threshold=1e-12,
+            reward_type="binary",
+        )
+
+        episode_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal episode_count
+            episode_count += 1
+            reward = 1.0 if episode_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{episode_count}"
+                node.node_id = f"node_{episode_count}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        # Should not crash even with failed episodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_dyn3"})
+        # Result may be None if all discarded, or a valid dict
+        # The key assertion: no crash
+        assert result is None or isinstance(result, dict)

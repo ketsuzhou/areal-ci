@@ -954,7 +954,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     ) -> dict[str, Any] | None:
         query_id = data.get("query_id") or ""
 
-        # 1. Check cache
+        if self.dynamic_group_size:
+            return await self._arun_episode_dynamic(engine, data, query_id)
+        return await self._arun_episode_fixed(engine, data, query_id)
+
+    async def _arun_episode_fixed(
+        self, engine, data: dict[str, Any], query_id: str
+    ) -> dict[str, Any] | None:
+        """Original fixed group_size logic (with zero-variance discard)."""
         cached_count = (
             self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
         )
@@ -969,7 +976,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             need_gen,
         )
 
-        # 2. Generate fresh episodes if needed
         fresh_nodes: list[Node] = []
         if need_gen > 0:
             results = await asyncio.gather(
@@ -990,45 +996,190 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 if nodes:
                     fresh_nodes.extend(nodes)
 
-        # 3. Load cached nodes
         cached_nodes: list[Node] = []
         if cached_count > 0 and query_id:
             cached_nodes = self.tree_store.load_untrained_episodes(
                 query_id, cached_count
             )
-            # Reset versions to 0 so decoupled PPO treats cached rollouts
-            # as coming from the current behavior policy
-            # for node in cached_nodes:
-            #     node.versions = [0 if m == 1 else -1 for m in node.loss_mask]
+
+        return await self._finalize_episode(
+            fresh_nodes, cached_nodes, engine, data, query_id
+        )
+
+    async def _arun_episode_dynamic(
+        self, engine, data: dict[str, Any], query_id: str
+    ) -> dict[str, Any] | None:
+        """Dynamic group_size: iterative sampling with uncertainty threshold."""
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        # 1. Initial round
+        cached_count = (
+            self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
+        )
+        need_gen = max(0, self.initial_group_size - cached_count)
+
+        logger.info(
+            "TreeSearchGroupedWorkflow [dynamic]: query_id=%s, "
+            "initial_group_size=%d, cached=%d, need_gen=%d, max=%d",
+            query_id,
+            self.initial_group_size,
+            cached_count,
+            need_gen,
+            self.max_group_size,
+        )
+
+        fresh_nodes: list[Node] = []
+        if need_gen > 0:
+            results = await asyncio.gather(
+                *[
+                    self._run_fresh_episode(engine, data, group_idx, query_id)
+                    for group_idx in range(need_gen)
+                ],
+                return_exceptions=True,
+            )
+            for group_idx, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error("Episode %d unrecoverable: %s", group_idx, result)
+                    continue
+                if result is None:
+                    continue
+                nodes = self._result_to_nodes(result, query_id, group_idx)
+                if nodes:
+                    fresh_nodes.extend(nodes)
+
+        cached_nodes: list[Node] = []
+        if cached_count > 0 and query_id:
+            cached_nodes = self.tree_store.load_untrained_episodes(
+                query_id, cached_count
+            )
+
+        # 2. Compute initial uncertainty
+        all_nodes = fresh_nodes + cached_nodes
+        uncertainty = self._compute_uncertainty_for_nodes(all_nodes)
+
+        logger.info(
+            "TreeSearchGroupedWorkflow [dynamic]: query_id=%s, "
+            "initial U=%.6f, episodes=%d",
+            query_id,
+            uncertainty,
+            self._count_episodes(all_nodes),
+        )
+
+        # 3. Iterative sampling loop
+        next_group_idx = need_gen
+        while self._count_episodes(all_nodes) < self.max_group_size:
+            if uncertainty <= self.uncertainty_threshold:
+                logger.info(
+                    "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                    "converged (U=%.6f <= threshold=%.6f), episodes=%d",
+                    query_id,
+                    uncertainty,
+                    self.uncertainty_threshold,
+                    self._count_episodes(all_nodes),
+                )
+                break
+
+            # Generate one more episode
+            result = await self._run_fresh_episode(
+                engine, data, next_group_idx, query_id
+            )
+            next_group_idx += 1
+
+            if isinstance(result, Exception) or result is None:
+                logger.warning(
+                    "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                    "additional episode failed, skipping",
+                    query_id,
+                )
+                continue
+
+            nodes = self._result_to_nodes(result, query_id, next_group_idx - 1)
+            if nodes:
+                fresh_nodes.extend(nodes)
+                all_nodes = fresh_nodes + cached_nodes
+                uncertainty = self._compute_uncertainty_for_nodes(all_nodes)
+
+                logger.info(
+                    "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                    "added episode, U=%.6f, episodes=%d",
+                    query_id,
+                    uncertainty,
+                    self._count_episodes(all_nodes),
+                )
+
+        return await self._finalize_episode(
+            fresh_nodes, cached_nodes, engine, data, query_id
+        )
+
+    def _compute_uncertainty_for_nodes(self, nodes: list[Node]) -> float:
+        """Compute uncertainty U(q) from a list of nodes."""
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        episode_data: dict[str, tuple[float, int]] = {}
+        for node in nodes:
+            if not node.episode_id:
+                continue
+            if node.episode_id not in episode_data:
+                episode_data[node.episode_id] = (node.outcome_reward, node.turn_idx)
+            else:
+                prev_reward, prev_max_turn = episode_data[node.episode_id]
+                episode_data[node.episode_id] = (
+                    prev_reward,
+                    max(prev_max_turn, node.turn_idx),
+                )
+
+        if not episode_data:
+            return float("inf")
+
+        rewards = [r for r, _ in episode_data.values()]
+        steps = [s for _, s in episode_data.values()]
+        return compute_query_uncertainty(rewards, steps, self.reward_type)
+
+    @staticmethod
+    def _count_episodes(nodes: list[Node]) -> int:
+        """Count distinct episodes in a node list."""
+        return len({n.episode_id for n in nodes if n.episode_id})
+
+    async def _finalize_episode(
+        self,
+        fresh_nodes: list[Node],
+        cached_nodes: list[Node],
+        engine: Any,
+        data: dict[str, Any],
+        query_id: str,
+    ) -> dict[str, Any] | None:
+        """Shared finalization: insert, distill, advantage, save, convert."""
+        all_nodes = fresh_nodes + cached_nodes
+
+        if not all_nodes:
+            return None
+
+        # Zero-variance discard: if all episodes have identical reward,
+        # there is no learning signal for GRPO.
+        episode_rewards: list[float] = []
+        seen_episodes: set[str] = set()
+        for node in all_nodes:
+            if node.episode_id and node.episode_id not in seen_episodes:
+                episode_rewards.append(node.outcome_reward)
+                seen_episodes.add(node.episode_id)
+        if should_discard_query(episode_rewards):
+            logger.info(
+                "TreeSearchGroupedWorkflow: discarding query_id=%s — "
+                "all %d episodes have identical reward",
+                query_id,
+                len(episode_rewards),
+            )
+            return None
 
         provider_client = None
         try:
-            # 4. Insert fresh nodes into tree
+            # Insert fresh nodes into tree
             if fresh_nodes:
                 self.tree_store.insert_batch(fresh_nodes)
-
-            # 5. Combine
-            all_nodes = fresh_nodes + cached_nodes
-
-            if not all_nodes:
-                return None
-
-            # Zero-variance discard: if all episodes have identical reward,
-            # there is no learning signal for GRPO.
-            episode_rewards: list[float] = []
-            seen_episodes: set[str] = set()
-            for node in all_nodes:
-                if node.episode_id and node.episode_id not in seen_episodes:
-                    episode_rewards.append(node.outcome_reward)
-                    seen_episodes.add(node.episode_id)
-            if should_discard_query(episode_rewards):
-                logger.info(
-                    "TreeSearchGroupedWorkflow: discarding query_id=%s — "
-                    "all %d episodes have identical reward",
-                    query_id,
-                    len(episode_rewards),
-                )
-                return None
 
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
@@ -1041,19 +1192,19 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     tokenizer,
                 )
 
-            # 6. Compute tree advantages
+            # Compute tree advantages
             if self.advantage_mode == AdvantageMode.TREE:
                 self.tree_advantage_computer.compute(all_nodes)
 
-            # 7. Mark all nodes as trained
+            # Mark all nodes as trained
             for node in all_nodes:
                 if node.node_id:
                     self.tree_store.set_trained(node.node_id, True)
 
-            # 8. Save tree checkpoint
+            # Save tree checkpoint
             self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
 
-            # 9. Convert to batched tensor dict
+            # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
                 all_nodes,
                 max_tokens=self.max_tokens,
