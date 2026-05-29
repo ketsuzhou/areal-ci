@@ -14,10 +14,6 @@ from customized_areal.tree_search.distilling.distill_types import (
     PositionRewardInfo,
 )
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.training.trainer import CustomizedPPOTrainer
-from customized_areal.tree_search.core.customized_grouped_workflow import (
-    TreeSearchGroupedRolloutWorkflow,
-)
 
 __all__ = [
     "AdvantageMode",
@@ -64,6 +60,14 @@ def __getattr__(name):
         from .engine import MultiCandidateFSDPPPOActor
 
         return MultiCandidateFSDPPPOActor
+    if name == "CustomizedPPOTrainer":
+        from .training.trainer import CustomizedPPOTrainer
+
+        return CustomizedPPOTrainer
+    if name == "TreeSearchGroupedRolloutWorkflow":
+        from .core.customized_grouped_workflow import TreeSearchGroupedRolloutWorkflow
+
+        return TreeSearchGroupedRolloutWorkflow
     if name == "grpo_distill_loss_fn":
         from .training.loss import grpo_distill_loss_fn
 

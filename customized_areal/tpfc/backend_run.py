@@ -14,8 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from httpx import AsyncClient as AsyncHttpxClient
-from httpx import Limits, Timeout
+from httpx import Timeout
 from supabase import create_async_client
 from supabase.lib.client_options import AsyncClientOptions
 
@@ -37,6 +36,10 @@ from customized_areal.db_service import (
     cleanup_sandbox_for_task,
     create_task,
     get_agent_loader,
+)
+from customized_areal.db_service.connection import (
+    _build_async_supabase_httpx_client,
+    _describe_supabase_url,
 )
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -507,7 +510,7 @@ async def _refresh_access_token(refresh_token: str) -> tuple[str, str]:
             "SUPABASE_URL and SUPABASE_ANON_KEY must be set to refresh token"
         )
 
-    async with httpx.AsyncClient(timeout=_TOKEN_HTTP_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=_TOKEN_HTTP_TIMEOUT, trust_env=False) as client:
         if not _is_refresh_token_usable(refresh_token):
             logger.warning(
                 "REFRESH_TOKEN is missing or locally expired; attempting email/password login"
@@ -568,7 +571,7 @@ async def _login_with_credentials(
 
     own_client = client is None
     if own_client:
-        client = httpx.AsyncClient()
+        client = httpx.AsyncClient(trust_env=False)
 
     try:
         try:
@@ -1355,13 +1358,18 @@ async def _create_shortlived_db_client():
             "SUPABASE_URL and a key (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY) "
             "environment variables must be set."
         )
-    httpx_client = AsyncHttpxClient(
-        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
-        limits=Limits(
-            max_connections=10,
-            max_keepalive_connections=5,
-            keepalive_expiry=30,
-        ),
+    httpx_client = _build_async_supabase_httpx_client(
+        max_connections=10,
+        max_keepalive_connections=5,
+    )
+    logger.info(
+        "Creating short-lived Supabase client for backend run: url=%s trust_env=%s "
+        "max_connections=%s max_keepalive=%s keepalive_expiry=%s",
+        _describe_supabase_url(supabase_url),
+        httpx_client._trust_env,
+        httpx_client._limits.max_connections,
+        httpx_client._limits.max_keepalive_connections,
+        httpx_client._limits.keepalive_expiry,
     )
     options = AsyncClientOptions(httpx_client=httpx_client)
     return await create_async_client(supabase_url, supabase_key, options)

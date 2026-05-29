@@ -47,7 +47,7 @@ rollout:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 5
+  max_concurrent_rollouts: 6
   queue_size: 240
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 40
@@ -192,9 +192,9 @@ saver:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
-  freq_epochs: null
-  freq_steps: null
-  freq_secs: null
+  freq_epochs: 1
+  freq_steps: 5
+  freq_secs: 7200
 
 recover:
   mode: "on"

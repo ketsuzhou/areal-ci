@@ -2,14 +2,55 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
+from urllib.parse import urlparse
 
 from httpx import AsyncClient as AsyncHttpxClient
 from httpx import Client as SyncHttpxClient
 from httpx import Limits, Timeout
 from supabase import AsyncClient, Client, create_async_client, create_client
 from supabase.lib.client_options import AsyncClientOptions, SyncClientOptions
+
+logger = logging.getLogger(__name__)
+
+
+def _describe_supabase_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return "<invalid>"
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _build_sync_supabase_httpx_client() -> SyncHttpxClient:
+    """Build a Supabase HTTP client that ignores ambient proxy env vars."""
+    return SyncHttpxClient(
+        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+        limits=Limits(
+            max_connections=100,
+            max_keepalive_connections=50,
+            keepalive_expiry=30,
+        ),
+        trust_env=False,
+    )
+
+
+def _build_async_supabase_httpx_client(
+    *,
+    max_connections: int = 100,
+    max_keepalive_connections: int = 50,
+) -> AsyncHttpxClient:
+    """Build a Supabase HTTP client that ignores ambient proxy env vars."""
+    return AsyncHttpxClient(
+        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+        limits=Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive_connections,
+            keepalive_expiry=30,
+        ),
+        trust_env=False,
+    )
 
 
 class SyncDBConnection:
@@ -51,13 +92,15 @@ class SyncDBConnection:
             )
 
         # Pool sized for general-purpose (non-rollout) usage
-        httpx_client = SyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
-            limits=Limits(
-                max_connections=100,
-                max_keepalive_connections=50,
-                keepalive_expiry=30,
-            ),
+        httpx_client = _build_sync_supabase_httpx_client()
+        logger.info(
+            "Initializing sync Supabase client: url=%s trust_env=%s max_connections=%s "
+            "max_keepalive=%s keepalive_expiry=%s",
+            _describe_supabase_url(supabase_url),
+            httpx_client._trust_env,
+            httpx_client._limits.max_connections,
+            httpx_client._limits.max_keepalive_connections,
+            httpx_client._limits.keepalive_expiry,
         )
         options = SyncClientOptions(httpx_client=httpx_client)
         self._client = create_client(supabase_url, supabase_key, options)
@@ -135,13 +178,15 @@ class DBConnection:
             )
 
         # Pool sized for general-purpose (non-rollout) usage
-        httpx_client = AsyncHttpxClient(
-            timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
-            limits=Limits(
-                max_connections=100,
-                max_keepalive_connections=50,
-                keepalive_expiry=30,
-            ),
+        httpx_client = _build_async_supabase_httpx_client()
+        logger.info(
+            "Initializing async Supabase client: url=%s trust_env=%s max_connections=%s "
+            "max_keepalive=%s keepalive_expiry=%s",
+            _describe_supabase_url(supabase_url),
+            httpx_client._trust_env,
+            httpx_client._limits.max_connections,
+            httpx_client._limits.max_keepalive_connections,
+            httpx_client._limits.keepalive_expiry,
         )
         options = AsyncClientOptions(httpx_client=httpx_client)
         self._client = await create_async_client(

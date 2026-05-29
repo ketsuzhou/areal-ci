@@ -2,10 +2,46 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+import time
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+_TASK_WRITE_RETRIES = max(_env_int("SUPABASE_TASK_WRITE_RETRIES", 2), 0)
+_TASK_WRITE_RETRY_DELAY = max(_env_float("SUPABASE_TASK_WRITE_RETRY_DELAY", 1.0), 0.0)
+_TRANSIENT_TASK_WRITE_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.RemoteProtocolError,
+    httpx.WriteError,
+    httpx.WriteTimeout,
+)
 
 
 class TaskStatus(StrEnum):
@@ -17,6 +53,70 @@ class TaskStatus(StrEnum):
     COMPLETED = "completed"
     CANCELED = "canceled"
     FAILED = "failed"
+
+
+async def _execute_task_write_with_retry(
+    query,
+    *,
+    operation: str,
+    task_id: str | None = None,
+    table: str = "tasks",
+    max_retries: int = _TASK_WRITE_RETRIES,
+) -> Any:
+    """Execute a task-table write with bounded retry on transient transport errors."""
+    retry_delay = _TASK_WRITE_RETRY_DELAY
+    started_at = time.monotonic()
+    for attempt in range(max_retries + 1):
+        try:
+            logger.info(
+                "Starting DB write: table=%s operation=%s task_id=%s attempt=%d/%d",
+                table,
+                operation,
+                task_id,
+                attempt + 1,
+                max_retries + 1,
+            )
+            result = await query.execute()
+            logger.info(
+                "Completed DB write: table=%s operation=%s task_id=%s attempt=%d/%d "
+                "elapsed=%.3fs",
+                table,
+                operation,
+                task_id,
+                attempt + 1,
+                max_retries + 1,
+                time.monotonic() - started_at,
+            )
+            return result
+        except _TRANSIENT_TASK_WRITE_ERRORS as exc:
+            if attempt == max_retries:
+                logger.error(
+                    "DB write failed after retries: table=%s operation=%s task_id=%s "
+                    "attempt=%d/%d elapsed=%.3fs error=%s: %s",
+                    table,
+                    operation,
+                    task_id,
+                    attempt + 1,
+                    max_retries + 1,
+                    time.monotonic() - started_at,
+                    type(exc).__name__,
+                    exc,
+                )
+                raise
+            sleep_for = min(retry_delay * (2**attempt), 30.0)
+            logger.warning(
+                "Transient task write failure: table=%s operation=%s task_id=%s "
+                "(attempt %d/%d, %s: %s); retrying in %.1fs",
+                table,
+                operation,
+                task_id,
+                attempt + 1,
+                max_retries + 1,
+                type(exc).__name__,
+                exc,
+                sleep_for,
+            )
+            await asyncio.sleep(sleep_for)
 
 
 async def create_task(
@@ -73,7 +173,12 @@ async def create_task(
     if project_id is not None:
         task_data["project_id"] = project_id
 
-    await client.table("tasks").insert(task_data).execute()
+    await _execute_task_write_with_retry(
+        client.table("tasks").insert(task_data),
+        operation="create_task",
+        task_id=task_id,
+        table="tasks",
+    )
 
     return task_id
 
@@ -105,4 +210,9 @@ async def update_task_status(
     if error is not None:
         update_data["error"] = error
 
-    await client.table("tasks").update(update_data).eq("task_id", task_id).execute()
+    await _execute_task_write_with_retry(
+        client.table("tasks").update(update_data).eq("task_id", task_id),
+        operation="update_task_status",
+        task_id=task_id,
+        table="tasks",
+    )
