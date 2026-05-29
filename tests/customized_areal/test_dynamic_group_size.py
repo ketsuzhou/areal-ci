@@ -43,3 +43,91 @@ class TestTreeBackupConfigDynamicFields:
     def test_reward_type_must_be_valid(self):
         with pytest.raises(ValueError, match="reward_type"):
             TreeBackupConfig(reward_type="unknown")
+
+
+class TestComputeQueryUncertainty:
+    def test_binary_all_success(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        # 3 episodes all reward=1, 2 steps each
+        # Beta(4,1): var = 4*1 / (25*6) = 4/150
+        u = compute_query_uncertainty([1.0, 1.0, 1.0], [2, 2, 2], "binary")
+        expected_var = (4 * 1) / (25 * 6)
+        assert u == pytest.approx(expected_var * 2.0)
+
+    def test_binary_mixed(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        # 4 episodes, 2 successes, 2 steps each
+        # Beta(3,3): var = 9 / (36*7) = 9/252
+        u = compute_query_uncertainty([1.0, 0.0, 1.0, 0.0], [2, 2, 2, 2], "binary")
+        expected_var = (3 * 3) / (36 * 7)
+        assert u == pytest.approx(expected_var * 2.0)
+
+    def test_continuous_n_ge_2(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        # 4 episodes rewards [0.5, 1.5, 0.5, 1.5], 3 steps each
+        u = compute_query_uncertainty([0.5, 1.5, 0.5, 1.5], [3, 3, 3, 3], "continuous")
+        # Just verify it's finite and positive
+        assert u > 0
+        assert u != float("inf")
+
+    def test_continuous_n_1(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        # n=1: NIG posterior should be well-defined under weak prior
+        u = compute_query_uncertainty([0.5], [3], "continuous")
+        assert u > 0
+        assert u != float("inf")
+
+    def test_zero_episodes(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        assert compute_query_uncertainty([], [], "binary") == float("inf")
+
+    def test_more_steps_higher_uncertainty(self):
+        from customized_areal.tree_search.core.uncertainty import (
+            compute_query_uncertainty,
+        )
+
+        u_short = compute_query_uncertainty([1.0, 0.0], [1, 1], "binary")
+        u_long = compute_query_uncertainty([1.0, 0.0], [10, 10], "binary")
+        assert u_long > u_short
+
+
+class TestShouldDiscardQuery:
+    def test_all_zero(self):
+        from customized_areal.tree_search.core.uncertainty import should_discard_query
+
+        assert should_discard_query([0.0, 0.0, 0.0]) is True
+
+    def test_all_one(self):
+        from customized_areal.tree_search.core.uncertainty import should_discard_query
+
+        assert should_discard_query([1.0, 1.0, 1.0]) is True
+
+    def test_mixed(self):
+        from customized_areal.tree_search.core.uncertainty import should_discard_query
+
+        assert should_discard_query([0.0, 1.0, 0.0]) is False
+
+    def test_single_episode_kept(self):
+        from customized_areal.tree_search.core.uncertainty import should_discard_query
+
+        assert should_discard_query([0.5]) is False
+
+    def test_empty_discarded(self):
+        from customized_areal.tree_search.core.uncertainty import should_discard_query
+
+        assert should_discard_query([]) is True
