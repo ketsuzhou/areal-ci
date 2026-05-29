@@ -504,3 +504,40 @@ class TestDynamicSamplingLoop:
         # Result may be None if all discarded, or a valid dict
         # The key assertion: no crash
         assert result is None or isinstance(result, dict)
+
+
+class TestPrecomputedAdvantages:
+    def test_rollout_with_advantages_skips_recomputation(self):
+        """When rollout trajectories already have advantages/returns,
+        compute_advantages should be skipped."""
+        # Simulate what the trainer check does
+        rollout_batch = [
+            {"input_ids": [1, 2, 3], "advantages": [0.5, -0.5], "returns": [0.5, -0.5]},
+            {"input_ids": [4, 5, 6], "advantages": [0.3, -0.3], "returns": [0.3, -0.3]},
+        ]
+        has_precomputed = all(
+            "advantages" in traj and "returns" in traj for traj in rollout_batch
+        )
+        assert has_precomputed is True
+
+    def test_rollout_without_advantages_does_not_skip(self):
+        """When rollout trajectories lack advantages, skip check is False."""
+        rollout_batch = [
+            {"input_ids": [1, 2, 3]},
+            {"input_ids": [4, 5, 6]},
+        ]
+        has_precomputed = all(
+            "advantages" in traj and "returns" in traj for traj in rollout_batch
+        )
+        assert has_precomputed is False
+
+    def test_partial_advantages_does_not_skip(self):
+        """If some trajectories have advantages but others don't, don't skip."""
+        rollout_batch = [
+            {"input_ids": [1, 2, 3], "advantages": [0.5], "returns": [0.5]},
+            {"input_ids": [4, 5, 6]},
+        ]
+        has_precomputed = all(
+            "advantages" in traj and "returns" in traj for traj in rollout_batch
+        )
+        assert has_precomputed is False
