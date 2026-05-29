@@ -33,6 +33,7 @@ from customized_areal.db_service import (
     truncate_messages_before_turn,
 )
 from customized_areal.tpfc.backend_run import _get_raw_messages_with_client
+from customized_areal.tree_search.core.uncertainty import should_discard_query
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
@@ -1010,6 +1011,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             all_nodes = fresh_nodes + cached_nodes
 
             if not all_nodes:
+                return None
+
+            # Zero-variance discard: if all episodes have identical reward,
+            # there is no learning signal for GRPO.
+            episode_rewards: list[float] = []
+            seen_episodes: set[str] = set()
+            for node in all_nodes:
+                if node.episode_id and node.episode_id not in seen_episodes:
+                    episode_rewards.append(node.outcome_reward)
+                    seen_episodes.add(node.episode_id)
+            if should_discard_query(episode_rewards):
+                logger.info(
+                    "TreeSearchGroupedWorkflow: discarding query_id=%s — "
+                    "all %d episodes have identical reward",
+                    query_id,
+                    len(episode_rewards),
+                )
                 return None
 
             if self.loss_mode != LossMode.GRPO:
