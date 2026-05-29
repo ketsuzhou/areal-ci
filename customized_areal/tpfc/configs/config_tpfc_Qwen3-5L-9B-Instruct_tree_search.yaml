@@ -193,7 +193,7 @@ saver:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   freq_epochs: 1
-  freq_steps: 5
+  freq_steps: 2
   freq_secs: 7200
 
 recover:
@@ -202,7 +202,7 @@ recover:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   freq_epochs: 1
-  freq_steps: 5
+  freq_steps: 2
   freq_secs: 7200
 
 evaluator:

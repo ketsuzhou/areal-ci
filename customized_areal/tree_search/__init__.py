@@ -1,6 +1,7 @@
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
+    DistillKLMode,
     LossMode,
     RolloutCacheConfig,
     TreeBackupConfig,
@@ -19,6 +20,7 @@ __all__ = [
     "AdvantageMode",
     "CustomizedPPOTrainer",
     "DiagnosisTurn",
+    "DistillKLMode",
     "EpisodeDiagnosis",
     "InteractionWithTokenLevelReward",
     "LossMode",

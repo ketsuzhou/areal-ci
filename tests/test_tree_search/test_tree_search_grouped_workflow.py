@@ -33,6 +33,7 @@ import pytest
 import torch
 
 from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
+from customized_areal.tree_search.distill_types import PositionRewardInfo
 from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
 
 # ---------------------------------------------------------------------------
@@ -438,7 +439,7 @@ class TestPrepareDistillForEpisode:
 
     @pytest.mark.asyncio
     async def test_distill_mode_empty_on_no_selected_turns(self):
-        """In DISTILL mode, no selected turns → empty result."""
+        """In DISTILL mode, non-selected turns still get teacher logprobs without guidance."""
         wf = _make_workflow(loss_mode=LossMode.DISTILL)
         nodes = [_make_node(node_id="n1", turn_idx=1, seq_len=30, response_len=5)]
 
@@ -448,9 +449,19 @@ class TestPrepareDistillForEpisode:
         )
         mock_tokenizer = MagicMock()
 
-        with patch(
-            "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
-            return_value=[{"role": "user", "content": "hello"}],
+        async def _fake_selected_turn_to_position_rewards(**kwargs):
+            assert kwargs["guidance"] == ""
+            return [PositionRewardInfo(position=0, candidate_token_ids=[1])]
+
+        with (
+            patch(
+                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                return_value=[{"role": "user", "content": "hello"}],
+            ),
+            patch(
+                "customized_areal.tree_search.core.selected_turn_distill.selected_turn_to_position_rewards",
+                new=_fake_selected_turn_to_position_rewards,
+            ),
         ):
             result_nodes, rewards = await wf._prepare_distill_for_episode(
                 nodes=nodes,
@@ -460,8 +471,8 @@ class TestPrepareDistillForEpisode:
                 tokenizer=mock_tokenizer,
             )
 
-        assert result_nodes == []
-        assert rewards == {}
+        assert result_nodes == nodes
+        assert rewards == {"n1": [PositionRewardInfo(position=0, candidate_token_ids=[1])]}
 
     @pytest.mark.asyncio
     async def test_guidance_cached_on_last_node_after_diagnose(self):

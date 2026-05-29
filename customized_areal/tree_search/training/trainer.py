@@ -58,6 +58,11 @@ class CustomizedPPOTrainer(PPOTrainer):
     def _create_train_engine(self, actor_config, alloc):
         """Override to use MultiCandidateFSDPPPOActor when distill loss is enabled."""
         if self.tree_backup_config.loss_mode != LossMode.GRPO:
+            setattr(
+                actor_config,
+                "distill_kl_mode",
+                self.tree_backup_config.distill_kl_mode.value,
+            )
             if alloc.backend != "fsdp":
                 raise ValueError(
                     f"Distillation loss mode requires FSDP backend, "

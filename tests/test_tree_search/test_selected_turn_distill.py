@@ -131,6 +131,7 @@ def test_tree_backup_config_has_distill_defaults():
     assert config.teacher_max_retries == 3
     assert config.teacher_timeout == 60.0
     assert config.teacher_missing_logprob == -23.0
+    assert config.distill_kl_mode == "reverse_kl"
     assert config.diagnose_model_name == ""
     assert config.diagnose_max_tokens == 1024
     assert config.diagnose_temperature == 0.0
@@ -308,6 +309,24 @@ def test_build_teacher_prompt_ids_uses_current_response_span():
     assert prompt_ids == [10, 20, 21, 11, 12, 900, 901]
 
 
+def test_build_teacher_prompt_ids_skips_guidance_insertion_when_blank():
+    from customized_areal.tree_search.core.selected_turn_distill import (
+        build_teacher_prompt_ids,
+    )
+
+    node = Node(
+        input_ids=[10, 11, 20, 21],
+        loss_mask=[0, 0, 1, 1],
+        logprobs=[0.0, 0.0, -0.3, -0.4],
+        versions=[-1, -1, 0, 0],
+    )
+
+    prompt_ids, generation_ids = build_teacher_prompt_ids(node, "   ", FakeTokenizer())
+
+    assert generation_ids == [20, 21]
+    assert prompt_ids == [10, 11]
+
+
 @pytest.mark.asyncio
 async def test_selected_turn_to_position_rewards_single_candidate_path():
     from customized_areal.tree_search.core.selected_turn_distill import (
@@ -345,9 +364,7 @@ async def test_selected_turn_to_position_rewards_single_candidate_path():
             position=0,
             candidates=["20"],
             candidate_token_ids=[20],
-            logprobs=[-0.3],
             teacher_logprobs=[-1.0],
-            rewards=[0.7],
             chosen_index=0,
             sample_index=7,
         ),
@@ -355,9 +372,7 @@ async def test_selected_turn_to_position_rewards_single_candidate_path():
             position=1,
             candidates=["21"],
             candidate_token_ids=[21],
-            logprobs=[-0.4],
             teacher_logprobs=[-2.5],
-            rewards=[2.1],
             chosen_index=0,
             sample_index=7,
         ),
@@ -393,7 +408,7 @@ async def test_selected_turn_to_position_rewards_topk_moves_generated_token_firs
 
     assert provider.calls[0]["candidate_token_ids"] == [[20, 30, 40]]
     assert rewards[0].candidate_token_ids == [20, 30, 40]
-    assert rewards[0].logprobs == [-0.3, -0.1, -0.8]
+    assert rewards[0].teacher_logprobs == [-1.0, -2.0, -3.0]
     assert rewards[0].chosen_index == 0
 
 
@@ -435,7 +450,7 @@ async def test_selected_turn_to_position_rewards_topk_uses_current_response_rows
     assert provider.calls[0]["generation_ids"] == [30]
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert rewards[0].teacher_logprobs == [-1.0, -2.0]
 
 
 @pytest.mark.asyncio
@@ -451,7 +466,6 @@ async def test_selected_turn_to_position_rewards_topk_accepts_current_response_r
         logprobs=[0.0, -0.1, -0.2, 0.0, 0.0, -0.3],
         versions=[-1, 0, 0, -1, -1, 0],
         topk_ids=[[30, 60]],
-        topk_logp=[[-0.3, -1.3]],
     )
 
     rewards = await selected_turn_to_position_rewards(
@@ -468,7 +482,7 @@ async def test_selected_turn_to_position_rewards_topk_accepts_current_response_r
     assert provider.calls[0]["generation_ids"] == [30]
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert rewards[0].teacher_logprobs == [-1.0, -2.0]
 
 
 @pytest.mark.asyncio
@@ -544,10 +558,10 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_full_sequence_ro
         }
     ]
     assert node.topk_ids == [[20, 60], [21, 61]]
-    assert node.topk_logp == [[-0.3, -1.3], [-0.4, -1.4]]
+    assert node.topk_logp is None
     assert provider.calls[0]["candidate_token_ids"] == [[20, 60], [21, 61]]
-    assert rewards[0].logprobs == [-0.3, -1.3]
-    assert rewards[1].logprobs == [-0.4, -1.4]
+    assert rewards[0].teacher_logprobs == [-1.0, -2.0]
+    assert rewards[1].teacher_logprobs == [-1.5, -2.5]
 
 
 @pytest.mark.asyncio
@@ -588,11 +602,11 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
     )
 
     assert node.topk_ids == [[30, 60]]
-    assert node.topk_logp == [[-0.3, -1.3]]
+    assert node.topk_logp is None
     assert provider.calls[0]["generation_ids"] == [30]
     assert provider.calls[0]["candidate_token_ids"] == [[30, 60]]
     assert rewards[0].candidate_token_ids == [30, 60]
-    assert rewards[0].logprobs == [-0.3, -1.3]
+    assert rewards[0].teacher_logprobs == [-1.0, -2.0]
 
 
 @pytest.mark.asyncio

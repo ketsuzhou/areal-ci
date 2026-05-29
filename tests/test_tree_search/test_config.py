@@ -1,4 +1,9 @@
-from customized_areal.tree_search.config import CacheMode, LossMode, TreeBackupConfig
+from customized_areal.tree_search.config import (
+    CacheMode,
+    DistillKLMode,
+    LossMode,
+    TreeBackupConfig,
+)
 
 
 class TestCacheMode:
@@ -25,6 +30,10 @@ class TestCacheMode:
 
 
 class TestDistillConfig:
+    def test_distill_kl_mode_defaults_to_reverse(self):
+        config = TreeBackupConfig()
+        assert config.distill_kl_mode == DistillKLMode.REVERSE
+
     def test_distill_env_defaults_are_representable(self):
         config = TreeBackupConfig(
             topk_distill=True,
@@ -33,11 +42,13 @@ class TestDistillConfig:
             teacher_model_name="qwen-397b",
             teacher_top_k=5,
             diagnose_model_name="qwen-397b",
+            distill_kl_mode=DistillKLMode.FORWARD,
         )
 
         assert config.topk_distill is True
         assert config.teacher_provider == "external"
         assert config.teacher_top_k == 5
+        assert config.distill_kl_mode == DistillKLMode.FORWARD
 
     def test_loss_mode_enum(self):
         assert LossMode.GRPO == "grpo"

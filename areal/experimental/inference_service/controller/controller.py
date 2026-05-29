@@ -1720,6 +1720,7 @@ class RolloutControllerV2:
                 teacher_max_retries=tree_search_cfg.teacher_max_retries,
                 teacher_timeout=tree_search_cfg.teacher_timeout,
                 teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                distill_kl_mode=tree_search_cfg.distill_kl_mode,
                 diagnose_model_name=tree_search_cfg.diagnose_model_name,
                 diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
                 diagnose_temperature=tree_search_cfg.diagnose_temperature,

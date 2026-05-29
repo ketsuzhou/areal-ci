@@ -1,4 +1,4 @@
-# TPFC Training Environment Setup
+# AREAL Training Environment Setup
 
 ## 1. Clone the Repository
 
@@ -33,6 +33,12 @@ SUPABASE_DB_CONNECTION=<your-db-connection-string>
 SUPABASE_JWT_SECRET=<your-jwt-secret>
 SUPABASE_AUTH_EMAIL=<your-auth-email>
 SUPABASE_AUTH_PASSWORD=<your-auth-password>
+
+# DAYTONA API
+DAYTONA_API_KEY=dtn_71b9c408b9d3c6cc23d903c9067beedc13fa0123d9af2259b5c530cebc776d04
+DAYTONA_SERVER_URL=https://app.daytona.io/api
+DAYTONA_TARGET=us
+
 
 # OpenRouter API
 OPENAI_API_KEY=<your-openrouter-key>

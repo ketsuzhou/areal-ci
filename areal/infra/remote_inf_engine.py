@@ -751,6 +751,7 @@ class RemoteInfEngine(InferenceEngine):
                     max_group_size=tree_search_cfg.max_group_size,
                     uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
                     reward_type=tree_search_cfg.reward_type,
+                    distill_kl_mode=tree_search_cfg.distill_kl_mode,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

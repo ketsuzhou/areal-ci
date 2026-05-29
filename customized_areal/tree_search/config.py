@@ -19,6 +19,11 @@ class LossMode(str, Enum):
     BOTH = "both"
 
 
+class DistillKLMode(str, Enum):
+    FORWARD = "forward_kl"
+    REVERSE = "reverse_kl"
+
+
 class SampleSource(str, Enum):
     SCRATCH = "scratch"
     BRANCH = "branch"
@@ -64,8 +69,10 @@ class TreeBackupConfig:
     max_group_size: int = 64
     uncertainty_threshold: float = 0.05
     reward_type: str = "binary"
+    distill_kl_mode: DistillKLMode = DistillKLMode.REVERSE
 
     def __post_init__(self) -> None:
+        self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
         if self.initial_group_size < 1:
             raise ValueError(
                 f"initial_group_size must be >= 1, got {self.initial_group_size}"

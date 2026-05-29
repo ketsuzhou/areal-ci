@@ -80,6 +80,7 @@ def grpo_distill_loss_fn(
     teacher_logprobs = input_data.get("teacher_logp")
     rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
     distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
+    distill_kl_mode = getattr(config, "distill_kl_mode", "reverse_kl")
 
     # Determine prompt length per sample from loss_mask (0 = prompt, 1 = output)
     if loss_mask.dim() > 1:
@@ -105,6 +106,7 @@ def grpo_distill_loss_fn(
             loss_mask=loss_mask,
             prompt_lens=prompt_lens,
             input_data=input_data,
+            distill_kl_mode=distill_kl_mode,
         )
         loss = distill_loss_weight * teacher_kl_loss
         distill_stat = teacher_kl_loss.detach()
@@ -146,6 +148,7 @@ def grpo_distill_loss_fn(
                 loss_mask=loss_mask,
                 prompt_lens=prompt_lens,
                 input_data=input_data,
+                distill_kl_mode=distill_kl_mode,
             )
             loss = rl_loss_weight * loss + distill_loss_weight * teacher_kl_loss
             distill_stat = teacher_kl_loss.detach()
@@ -219,6 +222,7 @@ def _compute_teacher_kl_loss(
     loss_mask: torch.Tensor,
     prompt_lens: list[int],
     input_data: dict | None = None,
+    distill_kl_mode: str = "reverse_kl",
 ) -> torch.Tensor:
     """Compute teacher KL distillation loss from batched teacher_logprobs tensor.
 
@@ -267,13 +271,25 @@ def _compute_teacher_kl_loss(
                 teacher = teacher_logprobs[b, :n_pos, :num_cand]
                 valid = teacher.abs().sum(dim=-1) > 1e-8
                 if valid.any():
-                    terms.append((student[valid] - teacher[valid]).reshape(-1))
+                    terms.append(
+                        _compute_subset_kl(
+                            student_logprobs=student[valid],
+                            teacher_logprobs=teacher[valid],
+                            distill_kl_mode=distill_kl_mode,
+                        ).reshape(-1)
+                    )
             else:
                 student = logprobs[start + pl : start + pl + n_pos]
                 teacher = teacher_logprobs[b, :n_pos, 0]
                 valid = teacher.abs() > 1e-8
                 if valid.any():
-                    terms.append((student[valid] - teacher[valid]).reshape(-1))
+                    terms.append(
+                        _compute_subset_kl(
+                            student_logprobs=student[valid].unsqueeze(-1),
+                            teacher_logprobs=teacher[valid].unsqueeze(-1),
+                            distill_kl_mode=distill_kl_mode,
+                        ).reshape(-1)
+                    )
 
         if not terms:
             return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
@@ -301,7 +317,13 @@ def _compute_teacher_kl_loss(
             teacher = teacher_logprobs[b, :n_pos, :num_cand]
             valid = teacher.abs().sum(dim=-1) > 1e-8
             if valid.any():
-                terms.append((student[valid] - teacher[valid]).reshape(-1))
+                terms.append(
+                    _compute_subset_kl(
+                        student_logprobs=student[valid],
+                        teacher_logprobs=teacher[valid],
+                        distill_kl_mode=distill_kl_mode,
+                    ).reshape(-1)
+                )
         else:
             if is_batched:
                 student = logprobs[b, pl : pl + n_pos]
@@ -310,12 +332,43 @@ def _compute_teacher_kl_loss(
             teacher = teacher_logprobs[b, :n_pos, 0]
             valid = teacher.abs() > 1e-8
             if valid.any():
-                terms.append((student[valid] - teacher[valid]).reshape(-1))
+                terms.append(
+                    _compute_subset_kl(
+                        student_logprobs=student[valid].unsqueeze(-1),
+                        teacher_logprobs=teacher[valid].unsqueeze(-1),
+                        distill_kl_mode=distill_kl_mode,
+                    ).reshape(-1)
+                )
 
     if not terms:
         return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
 
     return torch.cat(terms).mean()
+
+
+def _compute_subset_kl(
+    student_logprobs: torch.Tensor,
+    teacher_logprobs: torch.Tensor,
+    distill_kl_mode: str,
+) -> torch.Tensor:
+    """Compute KL on the candidate subset for each position.
+
+    The available support is the candidate subset, so both teacher and student
+    are normalized over that subset before computing KL.
+    """
+    student_logprobs = torch.log_softmax(student_logprobs, dim=-1)
+    teacher_logprobs = torch.log_softmax(teacher_logprobs, dim=-1)
+
+    if distill_kl_mode == "forward_kl":
+        teacher_probs = teacher_logprobs.exp()
+        return (teacher_probs * (teacher_logprobs - student_logprobs)).sum(dim=-1)
+    if distill_kl_mode == "reverse_kl":
+        student_probs = student_logprobs.exp()
+        return (student_probs * (student_logprobs - teacher_logprobs)).sum(dim=-1)
+    raise ValueError(
+        "distill_kl_mode must be 'forward_kl' or 'reverse_kl', "
+        f"got {distill_kl_mode!r}"
+    )
 
 
 def _resolve_proximal_logp(

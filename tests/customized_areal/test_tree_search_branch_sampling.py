@@ -168,6 +168,53 @@ def test_annotate_nodes_from_run_copies_entropy_metadata():
     assert nodes[1].branch_sandbox_id == "sb2"
 
 
+def test_annotate_nodes_from_run_populates_topk_from_raw_message_metadata():
+    node = _node(1)
+    raw_messages = [
+        {
+            "role": "assistant",
+            "metadata": {
+                "top_logprobs": [
+                    [
+                        {"token_id": 11, "token": "a", "logprob": -0.1},
+                        {"token_id": 12, "token": "b", "logprob": -0.2},
+                    ],
+                    [
+                        {"token_id": 21, "token": "c", "logprob": -0.3},
+                    ],
+                ],
+            },
+        }
+    ]
+
+    annotate_nodes_from_run([node], task_id="task-id", raw_messages=raw_messages)
+
+    assert node.topk_ids == [[11, 12], [21]]
+    assert node.topk_logp is None
+
+
+def test_annotate_nodes_from_run_does_not_override_existing_topk():
+    node = _node(1)
+    node.topk_ids = [[101, 102]]
+    raw_messages = [
+        {
+            "role": "assistant",
+            "metadata": {
+                "top_logprobs": [
+                    [
+                        {"token_id": 11, "token": "a", "logprob": -0.1},
+                    ]
+                ],
+            },
+        }
+    ]
+
+    annotate_nodes_from_run([node], task_id="task-id", raw_messages=raw_messages)
+
+    assert node.topk_ids == [[101, 102]]
+    assert node.topk_logp is None
+
+
 def test_annotate_nodes_from_run_skips_invalid_turn_idx():
     node = _node(0)
     raw_messages = [

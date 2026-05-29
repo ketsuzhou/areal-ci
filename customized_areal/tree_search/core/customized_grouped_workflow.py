@@ -2,16 +2,55 @@
 """Tree-search-aware grouped rollout workflow with cache reuse and teacher distillation.
 
 Consolidates the functionality of QueryIDProxyWorkflow,
-TreeSearchGroupedRolloutWorkflow, and TreeSearchWorkflowExecutor into
-a single class that:
-- Loads/saves tree_store from a checkpoint directory
-- Does per-query cache lookup to determine how many fresh episodes are needed (episode-level counting)
-- Generates only the needed fresh episodes (partial cache reuse)
-- Converts fresh results to Nodes, loads cached Nodes, combines them
-- Performs teacher model reward computation (diagnosis + teacher logprob gathering) for distillation
-- Inserts fresh Nodes into tree_store, computes advantages, marks trained
-- Saves tree checkpoint
-- Returns batched tensor dicts that the base WorkflowExecutor handles natively
+TreeSearchGroupedRolloutWorkflow, and TreeSearchWorkflowExecutor into a single
+``RolloutWorkflow`` subclass.
+
+Architecture
+~~~~~~~~~~~~
+The main entry point is ``arun_episode``, which dispatches to either
+``_arun_episode_fixed`` or ``_arun_episode_dynamic`` depending on
+``dynamic_group_size``.  Both paths converge on ``_finalize_episode`` for
+shared post-processing.
+
+Fixed group_size path (``_arun_episode_fixed``):
+  1. Query the tree_store for cached (untrained) episodes.
+  2. Generate ``group_size - cached_count`` fresh episodes in parallel.
+     Each fresh episode may come from scratch or from a *branch* of an
+     existing high-entropy node (controlled by ``sample_source`` /
+     ``branch_probability``).
+  3. Combine cached + fresh nodes.
+
+Dynamic group_size path (``_arun_episode_dynamic``):
+  1. Same cache lookup and initial generation as fixed, but starting from
+     ``initial_group_size`` instead of ``group_size``.
+  2. Iteratively sample one more episode, recompute uncertainty U(q), and
+     stop when U(q) falls below ``uncertainty_threshold`` or
+     ``max_group_size`` is reached.  A consecutive-failure circuit breaker
+     prevents infinite loops.
+
+Shared finalization (``_finalize_episode``):
+  4. Zero-variance discard: if all episodes have identical reward, insert
+     fresh nodes, mark them discarded, save checkpoint, and return None.
+  5. Insert fresh nodes into the tree_store.
+  6. If ``loss_mode != GRPO``: run selected-turn distillation — diagnose
+     the episode, identify turns needing improvement, gather teacher
+     logprobs, and build per-position reward info.
+  7. If ``advantage_mode == TREE``: compute GRPO-normalized tree advantages
+     across episodes.
+  8. Mark all nodes as trained, save the tree checkpoint, and convert to a
+     batched tensor dict.
+
+Helper functions
+~~~~~~~~~~~~~~~~
+- ``choose_sample_source`` — probabilistic selection between SCRATCH / BRANCH / MIXED.
+- ``select_branch_candidate`` — pick the highest-entropy node eligible for branching.
+- ``build_branch_task`` — create a TPFC task that reuses a branch sandbox.
+- ``interactions_dict_to_nodes`` — convert inference-engine interactions to ``Node``
+  objects, handling both live ``model_response`` and proxy-deserialized tensor caches.
+- ``annotate_nodes_from_run`` — stamp TPFC assistant metadata (entropy, branch info)
+  onto nodes by turn index.
+- ``_input_ids_to_messages`` — heuristic token-ID → message-list conversion used by
+  the diagnosis step.
 """
 
 from __future__ import annotations
@@ -150,6 +189,29 @@ def _assistant_metadata(raw_messages: list[dict[str, Any]]) -> list[dict[str, An
     return metadata_by_turn
 
 
+def _topk_ids_from_metadata(
+    metadata: dict[str, Any],
+) -> list[list[int]] | None:
+    top_logprobs = metadata.get("top_logprobs")
+    if not isinstance(top_logprobs, list):
+        return None
+
+    topk_ids: list[list[int]] = []
+    for pos_entry in top_logprobs:
+        if not isinstance(pos_entry, list):
+            return None
+        pos_ids: list[int] = []
+        for alt in pos_entry:
+            if not isinstance(alt, dict):
+                return None
+            token_id = alt.get("token_id")
+            if isinstance(token_id, bool) or not isinstance(token_id, int):
+                return None
+            pos_ids.append(token_id)
+        topk_ids.append(pos_ids)
+    return topk_ids
+
+
 def annotate_nodes_from_run(
     nodes: list[Node],
     *,
@@ -176,6 +238,10 @@ def annotate_nodes_from_run(
             if isinstance(branch_sandbox_id, str) and branch_sandbox_id
             else None
         )
+        if node.topk_ids is None:
+            topk_ids = _topk_ids_from_metadata(metadata)
+            if topk_ids is not None:
+                node.topk_ids = topk_ids
 
 
 def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
@@ -416,22 +482,28 @@ def _input_ids_to_messages(
 
 
 class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
-    """GroupedRolloutWorkflow with tree-search cache reuse, tree ops, and checkpoint.
+    """Grouped rollout workflow with tree-search cache reuse and teacher distillation.
 
-    Wraps the base OpenAIProxyWorkflow and overrides arun_episode to:
-    1. Check cache: how many untrained episodes exist for this query?
-    2. Generate only the needed fresh episodes (group_size - cached_count)
-    3. Convert fresh results to Nodes, load cached episode Nodes
-    4. Teacher model reward computation (if loss_mode != GRPO):
-       - Diagnose episodes to find turns needing improvement
-       - Get teacher logprobs for candidate tokens at each position
-       - Build PositionRewardInfo with candidate_token_ids, teacher_logprobs, and rewards
-    5. Combine cached + fresh Nodes (total = group_size episodes)
-    6. Insert fresh Nodes into tree_store
-    7. Compute tree advantages per-episode (if advantage_mode == TREE)
-    8. Mark all nodes as trained
-    9. Save tree checkpoint (if cache_mode == CROSS_TRAINING)
-    10. Return batched tensor dict (with distill weights and position_rewards if distilling)
+    Wraps a base ``RolloutWorkflow`` and overrides ``arun_episode`` to produce
+    ``group_size`` episodes per query, reusing cached (untrained) episodes from
+    the tree_store and generating only the deficit fresh episodes.
+
+    Two sampling modes:
+      - **Fixed** (default): generate exactly ``group_size - cached_count`` episodes.
+      - **Dynamic** (``dynamic_group_size=True``): start from ``initial_group_size``,
+        then iteratively add episodes until uncertainty drops below threshold
+        or ``max_group_size`` is reached.
+
+    Fresh episodes can optionally **branch** from high-entropy cached nodes
+    (``sample_source`` = BRANCH or MIXED) by reusing their TPFC sandbox state.
+
+    When ``loss_mode`` is DISTILL or BOTH, a teacher model diagnoses each
+    episode to identify weak turns, then provides logprobs for distillation
+    targets at those positions.
+
+    Checkpointing is managed per-query via ``TreeCheckpointManager`` and is
+    always performed (not gated on ``cache_mode``).  ``cache_mode`` only
+    controls whether the checkpoint is *loaded* at init time.
     """
 
     _tokenizer_cache: dict[str, Any] = {}
@@ -473,6 +545,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         max_group_size: int = 64,
         uncertainty_threshold: float = 0.05,
         reward_type: str = "binary",
+        distill_kl_mode: str = "reverse_kl",
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -515,6 +588,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.max_group_size = max_group_size
         self.uncertainty_threshold = uncertainty_threshold
         self.reward_type = reward_type
+        self.distill_kl_mode = distill_kl_mode
         if dynamic_group_size:
             self.group_size = self.initial_group_size
 
@@ -727,14 +801,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             selected = diagnosis.selected_turns
             if selected:
                 nodes[-1].guidance = dict(selected)
-        if not selected:
-            if self.loss_mode == LossMode.DISTILL:
-                return [], {}
+        if not selected and self.loss_mode != LossMode.DISTILL:
             return nodes, {}
 
         async def _run_one_node(node: Node) -> tuple[str, list[Any]] | None:
-            guidance = selected.get(node.turn_idx)
-            if not guidance:
+            guidance = selected.get(node.turn_idx, "")
+            if self.loss_mode != LossMode.DISTILL and not guidance:
                 return None
             rewards = await selected_turn_to_position_rewards(
                 node=node,
@@ -764,8 +836,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if result is not None:
                 node_id, rewards = result
                 rewards_by_node_id[node_id] = rewards
-        if self.loss_mode == LossMode.DISTILL and not rewards_by_node_id:
-            return [], {}
         return nodes, rewards_by_node_id
 
     async def _retry_episode(
@@ -971,7 +1041,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
 
         fresh_nodes: list[Node] = []
-        if need_gen > 0:
+        if need_gen > 0 and self.loss_mode != LossMode.DISTILL:
             results = await asyncio.gather(
                 *[
                     self._run_fresh_episode(engine, data, group_idx, query_id)

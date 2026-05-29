@@ -185,6 +185,9 @@ def build_teacher_prompt_ids(
     prefix_ids = input_ids[:start]
     generation_ids = input_ids[start:end]
 
+    if not guidance.strip():
+        return prefix_ids, generation_ids
+
     guidance_text = GUIDANCE_PROMPT_TEMPLATE.format(guidance=guidance.strip())
     guidance_ids = _encode(tokenizer, guidance_text)
     return prefix_ids + guidance_ids, generation_ids
@@ -200,51 +203,28 @@ async def selected_turn_to_position_rewards(
     engine: Any,
     teacher_top_k: int,
 ) -> list[PositionRewardInfo]:
-    """Convert one selected turn into position-level teacher rewards."""
+    """Convert one selected turn into position-level distillation targets."""
     prompt_ids, generation_ids = build_teacher_prompt_ids(node, guidance, tokenizer)
     if not generation_ids:
         return []
 
-    logprobs = _as_list(node.logprobs)
     loss_mask = _as_list(node.loss_mask)
-    start, end = response_token_span(loss_mask)
-    generation_logprobs = [float(value) for value in logprobs[start:end]]
 
     if topk_distill:
-        if node.topk_ids is None or node.topk_logp is None:
-            topk_ids, topk_logp = await _recompute_student_topk(
+        if node.topk_ids is None:
+            candidate_token_ids = await _recompute_student_topk(
                 engine=engine,
                 node=node,
                 teacher_top_k=teacher_top_k,
             )
         else:
-            topk_ids, topk_logp = _select_current_topk_rows(
+            candidate_token_ids = _select_current_topk_ids(
                 topk_ids=node.topk_ids,
-                topk_logp=node.topk_logp,
                 input_ids=_as_list(node.input_ids),
                 loss_mask=loss_mask,
             )
-        candidate_token_ids = []
-        student_logprobs = []
-        for generated_id, generated_logprob, candidates, position_logprobs in zip(
-            generation_ids,
-            generation_logprobs,
-            topk_ids,
-            topk_logp,
-            strict=True,
-        ):
-            reordered_ids = [generated_id]
-            reordered_logprobs = [generated_logprob]
-            for token_id, logprob in zip(candidates, position_logprobs, strict=True):
-                if token_id == generated_id:
-                    continue
-                reordered_ids.append(int(token_id))
-                reordered_logprobs.append(float(logprob))
-            candidate_token_ids.append(reordered_ids)
-            student_logprobs.append(reordered_logprobs)
     else:
         candidate_token_ids = [[token_id] for token_id in generation_ids]
-        student_logprobs = [[logprob] for logprob in generation_logprobs]
 
     teacher_logprobs = await provider.get_logprobs_for_prompt(
         prompt_ids=prompt_ids,
@@ -253,30 +233,19 @@ async def selected_turn_to_position_rewards(
     )
 
     position_rewards: list[PositionRewardInfo] = []
-    for position, (candidate_ids, student_lps, teacher_lps) in enumerate(
-        zip(candidate_token_ids, student_logprobs, teacher_logprobs, strict=True)
+    for position, (candidate_ids, teacher_lps) in enumerate(
+        zip(candidate_token_ids, teacher_logprobs, strict=True)
     ):
-        if len(candidate_ids) != len(student_lps) or len(candidate_ids) != len(
-            teacher_lps
-        ):
+        if len(candidate_ids) != len(teacher_lps):
             raise ValueError(
-                "candidate, student logprob, and teacher logprob lengths must match"
+                "candidate token ids and teacher logprob lengths must match"
             )
-
-        rewards = [
-            student_logprob - teacher_logprob
-            for student_logprob, teacher_logprob in zip(
-                student_lps, teacher_lps, strict=True
-            )
-        ]
         position_rewards.append(
             PositionRewardInfo(
                 position=position,
                 candidates=[str(token_id) for token_id in candidate_ids],
                 candidate_token_ids=list(candidate_ids),
-                logprobs=list(student_lps),
                 teacher_logprobs=list(teacher_lps),
-                rewards=rewards,
                 chosen_index=0,
                 sample_index=sample_index,
             )
@@ -289,7 +258,7 @@ async def _recompute_student_topk(
     engine: Any,
     node: Node,
     teacher_top_k: int,
-) -> tuple[list[list[int]], list[list[float]]]:
+) -> list[list[int]]:
     get_topk_logprobs = getattr(engine, "get_topk_logprobs", None)
     if get_topk_logprobs is None or not callable(get_topk_logprobs):
         raise NotImplementedError(
@@ -307,15 +276,28 @@ async def _recompute_student_topk(
             "student top-k"
         )
     topk_ids, topk_logp = await maybe_topk
-    selected_topk_ids, selected_topk_logp = _select_current_topk_rows(
+    selected_topk_ids, _ = _select_current_topk_rows(
         topk_ids=topk_ids,
         topk_logp=topk_logp,
         input_ids=_as_list(node.input_ids),
         loss_mask=_as_list(node.loss_mask),
     )
     node.topk_ids = selected_topk_ids
-    node.topk_logp = selected_topk_logp
-    return selected_topk_ids, selected_topk_logp
+    return selected_topk_ids
+
+
+def _select_current_topk_ids(
+    topk_ids: Any,
+    input_ids: list[int],
+    loss_mask: list[int],
+) -> list[list[int]]:
+    selected_topk_ids, _ = _select_current_topk_rows(
+        topk_ids=topk_ids,
+        topk_logp=[[0.0] * len(row) for row in _nested_list(topk_ids)],
+        input_ids=input_ids,
+        loss_mask=loss_mask,
+    )
+    return selected_topk_ids
 
 
 def _select_current_topk_rows(
