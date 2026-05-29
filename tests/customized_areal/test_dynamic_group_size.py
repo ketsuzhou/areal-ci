@@ -541,3 +541,261 @@ class TestPrecomputedAdvantages:
             "advantages" in traj and "returns" in traj for traj in rollout_batch
         )
         assert has_precomputed is False
+
+
+class TestEndToEndWorkflow:
+    @pytest.mark.asyncio
+    async def test_fixed_mode_unchanged(self):
+        """Fixed mode produces a valid tensor dict output."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.GAE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+        )
+
+        call_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal call_count
+            call_count += 1
+            reward = 1.0 if call_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{group_idx}"
+                node.node_id = f"node_{group_idx}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_e2e_fixed"})
+        assert result is not None
+        assert "input_ids" in result
+
+    @pytest.mark.asyncio
+    async def test_dynamic_binary_rewards(self):
+        """Dynamic mode with binary rewards produces valid output."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=8,
+            uncertainty_threshold=0.5,
+            reward_type="binary",
+        )
+
+        episode_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal episode_count
+            episode_count += 1
+            reward = 1.0 if episode_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{episode_count}"
+                node.node_id = f"node_{episode_count}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_e2e_binary"})
+        assert result is not None
+        assert "input_ids" in result
+
+    @pytest.mark.asyncio
+    async def test_dynamic_continuous_rewards(self):
+        """Dynamic mode with continuous rewards produces valid output."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=8,
+            uncertainty_threshold=0.5,
+            reward_type="continuous",
+        )
+
+        episode_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal episode_count
+            episode_count += 1
+            reward = 0.3 + 0.4 * (episode_count % 3) / 2
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{episode_count}"
+                node.node_id = f"node_{episode_count}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_e2e_cont"})
+        assert result is not None
+        assert "input_ids" in result
+
+    @pytest.mark.asyncio
+    async def test_discard_after_identical_rewards(self):
+        """E2E: dynamic mode discards when all rewards are identical."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=4,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=4,
+            uncertainty_threshold=0.001,
+            reward_type="binary",
+        )
+
+        def make_nodes(result, query_id, group_idx):
+            # All rewards = 1.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=1.0,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{group_idx}"
+                node.node_id = f"node_{group_idx}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_e2e_discard"})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_tree_mode_advantages_in_output(self):
+        """TREE-mode workflow output contains precomputed advantages."""
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
+        from unittest.mock import AsyncMock, MagicMock
+        import torch
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+        )
+
+        call_count = 0
+
+        def make_nodes(result, query_id, group_idx):
+            nonlocal call_count
+            call_count += 1
+            reward = 1.0 if call_count % 2 == 0 else 0.0
+            nodes = []
+            for i in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=reward,
+                )
+                node.query_id = query_id
+                node.episode_id = f"ep_{group_idx}"
+                node.node_id = f"node_{group_idx}_{i}"
+                node.turn_idx = i + 1
+                nodes.append(node)
+            return nodes
+
+        wf._result_to_nodes = make_nodes
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_e2e_tree"})
+        assert result is not None
+        assert "advantages" in result
