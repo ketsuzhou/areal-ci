@@ -703,8 +703,7 @@ class PPOTrainer:
                 # Skip GAE/GRPO recomputation if rollout trajectories already
                 # carry precomputed advantages and returns (e.g. TREE mode).
                 if rollout_batch and all(
-                    "advantages" in traj and "returns" in traj
-                    for traj in rollout_batch
+                    "advantages" in traj and "returns" in traj for traj in rollout_batch
                 ):
                     logger.info(
                         "Skipping compute_advantages: rollout already has "

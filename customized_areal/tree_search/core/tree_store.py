@@ -47,6 +47,7 @@ class Node:
     turn_idx: int = 0  # 1-based turn position within episode
     query_id: str = ""  # dataset query identifier
     train_id: str = ""  # training run that trained this node; "" means untrained
+    discarded: bool = False  # excluded from future cache reuse without marking trained
     task_id: str = ""  # TPFC backend task that produced this node
     entropy_stats: dict[str, Any] | None = None
     need_branch: bool = False
@@ -323,6 +324,28 @@ class MCTSTreeStore:
         else:
             node.train_id = self.current_train_id
 
+    def set_discarded(self, node_id: str, discarded: bool = True) -> None:
+        """Mark a node as discarded so it will not be reused from cache."""
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return
+        query_id, idx = key
+        node = self.trajectories[query_id][idx]
+        if isinstance(node, dict):
+            node["discarded"] = discarded
+        else:
+            node.discarded = discarded
+
+    def is_discarded(self, node_id: str) -> bool:
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return False
+        query_id, idx = key
+        node = self.trajectories[query_id][idx]
+        if isinstance(node, dict):
+            return bool(node.get("discarded", False))
+        return node.discarded
+
     def is_trained(self, node_id: str) -> bool:
         """A node is trained if its train_id matches the current run's train_id.
 
@@ -367,7 +390,7 @@ class MCTSTreeStore:
         return sum(
             1
             for node_id in self._query_node_ids[query_id]
-            if not self.is_trained(node_id)
+            if not self.is_trained(node_id) and not self.is_discarded(node_id)
         )
 
     def get_untrained_episode_count(self, query_id: str) -> int:
@@ -393,7 +416,7 @@ class MCTSTreeStore:
                 continue
             if ep_id not in episode_has_untrained:
                 episode_has_untrained[ep_id] = False
-            if not self.is_trained(node_id):
+            if not self.is_trained(node_id) and not self.is_discarded(node_id):
                 episode_has_untrained[ep_id] = True
         return sum(1 for v in episode_has_untrained.values() if v)
 
@@ -434,7 +457,7 @@ class MCTSTreeStore:
             # Check if any node in this episode is untrained
             is_untrained = False
             for node_id, qid, idx in episode_nodes[ep_id]:
-                if not self.is_trained(node_id):
+                if not self.is_trained(node_id) and not self.is_discarded(node_id):
                     is_untrained = True
                     break
             if not is_untrained:
@@ -449,7 +472,7 @@ class MCTSTreeStore:
             return []
         result: list[str] = []
         for node_id in self._query_node_ids[query_id]:
-            if not self.is_trained(node_id):
+            if not self.is_trained(node_id) and not self.is_discarded(node_id):
                 result.append(node_id)
                 if len(result) >= n_samples:
                     break

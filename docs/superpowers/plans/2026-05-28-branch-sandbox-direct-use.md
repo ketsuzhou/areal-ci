@@ -1,30 +1,39 @@
 # Branch Sandbox Direct Use + Subproc Metadata Propagation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix subproc metadata loss for task_id/raw_messages and eliminate redundant sandbox cloning in branch episodes.
+**Goal:** Fix subproc metadata loss for task_id/raw_messages and eliminate redundant
+sandbox cloning in branch episodes.
 
-**Architecture:** TPFCAgent returns a structured `TPFCAgentResult` dataclass instead of mutating `data`, which survives subprocess pickling. `OpenAIProxyWorkflow.arun_episode` unpacks it and propagates metadata to `data` in the parent process. `build_branch_task` uses `branch_sandbox_id` directly (no clone), and `_cleanup_branch` deletes the sandbox and marks the node after the branch episode finishes.
+**Architecture:** TPFCAgent returns a structured `TPFCAgentResult` dataclass instead of
+mutating `data`, which survives subprocess pickling. `OpenAIProxyWorkflow.arun_episode`
+unpacks it and propagates metadata to `data` in the parent process. `build_branch_task`
+uses `branch_sandbox_id` directly (no clone), and `_cleanup_branch` deletes the sandbox
+and marks the node after the branch episode finishes.
 
 **Tech Stack:** Python 3.12+, asyncio, pytest
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Action | Responsibility |
-|------|--------|---------------|
-| `customized_areal/tpfc/tpfc_agent.py` | Modify | Add `TPFCAgentResult`, return it from `run()` |
-| `areal/experimental/openai/proxy/workflow.py` | Modify | Handle `TPFCAgentResult` in `arun_episode` |
+| File                                                           | Action | Responsibility                                                                            |
+| -------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| `customized_areal/tpfc/tpfc_agent.py`                          | Modify | Add `TPFCAgentResult`, return it from `run()`                                             |
+| `areal/experimental/openai/proxy/workflow.py`                  | Modify | Handle `TPFCAgentResult` in `arun_episode`                                                |
 | `customized_areal/tree_search/tree_search_grouped_workflow.py` | Modify | Remove clone from `build_branch_task`, add `_cleanup_branch`, update `_run_fresh_episode` |
-| `tests/customized_areal/test_tree_search_branch_sampling.py` | Modify | Update existing tests, add new tests |
+| `tests/customized_areal/test_tree_search_branch_sampling.py`   | Modify | Update existing tests, add new tests                                                      |
 
----
+______________________________________________________________________
 
 ### Task 1: Add `TPFCAgentResult` dataclass and update `TPFCAgent.run()`
 
 **Files:**
+
 - Modify: `customized_areal/tpfc/tpfc_agent.py:1-198`
+
 - Test: `tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing test for TPFCAgentResult pickling**
@@ -57,12 +66,14 @@ def test_tpfca_agent_result_default_fields():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_is_picklable tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_default_fields -v`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_is_picklable tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_default_fields -v`
 Expected: FAIL — `ImportError: cannot import name 'TPFCAgentResult'`
 
 - [ ] **Step 3: Add TPFCAgentResult dataclass to tpfc_agent.py**
 
-At the top of `customized_areal/tpfc/tpfc_agent.py`, add after the existing imports (after `from areal.utils import logging`):
+At the top of `customized_areal/tpfc/tpfc_agent.py`, add after the existing imports
+(after `from areal.utils import logging`):
 
 ```python
 from dataclasses import dataclass, field
@@ -82,7 +93,11 @@ class TPFCAgentResult:
     raw_messages: list[dict[str, Any]] = field(default_factory=list)
 ```
 
-Note: `from dataclasses import dataclass` is not yet imported in this file. Add `dataclass, field` to a new import or to the existing typing imports. The file already imports `Any` from `typing` indirectly (via the `pathlib` and other imports). Check that `Any` is available — it's not explicitly imported. Add `from typing import Any` at the top.
+Note: `from dataclasses import dataclass` is not yet imported in this file. Add
+`dataclass, field` to a new import or to the existing typing imports. The file already
+imports `Any` from `typing` indirectly (via the `pathlib` and other imports). Check that
+`Any` is available — it's not explicitly imported. Add `from typing import Any` at the
+top.
 
 Then modify `TPFCAgent.run()` to return `TPFCAgentResult` instead of mutating `data`:
 
@@ -106,7 +121,8 @@ return TPFCAgentResult(
 )
 ```
 
-Also update the outer return type and timeout handling in `run()` (currently `-> float`). Change the method signature:
+Also update the outer return type and timeout handling in `run()` (currently
+`-> float`). Change the method signature:
 
 ```python
 async def run(
@@ -126,7 +142,8 @@ This already returns whatever `_do_run()` returns, so no change needed there.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_is_picklable tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_default_fields -v`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_is_picklable tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_default_fields -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -136,17 +153,22 @@ git add customized_areal/tpfc/tpfc_agent.py tests/customized_areal/test_tree_sea
 git commit -m "feat(tpfc): add TPFCAgentResult dataclass, return from run() instead of mutating data"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Handle `TPFCAgentResult` in `OpenAIProxyWorkflow.arun_episode`
 
 **Files:**
+
 - Modify: `areal/experimental/openai/proxy/workflow.py:215-252`
+
 - Test: `tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing test for TPFCAgentResult handling in arun_episode**
 
-This test verifies that when an agent returns `TPFCAgentResult`, the metadata is propagated to `data` and the reward is correctly assigned. Since `arun_episode` is complex and depends on proxy infrastructure, we test the data-propagation logic via the existing `_run_fresh_episode` / `_with_episode_metadata` path instead.
+This test verifies that when an agent returns `TPFCAgentResult`, the metadata is
+propagated to `data` and the reward is correctly assigned. Since `arun_episode` is
+complex and depends on proxy infrastructure, we test the data-propagation logic via the
+existing `_run_fresh_episode` / `_with_episode_metadata` path instead.
 
 Add to `tests/customized_areal/test_tree_search_branch_sampling.py`:
 
@@ -172,7 +194,10 @@ def test_with_episode_metadata_extracts_tpfca_result():
     assert result.result == "some_result"
 ```
 
-This test should already pass (existing functionality). The real test is that after we add `TPFCAgentResult` handling in `arun_episode`, the data dict gets populated correctly in both inline and subproc modes. Since testing `arun_episode` end-to-end requires the full proxy server, we add a focused unit test for the data-propagation logic:
+This test should already pass (existing functionality). The real test is that after we
+add `TPFCAgentResult` handling in `arun_episode`, the data dict gets populated correctly
+in both inline and subproc modes. Since testing `arun_episode` end-to-end requires the
+full proxy server, we add a focused unit test for the data-propagation logic:
 
 ```python
 def test_tpfca_agent_result_propagates_to_data_dict():
@@ -195,16 +220,23 @@ def test_tpfca_agent_result_propagates_to_data_dict():
     assert data["_backend_run_raw_messages"] == [{"role": "assistant", "content": "response"}]
 ```
 
-- [ ] **Step 2: Run test to verify it passes (data propagation test should pass since it's self-contained)**
+- [ ] **Step 2: Run test to verify it passes (data propagation test should pass since
+  it's self-contained)**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_with_episode_metadata_extracts_tpfca_result tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_propagates_to_data_dict -v`
-Expected: PASS (the propagation test is self-contained; the metadata test uses existing code)
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_with_episode_metadata_extracts_tpfca_result tests/customized_areal/test_tree_search_branch_sampling.py::test_tpfca_agent_result_propagates_to_data_dict -v`
+Expected: PASS (the propagation test is self-contained; the metadata test uses existing
+code)
 
 - [ ] **Step 3: Add TPFCAgentResult handling to `arun_episode`**
 
-In `areal/experimental/openai/proxy/workflow.py`, modify the `arun_episode` method. After line 226 (`rewards = await self._run_agent(...)`), add the structured result unpacking.
+In `areal/experimental/openai/proxy/workflow.py`, modify the `arun_episode` method.
+After line 226 (`rewards = await self._run_agent(...)`), add the structured result
+unpacking.
 
-**Important:** Do NOT import `TPFCAgentResult` from `customized_areal` — `areal` must not depend on `customized_areal`. Instead, use duck-typing: check for the `task_id` and `raw_messages` attributes that `TPFCAgentResult` exposes.
+**Important:** Do NOT import `TPFCAgentResult` from `customized_areal` — `areal` must
+not depend on `customized_areal`. Instead, use duck-typing: check for the `task_id` and
+`raw_messages` attributes that `TPFCAgentResult` exposes.
 
 Find this block (lines 225-238):
 
@@ -257,12 +289,14 @@ git add areal/experimental/openai/proxy/workflow.py tests/customized_areal/test_
 git commit -m "feat(proxy): handle TPFCAgentResult in arun_episode for subproc metadata propagation"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Modify `build_branch_task` to use `branch_sandbox_id` directly (no clone)
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:111-156`
+
 - Test: `tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing test for direct sandbox use in build_branch_task**
@@ -365,12 +399,15 @@ async def test_build_branch_task_uses_sandbox_directly_without_clone(monkeypatch
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_build_branch_task_uses_sandbox_directly_without_clone -v`
-Expected: FAIL — the existing code clones the sandbox, so `copied[0]` will have a different sandbox_id than `"direct-sandbox-id"`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_build_branch_task_uses_sandbox_directly_without_clone -v`
+Expected: FAIL — the existing code clones the sandbox, so `copied[0]` will have a
+different sandbox_id than `"direct-sandbox-id"`
 
 - [ ] **Step 3: Modify `build_branch_task` to use sandbox directly**
 
-In `customized_areal/tree_search/tree_search_grouped_workflow.py`, replace the `build_branch_task` function (lines 111-156) with:
+In `customized_areal/tree_search/tree_search_grouped_workflow.py`, replace the
+`build_branch_task` function (lines 111-156) with:
 
 ```python
 async def build_branch_task(
@@ -406,6 +443,7 @@ async def build_branch_task(
 ```
 
 Key changes:
+
 - Removed `clone_sandbox` call and its fallback
 - Removed `try/except` with sandbox cleanup on error (no cloned sandbox to clean up)
 - Use `candidate.branch_sandbox_id` directly
@@ -435,14 +473,19 @@ from customized_areal.db_service import (
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_build_branch_task_uses_sandbox_directly_without_clone -v`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_build_branch_task_uses_sandbox_directly_without_clone -v`
 Expected: PASS
 
 - [ ] **Step 5: Update the old clone-based test to match new behavior**
 
-The existing `test_build_branch_task_clones_sandbox_and_copies_prefix` (line 320) now fails because `clone_sandbox` is no longer called. Replace it with the new test above, or update the assertions. Since the new test covers the same scenario with the correct expectations, remove the old test.
+The existing `test_build_branch_task_clones_sandbox_and_copies_prefix` (line 320) now
+fails because `clone_sandbox` is no longer called. Replace it with the new test above,
+or update the assertions. Since the new test covers the same scenario with the correct
+expectations, remove the old test.
 
-Delete `test_build_branch_task_clones_sandbox_and_copies_prefix` from the test file (lines 319-415).
+Delete `test_build_branch_task_clones_sandbox_and_copies_prefix` from the test file
+(lines 319-415).
 
 - [ ] **Step 6: Run all branch sampling tests**
 
@@ -456,12 +499,14 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py tests/custo
 git commit -m "feat(tree-search): use branch_sandbox_id directly in build_branch_task, remove clone"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Add `_cleanup_branch` and update `_run_fresh_episode`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tree_search_grouped_workflow.py:818-892`
+
 - Test: `tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing test for `_cleanup_branch`**
@@ -542,12 +587,15 @@ def test_select_branch_candidate_ignores_cleaned_up_node():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_deletes_sandbox_and_clears_node_state -v`
-Expected: FAIL — `AttributeError: 'TreeSearchGroupedRolloutWorkflow' object has no attribute '_cleanup_branch'`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_deletes_sandbox_and_clears_node_state -v`
+Expected: FAIL —
+`AttributeError: 'TreeSearchGroupedRolloutWorkflow' object has no attribute '_cleanup_branch'`
 
 - [ ] **Step 3: Add `_cleanup_branch` method to `TreeSearchGroupedRolloutWorkflow`**
 
-In `customized_areal/tree_search/tree_search_grouped_workflow.py`, add the method after `_prepare_branch_task` (after line 892):
+In `customized_areal/tree_search/tree_search_grouped_workflow.py`, add the method after
+`_prepare_branch_task` (after line 892):
 
 ```python
     async def _cleanup_branch(self, candidate: Node) -> None:
@@ -567,12 +615,15 @@ In `customized_areal/tree_search/tree_search_grouped_workflow.py`, add the metho
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_deletes_sandbox_and_clears_node_state tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_tolerates_delete_failure tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_skips_delete_when_no_sandbox_id tests/customized_areal/test_tree_search_branch_sampling.py::test_select_branch_candidate_ignores_cleaned_up_node -v`
+Run:
+`uv run pytest tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_deletes_sandbox_and_clears_node_state tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_tolerates_delete_failure tests/customized_areal/test_tree_search_branch_sampling.py::test_cleanup_branch_skips_delete_when_no_sandbox_id tests/customized_areal/test_tree_search_branch_sampling.py::test_select_branch_candidate_ignores_cleaned_up_node -v`
 Expected: PASS
 
-- [ ] **Step 5: Update `_run_fresh_episode` to call `_cleanup_branch` after branch episode**
+- [ ] **Step 5: Update `_run_fresh_episode` to call `_cleanup_branch` after branch
+  episode**
 
-In `customized_areal/tree_search/tree_search_grouped_workflow.py`, modify `_run_fresh_episode` (lines 834-850). Replace:
+In `customized_areal/tree_search/tree_search_grouped_workflow.py`, modify
+`_run_fresh_episode` (lines 834-850). Replace:
 
 ```python
         if source == SampleSource.BRANCH and candidate is not None:
@@ -625,9 +676,10 @@ With:
             )
 ```
 
-The only change is adding `await self._cleanup_branch(candidate)` before the return on the branch path.
+The only change is adding `await self._cleanup_branch(candidate)` before the return on
+the branch path.
 
-- [ ] **Step 6: Write test verifying _cleanup_branch is called after branch episode**
+- [ ] **Step 6: Write test verifying \_cleanup_branch is called after branch episode**
 
 Add to `tests/customized_areal/test_tree_search_branch_sampling.py`:
 
@@ -679,7 +731,7 @@ git add customized_areal/tree_search/tree_search_grouped_workflow.py tests/custo
 git commit -m "feat(tree-search): add _cleanup_branch, delete branch sandbox after episode, clear node state"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Run pre-commit and full test suite
 
@@ -687,8 +739,7 @@ git commit -m "feat(tree-search): add _cleanup_branch, delete branch sandbox aft
 
 - [ ] **Step 1: Run pre-commit**
 
-Run: `pre-commit run --all-files`
-Expected: PASS (fix any linting/formatting issues)
+Run: `pre-commit run --all-files` Expected: PASS (fix any linting/formatting issues)
 
 - [ ] **Step 2: Run the full branch sampling test suite one final time**
 

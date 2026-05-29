@@ -101,6 +101,65 @@ def test_shared_token_manager_round_trips_token_payload(tmp_path):
     assert reader.refresh_token == refresh_token
 
 
+def test_shared_token_manager_write_token_updates_refresh_token_in_dotenv(
+    monkeypatch, tmp_path
+):
+    """Rotated refresh tokens are persisted for future processes."""
+    token_file = tmp_path / "shared_auth.json"
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text("REFRESH_TOKEN=refresh-v1\nOTHER=value\n", encoding="utf-8")
+    access_token = _jwt_with_exp(
+        int(time.time()) + 3600,
+        {"alg": "ES256", "kid": "key-id", "typ": "JWT"},
+    )
+
+    monkeypatch.setattr(backend_run, "_DOTENV_FILE", dotenv_file)
+
+    manager = backend_run.SharedTokenManager(
+        token_file=token_file,
+        refresh_token="refresh-v1",
+    )
+    manager.write_token(access_token, "refresh-v2")
+
+    payload = json.loads(token_file.read_text(encoding="utf-8"))
+    assert payload["refresh_token"] == "refresh-v2"
+    assert "REFRESH_TOKEN=refresh-v2\n" in dotenv_file.read_text(encoding="utf-8")
+    assert "OTHER=value\n" in dotenv_file.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_shared_token_manager_refreshes_and_persists_rotated_refresh_token(
+    monkeypatch, tmp_path
+):
+    """Refreshing under the shared lock updates both token stores."""
+    token_file = tmp_path / "shared_auth.json"
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text("REFRESH_TOKEN=refresh-v1\n", encoding="utf-8")
+    refreshed_access_token = _jwt_with_exp(
+        int(time.time()) + 3600,
+        {"alg": "ES256", "kid": "key-id", "typ": "JWT"},
+    )
+
+    async def fake_refresh(refresh_token):
+        assert refresh_token == "refresh-v1"
+        return refreshed_access_token, "refresh-v2"
+
+    monkeypatch.setattr(backend_run, "_DOTENV_FILE", dotenv_file)
+    monkeypatch.setattr(backend_run, "_refresh_access_token", fake_refresh)
+
+    manager = backend_run.SharedTokenManager(
+        token_file=token_file,
+        refresh_token="refresh-v1",
+    )
+    token = await manager.get_valid_token()
+
+    assert token == refreshed_access_token
+    assert manager.refresh_token == "refresh-v2"
+    payload = json.loads(token_file.read_text(encoding="utf-8"))
+    assert payload["refresh_token"] == "refresh-v2"
+    assert dotenv_file.read_text(encoding="utf-8") == "REFRESH_TOKEN=refresh-v2\n"
+
+
 @pytest.mark.asyncio
 async def test_refresh_access_token_uses_login_when_refresh_token_expired(
     monkeypatch,

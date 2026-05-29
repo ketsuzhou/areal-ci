@@ -1,5 +1,8 @@
 """Tests for dynamic group_size feature."""
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
 
 from customized_areal.tree_search.config import TreeBackupConfig
@@ -265,6 +268,57 @@ class TestZeroVarianceDiscard:
         wf._result_to_nodes = make_nodes
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_discard"})
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_discarded_cached_episodes_are_not_reused(self):
+        """Discarded episodes leave train_id untouched but are excluded from cache reuse."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+        )
+
+        cached_nodes = []
+        for ep_idx in range(2):
+            for turn_idx in range(2):
+                node = Node(
+                    input_ids=[1, 2, 3],
+                    loss_mask=[0, 1, 1],
+                    logprobs=[0.0, -0.5, -0.3],
+                    versions=[-1, 0, 0],
+                    outcome_reward=1.0,
+                    node_id=f"cached_{ep_idx}_{turn_idx}",
+                    episode_id=f"ep_{ep_idx}",
+                    query_id="q_cached_discard",
+                    turn_idx=turn_idx + 1,
+                )
+                cached_nodes.append(node)
+        wf.tree_store.insert_batch(cached_nodes)
+
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_cached_discard"})
+        assert result is None
+        assert wf.tree_store.get_untrained_episode_count("q_cached_discard") == 0
+        for node in cached_nodes:
+            assert node.train_id == ""
+            assert wf.tree_store.is_discarded(node.node_id) is True
 
     @pytest.mark.asyncio
     async def test_keep_mixed_rewards(self):
@@ -550,42 +604,104 @@ class TestDynamicSamplingLoop:
         # The key assertion: no crash
         assert result is None or isinstance(result, dict)
 
+    @pytest.mark.asyncio
+    async def test_failed_additions_are_bounded(self):
+        """Dynamic loop stops after a bounded number of failed additions."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            MagicMock(),
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=1,
+            max_group_size=4,
+            uncertainty_threshold=0.0,
+            reward_type="binary",
+        )
+        wf._run_fresh_episode = AsyncMock(return_value=None)
+
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_fail_cap"})
+        assert result is None
+        assert wf._run_fresh_episode.await_count == 1 + max(3, wf.max_group_size)
+
 
 class TestPrecomputedAdvantages:
-    def test_rollout_with_advantages_skips_recomputation(self):
-        """When rollout trajectories already have advantages/returns,
-        compute_advantages should be skipped."""
-        # Simulate what the trainer check does
-        rollout_batch = [
-            {"input_ids": [1, 2, 3], "advantages": [0.5, -0.5], "returns": [0.5, -0.5]},
-            {"input_ids": [4, 5, 6], "advantages": [0.3, -0.3], "returns": [0.3, -0.3]},
-        ]
-        has_precomputed = all(
-            "advantages" in traj and "returns" in traj for traj in rollout_batch
-        )
-        assert has_precomputed is True
+    def _make_minimal_trainer(self, rollout_batch):
+        from areal.trainer.rl_trainer import PPOTrainer, _EmptyDataLoader
 
-    def test_rollout_without_advantages_does_not_skip(self):
-        """When rollout trajectories lack advantages, skip check is False."""
+        trainer = PPOTrainer.__new__(PPOTrainer)
+        trainer.config = SimpleNamespace(
+            total_train_epochs=1,
+            total_train_steps=1,
+            dynamic_bs=False,
+            actor=SimpleNamespace(
+                should_compute_prox_logp=lambda: False,
+            ),
+            memory_profiler=None,
+            teacher=SimpleNamespace(rl_loss_weight=1.0, distill_loss_weight=1.0),
+            rollout=SimpleNamespace(agent=None),
+        )
+        trainer.recover_info = None
+        trainer.train_dataloader = _EmptyDataLoader(batch_size=1, steps_per_epoch=1)
+        trainer.actor = MagicMock()
+        trainer.actor.prepare_batch.return_value = rollout_batch
+        trainer.actor.get_device_stats.return_value = MagicMock(log=MagicMock())
+        trainer.actor.step_lr_scheduler = MagicMock()
+        trainer.actor.compute_advantages = MagicMock(return_value=rollout_batch)
+        trainer.actor.ppo_update = MagicMock(side_effect=RuntimeError("stop_after_update"))
+        trainer.rollout = MagicMock()
+        trainer.critic = None
+        trainer.ref = None
+        trainer.teacher = None
+        trainer._should_offload_rollout = False
+        trainer._should_offload_actor = False
+        trainer._should_offload_critic = False
+        trainer._should_offload_ref = False
+        trainer._should_offload_teacher = False
+        trainer._requires_proxy_workflow = MagicMock(return_value=False)
+        trainer.saver = MagicMock(maybe_wait_for_staging=MagicMock())
+        return trainer
+
+    def test_trainer_skips_compute_advantages_for_precomputed_rollout(self):
+        from areal.trainer.rl_trainer import PPOTrainer
+
+        rollout_batch = [
+            {"input_ids": [1, 2, 3], "advantages": [0.5], "returns": [0.5]},
+            {"input_ids": [4, 5, 6], "advantages": [0.3], "returns": [0.3]},
+        ]
+        trainer = self._make_minimal_trainer(rollout_batch)
+
+        with pytest.raises(RuntimeError, match="stop_after_update"):
+            PPOTrainer.train(trainer, workflow=object())
+
+        trainer.actor.compute_advantages.assert_not_called()
+
+    def test_trainer_computes_advantages_when_missing(self):
+        from areal.trainer.rl_trainer import PPOTrainer
+
         rollout_batch = [
             {"input_ids": [1, 2, 3]},
             {"input_ids": [4, 5, 6]},
         ]
-        has_precomputed = all(
-            "advantages" in traj and "returns" in traj for traj in rollout_batch
-        )
-        assert has_precomputed is False
+        trainer = self._make_minimal_trainer(rollout_batch)
 
-    def test_partial_advantages_does_not_skip(self):
-        """If some trajectories have advantages but others don't, don't skip."""
-        rollout_batch = [
-            {"input_ids": [1, 2, 3], "advantages": [0.5], "returns": [0.5]},
-            {"input_ids": [4, 5, 6]},
-        ]
-        has_precomputed = all(
-            "advantages" in traj and "returns" in traj for traj in rollout_batch
-        )
-        assert has_precomputed is False
+        with pytest.raises(RuntimeError, match="stop_after_update"):
+            PPOTrainer.train(trainer, workflow=object())
+
+        trainer.actor.compute_advantages.assert_called_once_with(rollout_batch)
 
 
 class TestEndToEndWorkflow:

@@ -6,18 +6,19 @@
 
 Two issues prevent tree-search branching from working correctly:
 
-1. **Subproc metadata loss**: In `subproc` mode, `TPFCAgent.run()` mutates `data` dict to pass
-   `task_id` and `raw_messages` back to the workflow. But `data` is pickled across process
-   boundaries, so mutations are lost. The tree search workflow never sees `_backend_run_task_id`
-   or `_backend_run_raw_messages`, so `EpisodeRunResult` is never created and
-   `annotate_nodes_from_run` is never called. Entropy metadata, `need_branch`, and
-   `branch_sandbox_id` never get annotated onto nodes.
+1. **Subproc metadata loss**: In `subproc` mode, `TPFCAgent.run()` mutates `data` dict
+   to pass `task_id` and `raw_messages` back to the workflow. But `data` is pickled
+   across process boundaries, so mutations are lost. The tree search workflow never sees
+   `_backend_run_task_id` or `_backend_run_raw_messages`, so `EpisodeRunResult` is never
+   created and `annotate_nodes_from_run` is never called. Entropy metadata,
+   `need_branch`, and `branch_sandbox_id` never get annotated onto nodes.
 
-2. **Unnecessary sandbox clone**: `build_branch_task` clones `candidate.branch_sandbox_id`
-   before binding it to the new task. But the sandbox was already deep-copied by
-   `_compute_entropy_metadata` in the agent loop. The clone is redundant and wastes time
-   and resources. Additionally, after the branching episode finishes, neither the cloned
-   sandbox nor the original `branch_sandbox_id` are cleaned up, causing resource leaks.
+1. **Unnecessary sandbox clone**: `build_branch_task` clones
+   `candidate.branch_sandbox_id` before binding it to the new task. But the sandbox was
+   already deep-copied by `_compute_entropy_metadata` in the agent loop. The clone is
+   redundant and wastes time and resources. Additionally, after the branching episode
+   finishes, neither the cloned sandbox nor the original `branch_sandbox_id` are cleaned
+   up, causing resource leaks.
 
 ## Design
 
@@ -49,13 +50,13 @@ return TPFCAgentResult(
 )
 ```
 
-This works in `subproc` mode because `TPFCAgentResult` is a picklable dataclass —
-the return value survives the process boundary, unlike `data` dict mutations.
+This works in `subproc` mode because `TPFCAgentResult` is a picklable dataclass — the
+return value survives the process boundary, unlike `data` dict mutations.
 
 ### 2. Backward-Compatible Handling in OpenAIProxyWorkflow
 
-In `OpenAIProxyWorkflow.arun_episode`, after `_run_agent` returns, detect `TPFCAgentResult`
-and propagate metadata to `data` in the parent process:
+In `OpenAIProxyWorkflow.arun_episode`, after `_run_agent` returns, detect
+`TPFCAgentResult` and propagate metadata to `data` in the parent process:
 
 ```python
 rewards = await self._run_agent(proxy_client.session_api_key, data)
@@ -68,11 +69,12 @@ if isinstance(rewards, TPFCAgentResult):
 ```
 
 Then the existing reward-handling logic (`isinstance(rewards, float)` etc.) continues to
-work unchanged. The `_with_episode_metadata` function in `tree_search_grouped_workflow.py`
-already reads `data["_backend_run_task_id"]` and `data["_backend_run_raw_messages"]`, so
-no changes needed there.
+work unchanged. The `_with_episode_metadata` function in
+`tree_search_grouped_workflow.py` already reads `data["_backend_run_task_id"]` and
+`data["_backend_run_raw_messages"]`, so no changes needed there.
 
-For agents that still return `float` or `dict`, behavior is unchanged (backward-compatible).
+For agents that still return `float` or `dict`, behavior is unchanged
+(backward-compatible).
 
 ### 3. Branch Task Preparation — Direct Sandbox Use
 
@@ -142,9 +144,10 @@ qualifies as a branch candidate.
 ## Files Modified
 
 1. `customized_areal/tpfc/tpfc_agent.py` — Add `TPFCAgentResult`, return it from `run()`
-2. `areal/experimental/openai/proxy/workflow.py` — Handle `TPFCAgentResult` in `arun_episode`
-3. `customized_areal/tree_search/tree_search_grouped_workflow.py` — Modify `build_branch_task`,
-   add `_cleanup_branch`, update `_run_fresh_episode`
+1. `areal/experimental/openai/proxy/workflow.py` — Handle `TPFCAgentResult` in
+   `arun_episode`
+1. `customized_areal/tree_search/tree_search_grouped_workflow.py` — Modify
+   `build_branch_task`, add `_cleanup_branch`, update `_run_fresh_episode`
 
 ## Testing
 

@@ -15,6 +15,14 @@ from supabase.lib.client_options import AsyncClientOptions, SyncClientOptions
 
 logger = logging.getLogger(__name__)
 
+_SUPABASE_CONNECT_TIMEOUT = 30.0
+_SUPABASE_READ_TIMEOUT = 120.0
+_SUPABASE_WRITE_TIMEOUT = 30.0
+_SUPABASE_POOL_TIMEOUT = 60.0
+_SUPABASE_MAX_CONNECTIONS = 100
+_SUPABASE_MAX_KEEPALIVE_CONNECTIONS = 50
+_SUPABASE_KEEPALIVE_EXPIRY = 30
+
 
 def _describe_supabase_url(url: str) -> str:
     parsed = urlparse(url)
@@ -26,11 +34,16 @@ def _describe_supabase_url(url: str) -> str:
 def _build_sync_supabase_httpx_client() -> SyncHttpxClient:
     """Build a Supabase HTTP client that ignores ambient proxy env vars."""
     return SyncHttpxClient(
-        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+        timeout=Timeout(
+            connect=_SUPABASE_CONNECT_TIMEOUT,
+            read=_SUPABASE_READ_TIMEOUT,
+            write=_SUPABASE_WRITE_TIMEOUT,
+            pool=_SUPABASE_POOL_TIMEOUT,
+        ),
         limits=Limits(
-            max_connections=100,
-            max_keepalive_connections=50,
-            keepalive_expiry=30,
+            max_connections=_SUPABASE_MAX_CONNECTIONS,
+            max_keepalive_connections=_SUPABASE_MAX_KEEPALIVE_CONNECTIONS,
+            keepalive_expiry=_SUPABASE_KEEPALIVE_EXPIRY,
         ),
         trust_env=False,
     )
@@ -43,11 +56,16 @@ def _build_async_supabase_httpx_client(
 ) -> AsyncHttpxClient:
     """Build a Supabase HTTP client that ignores ambient proxy env vars."""
     return AsyncHttpxClient(
-        timeout=Timeout(connect=30.0, read=120.0, write=30.0, pool=60.0),
+        timeout=Timeout(
+            connect=_SUPABASE_CONNECT_TIMEOUT,
+            read=_SUPABASE_READ_TIMEOUT,
+            write=_SUPABASE_WRITE_TIMEOUT,
+            pool=_SUPABASE_POOL_TIMEOUT,
+        ),
         limits=Limits(
             max_connections=max_connections,
             max_keepalive_connections=max_keepalive_connections,
-            keepalive_expiry=30,
+            keepalive_expiry=_SUPABASE_KEEPALIVE_EXPIRY,
         ),
         trust_env=False,
     )
@@ -95,12 +113,16 @@ class SyncDBConnection:
         httpx_client = _build_sync_supabase_httpx_client()
         logger.info(
             "Initializing sync Supabase client: url=%s trust_env=%s max_connections=%s "
-            "max_keepalive=%s keepalive_expiry=%s",
+            "max_keepalive=%s keepalive_expiry=%s timeout=(connect=%s read=%s write=%s pool=%s)",
             _describe_supabase_url(supabase_url),
-            httpx_client._trust_env,
-            httpx_client._limits.max_connections,
-            httpx_client._limits.max_keepalive_connections,
-            httpx_client._limits.keepalive_expiry,
+            False,
+            _SUPABASE_MAX_CONNECTIONS,
+            _SUPABASE_MAX_KEEPALIVE_CONNECTIONS,
+            _SUPABASE_KEEPALIVE_EXPIRY,
+            _SUPABASE_CONNECT_TIMEOUT,
+            _SUPABASE_READ_TIMEOUT,
+            _SUPABASE_WRITE_TIMEOUT,
+            _SUPABASE_POOL_TIMEOUT,
         )
         options = SyncClientOptions(httpx_client=httpx_client)
         self._client = create_client(supabase_url, supabase_key, options)
@@ -181,12 +203,16 @@ class DBConnection:
         httpx_client = _build_async_supabase_httpx_client()
         logger.info(
             "Initializing async Supabase client: url=%s trust_env=%s max_connections=%s "
-            "max_keepalive=%s keepalive_expiry=%s",
+            "max_keepalive=%s keepalive_expiry=%s timeout=(connect=%s read=%s write=%s pool=%s)",
             _describe_supabase_url(supabase_url),
-            httpx_client._trust_env,
-            httpx_client._limits.max_connections,
-            httpx_client._limits.max_keepalive_connections,
-            httpx_client._limits.keepalive_expiry,
+            False,
+            _SUPABASE_MAX_CONNECTIONS,
+            _SUPABASE_MAX_KEEPALIVE_CONNECTIONS,
+            _SUPABASE_KEEPALIVE_EXPIRY,
+            _SUPABASE_CONNECT_TIMEOUT,
+            _SUPABASE_READ_TIMEOUT,
+            _SUPABASE_WRITE_TIMEOUT,
+            _SUPABASE_POOL_TIMEOUT,
         )
         options = AsyncClientOptions(httpx_client=httpx_client)
         self._client = await create_async_client(

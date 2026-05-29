@@ -25,9 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
     from dotenv import load_dotenv
 
-    env_path = Path(__file__).parent.parent / ".env"
-    load_dotenv(env_path)
+    _DOTENV_FILE = Path(__file__).parent.parent / ".env"
+    load_dotenv(_DOTENV_FILE)
 except ImportError:
+    _DOTENV_FILE = Path(__file__).parent.parent / ".env"
     pass  # python-dotenv not installed, rely on environment variables
 
 from customized_areal.db_service import (
@@ -38,6 +39,11 @@ from customized_areal.db_service import (
     get_agent_loader,
 )
 from customized_areal.db_service.connection import (
+    _SUPABASE_CONNECT_TIMEOUT,
+    _SUPABASE_KEEPALIVE_EXPIRY,
+    _SUPABASE_POOL_TIMEOUT,
+    _SUPABASE_READ_TIMEOUT,
+    _SUPABASE_WRITE_TIMEOUT,
     _build_async_supabase_httpx_client,
     _describe_supabase_url,
 )
@@ -342,7 +348,7 @@ class SharedTokenManager:
         return access_token if isinstance(access_token, str) and access_token else None
 
     def write_token(self, access_token: str, refresh_token: str | None = None) -> None:
-        """Write the access token (and optionally a new refresh token) to the shared file atomically."""
+        """Write shared auth state and persist rotated refresh tokens."""
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
         payload: dict = {"access_token": access_token, "updated_at": time.time()}
         if refresh_token:
@@ -355,6 +361,8 @@ class SharedTokenManager:
             os.fsync(f.fileno())
         os.replace(tmp, self.token_file)
         self._fsync_parent_dir()
+        if refresh_token:
+            self._write_refresh_token_to_env(refresh_token)
         logger.info("Shared auth token updated in file: %s", self.token_file)
 
     async def get_valid_token(self, force_refresh: bool = False) -> str:
@@ -496,6 +504,59 @@ class SharedTokenManager:
         except OSError:
             pass
 
+    def _write_refresh_token_to_env(self, refresh_token: str) -> None:
+        """Persist the latest refresh token back to the dotenv file."""
+        os.environ["REFRESH_TOKEN"] = refresh_token
+        lines: list[str] = []
+        try:
+            if _DOTENV_FILE.exists():
+                lines = _DOTENV_FILE.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
+        except OSError as exc:
+            logger.warning("Failed to read dotenv file %s: %s", _DOTENV_FILE, exc)
+            return
+
+        updated = False
+        new_lines: list[str] = []
+        for line in lines:
+            if line.startswith("REFRESH_TOKEN="):
+                new_lines.append(f"REFRESH_TOKEN={refresh_token}\n")
+                updated = True
+            else:
+                new_lines.append(line)
+
+        if not updated:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] = f"{new_lines[-1]}\n"
+            new_lines.append(f"REFRESH_TOKEN={refresh_token}\n")
+
+        tmp = _DOTENV_FILE.with_name(f".{_DOTENV_FILE.name}.{os.getpid()}.tmp")
+        try:
+            _DOTENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, _DOTENV_FILE)
+            try:
+                dir_fd = os.open(_DOTENV_FILE.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+        except OSError as exc:
+            logger.warning(
+                "Failed to update REFRESH_TOKEN in %s: %s", _DOTENV_FILE, exc
+            )
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
 
 async def _refresh_access_token(refresh_token: str) -> tuple[str, str]:
     """Refresh Supabase access token using refresh_token.
@@ -510,7 +571,9 @@ async def _refresh_access_token(refresh_token: str) -> tuple[str, str]:
             "SUPABASE_URL and SUPABASE_ANON_KEY must be set to refresh token"
         )
 
-    async with httpx.AsyncClient(timeout=_TOKEN_HTTP_TIMEOUT, trust_env=False) as client:
+    async with httpx.AsyncClient(
+        timeout=_TOKEN_HTTP_TIMEOUT, trust_env=False
+    ) as client:
         if not _is_refresh_token_usable(refresh_token):
             logger.warning(
                 "REFRESH_TOKEN is missing or locally expired; attempting email/password login"
@@ -1358,18 +1421,24 @@ async def _create_shortlived_db_client():
             "SUPABASE_URL and a key (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY) "
             "environment variables must be set."
         )
+    max_connections = 10
+    max_keepalive_connections = 5
     httpx_client = _build_async_supabase_httpx_client(
-        max_connections=10,
-        max_keepalive_connections=5,
+        max_connections=max_connections,
+        max_keepalive_connections=max_keepalive_connections,
     )
     logger.info(
         "Creating short-lived Supabase client for backend run: url=%s trust_env=%s "
-        "max_connections=%s max_keepalive=%s keepalive_expiry=%s",
+        "max_connections=%s max_keepalive=%s keepalive_expiry=%s timeout=(connect=%s read=%s write=%s pool=%s)",
         _describe_supabase_url(supabase_url),
-        httpx_client._trust_env,
-        httpx_client._limits.max_connections,
-        httpx_client._limits.max_keepalive_connections,
-        httpx_client._limits.keepalive_expiry,
+        False,
+        max_connections,
+        max_keepalive_connections,
+        _SUPABASE_KEEPALIVE_EXPIRY,
+        _SUPABASE_CONNECT_TIMEOUT,
+        _SUPABASE_READ_TIMEOUT,
+        _SUPABASE_WRITE_TIMEOUT,
+        _SUPABASE_POOL_TIMEOUT,
     )
     options = AsyncClientOptions(httpx_client=httpx_client)
     return await create_async_client(supabase_url, supabase_key, options)
@@ -1552,10 +1621,6 @@ if __name__ == "__main__":
         "/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/dataset/gaia-benchmark/gaia/2023/validation/32102e3e-d12a-4209-9163-7b3a104efe5d.xlsx"
     ]
     gt = "Time-Parking 2: Parallel Universe"
-
-    # task_description = "今天北京天气怎么样"
-    # task_file_path = []
-    gt = ""
 
     messages, final_answer, log_path, _trace = asyncio.run(
         run_backend(

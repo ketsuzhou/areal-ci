@@ -1,10 +1,10 @@
 """Quick test: can the WORKSPACE_OPENAI API obtain logprobs?"""
+
 import asyncio
 import json
 import os
 
 import httpx
-
 
 API_KEY = os.environ["WORKSPACE_OPENAI_API_KEY"]
 # The full base URL already includes /llm/v1
@@ -17,7 +17,6 @@ async def main():
         "Content-Type": "application/json",
     }
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-
         # Test 1: /v1/completions with echo + logprobs
         print("=== Test 1: /v1/completions (echo + logprobs) ===")
         payload = {
@@ -44,7 +43,9 @@ async def main():
                     top_logprobs = lp.get("top_logprobs", [])
                     print(f"Tokens ({len(tokens)}): {tokens[:20]}")
                     for i, tlp in enumerate(top_logprobs[:5]):
-                        print(f"  pos {i} token={tokens[i] if i < len(tokens) else '?'}: {tlp}")
+                        print(
+                            f"  pos {i} token={tokens[i] if i < len(tokens) else '?'}: {tlp}"
+                        )
                 else:
                     print(f"Response: {data}")
             else:

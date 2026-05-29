@@ -7,13 +7,13 @@ import re
 from typing import Any
 from xml.etree import ElementTree
 
-from customized_areal.tree_search.distilling.teacher_provider import TeacherProvider
+from customized_areal.tree_search.core.tree_store import Node
 from customized_areal.tree_search.distilling.distill_types import (
     DiagnosisTurn,
     EpisodeDiagnosis,
     PositionRewardInfo,
 )
-from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.distilling.teacher_provider import TeacherProvider
 
 from areal.utils import logging
 

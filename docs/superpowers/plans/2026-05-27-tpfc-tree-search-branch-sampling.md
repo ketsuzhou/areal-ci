@@ -1,37 +1,83 @@
 # TPFC Tree Search Branch Sampling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let TPFC tree search sample new episodes from scratch, from a high-entropy intermediate node, or from a mixed policy, while cloning the selected node's sandbox and preserving truncated DB message context.
+**Goal:** Let TPFC tree search sample new episodes from scratch, from a high-entropy
+intermediate node, or from a mixed policy, while cloning the selected node's sandbox and
+preserving truncated DB message context.
 
-**Architecture:** Keep Leagent runtime entropy recording unchanged. Add AReaL-side run metadata, branch task/sandbox helpers, node metadata, and `TreeSearchGroupedRolloutWorkflow` sampling logic. Sandbox cloning is behind one helper that returns `None` when Daytona clone/snapshot support is unavailable, causing a logged fallback to scratch.
+**Architecture:** Keep Leagent runtime entropy recording unchanged. Add AReaL-side run
+metadata, branch task/sandbox helpers, node metadata, and
+`TreeSearchGroupedRolloutWorkflow` sampling logic. Sandbox cloning is behind one helper
+that returns `None` when Daytona clone/snapshot support is unavailable, causing a logged
+fallback to scratch.
 
-**Tech Stack:** Python 3.14, Supabase async client, Daytona SDK when available, pytest, AReaL tree-search workflow.
+**Tech Stack:** Python 3.14, Supabase async client, Daytona SDK when available, pytest,
+AReaL tree-search workflow.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`: add `BackendRunResult`, fetch raw messages with metadata, support starting an already-seeded branch task without inserting a prompt, and return named run metadata.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/messages.py`: add raw-message metadata reads and bulk message copy helper.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/sandbox.py`: add clone/snapshot helper and sandbox-row binding helper.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`: export new helpers.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/config.py`: add `SampleSource` and branch sampling fields to `TreeBackupConfig`.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/mcts_tree_store.py`: add optional TPFC metadata fields to `Node`.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`: annotate nodes from run metadata, choose scratch/branch/mixed episodes, create branch data, and insert branch nodes.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`: consume `BackendRunResult` attributes.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/core/agent.py`: replace its `run_backend(...)` tuple handling with `BackendRunResult.messages`, `.final_answer`, and `.log_path` reads.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/benchmark_run_base.py`: keep compatibility with the new result object.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/*tree_search*.yaml`: add optional `sample_source` and `branch_probability` fields with current behavior defaulting to scratch.
-- Add `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`: unit tests for metadata mapping, candidate selection, sampling modes, and branch task construction.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`: assert `BackendRunResult` compatibility.
-- Modify `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_sandbox_cleanup.py`: add sandbox clone fallback/binding tests.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`:
+  add `BackendRunResult`, fetch raw messages with metadata, support starting an
+  already-seeded branch task without inserting a prompt, and return named run metadata.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/messages.py`:
+  add raw-message metadata reads and bulk message copy helper.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/sandbox.py`:
+  add clone/snapshot helper and sandbox-row binding helper.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`:
+  export new helpers.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/config.py`:
+  add `SampleSource` and branch sampling fields to `TreeBackupConfig`.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/mcts_tree_store.py`:
+  add optional TPFC metadata fields to `Node`.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`:
+  annotate nodes from run metadata, choose scratch/branch/mixed episodes, create branch
+  data, and insert branch nodes.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`:
+  consume `BackendRunResult` attributes.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/core/agent.py`:
+  replace its `run_backend(...)` tuple handling with `BackendRunResult.messages`,
+  `.final_answer`, and `.log_path` reads.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/benchmark_run_base.py`:
+  keep compatibility with the new result object.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/*tree_search*.yaml`:
+  add optional `sample_source` and `branch_probability` fields with current behavior
+  defaulting to scratch.
+- Add
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`:
+  unit tests for metadata mapping, candidate selection, sampling modes, and branch task
+  construction.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`:
+  assert `BackendRunResult` compatibility.
+- Modify
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_sandbox_cleanup.py`:
+  add sandbox clone fallback/binding tests.
 
 ## Task 1: Add Backend Run Result Contract
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`
 
 - [ ] **Step 1: Write failing result-contract test**
 
@@ -119,7 +165,8 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main
 uv run pytest tests/customized_areal/test_tpfc_backend_auth.py::test_run_backend_returns_named_result_and_tuple_compat -q
 ```
 
-Expected: FAIL because `BackendRunResult` and `_get_raw_messages_with_client` do not exist yet.
+Expected: FAIL because `BackendRunResult` and `_get_raw_messages_with_client` do not
+exist yet.
 
 - [ ] **Step 3: Implement `BackendRunResult` and raw message fetch**
 
@@ -201,9 +248,15 @@ Expected: PASS.
 ## Task 2: Add Message Copy Helpers
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/messages.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/messages.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing message truncation test**
 
@@ -303,9 +356,15 @@ Expected: PASS.
 ## Task 3: Add Sandbox Clone And Binding Helpers
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/sandbox.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_sandbox_cleanup.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/sandbox.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/db_service/__init__.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_sandbox_cleanup.py`
 
 - [ ] **Step 1: Write failing sandbox clone fallback and binding tests**
 
@@ -416,9 +475,15 @@ Expected: PASS.
 ## Task 4: Add Node Metadata And Mapping Helpers
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/mcts_tree_store.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/mcts_tree_store.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing node annotation test**
 
@@ -522,8 +587,12 @@ Expected: PASS.
 ## Task 5: Add Branch Task Construction In `backend_run`
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/backend_run.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tpfc_backend_auth.py`
 
 - [ ] **Step 1: Write failing branch-start test**
 
@@ -603,7 +672,8 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main
 uv run pytest tests/customized_areal/test_tpfc_backend_auth.py::test_run_backend_existing_seeded_task_starts_without_new_task -q
 ```
 
-Expected: FAIL because `seed_messages_already_inserted` is missing and `run_backend` always creates a task.
+Expected: FAIL because `seed_messages_already_inserted` is missing and `run_backend`
+always creates a task.
 
 - [ ] **Step 3: Implement seeded task mode**
 
@@ -629,7 +699,8 @@ else:
     logger.info("Task created: %s", task_id)
 ```
 
-Ensure `_prepare_form_data()` receives `task_description or ""` so no new prompt text is inserted for seeded branch runs.
+Ensure `_prepare_form_data()` receives `task_description or ""` so no new prompt text is
+inserted for seeded branch runs.
 
 - [ ] **Step 4: Run branch-start test**
 
@@ -645,9 +716,15 @@ Expected: PASS.
 ## Task 6: Add Branch Sampling Logic To Tree Workflow
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/config.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/config.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing sampling mode tests**
 
@@ -771,9 +848,15 @@ Expected: PASS.
 ## Task 7: Wire Branch Run Orchestration
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`
-- Test: `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/tree_search_grouped_workflow.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`
+
+- Test:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/tests/customized_areal/test_tree_search_branch_sampling.py`
 
 - [ ] **Step 1: Write failing branch data preparation test**
 
@@ -940,7 +1023,8 @@ self.sample_source = SampleSource(sample_source)
 self.branch_probability = branch_probability
 ```
 
-Inside fresh generation, replace the single `asyncio.gather(self._retry_episode(...))` with an internal method:
+Inside fresh generation, replace the single `asyncio.gather(self._retry_episode(...))`
+with an internal method:
 
 ```python
 async def _run_fresh_episode(self, engine, data: dict[str, Any], group_idx: int, query_id: str) -> Any:
@@ -962,7 +1046,8 @@ async def _run_fresh_episode(self, engine, data: dict[str, Any], group_idx: int,
     return await self._retry_episode(engine, data, group_idx)
 ```
 
-Implement `_prepare_branch_task()` with the same identity sources that `run_backend()` already uses:
+Implement `_prepare_branch_task()` with the same identity sources that `run_backend()`
+already uses:
 
 ```python
 async def _prepare_branch_task(self, data: dict[str, Any], candidate: Node) -> str | None:
@@ -1024,13 +1109,27 @@ Expected: PASS.
 ## Task 8: Update Config Wiring And Callers
 
 **Files:**
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/train_tpfc_tree_search.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search_v2.yaml`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/core/agent.py`
-- Modify: `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/benchmark_run_base.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/train_tpfc_tree_search.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search_v2.yaml`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/configs/config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/tpfc_agent.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tree_search/core/agent.py`
+
+- Modify:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/customized_areal/tpfc/scripts/benchmark_run_base.py`
 
 - [ ] **Step 1: Update workflow construction**
 
@@ -1050,7 +1149,8 @@ Under `tree_search:` add:
   branch_probability: 0.5
 ```
 
-Keep `scratch` as default to preserve current behavior. Users can set `branch` or `mixed`.
+Keep `scratch` as default to preserve current behavior. Users can set `branch` or
+`mixed`.
 
 - [ ] **Step 3: Update non-TPFC result consumers**
 
@@ -1063,7 +1163,8 @@ final_answer = result.final_answer
 log_path = result.log_path
 ```
 
-For `benchmark_run_base.py`, if it expects a response string, preserve current behavior by extracting the last assistant content:
+For `benchmark_run_base.py`, if it expects a response string, preserve current behavior
+by extracting the last assistant content:
 
 ```python
 run_result = await run_backend(...)
@@ -1097,6 +1198,7 @@ Expected: prints `ok`.
 ## Task 9: Verification
 
 **Files:**
+
 - No source changes unless failures expose bugs.
 
 - [ ] **Step 1: Run focused tests**
@@ -1123,7 +1225,8 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main
 uv run ruff check customized_areal/tpfc/backend_run.py customized_areal/db_service/messages.py customized_areal/db_service/sandbox.py customized_areal/tree_search/tree_search_grouped_workflow.py customized_areal/tree_search/mcts_tree_store.py customized_areal/tree_search/config.py tests/customized_areal/test_tree_search_branch_sampling.py tests/customized_areal/test_tpfc_backend_auth.py tests/customized_areal/test_sandbox_cleanup.py
 ```
 
-Expected: PASS or only pre-existing unrelated findings. Fix touched-file findings before proceeding.
+Expected: PASS or only pre-existing unrelated findings. Fix touched-file findings before
+proceeding.
 
 - [ ] **Step 3: Inspect git diff for user changes**
 
@@ -1134,10 +1237,14 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main
 git diff -- customized_areal/tpfc/backend_run.py customized_areal/db_service/messages.py customized_areal/db_service/sandbox.py customized_areal/db_service/__init__.py customized_areal/tree_search/config.py customized_areal/tree_search/mcts_tree_store.py customized_areal/tree_search/tree_search_grouped_workflow.py customized_areal/tpfc/tpfc_agent.py customized_areal/tree_search/core/agent.py customized_areal/tpfc/scripts/benchmark_run_base.py tests/customized_areal/test_tree_search_branch_sampling.py tests/customized_areal/test_tpfc_backend_auth.py tests/customized_areal/test_sandbox_cleanup.py
 ```
 
-Expected: diff contains only branch sampling work and preserves pre-existing local edits.
+Expected: diff contains only branch sampling work and preserves pre-existing local
+edits.
 
 ## Self-Review
 
-- Spec coverage: sampling modes, branch probability, task id, entropy metadata, branch sandbox id, message truncation, sandbox clone, fallback behavior, and tests are covered.
+- Spec coverage: sampling modes, branch probability, task id, entropy metadata, branch
+  sandbox id, message truncation, sandbox clone, fallback behavior, and tests are
+  covered.
 - Placeholder scan: no `TBD`, `TODO`, or vague implementation-only steps remain.
-- Type consistency: `SampleSource`, `BackendRunResult`, `task_id`, `raw_messages`, `entropy_stats`, `need_branch`, and `branch_sandbox_id` names match across tasks.
+- Type consistency: `SampleSource`, `BackendRunResult`, `task_id`, `raw_messages`,
+  `entropy_stats`, `need_branch`, and `branch_sandbox_id` names match across tasks.

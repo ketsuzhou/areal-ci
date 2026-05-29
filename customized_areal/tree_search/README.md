@@ -9,9 +9,9 @@ on top of AReaL's `PPOTrainer`.
 
 This system uses **two distinct tree concepts** that work together:
 
-1. **MCTS Tree Search** (`tree_search/core/`): Organizes rollouts into a tree structure for
-   caching, advantage computation, and episode management. Each `Node` represents one
-   turn with parent-child relationships.
+1. **MCTS Tree Search** (`tree_search/core/`): Organizes rollouts into a tree structure
+   for caching, advantage computation, and episode management. Each `Node` represents
+   one turn with parent-child relationships.
 
 1. **Tree Attention (Trie Packing)** (`areal/models/tree_attn/`): Packs sequences with
    shared prefixes into a compressed trie (`TrieNode`) for efficient attention
@@ -113,7 +113,7 @@ Dataclasses controlling tree backup, caching, and advantage computation.
 |                      | `topk_distill`            | `bool`          | `False`                   | Use top-k distillation                             |
 |                      | `teacher_provider`        | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`) |
 |                      | `teacher_base_url`        | `str`           | `"http://localhost:8001"` | Teacher API endpoint                               |
-|                      | `teacher_backend`         | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)   |
+|                      | `teacher_backend`         | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)    |
 |                      | `teacher_model_name`      | `str`           | `""`                      | Teacher model identifier                           |
 |                      | `teacher_api_key`         | `str`           | `""`                      | API key for teacher endpoint                       |
 |                      | `teacher_top_k`           | `int`           | `10`                      | Top-k tokens from teacher                          |
@@ -167,30 +167,30 @@ A `Node` represents one assistant response turn with its full conversation conte
 tokens from the beginning through this turn's response). Nodes are linked via `node_id`
 / `parent_node_id` and grouped into episodes via `episode_id`.
 
-| Field               | Type                        | Description                                              |
-| ------------------- | --------------------------- | ------------------------------------------------------- |
-| `input_ids`         | `list[int]`                 | Full token sequence (prompt + response)                  |
-| `loss_mask`         | `list[int]`                 | 0=prompt tokens, 1=response tokens                      |
-| `logprobs`          | `list[float]`               | Per-token log probabilities                             |
-| `versions`          | `list[int]`                 | Policy version per token (-1 on prompt)                 |
-| `node_id`           | `str`                       | Globally unique interaction ID (UUID)                   |
-| `parent_node_id`    | `str \| None`               | Parent interaction ID (None for root)                   |
-| `episode_id`        | `str`                       | Groups turns into a trajectory path                     |
-| `turn_idx`          | `int`                       | 1-based turn position within episode                    |
-| `query_id`          | `str`                       | Dataset query identifier                                |
-| `train_id`          | `str`                       | Training run that trained this node ("" = untrained)    |
-| `task_id`           | `str`                       | TPFC backend task that produced this node                |
-| `entropy_stats`     | `dict \| None`              | Entropy statistics from TPFC assistant metadata         |
-| `need_branch`       | `bool`                      | Whether this node is a candidate for branch sampling    |
-| `branch_sandbox_id` | `str \| None`               | Sandbox ID for branch task creation                      |
-| `outcome_reward`    | `float`                     | Trajectory-level reward                                 |
-| `advantages`        | `torch.Tensor \| None`      | Tree-computed per-token advantages                      |
-| `returns`           | `torch.Tensor \| None`      | Tree-computed per-token returns                         |
-| `topk_ids`          | `list[list[int]] \| None`   | Top-k candidate token IDs per response position         |
-| `topk_logp`         | `list[list[float]] \| None` | Top-k candidate log probabilities                       |
-| `distill_reward`    | `list[list[float]] \| None` | Per-position distillation rewards                       |
-| `teacher_logp`      | `list[list[float]] \| None` | Teacher log probabilities per position                  |
-| `guidance`          | `dict[int, str] \| None`    | Turn index → guidance text map (on leaf nodes)        |
+| Field               | Type                        | Description                                          |
+| ------------------- | --------------------------- | ---------------------------------------------------- |
+| `input_ids`         | `list[int]`                 | Full token sequence (prompt + response)              |
+| `loss_mask`         | `list[int]`                 | 0=prompt tokens, 1=response tokens                   |
+| `logprobs`          | `list[float]`               | Per-token log probabilities                          |
+| `versions`          | `list[int]`                 | Policy version per token (-1 on prompt)              |
+| `node_id`           | `str`                       | Globally unique interaction ID (UUID)                |
+| `parent_node_id`    | `str \| None`               | Parent interaction ID (None for root)                |
+| `episode_id`        | `str`                       | Groups turns into a trajectory path                  |
+| `turn_idx`          | `int`                       | 1-based turn position within episode                 |
+| `query_id`          | `str`                       | Dataset query identifier                             |
+| `train_id`          | `str`                       | Training run that trained this node ("" = untrained) |
+| `task_id`           | `str`                       | TPFC backend task that produced this node            |
+| `entropy_stats`     | `dict \| None`              | Entropy statistics from TPFC assistant metadata      |
+| `need_branch`       | `bool`                      | Whether this node is a candidate for branch sampling |
+| `branch_sandbox_id` | `str \| None`               | Sandbox ID for branch task creation                  |
+| `outcome_reward`    | `float`                     | Trajectory-level reward                              |
+| `advantages`        | `torch.Tensor \| None`      | Tree-computed per-token advantages                   |
+| `returns`           | `torch.Tensor \| None`      | Tree-computed per-token returns                      |
+| `topk_ids`          | `list[list[int]] \| None`   | Top-k candidate token IDs per response position      |
+| `topk_logp`         | `list[list[float]] \| None` | Top-k candidate log probabilities                    |
+| `distill_reward`    | `list[list[float]] \| None` | Per-position distillation rewards                    |
+| `teacher_logp`      | `list[list[float]] \| None` | Teacher log probabilities per position               |
+| `guidance`          | `dict[int, str] \| None`    | Turn index → guidance text map (on leaf nodes)       |
 
 **Turn boundaries** are derived from `loss_mask` transitions (0→1 = response start, 1→0
 = response end) via `_find_turn_boundaries()`, rather than using tokenizer-specific
@@ -202,10 +202,10 @@ assistant markers.
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
 | `insert_batch(trajectories)`                    | Insert trajectories (Node objects) from rollout; skip already-cached nodes |
 | `get_q_value(node_id)`                          | Raw Q-value (mean reward) for a trajectory                                 |
-| `set_trained(node_id)` / `is_trained(node_id)`  | Mark/check whether a single node has been trained                         |
+| `set_trained(node_id)` / `is_trained(node_id)`  | Mark/check whether a single node has been trained                          |
 | `get_untrained_count(query_id)`                 | Count untrained nodes for a query                                          |
 | `get_untrained_episode_count(query_id)`         | Count untrained episodes for a query (used by workflow)                    |
-| `get_untrained_node_ids(query_id, n)`           | Get up to N untrained node IDs                                            |
+| `get_untrained_node_ids(query_id, n)`           | Get up to N untrained node IDs                                             |
 | `load_untrained_episodes(query_id, n_episodes)` | Load untrained Node objects grouped by episode (used by workflow)          |
 | `load_trajectories(query_id, n_samples)`        | Load untrained Node objects by sample count                                |
 | `reset_trained_flags()`                         | Reset all trained flags (for fresh training run)                           |
@@ -249,7 +249,7 @@ Serializes/deserializes the full MCTS tree state to disk.
 | `save(tree_store)`                  | Save self-contained per-query trajectory records as `query_{sanitized_id}.json` files with per-query metadata |
 | `save_query(tree_store, query_id)`  | Save checkpoint for a single query (used per-episode in the workflow)                                         |
 | `load()`                            | Restore `MCTSTreeStore` from disk. No rebuild needed — stats keyed by string node_id.                         |
-| `exists()`                          | Check if a checkpoint directory exists                                                                         |
+| `exists()`                          | Check if a checkpoint directory exists                                                                        |
 | `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                      |
 | `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                    |
 
@@ -262,19 +262,19 @@ to provide tree-search-aware rollout with cache reuse and branch sampling.
 
 Accepts the full set of configuration parameters (see `TreeBackupConfig` above), plus:
 
-| Parameter           | Type            | Description                                      |
-| ------------------- | --------------- | ------------------------------------------------ |
-| `workflow`          | `RolloutWorkflow` | Base workflow for episode generation            |
-| `group_size`        | `int`           | Number of episodes per query (must be >= 1)      |
-| `checkpoint_dir`    | `str`           | Directory for tree checkpoint persistence        |
-| `advantage_mode`   | `AdvantageMode` | TREE or GAE advantage computation                |
-| `loss_mode`        | `LossMode`      | GRPO, DISTILL, or BOTH                           |
-| `cache_mode`        | `CacheMode`     | OFF, IN_TRAINING, or CROSS_TRAINING              |
-| `tokenizer_path`   | `str`           | Path to HF tokenizer (required for distillation) |
-| `max_tokens`       | `int`           | Max tokens per node sequence (0 = no truncation) |
-| `sample_source`    | `SampleSource`  | SCRATCH, BRANCH, or MIXED                        |
-| `branch_probability` | `float`       | Probability of branch in MIXED mode              |
-| ...                 | ...             | All `TreeBackupConfig` fields (see config table) |
+| Parameter            | Type              | Description                                      |
+| -------------------- | ----------------- | ------------------------------------------------ |
+| `workflow`           | `RolloutWorkflow` | Base workflow for episode generation             |
+| `group_size`         | `int`             | Number of episodes per query (must be >= 1)      |
+| `checkpoint_dir`     | `str`             | Directory for tree checkpoint persistence        |
+| `advantage_mode`     | `AdvantageMode`   | TREE or GAE advantage computation                |
+| `loss_mode`          | `LossMode`        | GRPO, DISTILL, or BOTH                           |
+| `cache_mode`         | `CacheMode`       | OFF, IN_TRAINING, or CROSS_TRAINING              |
+| `tokenizer_path`     | `str`             | Path to HF tokenizer (required for distillation) |
+| `max_tokens`         | `int`             | Max tokens per node sequence (0 = no truncation) |
+| `sample_source`      | `SampleSource`    | SCRATCH, BRANCH, or MIXED                        |
+| `branch_probability` | `float`           | Probability of branch in MIXED mode              |
+| ...                  | ...               | All `TreeBackupConfig` fields (see config table) |
 
 - Creates `TreeCheckpointManager` and `MCTSTreeStore`
 - On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
@@ -294,8 +294,8 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
      `branch_probability`
    - Each fresh episode result is wrapped in `EpisodeRunResult` (carrying `task_id` and
      `raw_messages` from the TPFC backend)
-1. **Annotate Nodes**: `annotate_nodes_from_run()` copies TPFC assistant-message metadata
-   (task_id, entropy_stats, need_branch, branch_sandbox_id) onto fresh Nodes
+1. **Annotate Nodes**: `annotate_nodes_from_run()` copies TPFC assistant-message
+   metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto fresh Nodes
 1. **Convert results to Nodes**: `_result_to_nodes()` converts each arun_episode result
    (dict or list of `InteractionWithTokenLogpReward`) to `list[Node]`, assigning
    `episode_id`, `query_id`, and `turn_idx`
@@ -306,8 +306,7 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
    - Load tokenizer from `tokenizer_path`
    - Build teacher provider (external API or engine-based) via
      `_setup_distill_provider()`
-   - Apply distillation on combined node groups via
-     `_prepare_distill_for_node_groups()`
+   - Apply distillation on combined node groups via `_prepare_distill_for_node_groups()`
    - For each episode group, diagnose to find turns needing improvement
      (`_prepare_distill_for_episode()` → `provider.diagnose_episode()`)
    - Reuse cached guidance from previous diagnoses when available
@@ -325,35 +324,35 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
 
 **Utility functions and dataclasses:**
 
-| Name                                 | Description                                                                                                                               |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `EpisodeRunResult`                   | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                              |
-| `choose_sample_source()`             | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                       |
-| `select_branch_candidate()`          | Select the best node for branching (highest max-entropy among `need_branch` nodes with a sandbox)                                        |
-| `build_branch_task()`                | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                    |
-| `annotate_nodes_from_run()`          | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                     |
-| `_with_episode_metadata()`            | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                            |
-| `_max_entropy()`                     | Extract max_entropy value from a Node's entropy_stats                                                                                    |
-| `interactions_dict_to_nodes()`       | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
-| `_result_to_nodes()`                 | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                 |
-| `_nodes_to_batched_tensor_dict()`    | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                   |
-| `_input_ids_to_messages()`           | Convert full-context token IDs to a list of role/content message dicts using chat template markers                                        |
-| `_retry_episode()`                   | Retry a failed episode with exponential backoff (up to 1 retry)                                                                           |
-| `_prepare_distill_for_episode()`     | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                          |
-| `_prepare_distill_for_node_groups()` | Apply distillation to multiple episode groups with error handling                                                                          |
-| `_group_nodes_by_episode()`          | Group a flat list of Nodes by `episode_id`                                                                                                |
-| `_filter_distill_episode_failure()`  | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                            |
-| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                    |
+| Name                                    | Description                                                                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `EpisodeRunResult`                      | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                              |
+| `choose_sample_source()`                | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                       |
+| `select_branch_candidate()`             | Select the best node for branching (highest max-entropy among `need_branch` nodes with a sandbox)                                         |
+| `build_branch_task()`                   | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                    |
+| `annotate_nodes_from_run()`             | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                      |
+| `_with_episode_metadata()`              | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                             |
+| `_max_entropy()`                        | Extract max_entropy value from a Node's entropy_stats                                                                                     |
+| `interactions_dict_to_nodes()`          | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
+| `_result_to_nodes()`                    | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                 |
+| `_nodes_to_batched_tensor_dict()`       | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                   |
+| `_input_ids_to_messages()`              | Convert full-context token IDs to a list of role/content message dicts using chat template markers                                        |
+| `_retry_episode()`                      | Retry a failed episode with exponential backoff (up to 1 retry)                                                                           |
+| `_prepare_distill_for_episode()`        | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                          |
+| `_prepare_distill_for_node_groups()`    | Apply distillation to multiple episode groups with error handling                                                                         |
+| `_group_nodes_by_episode()`             | Group a flat list of Nodes by `episode_id`                                                                                                |
+| `_filter_distill_episode_failure()`     | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                            |
+| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                        |
 
 **Methods:**
 
-| Method                      | Description                                                                                      |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| `_run_fresh_episode()`      | Run a single fresh episode, deciding between scratch and branch sampling                         |
-| `_prepare_branch_task()`    | Create a TPFC branch task from a branch candidate node                                          |
-| `_cleanup_branch()`         | Delete branch sandbox and mark node as branched to prevent re-use                               |
-| `_get_tokenizer()`          | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)                  |
-| `_setup_distill_provider()` | Build `ExternalTeacherProvider` with auto-detected engine addresses and backend type             |
+| Method                      | Description                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `_run_fresh_episode()`      | Run a single fresh episode, deciding between scratch and branch sampling             |
+| `_prepare_branch_task()`    | Create a TPFC branch task from a branch candidate node                               |
+| `_cleanup_branch()`         | Delete branch sandbox and mark node as branched to prevent re-use                    |
+| `_get_tokenizer()`          | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)      |
+| `_setup_distill_provider()` | Build `ExternalTeacherProvider` with auto-detected engine addresses and backend type |
 
 ### 6. Trainer (`training/trainer.py`)
 
@@ -455,19 +454,19 @@ computation:
 | --------------------------------- | ----------------------------------------------------------------- |
 | `PositionRewardInfo`              | Per-position candidate tokens, logprobs, and rewards              |
 | `DiagnosisTurn`                   | Single turn diagnosis with `should_improve` flag and guidance     |
-| `EpisodeDiagnosis`               | Collection of `DiagnosisTurn`s with `selected_turns` property      |
+| `EpisodeDiagnosis`                | Collection of `DiagnosisTurn`s with `selected_turns` property     |
 | `InteractionWithTokenLevelReward` | Extended interaction with `token_rewards` and `token_reward_mask` |
 
 #### `distilling/` — On-Policy Distillation
 
-| File                                  | Purpose                                                            |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| `distilling/config.py`                | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`      |
-| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training     |
-| `distilling/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison |
-| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference    |
+| File                                  | Purpose                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------ |
+| `distilling/config.py`                | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`                  |
+| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training                 |
+| `distilling/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison             |
+| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference               |
 | `distilling/teacher_provider.py`      | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider` |
-| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards       |
+| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                   |
 
 #### `engine/` — Multi-Candidate Engine
 
@@ -490,12 +489,12 @@ computation:
 
 #### `training/` — Distillation Training
 
-| File                   | Purpose                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `training/loss.py`     | `grpo_distill_loss_fn()` — combined GRPO + position-level distillation loss          |
+| File                   | Purpose                                                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `training/loss.py`     | `grpo_distill_loss_fn()` — combined GRPO + position-level distillation loss                                      |
 | `training/actor.py`    | `MultiCandidateFSDPPPOActor`, `patch_ppo_actor_class_to_use_distill_loss()` / `unpatch_ppo_actor_distill_loss()` |
-| `training/logprobs.py` | `gather_logprobs_entropy_multi_candidates()` — multi-candidate logprob gathering     |
-| `training/trainer.py`  | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                |
+| `training/logprobs.py` | `gather_logprobs_entropy_multi_candidates()` — multi-candidate logprob gathering                                 |
+| `training/trainer.py`  | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                                            |
 
 **`grpo_distill_loss_fn` computes:**
 
@@ -516,19 +515,18 @@ leverages TPFC backend infrastructure to create branch tasks from existing sandb
 
 1. **Candidate Selection**: `select_branch_candidate()` picks the best node for
    branching among cached nodes for the query. Candidates must have `need_branch=True`,
-   a `task_id`, and a `branch_sandbox_id`. The candidate with the highest
-   `max_entropy` is chosen (entropy signals uncertainty where branching is most
-   valuable).
+   a `task_id`, and a `branch_sandbox_id`. The candidate with the highest `max_entropy`
+   is chosen (entropy signals uncertainty where branching is most valuable).
 
-2. **Branch Task Creation**: `build_branch_task()` creates a new TPFC task, binds the
+1. **Branch Task Creation**: `build_branch_task()` creates a new TPFC task, binds the
    candidate's sandbox to it, and copies the conversation prefix (messages up to the
    branch point) into the new task. This allows the episode to resume from the branch
    point.
 
-3. **Episode Execution**: The episode runs from the branch point, generating new
+1. **Episode Execution**: The episode runs from the branch point, generating new
    responses from the selected turn onward.
 
-4. **Cleanup**: `_cleanup_branch()` deletes the branch sandbox and clears the candidate
+1. **Cleanup**: `_cleanup_branch()` deletes the branch sandbox and clears the candidate
    node's `need_branch` and `branch_sandbox_id` to prevent re-use.
 
 ### SampleSource Decision Logic
@@ -772,26 +770,26 @@ with CustomizedPPOTrainer(
 
 ## File Index
 
-| File                                     | Purpose                                                                            |
-| ---------------------------------------- | ---------------------------------------------------------------------------------- |
-| `__init__.py`                            | Public API exports and lazy imports for distillation components                    |
-| `config.py`                              | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource` |
-| `core/advantage.py`                      | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                  |
-| `core/checkpoint.py`                     | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                 |
-| `core/mcts_tree_store.py`               | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics               |
-| `core/tree_search_grouped_workflow.py`    | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops     |
-| `distilling/__init__.py`                 | Distilling subpackage exports                                                      |
-| `distilling/config.py`                   | `OnPolicyDistillConfig`, `AgentConfig`                                             |
-| `distilling/agent.py`                    | `OnPolicyDistillAgent` — agent for distillation training                           |
-| `distilling/distill_types.py`            | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward` |
-| `distilling/reward_compute.py`            | Student vs teacher logprob reward computation                                      |
-| `distilling/teacher_client.py`           | `TeacherConfig`, `TeacherClient` — async teacher model inference client             |
-| `distilling/teacher_provider.py`         | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider`      |
-| `distilling/selected_turn_distill.py`    | Diagnoses episodes and builds position-level teacher rewards                        |
-| `engine/__init__.py`                     | Engine subpackage exports                                                          |
-| `engine/fsdp_engine.py`                  | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                      |
-| `training/__init__.py`                   | Training subpackage exports                                                       |
-| `training/actor.py`                      | `MultiCandidateFSDPPPOActor`, distill-loss patching functions                     |
-| `training/loss.py`                       | `grpo_distill_loss_fn` — combined GRPO + distillation loss                         |
-| `training/logprobs.py`                   | Multi-candidate logprob/entropy gathering utilities                                |
-| `training/trainer.py`                    | `CustomizedPPOTrainer` — PPO trainer with distillation engine support              |
+| File                                   | Purpose                                                                                            |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `__init__.py`                          | Public API exports and lazy imports for distillation components                                    |
+| `config.py`                            | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource` |
+| `core/advantage.py`                    | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                                  |
+| `core/checkpoint.py`                   | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                                 |
+| `core/mcts_tree_store.py`              | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics                               |
+| `core/tree_search_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops                     |
+| `distilling/__init__.py`               | Distilling subpackage exports                                                                      |
+| `distilling/config.py`                 | `OnPolicyDistillConfig`, `AgentConfig`                                                             |
+| `distilling/agent.py`                  | `OnPolicyDistillAgent` — agent for distillation training                                           |
+| `distilling/distill_types.py`          | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward`       |
+| `distilling/reward_compute.py`         | Student vs teacher logprob reward computation                                                      |
+| `distilling/teacher_client.py`         | `TeacherConfig`, `TeacherClient` — async teacher model inference client                            |
+| `distilling/teacher_provider.py`       | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider`                     |
+| `distilling/selected_turn_distill.py`  | Diagnoses episodes and builds position-level teacher rewards                                       |
+| `engine/__init__.py`                   | Engine subpackage exports                                                                          |
+| `engine/fsdp_engine.py`                | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                                     |
+| `training/__init__.py`                 | Training subpackage exports                                                                        |
+| `training/actor.py`                    | `MultiCandidateFSDPPPOActor`, distill-loss patching functions                                      |
+| `training/loss.py`                     | `grpo_distill_loss_fn` — combined GRPO + distillation loss                                         |
+| `training/logprobs.py`                 | Multi-candidate logprob/entropy gathering utilities                                                |
+| `training/trainer.py`                  | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                              |
