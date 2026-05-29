@@ -33,7 +33,6 @@ from customized_areal.db_service import (
     truncate_messages_before_turn,
 )
 from customized_areal.tpfc.backend_run import _get_raw_messages_with_client
-from customized_areal.tree_search.core.uncertainty import should_discard_query
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
@@ -41,6 +40,7 @@ from customized_areal.tree_search.config import (
     SampleSource,
 )
 from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.core.uncertainty import should_discard_query
 
 from areal.api import RolloutWorkflow
 from areal.utils import logging
@@ -940,23 +940,17 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         return prepared_nodes, rewards_by_node_id
 
     async def arun_episode(self, engine, data: dict[str, Any]) -> dict[str, Any] | None:
+        query_id = data.get("query_id") or ""
         try:
-            return await self._arun_episode_impl(engine, data)
+            if self.dynamic_group_size:
+                return await self._arun_episode_dynamic(engine, data, query_id)
+            return await self._arun_episode_fixed(engine, data, query_id)
         except Exception:
             logger.exception(
                 "TreeSearchGroupedWorkflow.arun_episode failed for query_id=%s",
-                data.get("query_id", ""),
+                query_id,
             )
             return None
-
-    async def _arun_episode_impl(
-        self, engine, data: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        query_id = data.get("query_id") or ""
-
-        if self.dynamic_group_size:
-            return await self._arun_episode_dynamic(engine, data, query_id)
-        return await self._arun_episode_fixed(engine, data, query_id)
 
     async def _arun_episode_fixed(
         self, engine, data: dict[str, Any], query_id: str
@@ -1010,9 +1004,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self, engine, data: dict[str, Any], query_id: str
     ) -> dict[str, Any] | None:
         """Dynamic group_size: iterative sampling with uncertainty threshold."""
-        from customized_areal.tree_search.core.uncertainty import (
-            compute_query_uncertainty,
-        )
 
         # 1. Initial round
         cached_count = (
@@ -1069,6 +1060,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         # 3. Iterative sampling loop
         next_group_idx = need_gen
+        consecutive_failed_additions = 0
+        max_failed_additions = max(3, self.max_group_size)
         while self._count_episodes(all_nodes) < self.max_group_size:
             if uncertainty <= self.uncertainty_threshold:
                 logger.info(
@@ -1088,11 +1081,22 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             next_group_idx += 1
 
             if isinstance(result, Exception) or result is None:
+                consecutive_failed_additions += 1
                 logger.warning(
                     "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
-                    "additional episode failed, skipping",
+                    "additional episode failed (%d/%d), skipping",
                     query_id,
+                    consecutive_failed_additions,
+                    max_failed_additions,
                 )
+                if consecutive_failed_additions >= max_failed_additions:
+                    logger.warning(
+                        "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                        "stopping after %d consecutive failed additions",
+                        query_id,
+                        consecutive_failed_additions,
+                    )
+                    break
                 continue
 
             nodes = self._result_to_nodes(result, query_id, next_group_idx - 1)
@@ -1100,6 +1104,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 fresh_nodes.extend(nodes)
                 all_nodes = fresh_nodes + cached_nodes
                 uncertainty = self._compute_uncertainty_for_nodes(all_nodes)
+                consecutive_failed_additions = 0
 
                 logger.info(
                     "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
@@ -1108,6 +1113,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     uncertainty,
                     self._count_episodes(all_nodes),
                 )
+            else:
+                consecutive_failed_additions += 1
+                logger.warning(
+                    "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                    "additional episode produced no nodes (%d/%d)",
+                    query_id,
+                    consecutive_failed_additions,
+                    max_failed_additions,
+                )
+                if consecutive_failed_additions >= max_failed_additions:
+                    logger.warning(
+                        "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
+                        "stopping after %d consecutive empty additions",
+                        query_id,
+                        consecutive_failed_additions,
+                    )
+                    break
 
         return await self._finalize_episode(
             fresh_nodes, cached_nodes, engine, data, query_id
@@ -1167,6 +1189,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 episode_rewards.append(node.outcome_reward)
                 seen_episodes.add(node.episode_id)
         if should_discard_query(episode_rewards):
+            if fresh_nodes:
+                self.tree_store.insert_batch(fresh_nodes)
+            for node in all_nodes:
+                if node.node_id:
+                    self.tree_store.set_discarded(node.node_id, True)
+            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
             logger.info(
                 "TreeSearchGroupedWorkflow: discarding query_id=%s — "
                 "all %d episodes have identical reward",
