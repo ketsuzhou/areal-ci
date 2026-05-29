@@ -131,3 +131,69 @@ class TestShouldDiscardQuery:
         from customized_areal.tree_search.core.uncertainty import should_discard_query
 
         assert should_discard_query([]) is True
+
+
+class TestWorkflowConstructorDynamicFields:
+    def test_explicit_dynamic_config(self):
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from unittest.mock import MagicMock
+
+        base = MagicMock()
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=16,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode="tree",
+            loss_mode="grpo",
+            cache_mode="off",
+            dynamic_group_size=True,
+            initial_group_size=8,
+            max_group_size=32,
+            uncertainty_threshold=0.1,
+            reward_type="continuous",
+        )
+        assert wf.dynamic_group_size is True
+        assert wf.initial_group_size == 8
+        assert wf.max_group_size == 32
+        assert wf.uncertainty_threshold == pytest.approx(0.1)
+        assert wf.reward_type == "continuous"
+        assert wf.group_size == 8
+
+    def test_fallback_initial_from_group_size(self):
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from unittest.mock import MagicMock
+
+        base = MagicMock()
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=16,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode="tree",
+            loss_mode="grpo",
+            cache_mode="off",
+            dynamic_group_size=True,
+        )
+        assert wf.initial_group_size == 16
+        assert wf.group_size == 16
+
+    def test_no_dynamic_backward_compat(self):
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from unittest.mock import MagicMock
+
+        base = MagicMock()
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=16,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode="tree",
+            loss_mode="grpo",
+            cache_mode="off",
+        )
+        assert wf.dynamic_group_size is False
+        assert wf.group_size == 16

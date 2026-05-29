@@ -467,6 +467,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         max_tokens: int = 0,
         sample_source: SampleSource = SampleSource.SCRATCH,
         branch_probability: float = 0.5,
+        dynamic_group_size: bool = False,
+        initial_group_size: int = 0,
+        max_group_size: int = 64,
+        uncertainty_threshold: float = 0.05,
+        reward_type: str = "binary",
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -502,6 +507,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.max_tokens = max_tokens
         self.sample_source = SampleSource(sample_source)
         self.branch_probability = branch_probability
+        self.dynamic_group_size = dynamic_group_size
+        self.initial_group_size = (
+            initial_group_size if initial_group_size > 0 else group_size
+        )
+        self.max_group_size = max_group_size
+        self.uncertainty_threshold = uncertainty_threshold
+        self.reward_type = reward_type
+        if dynamic_group_size:
+            self.group_size = self.initial_group_size
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
 

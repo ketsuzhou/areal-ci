@@ -746,6 +746,11 @@ class RemoteInfEngine(InferenceEngine):
                     max_tokens=max_tokens,
                     sample_source=tree_search_cfg.sample_source,
                     branch_probability=tree_search_cfg.branch_probability,
+                    dynamic_group_size=tree_search_cfg.dynamic_group_size,
+                    initial_group_size=tree_search_cfg.initial_group_size,
+                    max_group_size=tree_search_cfg.max_group_size,
+                    uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
+                    reward_type=tree_search_cfg.reward_type,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")
