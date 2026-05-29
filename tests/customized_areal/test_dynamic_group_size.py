@@ -135,11 +135,16 @@ class TestShouldDiscardQuery:
 
 class TestWorkflowConstructorDynamicFields:
     def test_explicit_dynamic_config(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import MagicMock
 
         base = MagicMock()
         wf = TreeSearchGroupedRolloutWorkflow(
@@ -163,11 +168,16 @@ class TestWorkflowConstructorDynamicFields:
         assert wf.group_size == 8
 
     def test_fallback_initial_from_group_size(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import MagicMock
 
         base = MagicMock()
         wf = TreeSearchGroupedRolloutWorkflow(
@@ -183,11 +193,16 @@ class TestWorkflowConstructorDynamicFields:
         assert wf.group_size == 16
 
     def test_no_dynamic_backward_compat(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import MagicMock
 
         base = MagicMock()
         wf = TreeSearchGroupedRolloutWorkflow(
@@ -206,12 +221,17 @@ class TestZeroVarianceDiscard:
     @pytest.mark.asyncio
     async def test_discard_identical_rewards(self):
         """2+ episodes with identical rewards -> return None."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -249,12 +269,17 @@ class TestZeroVarianceDiscard:
     @pytest.mark.asyncio
     async def test_keep_mixed_rewards(self):
         """Mixed rewards -> result is NOT None."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -297,12 +322,17 @@ class TestZeroVarianceDiscard:
     @pytest.mark.asyncio
     async def test_keep_single_episode(self):
         """Single episode is not discarded even if only one reward value."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -339,12 +369,17 @@ class TestDynamicSamplingLoop:
     @pytest.mark.asyncio
     async def test_stops_at_threshold(self):
         """Dynamic mode samples until uncertainty drops below threshold."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -396,12 +431,17 @@ class TestDynamicSamplingLoop:
     @pytest.mark.asyncio
     async def test_respects_max_group_size(self):
         """Dynamic mode caps at max_group_size even if uncertainty is high."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -444,19 +484,24 @@ class TestDynamicSamplingLoop:
             return nodes
 
         wf._result_to_nodes = make_nodes
-        result = await wf.arun_episode(MagicMock(), {"query_id": "q_dyn2"})
+        await wf.arun_episode(MagicMock(), {"query_id": "q_dyn2"})
         # Should cap at max_group_size
         assert episode_count <= 4
 
     @pytest.mark.asyncio
     async def test_tolerates_failed_extra_samples(self):
         """Dynamic loop continues if an extra episode fails."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         # First call succeeds, second call fails (returns None)
@@ -547,12 +592,17 @@ class TestEndToEndWorkflow:
     @pytest.mark.asyncio
     async def test_fixed_mode_unchanged(self):
         """Fixed mode produces a valid tensor dict output."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -596,12 +646,17 @@ class TestEndToEndWorkflow:
     @pytest.mark.asyncio
     async def test_dynamic_binary_rewards(self):
         """Dynamic mode with binary rewards produces valid output."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -650,12 +705,17 @@ class TestEndToEndWorkflow:
     @pytest.mark.asyncio
     async def test_dynamic_continuous_rewards(self):
         """Dynamic mode with continuous rewards produces valid output."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -704,12 +764,17 @@ class TestEndToEndWorkflow:
     @pytest.mark.asyncio
     async def test_discard_after_identical_rewards(self):
         """E2E: dynamic mode discards when all rewards are identical."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})
@@ -753,13 +818,17 @@ class TestEndToEndWorkflow:
     @pytest.mark.asyncio
     async def test_tree_mode_advantages_in_output(self):
         """TREE-mode workflow output contains precomputed advantages."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
         )
         from customized_areal.tree_search.core.tree_store import Node
-        from customized_areal.tree_search.config import AdvantageMode, LossMode, CacheMode
-        from unittest.mock import AsyncMock, MagicMock
-        import torch
 
         base = MagicMock()
         base.arun_episode = AsyncMock(return_value={})

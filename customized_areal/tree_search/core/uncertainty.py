@@ -38,13 +38,8 @@ def compute_query_uncertainty(
         ss = sum((r - r_bar) ** 2 for r in episode_rewards)
 
         kappa_n = kappa0 + n
-        mu_n = (kappa0 * mu0 + n * r_bar) / kappa_n
         alpha_n = alpha0 + n / 2
-        beta_n = (
-            beta0
-            + 0.5 * ss
-            + (kappa0 * n * (r_bar - mu0) ** 2) / (2 * kappa_n)
-        )
+        beta_n = beta0 + 0.5 * ss + (kappa0 * n * (r_bar - mu0) ** 2) / (2 * kappa_n)
 
         # Posterior variance of the latent mean
         posterior_var = beta_n / ((alpha_n - 1) * kappa_n)
