@@ -1,4 +1,0 @@
-export OPENROUTER_APL_KEY="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"
-export ANTHROPIC_BASE_URL="https://openrouter.ai/api"
-export ANTHROPIC_AUTH_TOKEN="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"
-export ANTHROPIC_MODEL="Z-ai/glm-5.1"
