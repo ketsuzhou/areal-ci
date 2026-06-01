@@ -7,9 +7,12 @@ import inspect
 from typing import Protocol
 
 import httpx
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
-from customized_areal.tree_search.distilling.teacher_client import TeacherClient
+from customized_areal.tree_search.distilling.teacher_client import (
+    TeacherClient,
+    TeacherServiceError,
+)
 
 from areal.utils import logging
 
@@ -105,16 +108,21 @@ class ExternalTeacherProvider:
         if self.diagnose_base_url:
             client = self._get_openai_client()
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.chat.completions.create(
-                    model=self.diagnose_model_name,
-                    messages=messages,
-                    max_tokens=self.diagnose_max_tokens,
-                    temperature=temp,
-                    extra_body={"enable_thinking": False},
-                ),
-            )
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=self.diagnose_model_name,
+                        messages=messages,
+                        max_tokens=self.diagnose_max_tokens,
+                        temperature=temp,
+                        extra_body={"enable_thinking": False},
+                    ),
+                )
+            except (OpenAIError, httpx.HTTPError) as exc:
+                raise TeacherServiceError(
+                    f"Diagnose API request failed: {exc}"
+                ) from exc
             content = response.choices[0].message.content
             if not content:
                 finish_reason = response.choices[0].finish_reason

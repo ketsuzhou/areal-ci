@@ -34,7 +34,7 @@ import torch
 
 from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
 from customized_areal.tree_search.distill_types import PositionRewardInfo
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -124,7 +124,7 @@ def _make_workflow(
     teacher_provider: str = "external",
 ) -> TreeSearchGroupedRolloutWorkflow:
     """Create a workflow instance with a mock inner workflow."""
-    from customized_areal.tree_search.tree_search_grouped_workflow import (
+    from customized_areal.tree_search.core.customized_grouped_workflow import (
         TreeSearchGroupedRolloutWorkflow,
     )
 
@@ -155,7 +155,7 @@ def _make_workflow(
 
 class TestInteractionsDictToNodes:
     def test_basic_conversion(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -168,7 +168,7 @@ class TestInteractionsDictToNodes:
             assert sum(node.loss_mask) == 10  # response_len
 
     def test_empty_dict(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -177,7 +177,7 @@ class TestInteractionsDictToNodes:
 
     def test_concat_mode_with_parent(self):
         """Test concat mode where parent logprobs are carried forward."""
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -210,7 +210,7 @@ class TestInteractionsDictToNodes:
 
     def test_skips_non_interaction_type(self):
         """Non-InteractionWithTokenLogpReward values are skipped."""
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -220,7 +220,7 @@ class TestInteractionsDictToNodes:
 
     def test_with_top_logprobs(self):
         """output_top_logprobs on ModelResponse is converted to topk_ids/topk_logp."""
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -311,6 +311,34 @@ class TestSetupDistillProvider:
 
         assert provider is not None
         assert client is not None
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_external_provider_prefers_openrouter_diagnose_config(self):
+        wf = _make_workflow(
+            diagnose_model_name="openrouter/model",
+            diagnose_base_url="https://openrouter.ai/api/v1",
+            diagnose_api_key="openrouter-key",
+        )
+        mock_engine = MagicMock()
+        mock_engine._proxy_gateway_addr = ""
+        mock_engine.addresses = []
+        mock_engine.config = MagicMock()
+        mock_engine.config.admin_api_key = ""
+
+        with patch.dict(
+            "os.environ",
+            {
+                "WORKSPACE_OPENAI_API_KEY": "workspace-key",
+                "WORKSPACE_OPENAI_API_BASE": "http://workspace:8080/v1",
+            },
+            clear=False,
+        ):
+            provider, client = await wf._setup_distill_provider(mock_engine)
+
+        assert provider.diagnose_model_name == "openrouter/model"
+        assert provider.diagnose_base_url == "https://openrouter.ai/api/v1"
+        assert provider.diagnose_api_key == "openrouter-key"
         await client.close()
 
     @pytest.mark.asyncio
@@ -648,7 +676,7 @@ class TestTreeStoreOperations:
 
 class TestTreeAdvantageComputer:
     def test_grpo_normalization(self):
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
 
         store = MCTSTreeStore()
         computer = TreeAdvantageComputer(store)
@@ -681,7 +709,7 @@ class TestTreeAdvantageComputer:
             assert response_adv.abs().sum().item() > 0
 
     def test_single_episode_zero_advantage(self):
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
 
         store = MCTSTreeStore()
         computer = TreeAdvantageComputer(store)
@@ -708,7 +736,7 @@ class TestTreeAdvantageComputer:
 
 class TestNodesToBatchedTensorDict:
     def test_basic_conversion(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
@@ -724,14 +752,14 @@ class TestNodesToBatchedTensorDict:
         assert result["input_ids"].shape[0] == 2  # batch dim
 
     def test_empty_nodes(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
         assert _nodes_to_batched_tensor_dict([]) is None
 
     def test_max_tokens_truncation(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
@@ -741,7 +769,7 @@ class TestNodesToBatchedTensorDict:
         assert result["input_ids"].shape[1] == 50
 
     def test_distill_mode_adds_teacher_logp(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
@@ -750,7 +778,7 @@ class TestNodesToBatchedTensorDict:
         assert "teacher_logp" in result
 
     def test_grpo_mode_no_teacher_logp(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
@@ -759,7 +787,7 @@ class TestNodesToBatchedTensorDict:
         assert "teacher_logp" not in result
 
     def test_with_topk_ids(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _nodes_to_batched_tensor_dict,
         )
 
@@ -947,8 +975,8 @@ class TestProfiling:
     @pytest.mark.asyncio
     async def test_profile_stages(self):
         """Time each pipeline stage with synthetic data."""
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _group_nodes_by_episode,
             _nodes_to_batched_tensor_dict,
         )
@@ -1037,7 +1065,7 @@ class TestProfiling:
 
 class TestInputIdsToMessages:
     def test_basic_parsing(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _input_ids_to_messages,
         )
 
@@ -1053,7 +1081,7 @@ class TestInputIdsToMessages:
         assert len(messages) >= 1
 
     def test_fallback_on_decode_failure(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _input_ids_to_messages,
         )
 
@@ -1073,7 +1101,7 @@ class TestInputIdsToMessages:
 
 class TestFilterDistillEpisodeFailure:
     def test_distill_mode_returns_empty(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _filter_distill_episode_failure,
         )
 
@@ -1082,7 +1110,7 @@ class TestFilterDistillEpisodeFailure:
         assert result == []
 
     def test_non_distill_mode_returns_nodes(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _filter_distill_episode_failure,
         )
 
@@ -1098,7 +1126,7 @@ class TestFilterDistillEpisodeFailure:
 
 class TestGroupNodesByEpisode:
     def test_basic_grouping(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _group_nodes_by_episode,
         )
 
@@ -1112,7 +1140,7 @@ class TestGroupNodesByEpisode:
         assert len(groups[1]) == 1
 
     def test_missing_episode_id(self):
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             _group_nodes_by_episode,
         )
 

@@ -2,8 +2,8 @@ import itertools
 
 import torch
 
-from customized_areal.tree_search.advantage import TreeAdvantageComputer
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 _node_id_counter = itertools.count(1)
 

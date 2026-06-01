@@ -712,7 +712,7 @@ class RemoteInfEngine(InferenceEngine):
             if use_tree_search:
                 self.logger.warning("use TreeSearchGroupedRolloutWorkflow")
 
-                from customized_areal.tree_search.tree_search_grouped_workflow import (
+                from customized_areal.tree_search.core.customized_grouped_workflow import (
                     TreeSearchGroupedRolloutWorkflow,
                 )
 

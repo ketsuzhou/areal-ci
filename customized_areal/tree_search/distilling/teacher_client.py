@@ -22,6 +22,10 @@ logger = logging.getLogger("TeacherClient")
 _DEFAULT_MISSING_LOGPROB = math.log(1e-10)
 
 
+class TeacherServiceError(RuntimeError):
+    """Raised when the remote teacher service cannot satisfy a request."""
+
+
 @dataclass
 class TeacherConfig:
     """Configuration for the remote teacher model.
@@ -429,7 +433,7 @@ class TeacherClient:
                     backoff = 2 ** (attempt - 1)
                     await asyncio.sleep(backoff)
 
-        raise RuntimeError(
+        raise TeacherServiceError(
             f"SGLang teacher API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
@@ -466,7 +470,7 @@ class TeacherClient:
                     backoff = 2 ** (attempt - 1)
                     await asyncio.sleep(backoff)
 
-        raise RuntimeError(
+        raise TeacherServiceError(
             f"Teacher API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
@@ -496,9 +500,9 @@ class TeacherClient:
                     backoff = 2 ** (attempt - 1)
                     await asyncio.sleep(backoff)
 
-        raise RuntimeError(
+        raise TeacherServiceError(
             f"Teacher chat API request failed after {max_retries} retries: {last_exc}"
         ) from last_exc
 
 
-__all__ = ["TeacherConfig", "TeacherClient"]
+__all__ = ["TeacherConfig", "TeacherClient", "TeacherServiceError"]

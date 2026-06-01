@@ -6,7 +6,7 @@ from customized_areal.tree_search.distill_types import (
     EpisodeDiagnosis,
     PositionRewardInfo,
 )
-from customized_areal.tree_search.mcts_tree_store import Node
+from customized_areal.tree_search.core.tree_store import Node
 
 
 class FakeTokenizer:
@@ -140,7 +140,7 @@ def test_tree_backup_config_has_distill_defaults():
 
 def test_both_mode_keeps_episode_after_distill_failure():
     from customized_areal.tree_search.config import LossMode
-    from customized_areal.tree_search.tree_search_grouped_workflow import (
+    from customized_areal.tree_search.core.customized_grouped_workflow import (
         _filter_distill_episode_failure,
     )
 
@@ -157,7 +157,7 @@ def test_both_mode_keeps_episode_after_distill_failure():
 
 def test_distill_mode_drops_episode_after_distill_failure():
     from customized_areal.tree_search.config import LossMode
-    from customized_areal.tree_search.tree_search_grouped_workflow import (
+    from customized_areal.tree_search.core.customized_grouped_workflow import (
         _filter_distill_episode_failure,
     )
 
@@ -173,7 +173,7 @@ def test_distill_mode_drops_episode_after_distill_failure():
 
 
 def test_set_position_reward_sample_indices_uses_final_node_order():
-    from customized_areal.tree_search.tree_search_grouped_workflow import (
+    from customized_areal.tree_search.core.customized_grouped_workflow import (
         _set_position_reward_sample_indices,
     )
 
@@ -204,7 +204,7 @@ def test_set_position_reward_sample_indices_uses_final_node_order():
 
 
 def test_parse_episode_diagnosis_keeps_only_selected_turns():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         parse_episode_diagnosis,
     )
 
@@ -236,7 +236,7 @@ def test_parse_episode_diagnosis_keeps_only_selected_turns():
 
 
 def test_parse_episode_diagnosis_extracts_xml_fence_after_reasoning():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         parse_episode_diagnosis,
     )
 
@@ -261,7 +261,7 @@ def test_parse_episode_diagnosis_extracts_xml_fence_after_reasoning():
 
 
 def test_response_token_span_returns_current_contiguous_one_span():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         response_token_span,
     )
 
@@ -270,7 +270,7 @@ def test_response_token_span_returns_current_contiguous_one_span():
 
 
 def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         build_teacher_prompt_ids,
     )
 
@@ -290,7 +290,7 @@ def test_build_teacher_prompt_ids_excludes_generation_from_prefix():
 
 
 def test_build_teacher_prompt_ids_uses_current_response_span():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         build_teacher_prompt_ids,
     )
 
@@ -310,7 +310,7 @@ def test_build_teacher_prompt_ids_uses_current_response_span():
 
 
 def test_build_teacher_prompt_ids_skips_guidance_insertion_when_blank():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         build_teacher_prompt_ids,
     )
 
@@ -329,7 +329,7 @@ def test_build_teacher_prompt_ids_skips_guidance_insertion_when_blank():
 
 @pytest.mark.asyncio
 async def test_selected_turn_to_position_rewards_single_candidate_path():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -381,7 +381,7 @@ async def test_selected_turn_to_position_rewards_single_candidate_path():
 
 @pytest.mark.asyncio
 async def test_selected_turn_to_position_rewards_topk_moves_generated_token_first():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -414,7 +414,7 @@ async def test_selected_turn_to_position_rewards_topk_moves_generated_token_firs
 
 @pytest.mark.asyncio
 async def test_selected_turn_to_position_rewards_topk_uses_current_response_rows():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -455,7 +455,7 @@ async def test_selected_turn_to_position_rewards_topk_uses_current_response_rows
 
 @pytest.mark.asyncio
 async def test_selected_turn_to_position_rewards_topk_accepts_current_response_rows():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -487,7 +487,7 @@ async def test_selected_turn_to_position_rewards_topk_accepts_current_response_r
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_requires_engine_for_missing_cache():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -513,7 +513,7 @@ async def test_selected_turn_topk_requires_engine_for_missing_cache():
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_recomputes_missing_cache_from_full_sequence_rows():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -566,7 +566,7 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_full_sequence_ro
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_rows():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -611,7 +611,7 @@ async def test_selected_turn_topk_recomputes_missing_cache_from_all_response_row
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_accepts_callable_returning_awaitable():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -644,7 +644,7 @@ async def test_selected_turn_topk_accepts_callable_returning_awaitable():
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_rejects_mismatched_id_logprob_layouts():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 
@@ -677,7 +677,7 @@ async def test_selected_turn_topk_rejects_mismatched_id_logprob_layouts():
 
 @pytest.mark.asyncio
 async def test_selected_turn_topk_rejects_invalid_same_length_row_layouts():
-    from customized_areal.tree_search.core.selected_turn_distill import (
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
         selected_turn_to_position_rewards,
     )
 

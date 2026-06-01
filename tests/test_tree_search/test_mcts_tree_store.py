@@ -2,7 +2,7 @@
 
 import torch
 
-from customized_areal.tree_search.mcts_tree_store import (
+from customized_areal.tree_search.core.tree_store import (
     MCTSTreeStore,
     Node,
     _find_turn_boundaries,
@@ -856,7 +856,7 @@ class TestLoadUntrainedEpisodes:
 
 class TestNodeToTensorDict:
     def test_response_only_fields_sliced(self):
-        from customized_areal.tree_search.mcts_tree_store import (
+        from customized_areal.tree_search.core.tree_store import (
             Node,
             _node_to_tensor_dict,
         )
@@ -888,7 +888,7 @@ class TestNodeToTensorDict:
         assert result["teacher_logp"].shape == (1, 3, 1)
 
     def test_current_response_only_fields_export_for_multiturn_node(self):
-        from customized_areal.tree_search.mcts_tree_store import (
+        from customized_areal.tree_search.core.tree_store import (
             Node,
             _node_to_tensor_dict,
         )
@@ -929,7 +929,7 @@ class TestNodeToTensorDict:
 
     def test_logp_already_sliced(self):
         """logp is already correctly sliced — verify it stays that way."""
-        from customized_areal.tree_search.mcts_tree_store import (
+        from customized_areal.tree_search.core.tree_store import (
             Node,
             _node_to_tensor_dict,
         )

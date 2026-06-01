@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from customized_areal.tree_search.core.reward_compute import (
+from customized_areal.tree_search.distilling.reward_compute import (
     _compute_token_rewards,
 )
-from customized_areal.tree_search.core.teacher_client import (
+from customized_areal.tree_search.distilling.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )

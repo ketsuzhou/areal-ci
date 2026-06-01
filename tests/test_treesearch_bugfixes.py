@@ -2,7 +2,7 @@
 
 import itertools
 
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 _counter = itertools.count(1)
 
@@ -39,7 +39,7 @@ class TestDictSetInsteadOfDictNone:
     """Bug #14: advantage computer should use set[int] not dict[int, None]."""
 
     def test_compute_uses_set_for_node_ids(self):
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
 
         store = MCTSTreeStore()
         for r in [1.0, 2.0, 3.0]:
@@ -87,7 +87,7 @@ class TestQueryIdCheckpoint:
     """Bug #3: query_id lost on checkpoint deserialization."""
 
     def test_query_id_survives_save_load(self, tmp_path):
-        from customized_areal.tree_search.checkpoint import TreeCheckpointManager
+        from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 
         store = MCTSTreeStore()
         node = _make_node()
@@ -108,7 +108,7 @@ class TestBesselVariance:
     """Bug #2: GRPO normalization should use Bessel-corrected variance."""
 
     def test_uses_sample_variance_not_population(self):
-        from customized_areal.tree_search.advantage import TreeAdvantageComputer
+        from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
 
         store = MCTSTreeStore()
         # Insert 4 nodes with known rewards
@@ -162,7 +162,7 @@ class TestTurnIdxInInteractionsToNodes:
     def test_interactions_to_nodes_sets_turn_idx(self):
         from unittest.mock import MagicMock
 
-        from customized_areal.tree_search.tree_search_grouped_workflow import (
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
             interactions_dict_to_nodes,
         )
 
@@ -198,7 +198,7 @@ class TestTurnIdxCheckpoint:
     """turn_idx survives checkpoint save/load."""
 
     def test_turn_idx_survives_save_load(self, tmp_path):
-        from customized_areal.tree_search.checkpoint import TreeCheckpointManager
+        from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 
         store = MCTSTreeStore()
         node = _make_node()

@@ -732,13 +732,24 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
             client = TeacherClient(config)
 
-        diagnose_model_name = "qwen/qwen3.5-397b-a17b"
-        diagnose_api_key = os.environ.get("WORKSPACE_OPENAI_API_KEY")
-        diagnose_base_url = os.environ.get("WORKSPACE_OPENAI_API_BASE")
+        diagnose_model_name = (
+            self.diagnose_model_name or "qwen/qwen3.5-397b-a17b"
+        )
+        diagnose_api_key = (
+            self.diagnose_api_key
+            or os.environ.get("OPENROUTER_API_KEY", "")
+            or os.environ.get("WORKSPACE_OPENAI_API_KEY", "")
+        )
+        diagnose_base_url = (
+            self.diagnose_base_url
+            or os.environ.get("OPENROUTER_BASE_URL", "")
+            or os.environ.get("WORKSPACE_OPENAI_API_BASE", "")
+        )
         provider = ExternalTeacherProvider(
             client=client,
             diagnose_model_name=diagnose_model_name,
-            diagnose_temperature=0,
+            diagnose_temperature=self.diagnose_temperature,
+            diagnose_max_tokens=self.diagnose_max_tokens,
             diagnose_base_url=diagnose_base_url,
             diagnose_api_key=diagnose_api_key,
         )
@@ -756,6 +767,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         from customized_areal.tree_search.distilling.selected_turn_distill import (
             parse_episode_diagnosis,
             selected_turn_to_position_rewards,
+        )
+        from customized_areal.tree_search.distilling.teacher_client import (
+            TeacherServiceError,
         )
 
         if not nodes:
@@ -782,6 +796,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     )
                     diagnosis = parse_episode_diagnosis(raw)
                     break
+                except TeacherServiceError as exc:
+                    logger.warning(
+                        "Diagnose request failed for episode_id=%s; proceeding "
+                        "without guidance: %s",
+                        nodes[0].episode_id,
+                        exc,
+                    )
+                    diagnosis = None
+                    break
                 except ValueError:
                     if retry < max_retries - 1:
                         logger.warning(
@@ -798,7 +821,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                             nodes[0].episode_id,
                         )
                         raise
-            selected = diagnosis.selected_turns
+            selected = diagnosis.selected_turns if diagnosis is not None else {}
             if selected:
                 nodes[-1].guidance = dict(selected)
         if not selected and self.loss_mode != LossMode.DISTILL:
@@ -808,16 +831,27 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             guidance = selected.get(node.turn_idx, "")
             if self.loss_mode != LossMode.DISTILL and not guidance:
                 return None
-            rewards = await selected_turn_to_position_rewards(
-                node=node,
-                guidance=guidance,
-                tokenizer=tokenizer,
-                provider=provider,
-                sample_index=0,
-                topk_distill=self.topk_distill,
-                engine=engine,
-                teacher_top_k=self.teacher_top_k,
-            )
+            try:
+                rewards = await selected_turn_to_position_rewards(
+                    node=node,
+                    guidance=guidance,
+                    tokenizer=tokenizer,
+                    provider=provider,
+                    sample_index=0,
+                    topk_distill=self.topk_distill,
+                    engine=engine,
+                    teacher_top_k=self.teacher_top_k,
+                )
+            except TeacherServiceError as exc:
+                logger.warning(
+                    "Teacher logprob request failed for episode_id=%s "
+                    "node_id=%s turn_idx=%s; skipping distill targets: %s",
+                    node.episode_id,
+                    node.node_id,
+                    node.turn_idx,
+                    exc,
+                )
+                return None
             if not rewards:
                 return None
             node.teacher_logp = [reward.teacher_logprobs or [] for reward in rewards]
@@ -836,6 +870,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if result is not None:
                 node_id, rewards = result
                 rewards_by_node_id[node_id] = rewards
+        if not rewards_by_node_id:
+            return _filter_distill_episode_failure(nodes, self.loss_mode), {}
         return nodes, rewards_by_node_id
 
     async def _retry_episode(

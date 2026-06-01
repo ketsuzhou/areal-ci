@@ -7,10 +7,10 @@ from customized_areal.db_service.messages import (
     copy_messages_to_task,
     truncate_messages_before_turn,
 )
-from customized_areal.tree_search.checkpoint import TreeCheckpointManager
+from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.config import SampleSource
-from customized_areal.tree_search.mcts_tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.tree_search_grouped_workflow import (
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.customized_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
     annotate_nodes_from_run,
     build_branch_task,
@@ -553,7 +553,7 @@ def test_tpfca_agent_result_default_fields():
 
 def test_with_episode_metadata_extracts_tpfca_result():
     """_with_episode_metadata should read _backend_run_task_id and _backend_run_raw_messages from data."""
-    from customized_areal.tree_search.tree_search_grouped_workflow import (
+    from customized_areal.tree_search.core.customized_grouped_workflow import (
         EpisodeRunResult,
         _with_episode_metadata,
     )

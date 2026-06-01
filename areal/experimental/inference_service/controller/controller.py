@@ -1695,7 +1695,7 @@ class RolloutControllerV2:
         """Wrap in TreeSearchGroupedRolloutWorkflow or GroupedRolloutWorkflow."""
         use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
         if use_tree_search:
-            from customized_areal.tree_search.tree_search_grouped_workflow import (
+            from customized_areal.tree_search.core.customized_grouped_workflow import (
                 TreeSearchGroupedRolloutWorkflow,
             )
 

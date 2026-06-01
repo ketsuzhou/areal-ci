@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from customized_areal.tree_search.core.teacher_client import (
+from customized_areal.tree_search.distilling.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )
-from customized_areal.tree_search.core.teacher_provider import (
+from customized_areal.tree_search.distilling.teacher_provider import (
     EngineTeacherProvider,
     ExternalTeacherProvider,
 )

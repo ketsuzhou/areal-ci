@@ -80,6 +80,11 @@ def main(args: list[str] | None = None) -> None:
         if api_key:
             config.tree_search.diagnose_api_key = api_key
             logger.info("Using OPENROUTER_API_KEY from environment for diagnose")
+    if not config.tree_search.diagnose_base_url:
+        base_url = os.environ.get("OPENROUTER_BASE_URL", "")
+        if base_url:
+            config.tree_search.diagnose_base_url = base_url
+            logger.info("Using OPENROUTER_BASE_URL from environment for diagnose")
 
     # os.environ["TRAIN_ID"] = uuid.uuid4().hex
     # logger.info("Generated new Train ID: %s", os.environ["TRAIN_ID"])

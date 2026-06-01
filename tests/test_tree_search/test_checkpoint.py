@@ -1,7 +1,7 @@
 import itertools
 
-from customized_areal.tree_search.checkpoint import TreeCheckpointManager
-from customized_areal.tree_search.mcts_tree_store import (
+from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
+from customized_areal.tree_search.core.tree_store import (
     MCTSTreeStore,
     Node,
     _find_turn_boundaries,
