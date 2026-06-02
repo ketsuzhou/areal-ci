@@ -11,14 +11,10 @@ from typing import Any
 
 from customized_areal.db_service.connection import DBConnection
 
-try:
-    from areal.utils.logging import getLogger
 
-    logger = getLogger("AgentLoader")
-except ImportError:
-    import logging
+import logging
 
-    logger = logging.getLogger("AgentLoader")
+logger = logging.getLogger("AgentLoader")
 
 
 @dataclass

@@ -159,7 +159,7 @@ class TPFCAgent:
                 task_id=data.get("task_id", ""),
                 gt=gt,
                 tags=tags,
-                model_name="openrouter/qwen/qwen3-vl-8b-thinking",
+                model_name="areal/qwen/qwen3_5-9b",
                 base_url=base_url,
                 api_key=api_key,
                 seed_messages_already_inserted=bool(

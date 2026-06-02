@@ -208,6 +208,15 @@ async def selected_turn_to_position_rewards(
     if not generation_ids:
         return []
 
+    logger.info(
+        "Distill node: episode_id=%s turn_idx=%s prompt_tokens=%d output_tokens=%d guidance_len=%d",
+        node.episode_id,
+        node.turn_idx,
+        len(prompt_ids),
+        len(generation_ids),
+        len(guidance),
+    )
+
     loss_mask = _as_list(node.loss_mask)
 
     if topk_distill:

@@ -18,7 +18,8 @@ tree_search:
   teacher_model_name: "Qwen3.5_397B_A17B_FP8"
   teacher_api_key: "aH6867Z7ppZWqN7NQGsaPhSlMrk68AGQnr18Z66KsSL0864mkjaBP7Tr868pKvnCJcWa0VvHZDHk64MrKG5Z5gWrZGx88mrmAv7pk88p786gFB6XXr6MrtSckKs9QJsr"
   teacher_top_k: 10
-  teacher_max_retries: 3
+  teacher_max_retries: 5
+  teacher_max_concurrency: 4
   teacher_timeout: 300.0
   teacher_missing_logprob: -23.0
   max_reasoning_tokens: 1000

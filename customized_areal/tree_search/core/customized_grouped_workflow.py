@@ -57,6 +57,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+except ImportError:
+    pass
 import random
 import re
 import traceback
@@ -530,6 +538,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         teacher_top_k: int = 10,
         teacher_max_retries: int = 3,
         teacher_timeout: float = 300.0,
+        teacher_max_concurrency: int = 4,
         teacher_missing_logprob: float = -23.0,
         diagnose_model_name: str = "",
         diagnose_max_tokens: int = 1024,
@@ -571,6 +580,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.teacher_top_k = teacher_top_k
         self.teacher_max_retries = teacher_max_retries
         self.teacher_timeout = teacher_timeout
+        self.teacher_max_concurrency = teacher_max_concurrency
         self.teacher_missing_logprob = teacher_missing_logprob
         self.diagnose_model_name = diagnose_model_name
         self.diagnose_max_tokens = diagnose_max_tokens
@@ -717,6 +727,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 teacher_timeout=self.teacher_timeout,
                 teacher_missing_logprob=self.teacher_missing_logprob,
                 teacher_backend=teacher_backend,
+                teacher_max_concurrency=self.teacher_max_concurrency,
             )
             client = TeacherClient(config)
         else:
@@ -729,6 +740,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 teacher_timeout=self.teacher_timeout,
                 teacher_missing_logprob=self.teacher_missing_logprob,
                 teacher_backend=self.teacher_backend,
+                teacher_max_concurrency=self.teacher_max_concurrency,
             )
             client = TeacherClient(config)
 

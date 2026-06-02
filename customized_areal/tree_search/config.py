@@ -53,6 +53,7 @@ class TreeBackupConfig:
     teacher_api_key: str = ""
     teacher_top_k: int = 10
     teacher_max_retries: int = 3
+    teacher_max_concurrency: int = 4
     teacher_timeout: float = 300.0
     teacher_missing_logprob: float = -23.0
     teacher_backend: str = "openai"

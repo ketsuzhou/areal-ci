@@ -9,10 +9,10 @@ TPFC_CONFIG = {
     "description": "TPFC is a specialized agent designed to learn from experience, store task solutions, strategies, skills as well as retrieve them when needed to improve future task completions.",
     "is_default": False,
     "metadata": {"visible": False},
+    "run_config": {"max_iterations": 50},
     "config": {
         "system_prompt": "",
         "model": "openrouter/qwen/qwen3-vl-8b-thinking",
-        "max_iterations": 50,
         "max_tokens": 16384,
         "tools": {
             "builtin": [

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -60,6 +61,7 @@ class TeacherConfig:
     teacher_timeout: float = 300.0
     teacher_missing_logprob: float = _DEFAULT_MISSING_LOGPROB
     teacher_backend: str = "openai"
+    teacher_max_concurrency: int = 4
 
 
 class TeacherClient:
@@ -100,6 +102,7 @@ class TeacherClient:
             timeout=httpx.Timeout(config.teacher_timeout),
             headers=headers,
         )
+        self._semaphore = asyncio.Semaphore(config.teacher_max_concurrency)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -164,6 +167,13 @@ class TeacherClient:
         num_output_tokens = len(output_ids)
         prompt_len = len(input_ids)
         all_ids = input_ids + output_ids
+
+        logger.info(
+            "Teacher logprob request (sglang): prompt_tokens=%d, output_tokens=%d, total_tokens=%d",
+            prompt_len,
+            num_output_tokens,
+            len(all_ids),
+        )
 
         payload: dict[str, Any] = {
             "input_ids": all_ids,
@@ -248,6 +258,13 @@ class TeacherClient:
         num_output_tokens = len(output_ids)
         prompt_len = len(input_ids)
         all_ids = input_ids + output_ids
+
+        logger.info(
+            "Teacher logprob request: prompt_tokens=%d, output_tokens=%d, total_tokens=%d",
+            prompt_len,
+            num_output_tokens,
+            len(all_ids),
+        )
 
         payload: dict[str, Any] = {
             "prompt": all_ids,
@@ -393,9 +410,18 @@ class TeacherClient:
 
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST with retry logic, dispatching to the correct endpoint."""
-        if self.config.teacher_backend == "sglang":
-            return await self._post_sglang_with_retries(payload)
-        return await self._post_openai_with_retries(payload)
+        async with self._semaphore:
+            if self.config.teacher_backend == "sglang":
+                return await self._post_sglang_with_retries(payload)
+            return await self._post_openai_with_retries(payload)
+
+    @staticmethod
+    def _retry_backoff(attempt: int, status_code: int | None = None) -> float:
+        """Compute retry delay with jitter. Longer for server errors (5xx)."""
+        base = 8 if (status_code is not None and status_code >= 500) else 1
+        backoff = base * (2 ** (attempt - 1))
+        jitter = random.uniform(0, backoff * 0.5)
+        return backoff + jitter
 
     async def _post_sglang_with_retries(
         self, payload: dict[str, Any]
@@ -423,6 +449,11 @@ class TeacherClient:
                 httpx.TimeoutException,
             ) as exc:
                 last_exc = exc
+                status_code = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 logger.warning(
                     "SGLang teacher API request failed (attempt %d/%d): %s",
                     attempt,
@@ -430,8 +461,7 @@ class TeacherClient:
                     exc,
                 )
                 if attempt < max_retries:
-                    backoff = 2 ** (attempt - 1)
-                    await asyncio.sleep(backoff)
+                    await asyncio.sleep(self._retry_backoff(attempt, status_code))
 
         raise TeacherServiceError(
             f"SGLang teacher API request failed after {max_retries} retries: {last_exc}"
@@ -460,6 +490,11 @@ class TeacherClient:
                 httpx.TimeoutException,
             ) as exc:
                 last_exc = exc
+                status_code = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 logger.warning(
                     "Teacher API request failed (attempt %d/%d): %s",
                     attempt,
@@ -467,8 +502,7 @@ class TeacherClient:
                     exc,
                 )
                 if attempt < max_retries:
-                    backoff = 2 ** (attempt - 1)
-                    await asyncio.sleep(backoff)
+                    await asyncio.sleep(self._retry_backoff(attempt, status_code))
 
         raise TeacherServiceError(
             f"Teacher API request failed after {max_retries} retries: {last_exc}"
@@ -476,6 +510,10 @@ class TeacherClient:
 
     async def _post_with_retries_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the chat completions endpoint with retry logic."""
+        async with self._semaphore:
+            return await self._post_with_retries_chat_inner(payload)
+
+    async def _post_with_retries_chat_inner(self, payload: dict[str, Any]) -> dict[str, Any]:
         max_retries = self.config.teacher_max_retries
         last_exc: Exception | None = None
 
@@ -490,6 +528,11 @@ class TeacherClient:
                 httpx.TimeoutException,
             ) as exc:
                 last_exc = exc
+                status_code = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 logger.warning(
                     "Teacher chat API request failed (attempt %d/%d): %s",
                     attempt,
@@ -497,8 +540,7 @@ class TeacherClient:
                     exc,
                 )
                 if attempt < max_retries:
-                    backoff = 2 ** (attempt - 1)
-                    await asyncio.sleep(backoff)
+                    await asyncio.sleep(self._retry_backoff(attempt, status_code))
 
         raise TeacherServiceError(
             f"Teacher chat API request failed after {max_retries} retries: {last_exc}"

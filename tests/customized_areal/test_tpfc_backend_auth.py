@@ -795,3 +795,199 @@ async def test_run_backend_timeout_skips_cleanup_for_active_run(monkeypatch):
         await backend_run.run_backend("task", [], user_id="user")
 
     assert cleanup_calls == []
+
+
+def test_prepare_form_data_includes_proxy_override():
+    """Explicit api_key/base_url are forwarded as proxy_api_key/proxy_base_url."""
+    form_data = backend_run._prepare_form_data(
+        task_id="t1",
+        task_description="test",
+        agent_id="a1",
+        model_name="openrouter/qwen/test",
+        base_url="http://proxy",
+        api_key="aaa",
+        tags=None,
+    )
+    assert form_data["proxy_api_key"] == "aaa"
+    assert form_data["proxy_base_url"] == "http://proxy"
+
+
+def test_prepare_form_data_omits_proxy_when_none():
+    """When api_key/base_url are None, proxy fields are absent (no overwrite)."""
+    form_data = backend_run._prepare_form_data(
+        task_id="t1",
+        task_description="test",
+        agent_id="a1",
+        model_name="openrouter/qwen/test",
+        base_url=None,
+        api_key=None,
+        tags=None,
+    )
+    assert "proxy_api_key" not in form_data
+    assert "proxy_base_url" not in form_data
+
+
+@pytest.mark.asyncio
+async def test_start_branch_agent_run_for_task_sends_proxy_override(monkeypatch):
+    """Branch start sends proxy_api_key/proxy_base_url in JSON body."""
+    posts = []
+
+    class FakeResponse:
+        status_code = 200
+        text = json.dumps({"task_id": "t1", "agent_run_id": "r1"})
+        url = "http://backend/api/agent/start-branch"
+
+        def json(self):
+            return {"task_id": "t1", "agent_run_id": "r1"}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            posts.append((url, headers, json))
+            return FakeResponse()
+
+    monkeypatch.delenv("LE_AGENT_BRANCH_RUN_ENDPOINT", raising=False)
+    monkeypatch.setattr(backend_run.httpx, "AsyncClient", FakeAsyncClient)
+
+    await backend_run._start_branch_agent_run_for_task(
+        client=object(),
+        api_base_url="http://backend",
+        auth_token="auth-token",
+        task_id="t1",
+        account_id="user",
+        model_name="openrouter/qwen/test",
+        base_url="http://proxy",
+        api_key="aaa",
+    )
+
+    assert len(posts) == 1
+    body = posts[0][2]
+    assert body["proxy_api_key"] == "aaa"
+    assert body["proxy_base_url"] == "http://proxy"
+
+
+@pytest.mark.asyncio
+async def test_start_branch_agent_run_for_task_omits_proxy_when_none(monkeypatch):
+    """Branch start omits proxy fields when api_key/base_url are None."""
+    posts = []
+
+    class FakeResponse:
+        status_code = 200
+        text = json.dumps({"task_id": "t1", "agent_run_id": "r1"})
+        url = "http://backend/api/agent/start-branch"
+
+        def json(self):
+            return {"task_id": "t1", "agent_run_id": "r1"}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            posts.append((url, headers, json))
+            return FakeResponse()
+
+    monkeypatch.delenv("LE_AGENT_BRANCH_RUN_ENDPOINT", raising=False)
+    monkeypatch.setattr(backend_run.httpx, "AsyncClient", FakeAsyncClient)
+
+    await backend_run._start_branch_agent_run_for_task(
+        client=object(),
+        api_base_url="http://backend",
+        auth_token="auth-token",
+        task_id="t1",
+        account_id="user",
+        model_name="openrouter/qwen/test",
+        base_url=None,
+        api_key=None,
+    )
+
+    assert len(posts) == 1
+    body = posts[0][2]
+    assert body["proxy_api_key"] is None
+    assert body["proxy_base_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_backend_forwards_proxy_override_to_normal_start(monkeypatch):
+    """run_backend passes api_key/base_url as proxy fields in normal (non-branch) mode."""
+
+    class FakeClient:
+        pass
+
+    captured_form_data = {}
+
+    async def fake_create_client():
+        return FakeClient()
+
+    async def fake_close_client(client):
+        return None
+
+    async def fake_resolve_agent_id(client, user_id, agent_id):
+        return "agent"
+
+    async def fake_create_task(**kwargs):
+        return "task-id"
+
+    async def fake_get_valid_token(self):
+        return "token"
+
+    async def fake_start_agent_run_with_refresh(**kwargs):
+        nonlocal captured_form_data
+        captured_form_data = kwargs.get("form_data", {})
+        return {"agent_run_id": "run-id", "status": "running"}, "token"
+
+    async def fake_wait_for_agent_run(*args, **kwargs):
+        return "completed"
+
+    async def fake_get_messages(client, task_id):
+        return [{"role": "assistant", "content": "<answer>42</answer>"}]
+
+    async def fake_get_raw_messages(client, task_id):
+        return []
+
+    async def fake_cleanup(client, task_id):
+        return None
+
+    monkeypatch.setattr(backend_run, "DEFAULT_USER_ID", "user")
+    monkeypatch.setattr(backend_run, "_create_shortlived_db_client", fake_create_client)
+    monkeypatch.setattr(backend_run, "_close_db_client", fake_close_client)
+    monkeypatch.setattr(backend_run, "_resolve_agent_id", fake_resolve_agent_id)
+    monkeypatch.setattr(backend_run, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        backend_run.SharedTokenManager, "get_valid_token", fake_get_valid_token
+    )
+    monkeypatch.setattr(
+        backend_run, "_start_agent_run_with_refresh", fake_start_agent_run_with_refresh
+    )
+    monkeypatch.setattr(backend_run, "_wait_for_agent_run", fake_wait_for_agent_run)
+    monkeypatch.setattr(backend_run, "_get_llm_messages_with_client", fake_get_messages)
+    monkeypatch.setattr(
+        backend_run, "_get_raw_messages_with_client", fake_get_raw_messages
+    )
+    monkeypatch.setattr(backend_run, "cleanup_sandbox_for_task", fake_cleanup)
+
+    await backend_run.run_backend(
+        "task",
+        [],
+        user_id="user",
+        model_name="openrouter/qwen/test",
+        api_key="aaa",
+        base_url="http://proxy",
+    )
+
+    assert captured_form_data.get("proxy_api_key") == "aaa"
+    assert captured_form_data.get("proxy_base_url") == "http://proxy"

@@ -52,14 +52,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 # Initialize logger
-try:
-    from areal.utils.logging import getLogger
 
-    logger = getLogger("BackendRun")
-except ImportError:
-    import logging
+import logging
 
-    logger = logging.getLogger("BackendRun")
+logger = logging.getLogger("BackendRun")
 
 DEFAULT_REFRESH_TOKEN = os.environ.get("REFRESH_TOKEN", "")
 DEFAULT_AGENT_ID = os.environ.get("TPFC_AGENT_ID", "")
@@ -715,6 +711,11 @@ def _prepare_form_data(
     if tags is not None:
         form_data["tags"] = ",".join(tags)
 
+    logger.info(
+        "_prepare_form_data: proxy_base_url=%s, proxy_api_key=%s",
+        form_data.get("proxy_base_url"),
+        form_data.get("proxy_api_key")[:8] + "..." if form_data.get("proxy_api_key") else None,
+    )
     return form_data
 
 
@@ -911,16 +912,22 @@ async def _start_branch_agent_run_for_task(
         else f"{api_base_url}{endpoint}"
     )
     async with httpx.AsyncClient(timeout=_agent_start_http_timeout()) as http_client:
+        request_body = {
+            "task_id": task_id,
+            "model_name": model_name,
+            "proxy_base_url": base_url,
+            "proxy_api_key": api_key,
+            "stream": False,
+        }
+        logger.info(
+            "_start_branch_agent_run_for_task: proxy_base_url=%s, proxy_api_key=%s",
+            base_url,
+            api_key[:8] + "..." if api_key else None,
+        )
         response = await http_client.post(
             url,
             headers={"Authorization": f"Bearer {auth_token}"},
-            json={
-                "task_id": task_id,
-                "model_name": model_name,
-                "proxy_base_url": base_url,
-                "proxy_api_key": api_key,
-                "stream": False,
-            },
+            json=request_body,
         )
     if response.status_code in _AUTH_ERROR_STATUS_CODES:
         raise AuthTokenExpiredError(
@@ -1629,9 +1636,10 @@ if __name__ == "__main__":
             gt=gt,
             tags=["debug", "0421"],
             user_id=DEFAULT_USER_ID,
-            model_name="openrouter/qwen/qwen3-vl-8b-thinking",
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
-            # api_key='aaa',
+            # model_name="openrouter/qwen/qwen3-vl-8b-thinking",
+            # api_key=os.environ.get("OPENROUTER_API_KEY"),
+            model_name="areal/qwen/qwen3_5-9b",
+            api_key='aaa',
             base_url=os.environ.get(
                 "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
             ),
