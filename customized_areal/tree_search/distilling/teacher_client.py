@@ -1,22 +1,32 @@
 """Async client for calling a remote teacher model inference API.
 
 This module provides TeacherConfig and TeacherClient for querying a remote
-teacher model (vLLM or SGLang) to get logprobs for student candidate
-tokens during on-policy distillation.
+teacher model (vLLM, SGLang, or Fireworks) to get logprobs for student
+candidate tokens during on-policy distillation.
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
+import os
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from areal.utils import logging
+
+try:
+    from dotenv import load_dotenv
+
+    _DOTENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+    load_dotenv(_DOTENV_FILE)
+except ImportError:
+    pass
 
 logger = logging.getLogger("TeacherClient")
 
@@ -49,8 +59,9 @@ class TeacherConfig:
         Logprob value assigned to candidate tokens not found in the
         teacher's top-k response.
     teacher_backend : str
-        Backend type: ``"openai"`` (vLLM-compatible /v1/completions) or
-        ``"sglang"`` (SGLang native /generate).
+        Backend type: ``"openai"`` (vLLM-compatible /v1/completions),
+        ``"sglang"`` (SGLang native /generate), or ``"fireworks"``
+        (Fireworks /v1/chat/completions with echo logprobs).
     """
 
     teacher_base_url: str = "http://localhost:8001"
@@ -63,16 +74,31 @@ class TeacherConfig:
     teacher_backend: str = "openai"
     teacher_max_concurrency: int = 4
 
+    _FIREWORKS_DEFAULT_BASE_URL = "https://api.fireworks.ai/inference/"
+
+    def __post_init__(self) -> None:
+        if self.teacher_backend == "fireworks":
+            if self.teacher_base_url == "http://localhost:8001":
+                env_url = os.getenv("FIREWORKS_BASE_URL", self._FIREWORKS_DEFAULT_BASE_URL)
+                self.teacher_base_url = env_url
+            if not self.teacher_api_key:
+                env_key = os.getenv("FIREWORKS_API_KEY", "")
+                if env_key:
+                    self.teacher_api_key = env_key
+
 
 class TeacherClient:
     """Async client for calling a remote teacher model inference API.
 
-    Supports two backends:
+    Supports three backends:
 
     - ``"openai"`` (default): vLLM-compatible ``/v1/completions`` endpoint
       with ``echo=True`` and text/token prompts.
     - ``"sglang"``: SGLang native ``/generate`` endpoint with ``input_ids``
       and ``top_k_logprobs_num``.
+    - ``"fireworks"``: Fireworks ``/v1/chat/completions`` endpoint with
+      ``echo=True`` and text prompts.  Requires a tokenizer to map between
+      token IDs and token text.
 
     The underlying httpx.AsyncClient is created in __init__ so the client
     is ready to use immediately — no async context manager needed.
@@ -145,6 +171,10 @@ class TeacherClient:
         if self.config.teacher_backend == "sglang":
             return await self._get_logprobs_sglang(
                 input_ids, output_ids, candidate_token_ids
+            )
+        if self.config.teacher_backend == "fireworks":
+            return await self._get_logprobs_fireworks(
+                input_ids, output_ids, candidate_token_ids, tokenizer
             )
         return await self._get_logprobs_openai(
             input_ids, output_ids, candidate_token_ids
@@ -323,6 +353,118 @@ class TeacherClient:
 
         return result
 
+    async def _get_logprobs_fireworks(
+        self,
+        input_ids: list[int],
+        output_ids: list[int],
+        candidate_token_ids: list[list[int]],
+        tokenizer: Any = None,
+    ) -> list[dict[int, float]]:
+        """Get teacher logprobs via Fireworks chat completions API with echo.
+
+        Sends the full student sequence (prompt + output) decoded to text as a
+        user message.  With ``echo=True`` the Fireworks API returns logprobs
+        for every content token.  Output positions are identified via
+        ``text_offset >= len(prompt_text)``.  Token text from ``top_logprobs``
+        is mapped back to token IDs via the tokenizer.
+        """
+        if tokenizer is None:
+            raise ValueError(
+                "tokenizer is required for the fireworks backend "
+                "to convert between token IDs and token text"
+            )
+
+        num_output_tokens = len(output_ids)
+        prompt_text = tokenizer.decode(input_ids)
+        output_text = tokenizer.decode(output_ids)
+        full_text = prompt_text + output_text
+        prompt_char_len = len(prompt_text)
+
+        logger.info(
+            "Teacher logprob request (fireworks): prompt_tokens=%d, "
+            "output_tokens=%d, prompt_chars=%d, output_chars=%d",
+            len(input_ids),
+            num_output_tokens,
+            prompt_char_len,
+            len(output_text),
+        )
+
+        payload: dict[str, Any] = {
+            "model": self.config.teacher_model_name,
+            "messages": [{"role": "user", "content": full_text}],
+            "max_tokens": 1,
+            "temperature": 0.6,
+            "logprobs": self.config.teacher_top_k,
+            "echo": True,
+        }
+
+        response_data = await self._post_fireworks_with_retries(payload)
+
+        choices = response_data.get("choices", [])
+        if not choices:
+            raise RuntimeError("Fireworks teacher API returned no choices")
+
+        logprobs_data = choices[0].get("logprobs", {})
+        tokens = logprobs_data.get("tokens", [])
+        text_offsets = logprobs_data.get("text_offset", [])
+        top_logprobs_list = logprobs_data.get("top_logprobs", [])
+
+        # Collect top_logprobs for output positions:
+        # text_offset >= prompt_char_len marks output tokens,
+        # text_offset >= len(full_text) marks the 1 generated token (skip it).
+        output_top_logprobs: list[dict[str, float]] = []
+        for i, offset in enumerate(text_offsets):
+            if prompt_char_len <= offset < len(full_text):
+                lp = top_logprobs_list[i] if i < len(top_logprobs_list) else None
+                output_top_logprobs.append(lp if lp else {})
+
+        if len(output_top_logprobs) < num_output_tokens:
+            logger.warning(
+                "Fireworks teacher returned fewer output logprob positions "
+                "(%d) than expected (%d). Padding with missing_logprob.",
+                len(output_top_logprobs),
+                num_output_tokens,
+            )
+
+        result: list[dict[int, float]] = []
+        missing_logprob = self.config.teacher_missing_logprob
+
+        for pos_idx in range(num_output_tokens):
+            top_lp = (
+                output_top_logprobs[pos_idx]
+                if pos_idx < len(output_top_logprobs)
+                else {}
+            )
+
+            # Build token_id → logprob map by encoding top_logprobs keys
+            teacher_id_map: dict[int, float] = {}
+            for token_text, logprob in top_lp.items():
+                try:
+                    encoded = tokenizer.encode(
+                        token_text, add_special_tokens=False
+                    )
+                    if len(encoded) == 1:
+                        teacher_id_map[encoded[0]] = float(logprob)
+                except Exception:
+                    pass
+
+            candidate_map: dict[int, float] = {}
+            for tid in candidate_token_ids[pos_idx]:
+                if tid in teacher_id_map:
+                    candidate_map[tid] = teacher_id_map[tid]
+                else:
+                    # Fallback: decode candidate ID and look up by text
+                    try:
+                        decoded = tokenizer.decode([tid])
+                        candidate_map[tid] = float(
+                            top_lp.get(decoded, missing_logprob)
+                        )
+                    except Exception:
+                        candidate_map[tid] = missing_logprob
+            result.append(candidate_map)
+
+        return result
+
     async def complete_text(
         self,
         prompt: str,
@@ -408,12 +550,18 @@ class TeacherClient:
 
         raise RuntimeError("Teacher chat completion choice contained no text content")
 
+    _BACKEND_ENDPOINTS: dict[str, str] = {
+        "openai": "v1/completions",
+        "sglang": "generate",
+        "fireworks": "v1/chat/completions",
+    }
+
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST with retry logic, dispatching to the correct endpoint."""
         async with self._semaphore:
-            if self.config.teacher_backend == "sglang":
-                return await self._post_sglang_with_retries(payload)
-            return await self._post_openai_with_retries(payload)
+            backend = self.config.teacher_backend
+            endpoint = self._BACKEND_ENDPOINTS.get(backend, "v1/completions")
+            return await self._post_with_retries_inner(endpoint, backend, payload)
 
     @staticmethod
     def _retry_backoff(attempt: int, status_code: int | None = None) -> float:
@@ -423,63 +571,24 @@ class TeacherClient:
         jitter = random.uniform(0, backoff * 0.5)
         return backoff + jitter
 
-    async def _post_sglang_with_retries(
-        self, payload: dict[str, Any]
+    async def _post_with_retries_inner(
+        self,
+        endpoint: str,
+        backend: str,
+        payload: dict[str, Any],
     ) -> dict[str, Any]:
-        """POST to SGLang /generate endpoint with retry logic."""
+        """POST to the given endpoint with retry logic."""
         max_retries = self.config.teacher_max_retries
         last_exc: Exception | None = None
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = await self._client.post("generate", json=payload)
+                response = await self._client.post(endpoint, json=payload)
                 response.raise_for_status()
                 logger.info(
-                    "SGLang teacher /generate success (attempt %d/%d, "
-                    "prompt_len=%d, output_len=%d)",
-                    attempt,
-                    max_retries,
-                    len(payload.get("input_ids", [])),
-                    payload.get("sampling_params", {}).get("max_new_tokens", 0),
-                )
-                return response.json()
-            except (
-                httpx.HTTPStatusError,
-                httpx.RequestError,
-                httpx.TimeoutException,
-            ) as exc:
-                last_exc = exc
-                status_code = (
-                    exc.response.status_code
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
-                logger.warning(
-                    "SGLang teacher API request failed (attempt %d/%d): %s",
-                    attempt,
-                    max_retries,
-                    exc,
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(self._retry_backoff(attempt, status_code))
-
-        raise TeacherServiceError(
-            f"SGLang teacher API request failed after {max_retries} retries: {last_exc}"
-        ) from last_exc
-
-    async def _post_openai_with_retries(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        """POST to the completions endpoint with retry logic."""
-        max_retries = self.config.teacher_max_retries
-        last_exc: Exception | None = None
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = await self._client.post("v1/completions", json=payload)
-                response.raise_for_status()
-                logger.info(
-                    "Teacher /v1/completions success (attempt %d/%d)",
+                    "Teacher %s %s success (attempt %d/%d)",
+                    backend,
+                    endpoint,
                     attempt,
                     max_retries,
                 )
@@ -496,7 +605,8 @@ class TeacherClient:
                     else None
                 )
                 logger.warning(
-                    "Teacher API request failed (attempt %d/%d): %s",
+                    "Teacher %s API request failed (attempt %d/%d): %s",
+                    backend,
                     attempt,
                     max_retries,
                     exc,
@@ -505,46 +615,16 @@ class TeacherClient:
                     await asyncio.sleep(self._retry_backoff(attempt, status_code))
 
         raise TeacherServiceError(
-            f"Teacher API request failed after {max_retries} retries: {last_exc}"
+            f"Teacher {backend} API request failed after "
+            f"{max_retries} retries: {last_exc}"
         ) from last_exc
 
     async def _post_with_retries_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to the chat completions endpoint with retry logic."""
         async with self._semaphore:
-            return await self._post_with_retries_chat_inner(payload)
-
-    async def _post_with_retries_chat_inner(self, payload: dict[str, Any]) -> dict[str, Any]:
-        max_retries = self.config.teacher_max_retries
-        last_exc: Exception | None = None
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = await self._client.post("v1/chat/completions", json=payload)
-                response.raise_for_status()
-                return response.json()
-            except (
-                httpx.HTTPStatusError,
-                httpx.RequestError,
-                httpx.TimeoutException,
-            ) as exc:
-                last_exc = exc
-                status_code = (
-                    exc.response.status_code
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
-                logger.warning(
-                    "Teacher chat API request failed (attempt %d/%d): %s",
-                    attempt,
-                    max_retries,
-                    exc,
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(self._retry_backoff(attempt, status_code))
-
-        raise TeacherServiceError(
-            f"Teacher chat API request failed after {max_retries} retries: {last_exc}"
-        ) from last_exc
+            return await self._post_with_retries_inner(
+                "v1/chat/completions", "chat", payload
+            )
 
 
 __all__ = ["TeacherConfig", "TeacherClient", "TeacherServiceError"]

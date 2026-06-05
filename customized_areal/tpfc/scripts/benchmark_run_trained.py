@@ -20,7 +20,7 @@ def main():
                     "metadata_file": "metadata.jsonl",
                     "whitelist": [],
                 },
-                "execution": {"max_concurrent": 5, "max_tasks": 166, "pass_at_k": 1},
+                "execution": {"max_concurrent": 25, "max_tasks": 166, "pass_at_k": 3},
             },
             "llm": {
                 "provider": "openai",
@@ -29,17 +29,17 @@ def main():
                 # "model_name": "openrouter/qwen/qwen3.5-9b",
                 "model_name": "openrouter/qwen/qwen3-vl-8b-thinking",
                 # "model_name": "openrouter/qwen/qwen3-32b",
-                "enable_thinking": False,
+                # "enable_thinking": False,
                 "reasoning_effort": "low",
                 "stream": False,
             },
-            "env": {"openai_api_key": ""},
+            "env": {"openai_api_key": "", "openrouter_api_key": ""},
             "level": 1,
             "user_id": "62ec5137-d121-4c8c-b175-ee165bdf38e4",
             "agent_id": os.environ.get("main_agent_id", ""),
             "backend_mode": True,
-            "base_url": os.getenv("PROXY_BASE_URL", ""),
-            "api_key": os.getenv("PROXY_API_KEY", ""),
+            "base_url": "http://localhost:30000/v1",
+            "api_key": "empty",
         }
     )
 
@@ -47,7 +47,7 @@ def main():
     cfg.tags = [
         f"{cfg.benchmark.name}",
         f"{cfg.llm.model_name}",
-        "trained_0507_",
+        "trained_0603",
         # "compression_1w",
         f"level_{cfg.level}",
     ]

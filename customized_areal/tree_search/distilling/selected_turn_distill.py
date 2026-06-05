@@ -13,7 +13,7 @@ from customized_areal.tree_search.distilling.distill_types import (
     EpisodeDiagnosis,
     PositionRewardInfo,
 )
-from customized_areal.tree_search.distilling.teacher_provider import TeacherProvider
+from customized_areal.tree_search.distilling.diagnose_provider import DiagnoseProvider
 
 from areal.utils import logging
 
@@ -197,15 +197,28 @@ async def selected_turn_to_position_rewards(
     node: Node,
     guidance: str,
     tokenizer: Any,
-    provider: TeacherProvider,
+    provider: DiagnoseProvider,
     sample_index: int,
     topk_distill: bool,
     engine: Any,
     teacher_top_k: int,
+    max_distill_tokens: int = 0,
 ) -> list[PositionRewardInfo]:
     """Convert one selected turn into position-level distillation targets."""
     prompt_ids, generation_ids = build_teacher_prompt_ids(node, guidance, tokenizer)
     if not generation_ids:
+        return []
+
+    total_tokens = len(prompt_ids) + len(generation_ids)
+    token_limit = max_distill_tokens if max_distill_tokens > 0 else 6000
+    if total_tokens > token_limit:
+        logger.warning(
+            "Skipping distill: total_tokens=%d > %d (episode_id=%s turn_idx=%d)",
+            total_tokens,
+            token_limit,
+            node.episode_id,
+            node.turn_idx,
+        )
         return []
 
     logger.info(

@@ -71,6 +71,7 @@ class TreeBackupConfig:
     uncertainty_threshold: float = 0.05
     reward_type: str = "binary"
     distill_kl_mode: DistillKLMode = DistillKLMode.REVERSE
+    max_distill_tokens: int = 0
 
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from customized_areal.db_service import auth
 from customized_areal.db_service import connection as db_connection
 from customized_areal.tpfc import backend_run
 
@@ -70,7 +71,7 @@ async def test_login_with_credentials_owns_proxy_free_httpx_client(monkeypatch):
     monkeypatch.setenv("SUPABASE_AUTH_EMAIL", "user@example.com")
     monkeypatch.setenv("SUPABASE_AUTH_PASSWORD", "secret")
     monkeypatch.setattr(backend_run.httpx, "AsyncClient", _FakeAsyncClient)
-    monkeypatch.setattr(backend_run, "_is_token_valid", lambda *args, **kwargs: True)
+    monkeypatch.setattr(auth, "_is_token_valid", lambda *args, **kwargs: True)
 
     access_token, refresh_token = await backend_run._login_with_credentials(
         "https://example.supabase.co",

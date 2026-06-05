@@ -737,6 +737,7 @@ class RemoteInfEngine(InferenceEngine):
                     teacher_max_retries=tree_search_cfg.teacher_max_retries,
                     teacher_timeout=tree_search_cfg.teacher_timeout,
                     teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                    teacher_max_concurrency=tree_search_cfg.teacher_max_concurrency,
                     diagnose_model_name=tree_search_cfg.diagnose_model_name,
                     diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
                     diagnose_temperature=tree_search_cfg.diagnose_temperature,
@@ -752,6 +753,7 @@ class RemoteInfEngine(InferenceEngine):
                     uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
                     reward_type=tree_search_cfg.reward_type,
                     distill_kl_mode=tree_search_cfg.distill_kl_mode,
+                    max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

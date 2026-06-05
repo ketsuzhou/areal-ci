@@ -12,14 +12,10 @@ tree_search:
   advantage_mode: GAE
   rl_loss_weight: 1.0
   distill_loss_weight: 0.005
-  teacher_provider: external
-  teacher_base_url: http://10.254.244.168:8443/service-large-64-1775803465274/llm
-  teacher_backend: openai
-  teacher_model_name: "Qwen3.5_397B_A17B_FP8"
-  teacher_api_key: "aH6867Z7ppZWqN7NQGsaPhSlMrk68AGQnr18Z66KsSL0864mkjaBP7Tr868pKvnCJcWa0VvHZDHk64MrKG5Z5gWrZGx88mrmAv7pk88p786gFB6XXr6MrtSckKs9QJsr"
+  teacher_provider: engine
   teacher_top_k: 10
   teacher_max_retries: 5
-  teacher_max_concurrency: 4
+  teacher_max_concurrency: 1
   teacher_timeout: 300.0
   teacher_missing_logprob: -23.0
   max_reasoning_tokens: 1000
@@ -92,7 +88,7 @@ actor:
   trial_name: ${trial_name}
   attn_impl: sdpa
   fsdp:
-    offload_params: false
+    offload_params: true
   # path: /dfs/share-groups/letrain/zhoujie/Qwen3-1.7B
   # path: /dfs/share-groups/letrain/ckpt/Qwen3-VL-8B-Instruct
   path: /dfs/share-groups/letrain/ckpt/Qwen3.5-9B
@@ -119,7 +115,7 @@ actor:
   reward_scaling: 10.0
   reward_bias: -0.5
   kl_ctl: 0.0
-  ppo_n_minibatches: 1
+  ppo_n_minibatches: 16
   recompute_logprob: true
   use_decoupled_loss: true
   rejection_sampling:
@@ -169,8 +165,8 @@ sglang:
   skip_tokenizer_init: true
   dtype: ${actor.dtype}
   max_running_requests: null
-  context_length: 40960
-  mem_fraction_static: 0.85
+  context_length: 10112
+  mem_fraction_static: 0.50
   enable_multimodal: true
 
 vllm:
@@ -207,7 +203,7 @@ saver:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   freq_epochs: null
-  freq_steps: 2
+  freq_steps: 20
   freq_secs: 7200
 
 recover:

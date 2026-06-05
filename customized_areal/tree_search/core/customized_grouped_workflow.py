@@ -555,6 +555,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         uncertainty_threshold: float = 0.05,
         reward_type: str = "binary",
         distill_kl_mode: str = "reverse_kl",
+        max_distill_tokens: int = 0,
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -599,6 +600,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.uncertainty_threshold = uncertainty_threshold
         self.reward_type = reward_type
         self.distill_kl_mode = distill_kl_mode
+        self.max_distill_tokens = max_distill_tokens or max_tokens
         if dynamic_group_size:
             self.group_size = self.initial_group_size
 
@@ -673,13 +675,13 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 self._tokenizer_cache[self.tokenizer_path] = tokenizer
             return tokenizer
 
-    async def _setup_distill_provider(self, engine):
+    async def _setup_distill_provider(self, engine, tokenizer=None):
         from customized_areal.tree_search.distilling.teacher_client import (
             TeacherClient,
             TeacherConfig,
         )
-        from customized_areal.tree_search.distilling.teacher_provider import (
-            ExternalTeacherProvider,
+        from customized_areal.tree_search.distilling.diagnose_provider import (
+            ExternalDiagnoseProvider,
         )
 
         if self.teacher_provider == "engine":
@@ -745,7 +747,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             client = TeacherClient(config)
 
         diagnose_model_name = (
-            self.diagnose_model_name or "qwen/qwen3.5-397b-a17b"
+            self.diagnose_model_name or "qwen/qwen3.7-max"
         )
         diagnose_api_key = (
             self.diagnose_api_key
@@ -757,13 +759,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             or os.environ.get("OPENROUTER_BASE_URL", "")
             or os.environ.get("WORKSPACE_OPENAI_API_BASE", "")
         )
-        provider = ExternalTeacherProvider(
+        provider = ExternalDiagnoseProvider(
             client=client,
             diagnose_model_name=diagnose_model_name,
             diagnose_temperature=self.diagnose_temperature,
             diagnose_max_tokens=self.diagnose_max_tokens,
             diagnose_base_url=diagnose_base_url,
             diagnose_api_key=diagnose_api_key,
+            tokenizer=tokenizer,
         )
 
         return provider, client
@@ -836,12 +839,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             selected = diagnosis.selected_turns if diagnosis is not None else {}
             if selected:
                 nodes[-1].guidance = dict(selected)
-        if not selected and self.loss_mode != LossMode.DISTILL:
+        if not selected:
             return nodes, {}
 
         async def _run_one_node(node: Node) -> tuple[str, list[Any]] | None:
             guidance = selected.get(node.turn_idx, "")
-            if self.loss_mode != LossMode.DISTILL and not guidance:
+            if not guidance:
                 return None
             try:
                 rewards = await selected_turn_to_position_rewards(
@@ -853,6 +856,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     topk_distill=self.topk_distill,
                     engine=engine,
                     teacher_top_k=self.teacher_top_k,
+                    max_distill_tokens=self.max_distill_tokens,
                 )
             except TeacherServiceError as exc:
                 logger.warning(
@@ -1329,7 +1333,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
-                provider, provider_client = await self._setup_distill_provider(engine)
+                provider, provider_client = await self._setup_distill_provider(engine, tokenizer)
                 all_nodes, _ = await self._prepare_distill_for_node_groups(
                     _group_nodes_by_episode(all_nodes),
                     data,
@@ -1337,6 +1341,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     provider,
                     tokenizer,
                 )
+
+            # If distillation filtered out all nodes, don't mark originals as trained
+            # — that would consume cached data without producing training signal.
+            if not all_nodes:
+                logger.warning(
+                    "TreeSearchGroupedWorkflow: distillation produced no usable nodes "
+                    "for query_id=%s; skipping (nodes not marked as trained)",
+                    query_id,
+                )
+                return None
 
             # Compute tree advantages
             if self.advantage_mode == AdvantageMode.TREE:

@@ -1720,6 +1720,7 @@ class RolloutControllerV2:
                 teacher_max_retries=tree_search_cfg.teacher_max_retries,
                 teacher_timeout=tree_search_cfg.teacher_timeout,
                 teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                teacher_max_concurrency=tree_search_cfg.teacher_max_concurrency,
                 distill_kl_mode=tree_search_cfg.distill_kl_mode,
                 diagnose_model_name=tree_search_cfg.diagnose_model_name,
                 diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
@@ -1735,6 +1736,7 @@ class RolloutControllerV2:
                 max_group_size=tree_search_cfg.max_group_size,
                 uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
                 reward_type=tree_search_cfg.reward_type,
+                max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
             )
         else:
             from areal.infra.remote_inf_engine import GroupedRolloutWorkflow

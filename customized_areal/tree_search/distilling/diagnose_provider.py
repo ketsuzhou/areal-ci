@@ -1,10 +1,10 @@
-"""Teacher provider interfaces for selected-turn distillation."""
+"""Diagnose provider interfaces for selected-turn distillation."""
 
 from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 from openai import OpenAI, OpenAIError
@@ -16,11 +16,11 @@ from customized_areal.tree_search.distilling.teacher_client import (
 
 from areal.utils import logging
 
-logger = logging.getLogger("TeacherProvider")
+logger = logging.getLogger("DiagnoseProvider")
 
 
-class TeacherProvider(Protocol):
-    """Interface for teacher diagnosis and token logprob providers."""
+class DiagnoseProvider(Protocol):
+    """Interface for diagnosis and token logprob providers."""
 
     async def diagnose_episode(
         self, conversation: list[dict[str, str]], gold_answer: str
@@ -38,8 +38,8 @@ class TeacherProvider(Protocol):
         ...
 
 
-class ExternalTeacherProvider:
-    """Teacher provider backed by the OpenAI-compatible teacher client."""
+class ExternalDiagnoseProvider:
+    """Diagnose provider backed by the OpenAI-compatible teacher client."""
 
     def __init__(
         self,
@@ -49,6 +49,7 @@ class ExternalTeacherProvider:
         diagnose_temperature: float = 0.0,
         diagnose_base_url: str = "",
         diagnose_api_key: str = "",
+        tokenizer: Any = None,
     ) -> None:
         self.client = client
         self.diagnose_model_name = diagnose_model_name
@@ -56,6 +57,7 @@ class ExternalTeacherProvider:
         self.diagnose_temperature = diagnose_temperature
         self.diagnose_base_url = diagnose_base_url
         self.diagnose_api_key = diagnose_api_key
+        self.tokenizer = tokenizer
         self._openai_client: OpenAI | None = None
 
     def _get_openai_client(self) -> OpenAI:
@@ -169,6 +171,7 @@ class ExternalTeacherProvider:
             input_ids=prompt_ids,
             output_ids=generation_ids,
             candidate_token_ids=candidate_token_ids,
+            tokenizer=self.tokenizer,
         )
         return [
             [position_map[token_id] for token_id in position_candidates]
@@ -178,8 +181,8 @@ class ExternalTeacherProvider:
         ]
 
 
-class EngineTeacherProvider:
-    """Teacher provider backed by an in-process inference engine."""
+class EngineDiagnoseProvider:
+    """Diagnose provider backed by an in-process inference engine."""
 
     def __init__(self, engine) -> None:
         get_logprobs_for_prompt = getattr(engine, "get_logprobs_for_prompt", None)
@@ -219,7 +222,7 @@ class EngineTeacherProvider:
 
 
 __all__ = [
-    "EngineTeacherProvider",
-    "ExternalTeacherProvider",
-    "TeacherProvider",
+    "EngineDiagnoseProvider",
+    "ExternalDiagnoseProvider",
+    "DiagnoseProvider",
 ]

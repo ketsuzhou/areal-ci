@@ -10,9 +10,9 @@ from customized_areal.tree_search.distilling.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )
-from customized_areal.tree_search.distilling.teacher_provider import (
-    EngineTeacherProvider,
-    ExternalTeacherProvider,
+from customized_areal.tree_search.distilling.diagnose_provider import (
+    EngineDiagnoseProvider,
+    ExternalDiagnoseProvider,
 )
 
 # ---------------------------------------------------------------------------
@@ -584,7 +584,7 @@ class FakeTeacherClient:
 @pytest.mark.asyncio
 async def test_external_provider_delegates_diagnosis_to_client():
     client = FakeTeacherClient()
-    provider = ExternalTeacherProvider(
+    provider = ExternalDiagnoseProvider(
         client=client,
         diagnose_model_name="qwen-397b",
         diagnose_max_tokens=300,
@@ -604,7 +604,7 @@ async def test_external_provider_delegates_diagnosis_to_client():
 @pytest.mark.asyncio
 async def test_external_provider_delegates_candidate_logprobs_to_client():
     client = FakeTeacherClient()
-    provider = ExternalTeacherProvider(client=client)
+    provider = ExternalDiagnoseProvider(client=client)
 
     result = await provider.get_logprobs_for_prompt(
         prompt_ids=[1, 2],
@@ -623,7 +623,7 @@ def test_engine_provider_fails_early_without_compatible_methods():
         pass
 
     with pytest.raises(NotImplementedError, match="engine-backed teacher provider"):
-        EngineTeacherProvider(Engine())
+        EngineDiagnoseProvider(Engine())
 
 
 def test_engine_provider_fails_early_with_non_callable_logprobs_method():
@@ -631,7 +631,7 @@ def test_engine_provider_fails_early_with_non_callable_logprobs_method():
         get_logprobs_for_prompt = None
 
     with pytest.raises(NotImplementedError, match="engine.get_logprobs_for_prompt"):
-        EngineTeacherProvider(Engine())
+        EngineDiagnoseProvider(Engine())
 
 
 def test_engine_provider_rejects_sync_logprobs_method_at_init():
@@ -645,7 +645,7 @@ def test_engine_provider_rejects_sync_logprobs_method_at_init():
             return [[-0.1]]
 
     with pytest.raises(NotImplementedError, match="async.*get_logprobs_for_prompt"):
-        EngineTeacherProvider(Engine())
+        EngineDiagnoseProvider(Engine())
 
 
 @pytest.mark.asyncio
@@ -659,7 +659,7 @@ async def test_engine_provider_diagnose_without_engine_method_raises():
         ):
             return [[-0.1]]
 
-    provider = EngineTeacherProvider(Engine())
+    provider = EngineDiagnoseProvider(Engine())
 
     with pytest.raises(NotImplementedError, match="engine.diagnose_episode"):
         await provider.diagnose_episode("context", "gold")
@@ -678,7 +678,7 @@ async def test_engine_provider_diagnose_with_non_callable_engine_method_raises()
 
         diagnose_episode = None
 
-    provider = EngineTeacherProvider(Engine())
+    provider = EngineDiagnoseProvider(Engine())
 
     with pytest.raises(NotImplementedError, match="engine.diagnose_episode"):
         await provider.diagnose_episode("context", "gold")
@@ -698,7 +698,7 @@ async def test_engine_provider_rejects_sync_diagnose_method_at_use():
         def diagnose_episode(self, context, gold_answer):
             return "diagnosis"
 
-    provider = EngineTeacherProvider(Engine())
+    provider = EngineDiagnoseProvider(Engine())
 
     with pytest.raises(NotImplementedError, match="async.*diagnose_episode"):
         await provider.diagnose_episode("context", "gold")
@@ -711,7 +711,7 @@ async def test_engine_provider_delegates_logprobs_to_engine():
             self.get_logprobs_for_prompt = AsyncMock(return_value=[[0.1, 0.2]])
 
     engine = Engine()
-    provider = EngineTeacherProvider(engine)
+    provider = EngineDiagnoseProvider(engine)
 
     result = await provider.get_logprobs_for_prompt(
         prompt_ids=[1, 2],

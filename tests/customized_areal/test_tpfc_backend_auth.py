@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+from customized_areal.db_service import auth
 from customized_areal.tpfc import backend_run
 
 
@@ -113,7 +114,7 @@ def test_shared_token_manager_write_token_updates_refresh_token_in_dotenv(
         {"alg": "ES256", "kid": "key-id", "typ": "JWT"},
     )
 
-    monkeypatch.setattr(backend_run, "_DOTENV_FILE", dotenv_file)
+    monkeypatch.setattr(auth, "_DOTENV_FILE", dotenv_file)
 
     manager = backend_run.SharedTokenManager(
         token_file=token_file,
@@ -144,8 +145,8 @@ async def test_shared_token_manager_refreshes_and_persists_rotated_refresh_token
         assert refresh_token == "refresh-v1"
         return refreshed_access_token, "refresh-v2"
 
-    monkeypatch.setattr(backend_run, "_DOTENV_FILE", dotenv_file)
-    monkeypatch.setattr(backend_run, "_refresh_access_token", fake_refresh)
+    monkeypatch.setattr(auth, "_DOTENV_FILE", dotenv_file)
+    monkeypatch.setattr(auth, "_refresh_access_token", fake_refresh)
 
     manager = backend_run.SharedTokenManager(
         token_file=token_file,

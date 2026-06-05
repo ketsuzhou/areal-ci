@@ -190,6 +190,11 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         per-sequence-concatenated logprobs in ``trie.all_sequence_ids`` order.
         This mirrors ``gather_packed_tree_logprobs_entropy`` but replaces
         response-position labels with ``topk_ids`` candidates.
+
+        Uses node-level caching: for shared-prefix nodes (where all sequences
+        have identical next-token labels), logprobs/entropy are computed once
+        and reused. Only response nodes with per-sequence topk_ids overrides
+        are computed individually.
         """
         trie = mb_input.get("trie_node")
         topk_ids = mb_input.get("topk_ids")
@@ -223,63 +228,161 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             )
             return None
 
-        logprob_parts: list[torch.Tensor] = []
-        entropy_parts: list[torch.Tensor] = []
         tp_group = (
             self.parallel_helper.tp_group if self.parallel_helper.tp_size > 1 else None
         )
+
+        # --- Node-level caching ---
+        # For internal node predictions (pred_pos -> label_pos within a node),
+        # the labels are always the next token from tree_input_ids regardless
+        # of the sequence. We cache (logprobs, entropy) keyed by (start, end).
+        # For transitions (end of node -> start of next node), cache by
+        # (pred_pos, label_pos).
+        # These caches use single-candidate labels (the actual next token).
+        # Multi-candidate overrides from topk_ids only apply at response
+        # positions and are sequence-specific, so those are not cached.
+        internal_cache: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+        transition_cache: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+
+        def _get_internal_logprobs_entropy(
+            start: int, end: int
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Compute logprobs/entropy for positions [start..end-1] predicting [start+1..end]."""
+            key = (start, end)
+            if key in internal_cache:
+                return internal_cache[key]
+            num = end - start
+            if num <= 0:
+                empty = torch.empty(0, device=logits.device, dtype=torch.float)
+                result = (empty, empty)
+            else:
+                pred_logits = logits[start:end]  # [num, vocab]
+                lbl = tree_input_ids[start + 1 : end + 1]  # [num]
+                # Expand to multi-candidate with same token repeated
+                lbl_mc = lbl.long().unsqueeze(-1).expand(-1, max_candidates)
+                lp, ent = gather_logprobs_entropy_multi_candidates(
+                    pred_logits, lbl_mc,
+                    temperature=self.config.temperature,
+                    tp_group=tp_group,
+                )
+                result = (lp, ent)
+            internal_cache[key] = result
+            return result
+
+        def _get_transition_logprobs_entropy(
+            pred_pos: int, label_pos: int
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Compute logprobs/entropy for a single transition position."""
+            key = (pred_pos, label_pos)
+            if key in transition_cache:
+                return transition_cache[key]
+            pred_logit = logits[pred_pos : pred_pos + 1]  # [1, vocab]
+            lbl = tree_input_ids[label_pos : label_pos + 1].long()
+            lbl_mc = lbl.unsqueeze(-1).expand(-1, max_candidates)
+            lp, ent = gather_logprobs_entropy_multi_candidates(
+                pred_logit, lbl_mc,
+                temperature=self.config.temperature,
+                tp_group=tp_group,
+            )
+            transition_cache[key] = (lp, ent)
+            return (lp, ent)
+
+        # --- Per-sequence assembly ---
+        logprob_parts: list[torch.Tensor] = []
+        entropy_parts: list[torch.Tensor] = []
 
         for b, seq_id in enumerate(trie.all_sequence_ids):
             indices = trie.get_sequence_tree_indices(seq_id)
             if not indices:
                 continue
 
-            pred_positions: list[int] = []
-            label_positions: list[int] = []
-            for i, (start, end) in enumerate(indices):
-                pred_positions.extend(range(start, end))
-                label_positions.extend(range(start + 1, end + 1))
-                next_start = indices[i + 1][0] if i + 1 < len(indices) else 0
-                pred_positions.append(end)
-                label_positions.append(next_start)
-
-            if not pred_positions:
-                continue
-
-            pred_idx = torch.tensor(
-                pred_positions, dtype=torch.long, device=logits.device
-            )
-            label_idx = torch.tensor(
-                label_positions, dtype=torch.long, device=tree_input_ids.device
-            )
-            seq_logits = logits[pred_idx]
-            labels = (
-                tree_input_ids[label_idx]
-                .long()
-                .unsqueeze(-1)
-                .expand(-1, max_candidates)
-                .clone()
-            )
-
-            start = int(cu_seqlens[b].item())
-            end = int(cu_seqlens[b + 1].item())
-            seg_mask = loss_mask[start:end].bool()
+            # Determine this sequence's prompt_len to know where topk overrides start
+            seg_start = int(cu_seqlens[b].item())
+            seg_end = int(cu_seqlens[b + 1].item())
+            seg_mask = loss_mask[seg_start:seg_end].bool()
             prompt_len = int(seg_mask.int().argmax().item()) if seg_mask.any() else 0
-            end_resp = min(prompt_len + resp_len, labels.shape[0])
-            if end_resp > prompt_len:
-                chunk = topk_ids[b, : end_resp - prompt_len].to(labels.device)
-                valid = chunk[:, 0] >= 0
-                if valid.any():
-                    labels[prompt_len:end_resp][valid] = chunk[valid].long()
 
-            seq_logprobs, seq_entropy = gather_logprobs_entropy_multi_candidates(
-                seq_logits,
-                labels,
-                temperature=self.config.temperature,
-                tp_group=tp_group,
-            )
-            logprob_parts.append(seq_logprobs)
-            entropy_parts.append(seq_entropy)
+            seq_lp_parts: list[torch.Tensor] = []
+            seq_ent_parts: list[torch.Tensor] = []
+            seq_offset = 0  # tracks position in the flattened per-sequence output
+
+            for i, (start, end) in enumerate(indices):
+                num_internal = end - start
+                next_start = indices[i + 1][0] if i + 1 < len(indices) else 0
+
+                # --- Internal node positions ---
+                if num_internal > 0:
+                    # Check if any internal positions fall in response range
+                    # and have topk_ids overrides for this sequence
+                    internal_resp_start = max(0, prompt_len - seq_offset)
+                    internal_resp_end = min(num_internal, prompt_len + resp_len - seq_offset)
+
+                    has_override = (
+                        internal_resp_end > internal_resp_start
+                        and internal_resp_start < num_internal
+                    )
+
+                    if not has_override:
+                        # Pure prefix node — use cache
+                        lp, ent = _get_internal_logprobs_entropy(start, end)
+                    else:
+                        # Node has response positions with potential topk overrides
+                        pred_logits = logits[start:end]
+                        lbl = (
+                            tree_input_ids[start + 1 : end + 1]
+                            .long()
+                            .unsqueeze(-1)
+                            .expand(-1, max_candidates)
+                            .clone()
+                        )
+                        # Apply topk_ids overrides at response positions
+                        for j in range(num_internal):
+                            resp_idx = seq_offset + j - prompt_len
+                            if 0 <= resp_idx < resp_len:
+                                cand = topk_ids[b, resp_idx]
+                                if cand[0] >= 0:
+                                    lbl[j] = cand.long()
+                        lp, ent = gather_logprobs_entropy_multi_candidates(
+                            pred_logits, lbl,
+                            temperature=self.config.temperature,
+                            tp_group=tp_group,
+                        )
+                        del pred_logits, lbl
+
+                    if lp.numel() > 0:
+                        seq_lp_parts.append(lp)
+                        seq_ent_parts.append(ent)
+
+                seq_offset += num_internal
+
+                # --- Transition position (end -> next_start) ---
+                trans_resp_idx = seq_offset - prompt_len
+                has_trans_override = (
+                    0 <= trans_resp_idx < resp_len
+                    and topk_ids[b, trans_resp_idx, 0] >= 0
+                )
+
+                if not has_trans_override:
+                    # Use cache
+                    lp, ent = _get_transition_logprobs_entropy(end, next_start)
+                else:
+                    # Compute with topk override
+                    pred_logit = logits[end : end + 1]
+                    cand = topk_ids[b, trans_resp_idx].long().unsqueeze(0)  # [1, K]
+                    lp, ent = gather_logprobs_entropy_multi_candidates(
+                        pred_logit, cand,
+                        temperature=self.config.temperature,
+                        tp_group=tp_group,
+                    )
+                    del pred_logit
+
+                seq_lp_parts.append(lp)
+                seq_ent_parts.append(ent)
+                seq_offset += 1
+
+            if seq_lp_parts:
+                logprob_parts.append(torch.cat(seq_lp_parts, dim=0))
+                entropy_parts.append(torch.cat(seq_ent_parts, dim=0))
 
         if not logprob_parts:
             return None

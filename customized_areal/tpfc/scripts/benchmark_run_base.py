@@ -120,7 +120,10 @@ class BenchmarkEvaluator(ABC):
         if not self.output_dir.exists():
             os.makedirs(self.output_dir, exist_ok=True)
             print(f"Created output directory: {self.output_dir}")
-        self.evaluation_llm = openai.AsyncOpenAI(api_key=cfg.env.openai_api_key)
+        self.evaluation_llm = openai.AsyncOpenAI(
+            api_key=cfg.env.openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", ""),
+            base_url="https://openrouter.ai/api/v1",
+        )
         self.tasks: list[BenchmarkTask] = []
         self.results: list[BenchmarkResult] = []
 
@@ -714,20 +717,20 @@ def main():
                     "metadata_file": "metadata.jsonl",
                     "whitelist": [],
                 },
-                "execution": {"max_concurrent": 10, "max_tasks": 166, "pass_at_k": 1},
+                "execution": {"max_concurrent": 20, "max_tasks": 166, "pass_at_k": 3},
             },
             "llm": {
                 "provider": "openai",
                 # "model_name": "openrouter/gpt-5",
                 # "model_name": "openai-compatible/gpt-5",
-                # "model_name": "openrouter/qwen/qwen3.5-9b",
-                "model_name": "openrouter/qwen/qwen3-vl-8b-thinking",
+                "model_name": "openrouter/qwen/qwen3.5-9b",
+                # "model_name": "openrouter/qwen/qwen3-vl-8b-thinking",
                 # "model_name": "openrouter/qwen/qwen3-32b",
-                "enable_thinking": False,
+                # "enable_thinking": False,
                 "reasoning_effort": "low",
                 "stream": False,
             },
-            "env": {"openai_api_key": ""},
+            "env": {"openai_api_key": "", "openrouter_api_key": ""},
             "level": 1,
             "user_id": "62ec5137-d121-4c8c-b175-ee165bdf38e4",
             "agent_id": os.environ.get("main_agent_id", ""),
@@ -743,7 +746,7 @@ def main():
     cfg.tags = [
         f"{cfg.benchmark.name}",
         f"{cfg.llm.model_name}",
-        "base_0517",
+        "base_0603_think",
         # "compression_1w",
         f"level_{cfg.level}",
     ]

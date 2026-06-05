@@ -112,7 +112,7 @@ async def verify_answer_llm_simpleqa(
 
     try:
         llm_response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="deepseek/deepseek-v4-flash",
             messages=messages,  # type: ignore
             max_completion_tokens=2,
         )
@@ -178,7 +178,7 @@ async def verify_answer_llm_hle(
 
     try:
         response = await openai_client.beta.chat.completions.parse(
-            model="o3-mini-2025-01-31",
+            model="deepseek/deepseek-v4-flash",
             max_completion_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
             response_format=HLEExtractedAnswer,
