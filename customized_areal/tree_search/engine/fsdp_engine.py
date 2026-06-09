@@ -89,24 +89,23 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 torch.roll(inputs["input_ids"], shifts=-1, dims=-1),
             )
 
-        # Handle batch dimension: inputs (padded_mbs) has batch dim (1, seq_len, ...)
-        # We need to match logits shape which may be [seq_len, vocab] or [1, seq_len, vocab]
-        if labels.ndim == 2 and labels.shape[0] == 1 and logits.ndim == 2:
-            # labels [1, seq_len], logits [seq_len, vocab] -> squeeze labels
+        # The functional gatherer chunks along dim=0, so keep logits in the
+        # upstream FSDP convention: [seq_len, vocab].
+        if logits.ndim == 3 and logits.shape[0] == 1:
+            logits = logits.squeeze(0)
+        if labels.ndim in (2, 3) and labels.shape[0] == 1:
             labels = labels.squeeze(0)
-        elif labels.ndim == 3 and labels.shape[0] == 1 and logits.ndim == 2:
-            # labels [1, seq_len, num_candidates], logits [seq_len, vocab] -> squeeze labels
-            labels = labels.squeeze(0)
-
-        # Ensure logits has batch dimension if labels does
-        if labels.ndim == 2 and logits.ndim == 2:
-            # labels [seq_len, num_candidates], logits [seq_len, vocab] -> add batch dim to logits
-            logits = logits.unsqueeze(0)  # [1, seq_len, vocab]
-            labels = labels.unsqueeze(0)  # [1, seq_len, num_candidates]
-        elif labels.ndim == 1 and logits.ndim == 2:
-            # Standard case: labels [seq_len], logits [seq_len, vocab]
-            logits = logits.unsqueeze(0)  # [1, seq_len, vocab]
-            labels = labels.unsqueeze(0)  # [1, seq_len]
+        if logits.ndim != 2 or labels.ndim not in (1, 2):
+            raise ValueError(
+                "Multi-candidate logprob gathering expects logits [seq_len, vocab] "
+                "and labels [seq_len] or [seq_len, num_candidates], got "
+                f"logits={tuple(logits.shape)}, labels={tuple(labels.shape)}"
+            )
+        if labels.shape[0] != logits.shape[0]:
+            raise ValueError(
+                "Logits and labels sequence lengths differ: "
+                f"logits={tuple(logits.shape)}, labels={tuple(labels.shape)}"
+            )
 
         # Use multi-candidate gathering function
         logprobs, entropy = gather_logprobs_entropy_multi_candidates(
@@ -118,12 +117,6 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             else None,
         )
 
-        # Remove batch dimension BEFORE Ulysses handling to ensure correct dim alignment
-        if logprobs.ndim == 3 and logprobs.shape[0] == 1:
-            logprobs = logprobs.squeeze(0)
-        if entropy.ndim == 2 and entropy.shape[0] == 1:
-            entropy = entropy.squeeze(0)
-
         # Handle sequence parallelism (Ulysses)
         # NOTE: Must be done after removing batch dimension to ensure slicing
         # operates on the sequence dimension, not batch or candidate dimension
@@ -132,18 +125,15 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             # we need to transpose before all_gather to ensure concatenation
             # happens along the sequence dimension (dim=0), not candidate dimension
             #
-            # Check if this is a multi-candidate case:
-            # - logprobs.ndim == 2 indicates [seq_len, num_candidates] shape
-            # - logprobs.shape[1] > 1 indicates more than one candidate
-            is_multi_candidate = logprobs.ndim == 2 and logprobs.shape[1] > 1
+            # Check if this is a multi-candidate case. Even K=1 with an explicit
+            # candidate axis must keep that axis through SP gather for the loss.
+            is_multi_candidate = logprobs.ndim == 2
 
             if is_multi_candidate:
                 # Multi-candidate case: logprobs is [seq_len, num_candidates]
                 # Transpose to [num_candidates, seq_len] so all_gather can concatenate
                 # along the last dimension (which becomes seq_len after transpose)
                 logprobs = logprobs.transpose(0, 1)
-                entropy = entropy.transpose(0, 1)
-
                 # all_gather concatenates along dim=-1 (which is seq_len after transpose)
                 logprobs = self._sp_all_gather(logprobs)
                 entropy = self._sp_all_gather(entropy)
@@ -154,7 +144,6 @@ class MultiCandidateFSDPEngine(FSDPEngine):
 
                 # transpose back: [num_candidates, gathered_seq_len] -> [gathered_seq_len, num_candidates]
                 logprobs = logprobs.transpose(0, 1)
-                entropy = entropy.transpose(0, 1)
             else:
                 # Single-candidate case: logprobs is [seq_len], all_gather on dim=-1 is correct
                 logprobs = self._sp_all_gather(logprobs)
@@ -213,7 +202,7 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             or not trie.all_sequence_ids
         ):
             return None
-        if (topk_ids[:, :, 0] < 0).all():
+        if (topk_ids < 0).all():
             return None
 
         tree_input_ids = tree_input_ids.squeeze(0)
@@ -339,9 +328,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                         for j in range(num_internal):
                             resp_idx = seq_offset + j - prompt_len
                             if 0 <= resp_idx < resp_len:
-                                cand = topk_ids[b, resp_idx]
-                                if cand[0] >= 0:
-                                    lbl[j] = cand.long()
+                                cand = topk_ids[b, resp_idx].long()
+                                if (cand >= 0).any():
+                                    lbl[j] = torch.where(cand >= 0, cand, lbl[j])
                         lp, ent = gather_logprobs_entropy_multi_candidates(
                             pred_logits, lbl,
                             temperature=self.config.temperature,
@@ -356,10 +345,20 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 seq_offset += num_internal
 
                 # --- Transition position (end -> next_start) ---
+                if end >= logits.shape[0] or next_start >= tree_input_ids.shape[0]:
+                    logger.warning(
+                        "Skipping invalid tree transition: pred_pos=%d label_pos=%d "
+                        "logits_len=%d input_ids_len=%d",
+                        end,
+                        next_start,
+                        logits.shape[0],
+                        tree_input_ids.shape[0],
+                    )
+                    continue
                 trans_resp_idx = seq_offset - prompt_len
                 has_trans_override = (
                     0 <= trans_resp_idx < resp_len
-                    and topk_ids[b, trans_resp_idx, 0] >= 0
+                    and (topk_ids[b, trans_resp_idx] >= 0).any()
                 )
 
                 if not has_trans_override:
@@ -368,7 +367,14 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 else:
                     # Compute with topk override
                     pred_logit = logits[end : end + 1]
-                    cand = topk_ids[b, trans_resp_idx].long().unsqueeze(0)  # [1, K]
+                    fallback = (
+                        tree_input_ids[next_start : next_start + 1]
+                        .long()
+                        .unsqueeze(-1)
+                        .expand(-1, max_candidates)
+                    )
+                    cand = topk_ids[b, trans_resp_idx].long().unsqueeze(0)
+                    cand = torch.where(cand >= 0, cand, fallback)
                     lp, ent = gather_logprobs_entropy_multi_candidates(
                         pred_logit, cand,
                         temperature=self.config.temperature,
@@ -420,7 +426,7 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         mb_bs, resp_len, max_candidates = topk_ids.shape
 
         # If every response position has -1 sentinel across all sequences, no distill data
-        if (topk_ids[:, :, 0] < 0).all():
+        if (topk_ids < 0).all():
             return None
 
         loss_mask = model_inputs.get("loss_mask")
@@ -457,7 +463,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             end = min(prompt_len + resp_len, seq_len)
             if end > prompt_len:
                 chunk = topk_2d[: end - prompt_len]
-                valid = chunk[:, 0] >= 0
+                rolled_chunk = labels[prompt_len:end]
+                chunk = torch.where(chunk >= 0, chunk, rolled_chunk)
+                valid = (chunk >= 0).any(dim=-1)
                 if valid.any():
                     labels[prompt_len:end][valid] = chunk[valid]
 
@@ -502,7 +510,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             end_resp = min(prompt_len_i + resp_len, seq_len_i)
             if end_resp > prompt_len_i:
                 chunk = topk_ids[b, : end_resp - prompt_len_i]
-                valid = chunk[:, 0] >= 0
+                rolled_chunk = labels_i[prompt_len_i:end_resp]
+                chunk = torch.where(chunk >= 0, chunk, rolled_chunk)
+                valid = (chunk >= 0).any(dim=-1)
                 if valid.any():
                     labels_i[prompt_len_i:end_resp][valid] = chunk[valid]
 
@@ -531,6 +541,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         unpack per-sequence logprobs from the trie structure. Multi-candidate
         logprob gathering is only supported in the non-tree training path.
         """
+        local_weight = loss_weight_fn(ctx.mb_input)
+        if local_weight == 0:
+            return logits.mean() * 0.0
 
         if self.config.is_critic and self.enable_tree_training:
             raise NotImplementedError(
@@ -625,5 +638,5 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 values = values[: -ctx.pad_length]
             loss = loss_fn(values, ctx.mb_input)
 
-        loss_scale = loss_weight_fn(ctx.mb_input) / total_loss_weight * loss_multiplier
+        loss_scale = local_weight / total_loss_weight * loss_multiplier
         return loss * loss_scale

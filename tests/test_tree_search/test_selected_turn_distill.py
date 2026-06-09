@@ -1,12 +1,12 @@
 import pytest
 
 from customized_areal.tree_search.config import TreeBackupConfig
-from customized_areal.tree_search.distill_types import (
+from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.distilling.distill_types import (
     DiagnosisTurn,
     EpisodeDiagnosis,
     PositionRewardInfo,
 )
-from customized_areal.tree_search.core.tree_store import Node
 
 
 class FakeTokenizer:
@@ -129,7 +129,7 @@ def test_tree_backup_config_has_distill_defaults():
     assert config.teacher_model_name == ""
     assert config.teacher_top_k == 10
     assert config.teacher_max_retries == 3
-    assert config.teacher_timeout == 60.0
+    assert config.teacher_timeout == 300.0
     assert config.teacher_missing_logprob == -23.0
     assert config.distill_kl_mode == "reverse_kl"
     assert config.diagnose_model_name == ""
@@ -258,6 +258,58 @@ def test_parse_episode_diagnosis_extracts_xml_fence_after_reasoning():
     )
 
     assert diagnosis.selected_turns == {4: "Check the cited answer."}
+
+
+def test_parse_episode_diagnosis_prefers_last_parseable_xml_block():
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
+        parse_episode_diagnosis,
+    )
+
+    diagnosis = parse_episode_diagnosis(
+        """
+        <reasoning>
+        The first fenced block is not the final answer.
+        ```xml
+        <diagnosis><turns><turn></turns></diagnosis>
+        ```
+        </reasoning>
+
+        ```xml
+        <diagnosis>
+          <turns>
+            <turn>
+              <turn_idx>1</turn_idx>
+              <should_improve>true</should_improve>
+              <guidance>Use the explicit date constraint.</guidance>
+            </turn>
+          </turns>
+        </diagnosis>
+        ```
+        """
+    )
+
+    assert diagnosis.selected_turns == {1: "Use the explicit date constraint."}
+
+
+def test_parse_episode_diagnosis_extracts_xml_from_answer_wrapper():
+    from customized_areal.tree_search.distilling.selected_turn_distill import (
+        parse_episode_diagnosis,
+    )
+
+    diagnosis = parse_episode_diagnosis(
+        """
+        <answer>
+        ```xml
+        <diagnosis>
+          <turns>
+          </turns>
+        </diagnosis>
+        ```
+        </answer>
+        """
+    )
+
+    assert diagnosis.selected_turns == {}
 
 
 def test_response_token_span_returns_current_contiguous_one_span():

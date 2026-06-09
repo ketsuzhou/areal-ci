@@ -518,6 +518,55 @@ class TestPrepareMultiCandidateLabelsPacked:
         assert labels is None
 
 
+class TestMultiCandidateLogprobShapes:
+    """Multi-candidate engine gather should keep sequence as dim 0."""
+
+    def _make_engine(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.engine.fsdp_engine import (
+            MultiCandidateFSDPEngine,
+        )
+
+        engine = MagicMock(spec=MultiCandidateFSDPEngine)
+        engine._compute_logprobs_entropy = (
+            MultiCandidateFSDPEngine._compute_logprobs_entropy.__get__(engine)
+        )
+        engine.config = MagicMock()
+        engine.config.temperature = 1.0
+        engine.parallel_helper = MagicMock()
+        engine.parallel_helper.tp_size = 1
+        engine.parallel_helper.tp_group = None
+        engine.parallel_helper.sp_size = 1
+        return engine
+
+    def test_squeezes_single_batch_logits_before_chunked_gather(self):
+        import torch
+
+        engine = self._make_engine()
+        logits = torch.arange(24, dtype=torch.float32).reshape(1, 3, 8)
+        labels = torch.tensor([[[1, 2], [3, 4], [5, 6]]])
+
+        logprobs, entropy = engine._compute_logprobs_entropy(
+            logits,
+            {"input_ids": torch.tensor([[0, 1, 2]])},
+            labels_override=labels,
+        )
+
+        expected = torch.log_softmax(logits.squeeze(0), dim=-1).gather(
+            dim=-1,
+            index=labels.squeeze(0),
+        )
+        expected_entropy = -(
+            torch.softmax(logits.squeeze(0), dim=-1)
+            * torch.log_softmax(logits.squeeze(0), dim=-1)
+        ).sum(dim=-1)
+
+        assert logprobs.shape == (3, 2)
+        torch.testing.assert_close(logprobs, expected, rtol=1e-6, atol=1e-6)
+        torch.testing.assert_close(entropy, expected_entropy, rtol=1e-6, atol=1e-6)
+
+
 class TestTreeMultiCandidateLogprobs:
     """Tree path should gather all topk_ids candidate columns."""
 

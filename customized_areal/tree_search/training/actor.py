@@ -213,21 +213,22 @@ def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
     # sample's local index inside that minibatch.
     per_mb_prs: dict[int, list] = {}
     for pr in position_rewards:
-        if pr.sample_index >= len(mb_assignment):
+        sample_index = int(pr.sample_index)
+        if sample_index < 0 or sample_index >= len(mb_assignment):
             logger.warning(
                 "position_reward sample_index=%d exceeds batch_size=%d, "
                 "dropping position=%d",
-                pr.sample_index,
+                sample_index,
                 len(mb_assignment),
                 pr.position,
             )
             continue
-        mb_i = mb_assignment[pr.sample_index]
+        mb_i = mb_assignment[sample_index]
         if mb_i is None:
             logger.warning(
                 "position_reward sample_index=%d not mapped to any minibatch, "
                 "dropping position=%d",
-                pr.sample_index,
+                sample_index,
                 pr.position,
             )
             continue
@@ -238,7 +239,7 @@ def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
             if i == mb_i:
                 for local_idx in range(mb_bs):
                     orig_idx = int(forward_indices[offset + local_idx])
-                    if orig_idx == pr.sample_index:
+                    if orig_idx == sample_index:
                         local_sample_index = local_idx
                         break
                 break
@@ -247,7 +248,7 @@ def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
             logger.warning(
                 "position_reward sample_index=%d could not be rebased for minibatch %d, "
                 "dropping position=%d",
-                pr.sample_index,
+                sample_index,
                 mb_i,
                 pr.position,
             )

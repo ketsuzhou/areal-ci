@@ -10,6 +10,8 @@ Usage:
     uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml  2>&1 | tee training.log
 """
 
+# ruff: noqa: E402
+
 import json
 import os
 import pathlib
@@ -21,7 +23,8 @@ sys.path.insert(0, str(project_root))
 
 from customized_areal.tpfc.tpfc_config import TPFCConfig
 from customized_areal.tpfc.tpfc_dataset import get_tpfc_rl_dataset
-from customized_areal.tree_search.config import RolloutCacheConfig
+from customized_areal.tree_search.config import LossMode, RolloutCacheConfig
+from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.training.trainer import CustomizedPPOTrainer
 
 from areal.api.cli_args import load_expr_config
@@ -30,6 +33,53 @@ from areal.utils.hf_utils import load_hf_tokenizer
 from areal.utils.saver import Saver
 
 logger = logging.getLogger("TrainTPFCTreeSearch")
+
+
+def _count_cached_tree_queries(checkpoint_dir: str) -> int:
+    manager = TreeCheckpointManager(checkpoint_dir)
+    save_dir = pathlib.Path(manager.save_dir)
+    if not save_dir.is_dir():
+        return 0
+    return sum(
+        1
+        for path in save_dir.iterdir()
+        if path.is_file()
+        and path.name.startswith("query_")
+        and path.name.endswith(".json")
+    )
+
+
+def _validate_tree_search_startup(config: TPFCConfig) -> None:
+    tree_search = config.tree_search
+    if not tree_search.checkpoint_dir:
+        raise ValueError(
+            "tree_search.checkpoint_dir must be set when using tree search training. "
+            "Set it in the config YAML under tree_search.checkpoint_dir."
+        )
+
+    if tree_search.loss_mode == LossMode.DISTILL:
+        cached_queries = _count_cached_tree_queries(tree_search.checkpoint_dir)
+        if cached_queries == 0:
+            raise ValueError(
+                "tree_search.loss_mode=DISTILL is cache-only, but no cached MCTS "
+                f"trees were found under {tree_search.checkpoint_dir!r}. Run GRPO "
+                "or BOTH mode first to populate the cache, or change loss_mode to "
+                "BOTH if fresh rollout generation should be allowed."
+            )
+        logger.warning(
+            "tree_search.loss_mode=DISTILL is cache-only: fresh rollouts will not "
+            "be generated. Found cached trees for %d queries under %s.",
+            cached_queries,
+            tree_search.checkpoint_dir,
+        )
+
+    if tree_search.max_distill_tokens and tree_search.max_distill_tokens > config.gconfig.max_tokens:
+        logger.warning(
+            "tree_search.max_distill_tokens=%d exceeds gconfig.max_tokens=%d; "
+            "teacher requests may still be skipped by the runtime context limit.",
+            tree_search.max_distill_tokens,
+            config.gconfig.max_tokens,
+        )
 
 
 def _try_load_train_id_from_checkpoint(config: TPFCConfig) -> str | None:
@@ -122,11 +172,7 @@ def main(args: list[str] | None = None) -> None:
 
     # Build cache / tree backup configs from overrides
     tree_search = config.tree_search
-    if not tree_search.checkpoint_dir:
-        raise ValueError(
-            "tree_search.checkpoint_dir must be set when using tree search training. "
-            "Set it in the config YAML under tree_search.checkpoint_dir."
-        )
+    _validate_tree_search_startup(config)
 
     n_samples = config.gconfig.n_samples
 

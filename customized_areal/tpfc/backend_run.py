@@ -11,10 +11,13 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from dotenv import load_dotenv
 from httpx import Timeout
 
 # Add parent of 'customized_areal' to Python path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from supabase import create_async_client
 from supabase.lib.client_options import AsyncClientOptions
@@ -1011,8 +1014,8 @@ if __name__ == "__main__":
             tags=["debug", "0421"],
             user_id=DEFAULT_USER_ID,
             model_name="openrouter/qwen/qwen3-vl-8b-thinking",
-            api_key="empty",
-            base_url="http://localhost:30000/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            base_url=os.environ.get("OPENROUTER_BASE_URL"),
             refresh_token=DEFAULT_REFRESH_TOKEN,
         )
     )

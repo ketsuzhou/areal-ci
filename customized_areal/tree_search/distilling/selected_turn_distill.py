@@ -8,12 +8,12 @@ from typing import Any
 from xml.etree import ElementTree
 
 from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.distilling.diagnose_provider import DiagnoseProvider
 from customized_areal.tree_search.distilling.distill_types import (
     DiagnosisTurn,
     EpisodeDiagnosis,
     PositionRewardInfo,
 )
-from customized_areal.tree_search.distilling.diagnose_provider import DiagnoseProvider
 
 from areal.utils import logging
 
@@ -31,6 +31,36 @@ _DIAGNOSIS_XML_RE = re.compile(
 _LAST_FENCE_RE = re.compile(r"```(?:xml)?\s*", re.DOTALL)
 
 
+def _is_parseable_xml(text: str) -> bool:
+    try:
+        ElementTree.fromstring(text)
+    except ElementTree.ParseError:
+        return False
+    return True
+
+
+def _diagnosis_xml_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+
+    for match in _FENCE_RE.finditer(text):
+        content = match.group(1).strip()
+        first = content.find("<")
+        if first >= 0:
+            candidates.append(content[first:].strip())
+
+    fence_markers = list(_LAST_FENCE_RE.finditer(text))
+    if fence_markers:
+        after_fence = text[fence_markers[-1].end() :]
+        xml_match = _DIAGNOSIS_XML_RE.search(after_fence)
+        if xml_match:
+            candidates.append(xml_match.group(0).strip())
+
+    for xml_match in _DIAGNOSIS_XML_RE.finditer(text):
+        candidates.append(xml_match.group(0).strip())
+
+    return candidates
+
+
 def _extract_xml_from_markdown(text: str) -> str:
     """Extract XML content from markdown code fences or plain text.
 
@@ -38,18 +68,14 @@ def _extract_xml_from_markdown(text: str) -> str:
     Handles: complete fences, incomplete fences (no closing ```),
     bare XML documents, and models that wrap output in thinking tags.
     """
-    # 1. Try complete code fences: ```xml ... ```
-    match = _FENCE_RE.search(text)
-    if match:
-        content = match.group(1).strip()
-        if content:
-            # Strip stray language labels / non-XML prefixes before <
-            first = content.find("<")
-            if first >= 0:
-                content = content[first:]
-            return content
+    candidates = _diagnosis_xml_candidates(text)
+    for candidate in reversed(candidates):
+        if _is_parseable_xml(candidate):
+            return candidate
+    if candidates:
+        return candidates[-1]
 
-    # 2. Try incomplete code fence — opening ``` exists but no closing ```
+    # Try incomplete code fence — opening ``` exists but no closing ```
     #    Take everything after the *last* opening fence marker.
     fence_markers = list(_LAST_FENCE_RE.finditer(text))
     if fence_markers:
@@ -57,17 +83,17 @@ def _extract_xml_from_markdown(text: str) -> str:
     else:
         after_fence = text
 
-    # 3. Strip leading XML/thinking tags (</think>, </reasoning>, </analysis>)
+    # Strip leading XML/thinking tags (</think>, </reasoning>, </analysis>)
     after_fence = re.sub(
         r"</(?:think|reasoning|analysis|thought)>", "", after_fence
     ).strip()
 
-    # 4. Search for XML diagnosis in remaining text
+    # Search for XML diagnosis in remaining text
     xml_match = _DIAGNOSIS_XML_RE.search(after_fence)
     if xml_match:
         return xml_match.group(0).strip()
 
-    # 5. Fall back to original text for the bare-XML search
+    # Fall back to original text for the bare-XML search
     xml_match = _DIAGNOSIS_XML_RE.search(text)
     if xml_match:
         return xml_match.group(0).strip()
@@ -210,7 +236,7 @@ async def selected_turn_to_position_rewards(
         return []
 
     total_tokens = len(prompt_ids) + len(generation_ids)
-    token_limit = max_distill_tokens if max_distill_tokens > 0 else 6000
+    token_limit = max_distill_tokens if max_distill_tokens > 0 else 10000
     if total_tokens > token_limit:
         logger.warning(
             "Skipping distill: total_tokens=%d > %d (episode_id=%s turn_idx=%d)",
@@ -248,6 +274,11 @@ async def selected_turn_to_position_rewards(
     else:
         candidate_token_ids = [[token_id] for token_id in generation_ids]
 
+    candidate_token_ids = _ensure_generated_token_first(
+        candidate_token_ids,
+        generation_ids,
+    )
+
     teacher_logprobs = await provider.get_logprobs_for_prompt(
         prompt_ids=prompt_ids,
         generation_ids=generation_ids,
@@ -274,6 +305,31 @@ async def selected_turn_to_position_rewards(
         )
 
     return position_rewards
+
+
+def _ensure_generated_token_first(
+    candidate_token_ids: list[list[int]],
+    generation_ids: list[int],
+) -> list[list[int]]:
+    """Align candidate rows with chosen_index=0 by moving gold tokens first."""
+    aligned: list[list[int]] = []
+    for candidates, generated_token_id in zip(
+        candidate_token_ids, generation_ids, strict=True
+    ):
+        row = list(candidates)
+        if not row:
+            aligned.append([generated_token_id])
+            continue
+        if row[0] == generated_token_id:
+            aligned.append(row)
+            continue
+        try:
+            index = row.index(generated_token_id)
+        except ValueError:
+            aligned.append([generated_token_id, *row])
+            continue
+        aligned.append([generated_token_id, *row[:index], *row[index + 1 :]])
+    return aligned
 
 
 async def _recompute_student_topk(

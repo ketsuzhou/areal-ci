@@ -9,6 +9,7 @@ The dataset format matches openai/gsm8k RL format:
 - files_path (optional): List of image file paths for multimodal models
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,41 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from PIL import Image
+
+
+def _to_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _to_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        nested = content.get("content", content.get("text", ""))
+        return _content_to_text(nested)
+    if isinstance(content, list):
+        return "".join(_content_to_text(part) for part in content)
+    return str(content)
 
 
 def convert_image_to_bytes(
@@ -36,9 +72,12 @@ def convert_image_to_bytes(
     # Handle dict format from parquet (e.g., {'image': 'file://...'})
     if isinstance(image_input, dict) and "image" in image_input:
         image_path = image_input["image"]
+        if not isinstance(image_path, str) or not image_path:
+            raise ValueError(f"Invalid image path: {image_path!r}")
         if image_path.startswith("file://"):
             image_path = image_path[7:]  # Remove file:// prefix
-        image = Image.open(image_path)
+        with Image.open(image_path) as opened:
+            image = opened.copy()
     else:
         raise ValueError(f"Unsupported image input type: {type(image_input)}")
 
@@ -94,61 +133,60 @@ def get_tpfc_rl_dataset(
     # Load parquet file
     parquet_path = Path(path)
     if parquet_path.is_dir():
-        parquet_files = list(parquet_path.glob("*.parquet"))
+        parquet_files = sorted(parquet_path.glob("*.parquet"))
         if not parquet_files:
             raise ValueError(f"No parquet files found in directory: {path}")
         parquet_path = parquet_files[0]
+    if not parquet_path.exists():
+        raise FileNotFoundError(f"TPFC dataset parquet not found: {parquet_path}")
 
     # Read parquet using pandas
     df = pd.read_parquet(parquet_path)
-
-    # Convert to HuggingFace Dataset
-    dataset = Dataset.from_pandas(df)
+    if df.empty:
+        raise ValueError(f"TPFC dataset parquet has no rows: {parquet_path}")
 
     def process(sample):
         """Process a single sample to match gsm8k RL format."""
         # Extract prompt messages (numpy array of dicts -> list of dicts)
-        prompt_array = sample["prompt"]
-        if isinstance(prompt_array, np.ndarray):
-            messages = [
-                {"role": msg.get("role"), "content": msg.get("content", "")}
-                for msg in prompt_array
-            ]
-        elif isinstance(prompt_array, list):
-            messages = prompt_array
-        else:
-            messages = []
+        prompt_array = _to_list(sample.get("prompt"))
+        messages = []
+        for msg in prompt_array:
+            msg_dict = _to_dict(msg)
+            if not msg_dict:
+                continue
+            role = msg_dict.get("role")
+            if not isinstance(role, str) or not role:
+                continue
+            messages.append(
+                {"role": role, "content": _content_to_text(msg_dict.get("content"))}
+            )
 
         # Get ground truth from reward_model
-        reward_model = sample.get("reward_model", {})
-        if isinstance(reward_model, dict):
-            answer = reward_model.get("ground_truth", "")
-        else:
-            answer = ""
+        reward_model = _to_dict(sample.get("reward_model"))
+        answer = _content_to_text(reward_model.get("ground_truth", ""))
 
         # Process images if present
-        images_array = sample.get("images", [])
+        images_array = _to_list(sample.get("images"))
         files_path = []
-        if isinstance(images_array, (list, np.ndarray)) and len(images_array) > 0:
-            for img_data in images_array:
-                if isinstance(img_data, dict) and "image" in img_data:
-                    image_path = img_data["image"]
-                    if image_path.startswith("file://"):
-                        image_path = image_path[7:]
-                    files_path.append(image_path)
+        for img_data in images_array:
+            img_dict = _to_dict(img_data)
+            image_path = img_dict.get("image")
+            if not isinstance(image_path, str) or not image_path:
+                continue
+            if image_path.startswith("file://"):
+                image_path = image_path[7:]
+            files_path.append(image_path)
 
         # Extract query_id from extra_info (UUID generated at data prep time)
-        extra_info = sample.get("extra_info", {})
-        query_id = (
-            extra_info.get("query_id", "") if isinstance(extra_info, dict) else ""
-        )
+        extra_info = _to_dict(sample.get("extra_info"))
+        query_id = _content_to_text(extra_info.get("query_id", ""))
 
         # Extract query text from the last user message after "<User Query>: ",
         # stripping any leading "<context>...</context>" prefix
         query = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
-                content = msg.get("content", "")
+                content = _content_to_text(msg.get("content"))
                 marker = "<User Query>: "
                 idx = content.rfind(marker)
                 if idx != -1:
@@ -158,6 +196,10 @@ def get_tpfc_rl_dataset(
                     )
                     query = re.sub(
                         r"^\s*<context>.*?<context>\s*", "", query, flags=re.DOTALL
+                    )
+                else:
+                    query = re.sub(
+                        r"^\s*<context>.*?</context>\s*", "", content, flags=re.DOTALL
                     )
                 break
 
@@ -171,7 +213,9 @@ def get_tpfc_rl_dataset(
 
         return result
 
-    dataset = dataset.map(process, remove_columns=dataset.column_names)
+    dataset = Dataset.from_list(
+        [process(sample) for sample in df.to_dict(orient="records")]
+    )
 
     # Filter by length if requested
     if max_length is not None and tokenizer is not None:

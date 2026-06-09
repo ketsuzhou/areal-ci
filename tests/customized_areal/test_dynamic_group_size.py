@@ -219,6 +219,223 @@ class TestWorkflowConstructorDynamicFields:
         assert wf.dynamic_group_size is False
         assert wf.group_size == 16
 
+    def test_dynamic_constructor_rejects_invalid_bounds(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        with pytest.raises(ValueError, match="max_group_size"):
+            TreeSearchGroupedRolloutWorkflow(
+                MagicMock(),
+                group_size=4,
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                cache_mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=8,
+                max_group_size=4,
+            )
+
+    def test_dynamic_constructor_rejects_invalid_reward_type(self):
+        from unittest.mock import MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        with pytest.raises(ValueError, match="reward_type"):
+            TreeSearchGroupedRolloutWorkflow(
+                MagicMock(),
+                group_size=4,
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                cache_mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                reward_type="unknown",
+            )
+
+
+class TestWorkflowFailureHandling:
+    @pytest.mark.asyncio
+    async def test_retry_episode_retries_raised_exception(self, monkeypatch):
+        """Raised workflow exceptions are retried like None results."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(side_effect=[RuntimeError("boom"), {"ok": True}])
+        monkeypatch.setattr(
+            "customized_areal.tree_search.core.customized_grouped_workflow.asyncio.sleep",
+            AsyncMock(),
+        )
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=1,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+        )
+
+        result = await wf._retry_episode(MagicMock(), {}, group_idx=0, max_retries=2)
+        assert result == {"ok": True}
+        assert base.arun_episode.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_branch_cleanup_runs_when_branch_rollout_raises(self):
+        """A failed branch rollout still marks the branch candidate consumed."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+            SampleSource,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+
+        wf = TreeSearchGroupedRolloutWorkflow(
+            MagicMock(),
+            group_size=1,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+            sample_source=SampleSource.BRANCH,
+        )
+        candidate = Node(
+            input_ids=[1, 2],
+            loss_mask=[0, 1],
+            logprobs=[0.0, -0.1],
+            versions=[-1, 0],
+            node_id="candidate",
+            query_id="q_branch",
+            task_id="task",
+            need_branch=True,
+            branch_sandbox_id="sandbox",
+        )
+        wf.tree_store.trajectories["q_branch"] = [candidate]
+        wf._prepare_branch_task = AsyncMock(return_value="branch_task")
+        wf._retry_episode = AsyncMock(side_effect=RuntimeError("branch failed"))
+        wf._cleanup_branch = AsyncMock()
+
+        with pytest.raises(RuntimeError, match="branch failed"):
+            await wf._run_fresh_episode(MagicMock(), {"query_id": "q_branch"}, 0, "q_branch")
+
+        wf._cleanup_branch.assert_awaited_once_with(candidate)
+
+    @pytest.mark.asyncio
+    async def test_dynamic_distill_mode_does_not_generate_without_cache(self):
+        """Dynamic DISTILL mode matches fixed mode and consumes cache only."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.DISTILL,
+            cache_mode=CacheMode.OFF,
+            dynamic_group_size=True,
+            initial_group_size=2,
+            max_group_size=4,
+        )
+
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_distill_empty"})
+        assert result is None
+        base.arun_episode.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_conversion_failure_does_not_mark_nodes_trained(self, monkeypatch):
+        """Cache entries stay untrained when tensor batch conversion fails."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        import customized_areal.tree_search.core.customized_grouped_workflow as workflow_mod
+        from customized_areal.tree_search.config import (
+            AdvantageMode,
+            CacheMode,
+            LossMode,
+        )
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+        from customized_areal.tree_search.core.tree_store import Node
+
+        base = MagicMock()
+        base.arun_episode = AsyncMock(return_value={})
+        wf = TreeSearchGroupedRolloutWorkflow(
+            base,
+            group_size=2,
+            checkpoint_dir="/tmp/test_ckpt",
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            cache_mode=CacheMode.OFF,
+        )
+
+        def make_nodes(result, query_id, group_idx):
+            node = Node(
+                input_ids=[1, 2, 3],
+                loss_mask=[0, 1, 1],
+                logprobs=[0.0, -0.5, -0.3],
+                versions=[-1, 0, 0],
+                outcome_reward=float(group_idx),
+                node_id=f"node_{group_idx}",
+                episode_id=f"ep_{group_idx}",
+                query_id=query_id,
+                turn_idx=1,
+            )
+            return [node]
+
+        wf._result_to_nodes = make_nodes
+
+        def fail_convert(*args, **kwargs):
+            raise RuntimeError("convert failed")
+
+        monkeypatch.setattr(workflow_mod, "_nodes_to_batched_tensor_dict", fail_convert)
+
+        result = await wf.arun_episode(MagicMock(), {"query_id": "q_convert_fail"})
+        assert result is None
+        assert wf.tree_store.get_untrained_episode_count("q_convert_fail") == 2
+        for node in wf.tree_store.trajectories["q_convert_fail"]:
+            assert node.train_id == ""
+
 
 class TestZeroVarianceDiscard:
     @pytest.mark.asyncio
@@ -653,6 +870,7 @@ class TestPrecomputedAdvantages:
             memory_profiler=None,
             teacher=SimpleNamespace(rl_loss_weight=1.0, distill_loss_weight=1.0),
             rollout=SimpleNamespace(agent=None),
+            gconfig=SimpleNamespace(n_samples=1),
         )
         trainer.recover_info = None
         trainer.train_dataloader = _EmptyDataLoader(batch_size=1, steps_per_epoch=1)

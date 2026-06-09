@@ -602,6 +602,26 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.distill_kl_mode = distill_kl_mode
         self.max_distill_tokens = max_distill_tokens or max_tokens
         if dynamic_group_size:
+            if self.initial_group_size < 1:
+                raise ValueError(
+                    f"initial_group_size must be >= 1, got {self.initial_group_size}"
+                )
+            if self.max_group_size < self.initial_group_size:
+                raise ValueError(
+                    "max_group_size must be >= initial_group_size, "
+                    f"got max_group_size={self.max_group_size}, "
+                    f"initial_group_size={self.initial_group_size}"
+                )
+            if self.uncertainty_threshold < 0:
+                raise ValueError(
+                    "uncertainty_threshold must be non-negative, "
+                    f"got {self.uncertainty_threshold}"
+                )
+            if self.reward_type not in ("binary", "continuous"):
+                raise ValueError(
+                    "reward_type must be 'binary' or 'continuous', "
+                    f"got {self.reward_type!r}"
+                )
             self.group_size = self.initial_group_size
 
         self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
@@ -676,12 +696,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             return tokenizer
 
     async def _setup_distill_provider(self, engine, tokenizer=None):
+        from customized_areal.tree_search.distilling.diagnose_provider import (
+            ExternalDiagnoseProvider,
+        )
         from customized_areal.tree_search.distilling.teacher_client import (
             TeacherClient,
             TeacherConfig,
-        )
-        from customized_areal.tree_search.distilling.diagnose_provider import (
-            ExternalDiagnoseProvider,
         )
 
         if self.teacher_provider == "engine":
@@ -899,7 +919,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     ) -> Any:
         """Retry a failed episode until success or max_retries exhausted."""
         for attempt in range(1, max_retries + 1):
-            result = await self.workflow.arun_episode(engine, data)
+            try:
+                result = await self.workflow.arun_episode(engine, data)
+            except Exception as exc:
+                result = exc
             if not isinstance(result, Exception) and result is not None:
                 return result
             logger.warning(
@@ -966,8 +989,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if branch_task_id:
                 branch_data["task_id"] = branch_task_id
                 branch_data["seed_messages_already_inserted"] = True
-                result = await self._retry_episode(engine, branch_data, group_idx)
-                await self._cleanup_branch(candidate)
+                try:
+                    result = await self._retry_episode(engine, branch_data, group_idx)
+                finally:
+                    await self._cleanup_branch(candidate)
                 return _with_episode_metadata(result, branch_data)
             logger.warning(
                 "Branch task preparation failed for query_id=%s; falling back to scratch",
@@ -1144,7 +1169,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
 
         fresh_nodes: list[Node] = []
-        if need_gen > 0:
+        if need_gen > 0 and self.loss_mode != LossMode.DISTILL:
             results = await asyncio.gather(
                 *[
                     self._run_fresh_episode(engine, data, group_idx, query_id)
@@ -1184,7 +1209,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         next_group_idx = need_gen
         consecutive_failed_additions = 0
         max_failed_additions = max(3, self.max_group_size)
-        while self._count_episodes(all_nodes) < self.max_group_size:
+        while (
+            self.loss_mode != LossMode.DISTILL
+            and self._count_episodes(all_nodes) < self.max_group_size
+        ):
             if uncertainty <= self.uncertainty_threshold:
                 logger.info(
                     "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
@@ -1356,14 +1384,6 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if self.advantage_mode == AdvantageMode.TREE:
                 self.tree_advantage_computer.compute(all_nodes)
 
-            # Mark all nodes as trained
-            for node in all_nodes:
-                if node.node_id:
-                    self.tree_store.set_trained(node.node_id, True)
-
-            # Save tree checkpoint
-            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
-
             # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
                 all_nodes,
@@ -1371,7 +1391,18 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 loss_mode=self.loss_mode.value,
             )
 
-            return result_dict if result_dict else None
+            if not result_dict:
+                return None
+
+            # Mark nodes as trained only after the batch is materialized.
+            for node in all_nodes:
+                if node.node_id:
+                    self.tree_store.set_trained(node.node_id, True)
+
+            # Save tree checkpoint
+            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
+
+            return result_dict
         finally:
             if provider_client is not None:
                 await provider_client.close()

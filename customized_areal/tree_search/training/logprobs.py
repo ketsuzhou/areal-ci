@@ -16,16 +16,35 @@ def _gather_logprobs_entropy_multi_candidates(
     """Compute logprobs and entropy for multiple candidates per position.
 
     Args:
-        logits: [seq_len, vocab_size] or [batch, seq_len, vocab_size]
-        labels: [seq_len] or [batch, seq_len] for single candidate per position
-                or [seq_len, num_candidates] or [batch, seq_len, num_candidates]
-                for multiple candidates per position
+        logits: [seq_len, vocab_size]
+        labels: [seq_len] for single candidate per position or
+                [seq_len, num_candidates] for multiple candidates per position.
         temperature: Softmax temperature
 
     Returns:
         logprobs_labels: Same shape as labels (logprobs at specified positions)
-        entropy: [seq_len] or [batch, seq_len] (entropy of the distribution)
+        entropy: [seq_len] (entropy of the distribution)
     """
+    if logits.ndim != 2:
+        raise ValueError(
+            "logits must be 2D [seq_len, vocab_size], "
+            f"got {logits.ndim}D with shape {tuple(logits.shape)}"
+        )
+    if labels.dim() not in (1, 2):
+        raise ValueError(f"labels must be 1D or 2D, got {labels.dim()}D")
+    if labels.shape[0] != logits.shape[0]:
+        raise ValueError(
+            "labels sequence length must match logits sequence length: "
+            f"labels={tuple(labels.shape)}, logits={tuple(logits.shape)}"
+        )
+
+    labels = labels.long()
+    if ((labels < 0) | (labels >= logits.shape[-1])).any():
+        raise ValueError(
+            "labels contain token ids outside the local vocab range; "
+            "replace invalid candidates before gathering"
+        )
+
     log_probs = torch.nn.functional.log_softmax(logits.float() / temperature, dim=-1)
     entropy = -torch.sum(log_probs.exp() * log_probs, dim=-1)
 
@@ -35,8 +54,6 @@ def _gather_logprobs_entropy_multi_candidates(
         )
     elif labels.dim() == 2:
         log_probs_labels = log_probs.gather(dim=-1, index=labels)
-    else:
-        raise ValueError(f"labels must be 1D or 2D, got {labels.dim()}D")
 
     return log_probs_labels, entropy
 
@@ -51,11 +68,12 @@ def gather_logprobs_entropy_multi_candidates(
     """Compute log probabilities and entropy for multiple candidates per position.
 
     Args:
-        logits: Model logits with shape [..., vocab_size] or [..., vocab_size/tp]
+        logits: Model logits with shape [seq_len, vocab_size] or
+            [seq_len, vocab_size/tp]
             when tensor parallelism is enabled.
         labels: Token indices for which to compute log probabilities.
-            Shape: [...] for single candidate per position, or [..., num_candidates]
-            for multiple candidates per position.
+            Shape: [seq_len] for single candidate per position, or
+            [seq_len, num_candidates] for multiple candidates per position.
         temperature: Softmax temperature scaling. Default is 1.0.
         tp_group: If provided with tp_size > 1, uses vocab-parallel computation.
         chunk_size: Chunk size for memory-efficient processing. Default is 1024.
@@ -139,6 +157,22 @@ def _vocab_parallel_logprobs_entropy_multi_candidates(
         logprobs: Logprobs at label positions (same shape as labels)
         entropy: Entropy of the distribution
     """
+    if logits.ndim != 2:
+        raise ValueError(
+            "logits must be 2D [seq_len, vocab_size/tp], "
+            f"got {logits.ndim}D with shape {tuple(logits.shape)}"
+        )
+    if labels.dim() not in (1, 2):
+        raise ValueError(f"labels must be 1D or 2D, got {labels.dim()}D")
+    if labels.shape[0] != logits.shape[0]:
+        raise ValueError(
+            "labels sequence length must match logits sequence length: "
+            f"labels={tuple(labels.shape)}, logits={tuple(logits.shape)}"
+        )
+
+    labels = labels.long()
+    if (labels < 0).any():
+        raise ValueError("labels contain negative token ids")
     tp_rank = dist.get_rank(tp_group)
     partition_vocab_size = logits.size(-1)
     vocab_start_index = tp_rank * partition_vocab_size
@@ -153,7 +187,8 @@ def _vocab_parallel_logprobs_entropy_multi_candidates(
     dist.all_reduce(sum_exp_logits, op=dist.ReduceOp.SUM, group=tp_group)
 
     softmax = exp_logits.div_(sum_exp_logits)
-    log_probs = torch.log(softmax)
+    log_sum_exp = sum_exp_logits.log()
+    log_probs = normalized_logits - log_sum_exp
     entropy = -torch.sum(softmax * log_probs, dim=-1)
 
     labels_mask = (labels < vocab_start_index) | (labels >= vocab_end_index)
