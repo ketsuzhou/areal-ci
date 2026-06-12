@@ -3,6 +3,10 @@
 This module provides:
 - MultiCandidateFSDPPPOActor: PPO actor using MultiCandidateFSDPEngine for
   on-policy distillation with multi-candidate logprob gathering.
+- ClipCovFSDPPPOActor / ClipCovMegatronPPOActor: Actor wrappers that patch
+  PPOActor with clip-cov loss before worker creation.
+- MuonFSDPPPOActor / MuonMultiCandidateFSDPPPOActor: Actor wrappers that patch
+  optimizer creation for the Muon optimizer before worker init.
 - patch/unpatch functions to swap PPOActor._ppo_update with grpo_distill_loss_fn.
 """
 
@@ -23,6 +27,105 @@ from areal.utils.data import split_padded_tensor_dict_into_mb_list
 from ..engine.fsdp_engine import MultiCandidateFSDPEngine
 
 logger = logging.getLogger("OnPolicyDistill")
+
+
+def _patch_clip_cov_from_actor_config(config: Any) -> None:
+    from customized_areal.clip_cov import patch_ppo_actor_to_use_clip_cov_loss, ClipCovConfig
+
+    patch_ppo_actor_to_use_clip_cov_loss(
+        ClipCovConfig(
+            clip_ratio=config.clip_cov_clip_ratio,
+            clip_cov_lb=config.clip_cov_lb,
+            clip_cov_ub=config.clip_cov_ub,
+        )
+    )
+
+
+class ClipCovFSDPPPOActor:
+    """FSDP actor wrapper that patches PPOActor before worker actor creation."""
+
+    def __new__(cls, config):
+        from areal.engine import FSDPPPOActor
+
+        _patch_clip_cov_from_actor_config(config)
+        return FSDPPPOActor(config)
+
+    @classmethod
+    def as_controller(cls, config, scheduler):
+        from areal.trainer.ppo.actor import PPOActorController, PPOActorControllerV2
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
+
+
+class ClipCovMegatronPPOActor:
+    """Megatron actor wrapper that patches PPOActor before worker actor creation."""
+
+    def __new__(cls, config):
+        from areal.engine import MegatronPPOActor
+
+        _patch_clip_cov_from_actor_config(config)
+        return MegatronPPOActor(config)
+
+    @classmethod
+    def as_controller(cls, config, scheduler):
+        from areal.trainer.ppo.actor import PPOActorController, PPOActorControllerV2
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
+
+
+def _patch_muon_from_actor_config(config: Any) -> None:
+    from customized_areal.optimizers import patch_fsdp_engine_for_muon
+
+    patch_fsdp_engine_for_muon(
+        momentum=config.muon_momentum,
+        muon_adam_lr=config.muon_adam_lr,
+        ns_steps=config.muon_ns_steps,
+        nesterov=config.muon_nesterov,
+    )
+
+
+class MuonFSDPPPOActor:
+    """FSDP actor wrapper that patches optimizer creation before worker init."""
+
+    def __new__(cls, config):
+        from areal.engine import FSDPPPOActor
+
+        _patch_muon_from_actor_config(config)
+        return FSDPPPOActor(config)
+
+    @classmethod
+    def as_controller(cls, config, scheduler):
+        from areal.trainer.ppo.actor import PPOActorController, PPOActorControllerV2
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
+
+
+class MuonMultiCandidateFSDPPPOActor:
+    """Multi-candidate FSDP actor wrapper with Muon optimizer patching."""
+
+    def __new__(cls, config):
+        from customized_areal.tree_search.engine import MultiCandidateFSDPPPOActor
+
+        _patch_muon_from_actor_config(config)
+        return MultiCandidateFSDPPPOActor(config)
+
+    @classmethod
+    def as_controller(cls, config, scheduler):
+        from areal.trainer.ppo.actor import PPOActorController, PPOActorControllerV2
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
 
 _patch_applied = False
 _original_ppo_update = None

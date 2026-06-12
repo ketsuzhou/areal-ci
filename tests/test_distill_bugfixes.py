@@ -205,3 +205,52 @@ def test_bug12_chunked_apply_has_shape_assertion():
         "_chunked_apply should assert logits.ndim == 2 since it splits "
         "along dim=0 assuming seq_len is the first dimension."
     )
+
+
+def test_bug13_align_teacher_squeezes_trailing_singleton_candidate_dim():
+    """Bug 13: _align_teacher_chosen_logprobs must squeeze trailing singleton
+    candidate dims before checking dimension differences.
+
+    When teacher_logp is [B, resp_len, 1] and target is 1D packed with
+    cu_seqlens, the function must squeeze the trailing candidate dim first
+    to reach the cu_seqlens alignment path. Without this, dim diff is 2
+    (batch + candidates) instead of 1, and the function raises ValueError.
+    """
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    # 3 sequences packed into 1D: prompt_len=2 each, response_len=3 each
+    # target: [0, 0, p1, p1, r1, r1, r1, p2, p2, r2, r2, r2, p3, p3, r3, r3, r3]
+    target = torch.zeros(15)
+    loss_mask = torch.tensor(
+        [0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1], dtype=torch.int32
+    )
+    cu_seqlens = torch.tensor([0, 5, 10, 15], dtype=torch.int32)
+    prompt_lens = [2, 2, 2]
+
+    # teacher_logp: [3, 3, 1] — 3 sequences, 3 response tokens each, 1 candidate
+    teacher_logp = torch.tensor([[[-1.0], [-2.0], [-3.0]],
+                                  [[-4.0], [-5.0], [-6.0]],
+                                  [[-7.0], [-8.0], [-9.0]]])
+
+    aligned, valid = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher_logp,
+        target=target,
+        loss_mask=loss_mask,
+        prompt_lens=prompt_lens,
+        input_data={"cu_seqlens": cu_seqlens},
+    )
+
+    assert aligned.shape == target.shape, (
+        f"aligned shape {aligned.shape} should match target {target.shape}"
+    )
+    # Response positions (indices 2-4, 7-9, 12-14) should have teacher values
+    assert aligned[2].item() == -1.0
+    assert aligned[3].item() == -2.0
+    assert aligned[4].item() == -3.0
+    assert aligned[7].item() == -4.0
+    assert aligned[8].item() == -5.0
+    assert aligned[9].item() == -6.0

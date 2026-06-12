@@ -2,6 +2,10 @@
 
 __all__ = [
     "MultiCandidateFSDPPPOActor",
+    "ClipCovFSDPPPOActor",
+    "ClipCovMegatronPPOActor",
+    "MuonFSDPPPOActor",
+    "MuonMultiCandidateFSDPPPOActor",
     "patch_ppo_actor_class_to_use_distill_loss",
     "unpatch_ppo_actor_distill_loss",
     "grpo_distill_loss_fn",
@@ -13,17 +17,29 @@ __all__ = [
 def __getattr__(name: str):
     if name in {
         "MultiCandidateFSDPPPOActor",
+        "ClipCovFSDPPPOActor",
+        "ClipCovMegatronPPOActor",
+        "MuonFSDPPPOActor",
+        "MuonMultiCandidateFSDPPPOActor",
         "patch_ppo_actor_class_to_use_distill_loss",
         "unpatch_ppo_actor_distill_loss",
     }:
         from .actor import (
+            ClipCovFSDPPPOActor,
+            ClipCovMegatronPPOActor,
             MultiCandidateFSDPPPOActor,
+            MuonFSDPPPOActor,
+            MuonMultiCandidateFSDPPPOActor,
             patch_ppo_actor_class_to_use_distill_loss,
             unpatch_ppo_actor_distill_loss,
         )
 
         exports = {
             "MultiCandidateFSDPPPOActor": MultiCandidateFSDPPPOActor,
+            "ClipCovFSDPPPOActor": ClipCovFSDPPPOActor,
+            "ClipCovMegatronPPOActor": ClipCovMegatronPPOActor,
+            "MuonFSDPPPOActor": MuonFSDPPPOActor,
+            "MuonMultiCandidateFSDPPPOActor": MuonMultiCandidateFSDPPPOActor,
             "patch_ppo_actor_class_to_use_distill_loss": (
                 patch_ppo_actor_class_to_use_distill_loss
             ),

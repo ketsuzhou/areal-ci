@@ -1,4 +1,49 @@
-"""Teacher distillation and evidence-reweighting loss helpers."""
+"""Teacher distillation and evidence-reweighting loss helpers.
+
+This module implements the teacher-signal half of the combined GRPO + distill
+objective (see ``combined.py::grpo_distill_loss_fn``). A *teacher* is a model
+that scores the student's sampled tokens with access to privileged context
+(e.g. a hint or the gold answer); the student is the policy being trained.
+Two complementary ways of consuming the teacher signal are provided:
+
+1. **Evidence reweighting** (``_compute_distill_reweighted_advantages``).
+   Used when GRPO is still active (``distill_loss_mode in {"evidence", "rlsd"}``
+   and ``rl_loss_weight != 0``). The per-token advantage is rescaled by a
+   detached, direction-aware weight derived from the teacher/student
+   log-probability gap ``delta = teacher_logp - student_logp``. The teacher
+   only *redistributes credit*; it never contributes gradients directly.
+
+2. **KL distillation** (``_compute_teacher_kl_loss``).
+   Used as an auxiliary term (``distill_loss_weight``) or, when
+   ``rl_loss_weight == 0`` ("DISTILL" mode), as the sole loss. The KL is taken
+   over the candidate subset that the teacher actually scored.
+
+Tensor-format conventions
+--------------------------
+Tensors arrive in one of two layouts, both supported throughout this module:
+
+- **2D batched**: ``loss_mask`` is ``[batch, seq_len]`` and per-sequence
+  tensors are indexed by row ``b``.
+- **1D packed**: ``loss_mask`` is ``[total_tokens]`` (all sequences
+  concatenated) and per-sequence boundaries come from
+  ``input_data["cu_seqlens"]`` (cumulative sequence lengths, length
+  ``num_seqs + 1``). This is the layout used by the FSDP packed-tree path.
+
+``teacher_logp`` is built **response-aligned** upstream
+(``tree_store._node_to_tensor_dict``): shape ``[batch, resp_len, num_candidates]``
+where response index ``i`` maps to absolute position ``prompt_len + i``. The
+trailing candidate axis is ``1`` for the evidence path (chosen token only) and
+``>= 1`` for the multi-candidate KL path. Padding tokens are stored as exactly
+``0.0`` and are filtered with an ``abs() > 1e-8`` validity test.
+
+Glossary
+--------
+- ``target`` / ``student_context_logprobs``: rollout log-probs under the
+  student prompt, in the same layout as ``loss_mask``.
+- ``prompt_lens[b]``: number of leading non-response tokens for sequence ``b``.
+- ``valid`` mask: positions where a real (non-padding) teacher value exists
+  *and* ``loss_mask`` is set.
+"""
 
 from __future__ import annotations
 
@@ -44,10 +89,57 @@ def _compute_distill_reweighted_advantages(
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Apply direction-aware evidence reweighting to token advantages.
 
-    ``student_context_logprobs`` is the rollout log-probability under the
-    student prompt, while ``teacher_logprobs`` is the privileged-context
-    teacher log-probability for the same sampled token. The resulting weights
-    are detached so the teacher signal only redistributes credit.
+    For each response token the teacher/student log-probability gap
+    ``delta = teacher_logp - student_logp`` is turned into a multiplicative
+    credit weight::
+
+        signed_delta   = sign(advantage) * delta
+        evidence_weight = exp(signed_delta)                       # detached
+        credit_weight   = clamp(evidence_weight, 1-eps, 1+eps)    # if eps_clip
+        credit_weight   = (1 - mixing_coeff) + mixing_coeff * credit_weight
+        reweighted_adv  = advantage * credit_weight
+
+    Multiplying by ``sign(advantage)`` makes the reweighting direction-aware:
+    when the teacher is *more* confident than the student (``delta > 0``) the
+    magnitude of a positive advantage is amplified and a negative advantage is
+    damped, and vice-versa. All weight terms are ``detach``-ed so the teacher
+    signal only redistributes credit across tokens and never contributes
+    gradients of its own.
+
+    Parameters
+    ----------
+    advantages : torch.Tensor
+        Per-token advantages, same layout as ``loss_mask``.
+    student_context_logprobs : torch.Tensor
+        Rollout log-probability of the sampled token under the *student*
+        prompt (i.e. ``old_logp``). Doubles as the alignment ``target``.
+    teacher_logprobs : torch.Tensor
+        Response-aligned teacher log-probabilities for the same sampled token,
+        shape ``[batch, resp_len, 1]`` (see module docstring).
+    loss_mask : torch.Tensor
+        ``1`` on response tokens, ``0`` elsewhere. 1D packed or 2D batched.
+    prompt_lens : list[int]
+        Per-sequence prompt length used to place response-aligned values.
+    input_data : dict | None
+        Carries ``cu_seqlens`` for the 1D packed layout.
+    eps_clip : float | None
+        If set (``>= 0``), clamp ``evidence_weight`` to ``[1-eps, 1+eps]``.
+    mixing_coeff : float
+        Interpolation in ``[0, 1]`` between no reweighting (``0`` -> weight 1)
+        and full reweighting (``1``).
+
+    Returns
+    -------
+    reweighted_advantages : torch.Tensor
+        ``advantages`` scaled by the detached ``credit_weight``.
+    stat : dict[str, torch.Tensor]
+        Detached ``delta``, ``evidence_weight`` and ``credit_weight`` tensors
+        (set to neutral values on invalid positions) for metric logging.
+
+    Raises
+    ------
+    ValueError
+        If ``eps_clip < 0`` or ``mixing_coeff`` is outside ``[0, 1]``.
     """
     teacher_chosen_logprobs, valid_mask = _align_teacher_chosen_logprobs(
         teacher_logprobs=teacher_logprobs,
@@ -96,10 +188,68 @@ def _align_teacher_chosen_logprobs(
     prompt_lens: list[int],
     input_data: dict | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Align response-only teacher log-probs to full-sequence chosen log-probs."""
+    """Scatter response-aligned teacher log-probs onto the student layout.
+
+    The teacher tensor is stored response-first (index ``0`` == first response
+    token), whereas ``target``/``loss_mask`` span the full prompt+response
+    sequence. This helper produces an ``aligned`` tensor shaped like ``target``
+    with teacher values written at the matching response positions, plus a
+    ``valid`` mask marking which of those positions hold a real (non-padding)
+    teacher value.
+
+    Supported shape combinations (checked in order):
+
+    1. ``teacher.shape == target.shape`` -> used as-is (already aligned).
+    2. 1D packed ``target`` + ``[B, resp_len(, 1)]`` teacher + ``cu_seqlens``:
+       trailing singleton candidate dims are squeezed, then each sequence's
+       response slice is filled via ``cu_seqlens`` boundaries.
+    3. 1D packed ``target`` + 1D teacher: teacher values are dropped onto the
+       first ``loss_mask`` non-zero positions (single-sequence fallback).
+    4. 2D batched ``target`` + 2D teacher: per-row response slice fill.
+
+    Parameters
+    ----------
+    teacher_logprobs : torch.Tensor
+        Response-aligned teacher log-probs, ``[B, resp_len, num_candidates]``,
+        ``[B, resp_len]``, or already-aligned matching ``target``.
+    target : torch.Tensor
+        Reference tensor defining the output layout (the student logprobs).
+    loss_mask : torch.Tensor
+        Response mask in the same layout as ``target``.
+    prompt_lens : list[int]
+        Per-sequence prompt length; the response is assumed to start here.
+    input_data : dict | None
+        Carries ``cu_seqlens`` for the 1D packed layout.
+
+    Returns
+    -------
+    aligned : torch.Tensor
+        ``zeros_like(target)`` with teacher values scattered into response
+        positions.
+    valid : torch.Tensor (bool)
+        True where ``aligned`` holds a real teacher value.
+
+    Raises
+    ------
+    ValueError
+        If the ``teacher``/``target`` shape combination is not supported
+        (e.g. a multi-candidate ``[B, resp_len, C>1]`` teacher against a 1D
+        packed target, which the evidence path never produces).
+
+    Notes
+    -----
+    Alignment assumes each sequence has a **single contiguous** response
+    region: teacher values are written into the slice
+    ``[start + prompt_len, start + prompt_len + resp_len)``. For sequences with
+    multiple non-contiguous ``loss_mask`` segments (some multi-turn layouts)
+    this contiguous placement can misalign later turns. This assumption is
+    shared with the 2D batched branch. Padding-induced over-reads are bounded
+    by ``teacher.shape[1]`` and filtered out by the ``abs() > 1e-8`` check.
+    """
     if teacher_logprobs.numel() == 0:
         return torch.zeros_like(target), torch.zeros_like(target, dtype=torch.bool)
 
+    # Case 1: teacher already matches the target layout.
     if teacher_logprobs.shape == target.shape:
         teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
         valid = loss_mask.bool() & (teacher.abs() > 1e-8)
@@ -110,10 +260,14 @@ def _align_teacher_chosen_logprobs(
     aligned = torch.zeros_like(target)
     valid = torch.zeros_like(target, dtype=torch.bool)
 
-    if teacher.dim() == target.dim() + 1:
+    # Squeeze trailing singleton candidate dimensions first.
+    # Handles teacher [B, resp_len, 1] -> [B, resp_len] when target is
+    # 1D packed, where teacher has 2 extra dims (batch + candidates).
+    while teacher.dim() > target.dim() + 1 and teacher.shape[-1] == 1:
         teacher = teacher[..., 0]
 
     cu_seqlens = (input_data or {}).get("cu_seqlens")
+    # Case 2: 1D packed target with per-sequence cu_seqlens boundaries.
     if target.dim() == 1 and teacher.dim() == 2 and cu_seqlens is not None:
         for b in range(min(teacher.shape[0], len(cu_seqlens) - 1)):
             start = int(cu_seqlens[b].item())
@@ -130,6 +284,11 @@ def _align_teacher_chosen_logprobs(
             )
         return aligned, valid
 
+    # Non-packed fallback: collapse a single trailing candidate dim.
+    if teacher.dim() == target.dim() + 1:
+        teacher = teacher[..., 0]
+
+    # Case 3: 1D packed target + 1D teacher (single-sequence fallback).
     if target.dim() == 1 and teacher.dim() == 1:
         response_positions = mask.nonzero(as_tuple=False).squeeze(-1)
         n_pos = min(response_positions.numel(), teacher.shape[0])
@@ -139,6 +298,7 @@ def _align_teacher_chosen_logprobs(
             valid[positions] = teacher[:n_pos].abs() > 1e-8
         return aligned, valid
 
+    # Case 4: 2D batched target + 2D teacher, per-row response slice.
     if target.dim() == 2 and teacher.dim() == 2:
         batch_size = min(target.shape[0], teacher.shape[0])
         for b in range(batch_size):
