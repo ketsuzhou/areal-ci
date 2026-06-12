@@ -1,14 +1,16 @@
+import pytest
+
 from customized_areal.tree_search.config import (
     CacheMode,
+    Config,
     DistillKLMode,
     LossMode,
-    TreeBackupConfig,
 )
 
 
 class TestCacheMode:
     def test_off_is_default(self):
-        config = TreeBackupConfig()
+        config = Config()
         assert config.mode == CacheMode.OFF
 
     def test_enum_values(self):
@@ -17,11 +19,11 @@ class TestCacheMode:
         assert CacheMode.CROSS_TRAINING == "cross_training"
 
     def test_default_checkpoint_dir_empty(self):
-        config = TreeBackupConfig()
+        config = Config()
         assert config.checkpoint_dir == ""
 
     def test_custom_values(self):
-        config = TreeBackupConfig(
+        config = Config(
             mode=CacheMode.CROSS_TRAINING,
             checkpoint_dir="/tmp/mcts",
         )
@@ -31,11 +33,11 @@ class TestCacheMode:
 
 class TestDistillConfig:
     def test_distill_kl_mode_defaults_to_reverse(self):
-        config = TreeBackupConfig()
+        config = Config()
         assert config.distill_kl_mode == DistillKLMode.REVERSE
 
     def test_distill_env_defaults_are_representable(self):
-        config = TreeBackupConfig(
+        config = Config(
             topk_distill=True,
             teacher_provider="external",
             teacher_base_url="http://teacher:8001",
@@ -54,3 +56,72 @@ class TestDistillConfig:
         assert LossMode.GRPO == "grpo"
         assert LossMode.DISTILL == "distill"
         assert LossMode.BOTH == "both"
+
+
+class TestClipCovConfig:
+    def test_clip_cov_defaults_disabled(self):
+        config = Config()
+
+        assert config.use_clip_cov is False
+        assert config.clip_cov_clip_ratio == 0.0002
+        assert config.clip_cov_lb == 1.0
+        assert config.clip_cov_ub == 5.0
+
+    def test_clip_cov_custom_values(self):
+        config = Config(
+            use_clip_cov=True,
+            clip_cov_clip_ratio=0.01,
+            clip_cov_lb=0.5,
+            clip_cov_ub=2.0,
+        )
+
+        assert config.use_clip_cov is True
+        assert config.clip_cov_clip_ratio == 0.01
+        assert config.clip_cov_lb == 0.5
+        assert config.clip_cov_ub == 2.0
+
+    def test_clip_cov_rejects_invalid_ratio(self):
+        with pytest.raises(ValueError, match="clip_cov_clip_ratio"):
+            Config(clip_cov_clip_ratio=1.1)
+
+    def test_clip_cov_rejects_invalid_bounds(self):
+        with pytest.raises(ValueError, match="clip_cov_lb"):
+            Config(clip_cov_lb=2.0, clip_cov_ub=2.0)
+
+
+class TestMuonConfig:
+    def test_muon_defaults_disabled(self):
+        config = Config()
+
+        assert config.use_muon_optimizer is False
+        assert config.muon_momentum == 0.95
+        assert config.muon_adam_lr == 3e-4
+        assert config.muon_ns_steps == 5
+        assert config.muon_nesterov is True
+
+    def test_muon_custom_values(self):
+        config = Config(
+            use_muon_optimizer=True,
+            muon_momentum=0.9,
+            muon_adam_lr=1e-4,
+            muon_ns_steps=3,
+            muon_nesterov=False,
+        )
+
+        assert config.use_muon_optimizer is True
+        assert config.muon_momentum == 0.9
+        assert config.muon_adam_lr == 1e-4
+        assert config.muon_ns_steps == 3
+        assert config.muon_nesterov is False
+
+    def test_muon_rejects_invalid_momentum(self):
+        with pytest.raises(ValueError, match="muon_momentum"):
+            Config(muon_momentum=1.0)
+
+    def test_muon_rejects_invalid_aux_adam_lr(self):
+        with pytest.raises(ValueError, match="muon_adam_lr"):
+            Config(muon_adam_lr=0)
+
+    def test_muon_rejects_invalid_ns_steps(self):
+        with pytest.raises(ValueError, match="muon_ns_steps"):
+            Config(muon_ns_steps=0)

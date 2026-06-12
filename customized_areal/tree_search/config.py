@@ -31,7 +31,7 @@ class SampleSource(str, Enum):
 
 
 @dataclass
-class TreeBackupConfig:
+class Config:
     mode: CacheMode = CacheMode.OFF
     enabled: bool = True
     checkpoint_dir: str = ""
@@ -72,6 +72,15 @@ class TreeBackupConfig:
     reward_type: str = "binary"
     distill_kl_mode: DistillKLMode = DistillKLMode.REVERSE
     max_distill_tokens: int = 0
+    use_clip_cov: bool = False
+    clip_cov_clip_ratio: float = 0.0002
+    clip_cov_lb: float = 1.0
+    clip_cov_ub: float = 5.0
+    use_muon_optimizer: bool = False
+    muon_momentum: float = 0.95
+    muon_adam_lr: float = 3e-4
+    muon_ns_steps: int = 5
+    muon_nesterov: bool = True
 
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
@@ -93,6 +102,23 @@ class TreeBackupConfig:
                 f"reward_type must be 'binary' or 'continuous', "
                 f"got {self.reward_type!r}"
             )
+        if not 0.0 <= self.clip_cov_clip_ratio <= 1.0:
+            raise ValueError(
+                f"clip_cov_clip_ratio must be in [0, 1], got {self.clip_cov_clip_ratio}"
+            )
+        if self.clip_cov_lb >= self.clip_cov_ub:
+            raise ValueError(
+                f"clip_cov_lb ({self.clip_cov_lb}) must be < "
+                f"clip_cov_ub ({self.clip_cov_ub})"
+            )
+        if not 0.0 <= self.muon_momentum < 1.0:
+            raise ValueError(
+                f"muon_momentum must be in [0, 1), got {self.muon_momentum}"
+            )
+        if self.muon_adam_lr <= 0:
+            raise ValueError(f"muon_adam_lr must be > 0, got {self.muon_adam_lr}")
+        if self.muon_ns_steps < 1:
+            raise ValueError(f"muon_ns_steps must be >= 1, got {self.muon_ns_steps}")
 
 
 @dataclass
