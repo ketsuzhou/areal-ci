@@ -107,7 +107,6 @@ class TestClipCovPpoActorLossFn:
             advantages=advantages,
             eps_clip=eps_clip,
             loss_mask=loss_mask,
-            behave_imp_weight_mode="disabled",
         )
 
         # Use bounds that exclude all covariance values (very tight range)
@@ -226,9 +225,15 @@ class TestClipCovPatch:
     """Tests for PPOActor monkey-patching."""
 
     def test_patch_is_idempotent(self):
-        from customized_areal.clip_cov.patch import patch_ppo_actor_to_use_clip_cov_loss
+        from customized_areal.clip_cov.patch import (
+            patch_ppo_actor_to_use_clip_cov_loss,
+            unpatch_ppo_actor_clip_cov_loss,
+        )
 
         config = ClipCovConfig()
-        patch_ppo_actor_to_use_clip_cov_loss(config)
-        # Calling again should not raise
-        patch_ppo_actor_to_use_clip_cov_loss(config)
+        try:
+            patch_ppo_actor_to_use_clip_cov_loss(config)
+            # Calling again should not raise
+            patch_ppo_actor_to_use_clip_cov_loss(config)
+        finally:
+            unpatch_ppo_actor_clip_cov_loss()

@@ -8,6 +8,8 @@ Usage:
 uv run customized_areal/tpfc/scripts/train_tpfc.py  --config customized_areal/tpfc/configs/config_tpfc.yaml
 """
 
+# ruff: noqa: E402
+
 import pathlib
 import sys
 

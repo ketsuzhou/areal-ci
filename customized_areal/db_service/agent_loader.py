@@ -5,14 +5,12 @@ Provides AgentConfig/AgentData models and a loader to fetch agents with a
 consistent schema and unified caching behavior.
 """
 
+import logging
 import uuid as _uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from customized_areal.db_service.connection import DBConnection
-
-
-import logging
 
 logger = logging.getLogger("AgentLoader")
 

@@ -8,13 +8,13 @@ This module contains:
 - reward_compute.py: _compute_token_rewards for teacher/student logprob comparison
 """
 
-from .reward_compute import _compute_token_rewards
-from .teacher_client import TeacherClient, TeacherConfig
 from .diagnose_provider import (
+    DiagnoseProvider,
     EngineDiagnoseProvider,
     ExternalDiagnoseProvider,
-    DiagnoseProvider,
 )
+from .reward_compute import _compute_token_rewards
+from .teacher_client import TeacherClient, TeacherConfig
 
 __all__ = [
     "EngineDiagnoseProvider",

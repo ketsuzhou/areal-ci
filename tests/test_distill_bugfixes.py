@@ -31,7 +31,7 @@ def test_bug6_distribute_position_rewards_warns_on_unmapped():
 
     import torch
 
-    from customized_areal.tree_search.distill_types import PositionRewardInfo
+    from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
     from customized_areal.tree_search.training.actor import (
         _distribute_position_rewards,
     )
@@ -154,7 +154,7 @@ def test_bug9_position_clamping_warns():
 
     import torch
 
-    from customized_areal.tree_search.distill_types import PositionRewardInfo
+    from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
     from customized_areal.tree_search.training.loss import (
         _compute_position_level_grpo_loss,
     )

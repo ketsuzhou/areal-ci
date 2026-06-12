@@ -766,9 +766,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
             client = TeacherClient(config)
 
-        diagnose_model_name = (
-            self.diagnose_model_name or "qwen/qwen3.7-max"
-        )
+        diagnose_model_name = self.diagnose_model_name or "qwen/qwen3.7-max"
         diagnose_api_key = (
             self.diagnose_api_key
             or os.environ.get("OPENROUTER_API_KEY", "")
@@ -1361,7 +1359,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
-                provider, provider_client = await self._setup_distill_provider(engine, tokenizer)
+                provider, provider_client = await self._setup_distill_provider(
+                    engine, tokenizer
+                )
                 all_nodes, _ = await self._prepare_distill_for_node_groups(
                     _group_nodes_by_episode(all_nodes),
                     data,

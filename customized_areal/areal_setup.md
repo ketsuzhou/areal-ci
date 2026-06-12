@@ -8,7 +8,9 @@ git clone https://gitlab.xpaas.lenovo.com/zhoujie22/areal
 
 ## 2. Copy Pre-built Wheels
 
-Copy the pre-built CUDA/wheel packages into the project. These include custom builds of PyTorch, Triton, SGLang kernels, FlashInfer, and NVIDIA libraries that are required for the training environment.
+Copy the pre-built CUDA/wheel packages into the project. These include custom builds of
+PyTorch, Triton, SGLang kernels, FlashInfer, and NVIDIA libraries that are required for
+the training environment.
 
 ```bash
 cp -r /dfs/share-groups/foundationmodelgroup/LRM/zhoujie/wheels/ AReaL-main/wheels
@@ -22,7 +24,8 @@ uv sync
 
 ## 4. Configure Environment Variables
 
-Copy or create the `.env` file at `customized_areal/.env`. The file must contain the following variables:
+Copy or create the `.env` file at `customized_areal/.env`. The file must contain the
+following variables:
 
 ```env
 # Supabase (database & auth)
@@ -73,9 +76,9 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/
 
 ## Available Configs
 
-| Config | Description |
-|--------|-------------|
-| `config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml` | Tree search training |
-| `config_tpfc_Qwen3-5L-9B-Instruct_tree_search_v2.yaml` | Tree search v2 |
-| `config_tpfc_Qwen3-5L-9B-opd.yaml` | OPD training |
-| `config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml` | VL-8B tree search |
+| Config                                                 | Description          |
+| ------------------------------------------------------ | -------------------- |
+| `config_tpfc_Qwen3-5L-9B-Instruct_tree_search.yaml`    | Tree search training |
+| `config_tpfc_Qwen3-5L-9B-Instruct_tree_search_v2.yaml` | Tree search v2       |
+| `config_tpfc_Qwen3-5L-9B-opd.yaml`                     | OPD training         |
+| `config_tpfc_Qwen3-VL-8B-Instruct_tree_search.yaml`    | VL-8B tree search    |

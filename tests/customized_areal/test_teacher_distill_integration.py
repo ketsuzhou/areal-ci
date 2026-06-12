@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
 from customized_areal.tree_search.distilling.reward_compute import (
     _compute_token_rewards,
 )
@@ -15,7 +16,6 @@ from customized_areal.tree_search.distilling.teacher_client import (
     TeacherClient,
     TeacherConfig,
 )
-from customized_areal.tree_search.distill_types import PositionRewardInfo
 
 # ---------------------------------------------------------------------------
 # Helpers

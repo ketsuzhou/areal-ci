@@ -78,7 +78,9 @@ class StubSelectedTurnModule:
         self.calls = []
 
     def parse_episode_diagnosis(self, raw_text):
-        raise AssertionError("parse_episode_diagnosis should not be called in this test")
+        raise AssertionError(
+            "parse_episode_diagnosis should not be called in this test"
+        )
 
     async def selected_turn_to_position_rewards(
         self,
@@ -175,17 +177,17 @@ def _install_workflow_stubs(selected_turn_module: StubSelectedTurnModule) -> Non
     selected_turn_module_obj.selected_turn_to_position_rewards = (
         selected_turn_module.selected_turn_to_position_rewards
     )
-    sys.modules[
-        "customized_areal.tree_search.distilling.selected_turn_distill"
-    ] = selected_turn_module_obj
+    sys.modules["customized_areal.tree_search.distilling.selected_turn_distill"] = (
+        selected_turn_module_obj
+    )
 
     teacher_client_module = types.ModuleType(
         "customized_areal.tree_search.distilling.teacher_client"
     )
     teacher_client_module.TeacherServiceError = TeacherServiceError
-    sys.modules[
-        "customized_areal.tree_search.distilling.teacher_client"
-    ] = teacher_client_module
+    sys.modules["customized_areal.tree_search.distilling.teacher_client"] = (
+        teacher_client_module
+    )
 
     areal_pkg = types.ModuleType("areal")
     areal_pkg.__path__ = []

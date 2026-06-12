@@ -81,6 +81,9 @@ def grpo_distill_loss_fn(
     rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
     distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
     distill_kl_mode = getattr(config, "distill_kl_mode", "reverse_kl")
+    distill_loss_mode = input_data.get(
+        "distill_loss_mode", getattr(config, "distill_loss_mode", "evidence")
+    )
 
     # Determine prompt length per sample from loss_mask (0 = prompt, 1 = output)
     if loss_mask.dim() > 1:
@@ -97,8 +100,57 @@ def grpo_distill_loss_fn(
     chosen_logprobs = _select_chosen_logprobs(logprobs, loss_mask)
 
     distill_stat = None
+    distill_evidence_stat = None
 
-    if rl_loss_weight == 0 and teacher_logprobs is not None:
+    if (
+        teacher_logprobs is not None
+        and distill_loss_mode in {"evidence", "rlsd"}
+        and rl_loss_weight != 0
+    ):
+        distill_eps = input_data.get(
+            "distill_eps_clip", getattr(config, "distill_eps_clip", None)
+        )
+        distill_lambda = input_data.get(
+            "distill_mixing_coeff", getattr(config, "distill_mixing_coeff", 1.0)
+        )
+        reweighted_advantages, evidence_stat = _compute_distill_reweighted_advantages(
+            advantages=advantages,
+            student_context_logprobs=old_logp,
+            teacher_logprobs=teacher_logprobs,
+            loss_mask=loss_mask,
+            prompt_lens=prompt_lens,
+            input_data=input_data,
+            eps_clip=distill_eps,
+            mixing_coeff=distill_lambda,
+        )
+
+        coeffs = _resolve_proximal_logp(
+            prox_logp_gt=prox_logp_gt,
+            prox_logp_method=getattr(config, "prox_logp_method", "recompute"),
+            old_logp=old_logp,
+            logprobs=chosen_logprobs.detach(),
+            versions=input_data.get("versions"),
+            current_version=current_version,
+        )
+
+        loss, stat = _compute_grpo_loss(
+            logprobs=chosen_logprobs,
+            old_logp=old_logp,
+            advantages=reweighted_advantages,
+            eps_clip=config.eps_clip,
+            eps_clip_higher=config.eps_clip_higher,
+            loss_mask=loss_mask,
+            c_clip=config.c_clip,
+            proximal_logprobs=coeffs,
+            rejection_sampling=getattr(config, "rejection_sampling", None),
+            importance_sampling_level=config.importance_sampling_level,
+            cu_seqlens=input_data.get("cu_seqlens"),
+        )
+        loss = rl_loss_weight * loss
+        distill_evidence_stat = evidence_stat | {
+            "advantage": reweighted_advantages.detach()
+        }
+    elif rl_loss_weight == 0 and teacher_logprobs is not None:
         # DISTILL mode: only teacher KL loss, no GRPO loss.
         teacher_kl_loss = _compute_teacher_kl_loss(
             teacher_logprobs=teacher_logprobs,
@@ -174,6 +226,15 @@ def grpo_distill_loss_fn(
             denominator="n_valid_tokens",
         )
 
+    if distill_evidence_stat is not None:
+        stats_tracker.stat(
+            distill_delta=distill_evidence_stat["delta"],
+            distill_evidence_weight=distill_evidence_stat["evidence_weight"],
+            distill_credit_weight=distill_evidence_stat["credit_weight"],
+            distill_advantage=distill_evidence_stat["advantage"],
+            denominator="n_valid_tokens",
+        )
+
     stats_tracker.stat(
         importance_weight=stat["importance_weight"],
         approx_kl=stat["approx_kl"],
@@ -216,13 +277,141 @@ def _select_chosen_logprobs(
     raise ValueError(f"Unsupported logprobs shape for distill loss: {logprobs.shape}")
 
 
-def _compute_teacher_kl_loss(
+def _compute_distill_reweighted_advantages(
+    advantages: torch.Tensor,
+    student_context_logprobs: torch.Tensor,
     teacher_logprobs: torch.Tensor,
-    logprobs: torch.Tensor,
     loss_mask: torch.Tensor,
     prompt_lens: list[int],
     input_data: dict | None = None,
+    eps_clip: float | None = None,
+    mixing_coeff: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Apply direction-aware evidence reweighting to token advantages.
+
+    ``student_context_logprobs`` is the rollout log-probability under the
+    student prompt, while ``teacher_logprobs`` is the privileged-context
+    teacher log-probability for the same sampled token. The resulting weights
+    are detached so the teacher signal only redistributes credit.
+    """
+    teacher_chosen_logprobs, valid_mask = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher_logprobs,
+        target=student_context_logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=prompt_lens,
+        input_data=input_data,
+    )
+    valid_mask = valid_mask & loss_mask.bool()
+
+    delta = (teacher_chosen_logprobs - student_context_logprobs).detach()
+    signed_delta = torch.sign(advantages.detach()) * delta
+    evidence_weight = torch.exp(signed_delta)
+    evidence_weight = torch.where(
+        valid_mask, evidence_weight, torch.ones_like(evidence_weight)
+    )
+
+    if eps_clip is not None:
+        if eps_clip < 0:
+            raise ValueError(f"distill_eps_clip must be non-negative, got {eps_clip}")
+        credit_weight = torch.clamp(evidence_weight, 1.0 - eps_clip, 1.0 + eps_clip)
+    else:
+        credit_weight = evidence_weight
+
+    if not 0.0 <= mixing_coeff <= 1.0:
+        raise ValueError(f"distill_mixing_coeff must be in [0, 1], got {mixing_coeff}")
+    credit_weight = (1.0 - mixing_coeff) + mixing_coeff * credit_weight
+    reweighted_advantages = advantages * credit_weight.detach()
+
+    stat = {
+        "delta": torch.where(valid_mask, delta, torch.zeros_like(delta)).detach(),
+        "evidence_weight": torch.where(
+            valid_mask, evidence_weight, torch.ones_like(evidence_weight)
+        ).detach(),
+        "credit_weight": torch.where(
+            valid_mask, credit_weight, torch.ones_like(credit_weight)
+        ).detach(),
+    }
+    return reweighted_advantages, stat
+
+
+def _align_teacher_chosen_logprobs(
+    teacher_logprobs: torch.Tensor,
+    target: torch.Tensor,
+    loss_mask: torch.Tensor,
+    prompt_lens: list[int],
+    input_data: dict | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Align response-only teacher log-probs to full-sequence chosen log-probs."""
+    if teacher_logprobs.numel() == 0:
+        return torch.zeros_like(target), torch.zeros_like(target, dtype=torch.bool)
+
+    if teacher_logprobs.shape == target.shape:
+        teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
+        valid = loss_mask.bool() & (teacher.abs() > 1e-8)
+        return teacher, valid
+
+    mask = loss_mask.bool()
+    teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
+    aligned = torch.zeros_like(target)
+    valid = torch.zeros_like(target, dtype=torch.bool)
+
+    if teacher.dim() == target.dim() + 1:
+        teacher = teacher[..., 0]
+
+    cu_seqlens = (input_data or {}).get("cu_seqlens")
+    if target.dim() == 1 and teacher.dim() == 2 and cu_seqlens is not None:
+        for b in range(min(teacher.shape[0], len(cu_seqlens) - 1)):
+            start = int(cu_seqlens[b].item())
+            end = int(cu_seqlens[b + 1].item())
+            pl = prompt_lens[b] if b < len(prompt_lens) else 0
+            seg_mask = mask[start:end]
+            resp_len = min(int(seg_mask[pl:].sum().item()), teacher.shape[1])
+            if resp_len <= 0:
+                continue
+            dst = slice(start + pl, start + pl + resp_len)
+            aligned[dst] = teacher[b, :resp_len]
+            valid[dst] = seg_mask[pl : pl + resp_len] & (
+                teacher[b, :resp_len].abs() > 1e-8
+            )
+        return aligned, valid
+
+    if target.dim() == 1 and teacher.dim() == 1:
+        response_positions = mask.nonzero(as_tuple=False).squeeze(-1)
+        n_pos = min(response_positions.numel(), teacher.shape[0])
+        if n_pos > 0:
+            positions = response_positions[:n_pos]
+            aligned[positions] = teacher[:n_pos]
+            valid[positions] = teacher[:n_pos].abs() > 1e-8
+        return aligned, valid
+
+    if target.dim() == 2 and teacher.dim() == 2:
+        batch_size = min(target.shape[0], teacher.shape[0])
+        for b in range(batch_size):
+            pl = prompt_lens[b] if b < len(prompt_lens) else 0
+            resp_len = min(int(mask[b, pl:].sum().item()), teacher.shape[1])
+            if resp_len <= 0:
+                continue
+            aligned[b, pl : pl + resp_len] = teacher[b, :resp_len]
+            valid[b, pl : pl + resp_len] = mask[b, pl : pl + resp_len] & (
+                teacher[b, :resp_len].abs() > 1e-8
+            )
+        return aligned, valid
+
+    raise ValueError(
+        "Unsupported teacher_logp shape for distill evidence loss: "
+        f"teacher={teacher_logprobs.shape}, target={target.shape}, "
+        f"loss_mask={loss_mask.shape}"
+    )
+
+
+def _compute_teacher_kl_loss(
+    logprobs: torch.Tensor,
+    loss_mask: torch.Tensor,
+    prompt_lens: list[int],
+    teacher_logprobs: torch.Tensor | None = None,
+    input_data: dict | None = None,
     distill_kl_mode: str = "reverse_kl",
+    position_rewards: list | None = None,
 ) -> torch.Tensor:
     """Compute teacher KL distillation loss from batched teacher_logprobs tensor.
 
@@ -232,7 +421,14 @@ def _compute_teacher_kl_loss(
     Supports both batched (loss_mask 2D) and 1D packed (loss_mask 1D + cu_seqlens)
     formats for logprobs and loss_mask.
     """
-    if teacher_logprobs.numel() == 0:
+    if teacher_logprobs is None and position_rewards is not None:
+        return _compute_position_reward_teacher_kl_loss(
+            position_rewards=position_rewards,
+            logprobs=logprobs,
+            loss_mask=loss_mask,
+            prompt_lens=prompt_lens,
+        )
+    if teacher_logprobs is None or teacher_logprobs.numel() == 0:
         return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
 
     terms: list[torch.Tensor] = []
@@ -346,6 +542,62 @@ def _compute_teacher_kl_loss(
     return torch.cat(terms).mean()
 
 
+def _compute_position_reward_teacher_kl_loss(
+    position_rewards: list,
+    logprobs: torch.Tensor,
+    loss_mask: torch.Tensor,
+    prompt_lens: list[int],
+) -> torch.Tensor:
+    """Legacy PositionRewardInfo KL path used by older tests/callers."""
+    if not position_rewards:
+        return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
+
+    terms: list[torch.Tensor] = []
+    mask = loss_mask.bool()
+    is_batched = mask.dim() == 2 or logprobs.dim() >= 3
+
+    for pr in position_rewards:
+        teacher_lps = getattr(pr, "teacher_logprobs", None)
+        if not teacher_lps:
+            continue
+
+        sample_idx = getattr(pr, "sample_index", 0)
+        if isinstance(prompt_lens, list):
+            pl = prompt_lens[sample_idx] if sample_idx < len(prompt_lens) else 0
+        else:
+            pl = int(prompt_lens)
+        abs_pos = int(getattr(pr, "position", 0)) + pl
+
+        if is_batched:
+            if sample_idx >= logprobs.shape[0] or abs_pos >= logprobs.shape[1]:
+                continue
+            pos_mask = mask[sample_idx, abs_pos]
+            student_row = logprobs[sample_idx, abs_pos]
+        else:
+            if abs_pos >= logprobs.shape[0]:
+                continue
+            pos_mask = mask[abs_pos]
+            student_row = logprobs[abs_pos]
+        if not bool(pos_mask):
+            continue
+
+        teacher = torch.tensor(
+            teacher_lps, dtype=logprobs.dtype, device=logprobs.device
+        )
+        if student_row.dim() == 0:
+            chosen_index = min(int(getattr(pr, "chosen_index", 0)), teacher.numel() - 1)
+            terms.append(student_row - teacher[chosen_index])
+            continue
+
+        n_cand = min(student_row.shape[-1], teacher.numel())
+        if n_cand > 0:
+            terms.append((student_row[:n_cand] - teacher[:n_cand]).reshape(-1))
+
+    if not terms:
+        return torch.tensor(0.0, dtype=logprobs.dtype, device=logprobs.device)
+    return torch.cat([term.reshape(-1) for term in terms]).mean()
+
+
 def _compute_subset_kl(
     student_logprobs: torch.Tensor,
     teacher_logprobs: torch.Tensor,
@@ -366,8 +618,7 @@ def _compute_subset_kl(
         student_probs = student_logprobs.exp()
         return (student_probs * (student_logprobs - teacher_logprobs)).sum(dim=-1)
     raise ValueError(
-        "distill_kl_mode must be 'forward_kl' or 'reverse_kl', "
-        f"got {distill_kl_mode!r}"
+        f"distill_kl_mode must be 'forward_kl' or 'reverse_kl', got {distill_kl_mode!r}"
     )
 
 

@@ -1,24 +1,24 @@
-import requests
 import json
 import math
 
+import requests
 
 API_KEY = "pAx3ob61ByPD8NDYcDRGDJ2k7LjObP8M"
 
 url = "https://api.deepinfra.com/v1/openai/completions"
 prompt_text = "what is your name"
 payload = {
-  "model": "deepseek-ai/DeepSeek-V3",
-  "max_tokens": 1,
-  "temperature": 0.6,
-  "logprobs": 5,
-  "echo": True,
-  "prompt": prompt_text
+    "model": "deepseek-ai/DeepSeek-V3",
+    "max_tokens": 1,
+    "temperature": 0.6,
+    "logprobs": 5,
+    "echo": True,
+    "prompt": prompt_text,
 }
 headers = {
-  "Accept": "application/json",
-  "Content-Type": "application/json",
-  "Authorization": f"Bearer {API_KEY}"
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {API_KEY}",
 }
 response = requests.request("POST", url, headers=headers, data=json.dumps(payload))
 data = response.json()
@@ -51,4 +51,6 @@ for i, (token, log_p, top_lp, offset) in enumerate(
         continue
     sorted_top = sorted(top_lp.items(), key=lambda x: -x[1])
     for rank, (t, p) in enumerate(sorted_top):
-        print(f"  top-{rank+1}: {repr(t):<20} logP={p:>10.6f}  prob={math.exp(p):.8f}")
+        print(
+            f"  top-{rank + 1}: {repr(t):<20} logP={p:>10.6f}  prob={math.exp(p):.8f}"
+        )

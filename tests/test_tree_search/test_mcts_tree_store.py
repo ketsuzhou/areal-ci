@@ -115,7 +115,6 @@ def _make_traj(
     query_id: str | None = None,
     node_id: str = "",
 ) -> Node:
-    seq_len = len(input_ids)
     # Convert lists to tensors as expected by Node
     input_ids_tensor = torch.tensor(input_ids, dtype=torch.int32)
     loss_mask_tensor = torch.tensor(loss_mask, dtype=torch.int32)

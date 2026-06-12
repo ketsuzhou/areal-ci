@@ -62,8 +62,7 @@ def test_get_tpfc_rl_dataset_normalizes_malformed_rows(tmp_path, monkeypatch):
         {
             "role": "user",
             "content": (
-                "<context>hidden</context>\n"
-                "Prefix <User Query>: What is the answer?"
+                "<context>hidden</context>\nPrefix <User Query>: What is the answer?"
             ),
         },
     ]

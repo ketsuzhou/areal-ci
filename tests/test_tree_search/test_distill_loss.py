@@ -1,8 +1,9 @@
 import torch
 
-from customized_areal.tree_search.distill_types import PositionRewardInfo
+from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
 from customized_areal.tree_search.training.actor import _distribute_position_rewards
 from customized_areal.tree_search.training.loss import (
+    _compute_distill_reweighted_advantages,
     _compute_teacher_kl_loss,
     _select_chosen_logprobs,
     grpo_distill_loss_fn,
@@ -69,6 +70,107 @@ def test_grpo_distill_loss_uses_current_rejection_sampling_api():
     )
 
     assert loss.shape == torch.Size([])
+
+
+def test_distill_reweighting_supports_positive_advantage_tokens():
+    advantages = torch.tensor([[2.0, 2.0, 2.0]])
+    student_logprobs = torch.tensor([[-9.0, -2.0, -2.0]])
+    teacher_logprobs = torch.tensor([[[-1.0], [-3.0]]])
+    loss_mask = torch.tensor([[0, 1, 1]], dtype=torch.bool)
+
+    reweighted, stat = _compute_distill_reweighted_advantages(
+        advantages=advantages,
+        student_context_logprobs=student_logprobs,
+        teacher_logprobs=teacher_logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[1],
+        eps_clip=None,
+    )
+
+    expected = torch.tensor(
+        [[2.0, 2.0 * torch.exp(torch.tensor(1.0)), 2.0 * torch.exp(torch.tensor(-1.0))]]
+    )
+    torch.testing.assert_close(reweighted, expected)
+    torch.testing.assert_close(stat["delta"], torch.tensor([[0.0, 1.0, -1.0]]))
+
+
+def test_distill_reweighting_inverts_for_negative_advantage_tokens():
+    advantages = torch.tensor([[0.0, -2.0, -2.0]])
+    student_logprobs = torch.tensor([[-9.0, -2.0, -2.0]])
+    teacher_logprobs = torch.tensor([[[-1.0], [-3.0]]])
+    loss_mask = torch.tensor([[0, 1, 1]], dtype=torch.bool)
+
+    reweighted, stat = _compute_distill_reweighted_advantages(
+        advantages=advantages,
+        student_context_logprobs=student_logprobs,
+        teacher_logprobs=teacher_logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[1],
+        eps_clip=None,
+    )
+
+    expected = torch.tensor(
+        [
+            [
+                0.0,
+                -2.0 * torch.exp(torch.tensor(-1.0)),
+                -2.0 * torch.exp(torch.tensor(1.0)),
+            ]
+        ]
+    )
+    torch.testing.assert_close(reweighted, expected)
+    torch.testing.assert_close(
+        stat["evidence_weight"],
+        torch.tensor(
+            [[1.0, torch.exp(torch.tensor(-1.0)), torch.exp(torch.tensor(1.0))]]
+        ),
+    )
+
+
+def test_distill_reweighting_clips_and_mixes_credit_weights():
+    advantages = torch.tensor([[1.0, 1.0]])
+    student_logprobs = torch.tensor([[-10.0, -5.0]])
+    teacher_logprobs = torch.tensor([[[-5.0], [-10.0]]])
+    loss_mask = torch.tensor([[1, 1]], dtype=torch.bool)
+
+    reweighted, stat = _compute_distill_reweighted_advantages(
+        advantages=advantages,
+        student_context_logprobs=student_logprobs,
+        teacher_logprobs=teacher_logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[0],
+        eps_clip=0.2,
+        mixing_coeff=0.5,
+    )
+
+    torch.testing.assert_close(reweighted, torch.tensor([[1.1, 0.9]]))
+    torch.testing.assert_close(stat["credit_weight"], torch.tensor([[1.1, 0.9]]))
+
+
+def test_distill_reweighting_ignores_missing_zero_teacher_logp_rows():
+    advantages = torch.tensor([[1.0, 1.0, -1.0]])
+    student_logprobs = torch.tensor([[-9.0, -2.0, -2.0]])
+    teacher_logprobs = torch.tensor([[[0.0], [-3.0]]])
+    loss_mask = torch.tensor([[0, 1, 1]], dtype=torch.bool)
+
+    reweighted, stat = _compute_distill_reweighted_advantages(
+        advantages=advantages,
+        student_context_logprobs=student_logprobs,
+        teacher_logprobs=teacher_logprobs,
+        loss_mask=loss_mask,
+        prompt_lens=[1],
+        eps_clip=None,
+    )
+
+    torch.testing.assert_close(
+        reweighted,
+        torch.tensor([[1.0, 1.0, -1.0 * torch.exp(torch.tensor(1.0))]]),
+    )
+    torch.testing.assert_close(stat["delta"], torch.tensor([[0.0, 0.0, -1.0]]))
+    torch.testing.assert_close(
+        stat["credit_weight"],
+        torch.tensor([[1.0, 1.0, torch.exp(torch.tensor(1.0))]]),
+    )
 
 
 def test_compute_teacher_kl_loss_1d_uses_prompt_len_absolute_positions():

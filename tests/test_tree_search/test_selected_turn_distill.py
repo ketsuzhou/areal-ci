@@ -1,6 +1,6 @@
 import pytest
 
-from customized_areal.tree_search.config import TreeBackupConfig
+from customized_areal.tree_search.config import Config
 from customized_areal.tree_search.core.tree_store import Node
 from customized_areal.tree_search.distilling.distill_types import (
     DiagnosisTurn,
@@ -120,8 +120,8 @@ def test_package_exports_selected_turn_diagnosis_types():
     assert ExportedEpisodeDiagnosis is EpisodeDiagnosis
 
 
-def test_tree_backup_config_has_distill_defaults():
-    config = TreeBackupConfig()
+def test_config_has_distill_defaults():
+    config = Config()
 
     assert config.topk_distill is False
     assert config.teacher_provider == "external"

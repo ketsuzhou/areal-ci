@@ -27,7 +27,6 @@ import time
 import httpx
 from transformers import AutoTokenizer
 
-
 DEFAULT_BASE_URL = "http://10.254.244.168:8443/service-large-64-1775803465274/llm/v1"
 DEFAULT_MODEL = "Qwen3.5_397B_A17B_FP8"
 DEFAULT_TOKENIZER = "/dfs/share-groups/letrain/ckpt/Qwen3.5-9B"
@@ -66,7 +65,7 @@ async def test_prompt_logprobs(
     output_ids = tokenizer.encode(output_text, add_special_tokens=False)
     all_ids = input_ids + output_ids
 
-    print(f"\n--- Prompt Logprob Test ---")
+    print("\n--- Prompt Logprob Test ---")
     print(f"  Input text:  {input_text!r}")
     print(f"  Output text: {output_text!r}")
     print(f"  input_ids:   {input_ids}")
@@ -106,24 +105,28 @@ async def test_prompt_logprobs(
     data = resp.json()
     choices = data.get("choices", [])
     if not choices:
-        print(f"[FAIL] No choices in response")
+        print("[FAIL] No choices in response")
         return False
 
     logprobs_data = choices[0].get("logprobs", {})
     top_logprobs_list = logprobs_data.get("top_logprobs", [])
 
     total_positions = len(top_logprobs_list)
-    output_top_logprobs = top_logprobs_list[len(input_ids) : len(input_ids) + len(output_ids)]
+    output_top_logprobs = top_logprobs_list[
+        len(input_ids) : len(input_ids) + len(output_ids)
+    ]
 
     print(f"\n  Response in {elapsed:.2f}s")
     print(f"  Total logprob positions returned: {total_positions}")
-    print(f"  Output logprob positions: {len(output_top_logprobs)} (expected {len(output_ids)})")
+    print(
+        f"  Output logprob positions: {len(output_top_logprobs)} (expected {len(output_ids)})"
+    )
 
     if len(output_top_logprobs) < len(output_ids):
-        print(f"[FAIL] Fewer output logprob positions than expected")
+        print("[FAIL] Fewer output logprob positions than expected")
         return False
 
-    print(f"\n  Prompt logprobs at output positions:")
+    print("\n  Prompt logprobs at output positions:")
     all_ok = True
     for i, pos_entry in enumerate(output_top_logprobs):
         if pos_entry is None:
@@ -131,8 +134,12 @@ async def test_prompt_logprobs(
             all_ok = False
             continue
 
-        token_entries = list(pos_entry.items()) if isinstance(pos_entry, dict) else pos_entry
-        print(f"    pos {i} (output token {output_ids[i]} = {tokenizer.decode([output_ids[i]])!r}):")
+        token_entries = (
+            list(pos_entry.items()) if isinstance(pos_entry, dict) else pos_entry
+        )
+        print(
+            f"    pos {i} (output token {output_ids[i]} = {tokenizer.decode([output_ids[i]])!r}):"
+        )
         for entry in token_entries[:3]:
             if isinstance(entry, dict):
                 tid = entry.get("token_id") or entry.get("id")
@@ -144,14 +151,18 @@ async def test_prompt_logprobs(
 
     prompt_top_logprobs = top_logprobs_list[1 : len(input_ids)]
     prompt_with_logprobs = sum(1 for p in prompt_top_logprobs if p is not None)
-    print(f"\n  Prompt positions with logprobs: {prompt_with_logprobs}/{len(prompt_top_logprobs)}")
+    print(
+        f"\n  Prompt positions with logprobs: {prompt_with_logprobs}/{len(prompt_top_logprobs)}"
+    )
 
-    print(f"\n  Prompt token logprobs:")
+    print("\n  Prompt token logprobs:")
     for i, pos_entry in enumerate(prompt_top_logprobs):
         token_id = input_ids[i + 1]  # offset by 1 since we sliced from pos 1
         token_text = tokenizer.decode([token_id])
         if pos_entry is None:
-            print(f"    pos {i+1}: token_id={token_id} ({token_text!r}) logprob=None (missing)")
+            print(
+                f"    pos {i + 1}: token_id={token_id} ({token_text!r}) logprob=None (missing)"
+            )
             continue
         # Look for the actual token's logprob in the top-k entries
         token_logp = None
@@ -163,23 +174,35 @@ async def test_prompt_logprobs(
                         token_logp = entry.get("logprob")
                         break
                 elif isinstance(key, int) and key == token_id:
-                    token_logp = entry if isinstance(entry, (int, float)) else entry.get("logprob") if isinstance(entry, dict) else None
+                    token_logp = (
+                        entry
+                        if isinstance(entry, (int, float))
+                        else entry.get("logprob")
+                        if isinstance(entry, dict)
+                        else None
+                    )
                     break
         if token_logp is not None:
-            print(f"    pos {i+1}: token_id={token_id} ({token_text!r}) logp={token_logp:.6f}")
+            print(
+                f"    pos {i + 1}: token_id={token_id} ({token_text!r}) logp={token_logp:.6f}"
+            )
         else:
             # Fallback: print top-3 entries so we can inspect
-            token_entries = list(pos_entry.items()) if isinstance(pos_entry, dict) else pos_entry
-            print(f"    pos {i+1}: token_id={token_id} ({token_text!r}) logp=NOT_IN_TOP_K  top3:")
-            for entry in (token_entries[:3] if isinstance(token_entries, list) else []):
+            token_entries = (
+                list(pos_entry.items()) if isinstance(pos_entry, dict) else pos_entry
+            )
+            print(
+                f"    pos {i + 1}: token_id={token_id} ({token_text!r}) logp=NOT_IN_TOP_K  top3:"
+            )
+            for entry in token_entries[:3] if isinstance(token_entries, list) else []:
                 if isinstance(entry, tuple) and len(entry) >= 2:
                     print(f"      {entry}")
 
     if all_ok and len(output_top_logprobs) == len(output_ids):
-        print(f"\n[PASS] Prompt logprobs working correctly")
+        print("\n[PASS] Prompt logprobs working correctly")
         return True
     else:
-        print(f"\n[FAIL] Prompt logprobs incomplete or missing")
+        print("\n[FAIL] Prompt logprobs incomplete or missing")
         return False
 
 
@@ -200,7 +223,7 @@ async def test_raw_text_logprobs(
         "echo": True,
     }
 
-    print(f"\n--- Raw Text Echo Test ---")
+    print("\n--- Raw Text Echo Test ---")
     try:
         resp = await client.post(
             f"{base_url}/completions",
@@ -232,10 +255,10 @@ async def test_raw_text_logprobs(
 
     has_prompt_lps = any(p is not None for p in top_logprobs[:-1])
     if has_prompt_lps:
-        print(f"[PASS] Echo logprobs include prompt positions")
+        print("[PASS] Echo logprobs include prompt positions")
         return True
     else:
-        print(f"[FAIL] No prompt position logprobs in echo response")
+        print("[FAIL] No prompt position logprobs in echo response")
         return False
 
 
@@ -243,12 +266,18 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description="Verify teacher API prompt logprobs")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="Teacher API key (reads WORKSPACE_OPENAI_API_KEY env if not set)")
+    parser.add_argument(
+        "--api-key",
+        default=DEFAULT_API_KEY,
+        help="Teacher API key (reads WORKSPACE_OPENAI_API_KEY env if not set)",
+    )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     args = parser.parse_args()
 
-    api_key = args.api_key or __import__("os").environ.get("WORKSPACE_OPENAI_API_KEY", "")
+    api_key = args.api_key or __import__("os").environ.get(
+        "WORKSPACE_OPENAI_API_KEY", ""
+    )
     if not api_key:
         print("[FAIL] No API key provided. Use --api-key or set TEACHER_API_KEY.")
         return 1
@@ -269,7 +298,9 @@ async def main() -> int:
             return 1
         results.append(("Health check", ok))
 
-        ok = await test_raw_text_logprobs(client, args.base_url, api_key, args.model, args.top_k)
+        ok = await test_raw_text_logprobs(
+            client, args.base_url, api_key, args.model, args.top_k
+        )
         results.append(("Raw text echo logprobs", ok))
 
         ok = await test_prompt_logprobs(
@@ -277,7 +308,7 @@ async def main() -> int:
         )
         results.append(("Token-ID prompt logprobs", ok))
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print("Summary:")
     for name, ok in results:
         status = "PASS" if ok else "FAIL"

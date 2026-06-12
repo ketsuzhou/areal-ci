@@ -1,31 +1,26 @@
-import requests
 import json
 import math
 
+import requests
 
 API_KEY = "fw_SFMBCxGcfYk3ieCmRTCzzT"
 
 url = "https://api.fireworks.ai/inference/v1/chat/completions"
 prompt_text = "what is your name"
 payload = {
-  "model": "accounts/fireworks/models/deepseek-v4-flash",
-  "max_tokens": 1,
-  "presence_penalty": 0,
-  "frequency_penalty": 0,
-  "temperature": 0.6,
-  "logprobs": 5,
-  "messages": [
-    {
-      "role": "user",
-      "content": prompt_text
-    }
-  ],
-  "echo": True
+    "model": "accounts/fireworks/models/deepseek-v4-flash",
+    "max_tokens": 1,
+    "presence_penalty": 0,
+    "frequency_penalty": 0,
+    "temperature": 0.6,
+    "logprobs": 5,
+    "messages": [{"role": "user", "content": prompt_text}],
+    "echo": True,
 }
 headers = {
-  "Accept": "application/json",
-  "Content-Type": "application/json",
-  "Authorization": f"Bearer {API_KEY}"
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {API_KEY}",
 }
 response = requests.request("POST", url, headers=headers, data=json.dumps(payload))
 data = response.json()
@@ -58,4 +53,6 @@ for i, (token, log_p, top_lp, offset) in enumerate(
         continue
     sorted_top = sorted(top_lp.items(), key=lambda x: -x[1])
     for rank, (t, p) in enumerate(sorted_top):
-        print(f"  top-{rank+1}: {repr(t):<20} logP={p:>10.6f}  prob={math.exp(p):.8f}")
+        print(
+            f"  top-{rank + 1}: {repr(t):<20} logP={p:>10.6f}  prob={math.exp(p):.8f}"
+        )

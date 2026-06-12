@@ -1,3 +1,7 @@
+"""TPFC backend task runner."""
+
+# ruff: noqa: E402
+
 import asyncio
 import json
 import logging

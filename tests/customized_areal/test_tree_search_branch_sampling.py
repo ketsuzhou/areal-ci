@@ -7,9 +7,9 @@ from customized_areal.db_service.messages import (
     copy_messages_to_task,
     truncate_messages_before_turn,
 )
-from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
+from customized_areal.tpfc.tpfc_agent import TPFCAgentResult
 from customized_areal.tree_search.config import SampleSource
-from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.core.customized_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
     annotate_nodes_from_run,
@@ -17,6 +17,7 @@ from customized_areal.tree_search.core.customized_grouped_workflow import (
     choose_sample_source,
     select_branch_candidate,
 )
+from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 
 class FakeInsert:
@@ -418,19 +419,19 @@ async def test_build_branch_task_uses_sandbox_directly_without_clone(monkeypatch
         copied.append(("messages", task_id, messages))
 
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow._get_raw_messages_with_client",
+        "customized_areal.tree_search.core.customized_grouped_workflow._get_raw_messages_with_client",
         fake_get_raw_messages,
     )
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.create_task",
+        "customized_areal.tree_search.core.customized_grouped_workflow.create_task",
         fake_create_task,
     )
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.bind_sandbox_to_task",
+        "customized_areal.tree_search.core.customized_grouped_workflow.bind_sandbox_to_task",
         fake_bind_sandbox_to_task,
     )
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.copy_messages_to_task",
+        "customized_areal.tree_search.core.customized_grouped_workflow.copy_messages_to_task",
         fake_copy_messages_to_task,
     )
 
@@ -530,9 +531,6 @@ async def test_run_fresh_episode_uses_isolated_data_for_scratch_metadata():
     assert second.task_id == "task-2"
 
 
-from customized_areal.tpfc.tpfc_agent import TPFCAgentResult
-
-
 def test_tpfca_agent_result_is_picklable():
     result = TPFCAgentResult(
         reward=0.75,
@@ -599,7 +597,7 @@ async def test_cleanup_branch_deletes_sandbox_and_clears_node_state(monkeypatch)
         deleted_ids.append(sandbox_id)
 
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.delete_sandbox",
+        "customized_areal.tree_search.core.customized_grouped_workflow.delete_sandbox",
         fake_delete_sandbox,
     )
 
@@ -623,7 +621,7 @@ async def test_cleanup_branch_tolerates_delete_failure(monkeypatch):
         raise RuntimeError("sandbox API down")
 
     monkeypatch.setattr(
-        "customized_areal.tree_search.tree_search_grouped_workflow.delete_sandbox",
+        "customized_areal.tree_search.core.customized_grouped_workflow.delete_sandbox",
         failing_delete,
     )
 
@@ -699,7 +697,7 @@ async def test_run_fresh_episode_calls_cleanup_after_branch():
     workflow._cleanup_branch = fake_cleanup
 
     data = {"query_id": "q"}
-    result = await workflow._run_fresh_episode(None, data, 0, "q")
+    await workflow._run_fresh_episode(None, data, 0, "q")
 
     assert len(cleanup_called) == 1
     assert cleanup_called[0] is candidate

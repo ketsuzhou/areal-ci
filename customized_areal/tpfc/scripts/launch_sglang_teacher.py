@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """Launch a standalone SGLang server for external teacher distillation.
 
 Usage:

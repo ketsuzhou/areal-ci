@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from customized_areal.tree_search.config import TreeBackupConfig
+from customized_areal.tree_search.config import Config
 
 
-class TestTreeBackupConfigDynamicFields:
+class TestConfigDynamicFields:
     def test_defaults(self):
-        cfg = TreeBackupConfig()
+        cfg = Config()
         assert cfg.dynamic_group_size is False
         assert cfg.initial_group_size == 4
         assert cfg.max_group_size == 64
@@ -18,7 +18,7 @@ class TestTreeBackupConfigDynamicFields:
         assert cfg.reward_type == "binary"
 
     def test_custom_values(self):
-        cfg = TreeBackupConfig(
+        cfg = Config(
             dynamic_group_size=True,
             initial_group_size=8,
             max_group_size=128,
@@ -33,19 +33,19 @@ class TestTreeBackupConfigDynamicFields:
 
     def test_initial_group_size_must_be_positive(self):
         with pytest.raises(ValueError, match="initial_group_size"):
-            TreeBackupConfig(initial_group_size=0)
+            Config(initial_group_size=0)
 
     def test_max_group_size_must_be_at_least_initial(self):
         with pytest.raises(ValueError, match="max_group_size"):
-            TreeBackupConfig(initial_group_size=10, max_group_size=5)
+            Config(initial_group_size=10, max_group_size=5)
 
     def test_uncertainty_threshold_must_be_non_negative(self):
         with pytest.raises(ValueError, match="uncertainty_threshold"):
-            TreeBackupConfig(uncertainty_threshold=-0.01)
+            Config(uncertainty_threshold=-0.01)
 
     def test_reward_type_must_be_valid(self):
         with pytest.raises(ValueError, match="reward_type"):
-            TreeBackupConfig(reward_type="unknown")
+            Config(reward_type="unknown")
 
 
 class TestComputeQueryUncertainty:
@@ -346,7 +346,9 @@ class TestWorkflowFailureHandling:
         wf._cleanup_branch = AsyncMock()
 
         with pytest.raises(RuntimeError, match="branch failed"):
-            await wf._run_fresh_episode(MagicMock(), {"query_id": "q_branch"}, 0, "q_branch")
+            await wf._run_fresh_episode(
+                MagicMock(), {"query_id": "q_branch"}, 0, "q_branch"
+            )
 
         wf._cleanup_branch.assert_awaited_once_with(candidate)
 
@@ -879,7 +881,9 @@ class TestPrecomputedAdvantages:
         trainer.actor.get_device_stats.return_value = MagicMock(log=MagicMock())
         trainer.actor.step_lr_scheduler = MagicMock()
         trainer.actor.compute_advantages = MagicMock(return_value=rollout_batch)
-        trainer.actor.ppo_update = MagicMock(side_effect=RuntimeError("stop_after_update"))
+        trainer.actor.ppo_update = MagicMock(
+            side_effect=RuntimeError("stop_after_update")
+        )
         trainer.rollout = MagicMock()
         trainer.critic = None
         trainer.ref = None

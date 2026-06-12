@@ -15,11 +15,11 @@ This design uses the following decisions:
 
 1. `dynamic_group_size` uses a per-query absolute uncertainty threshold, not a
    batch-relative percentile threshold.
-2. A query is discarded only when `n_episodes >= 2` and all sampled episodes have
+1. A query is discarded only when `n_episodes >= 2` and all sampled episodes have
    identical rewards.
-3. Continuous rewards use a clean conjugate Bayesian model with unknown variance:
+1. Continuous rewards use a clean conjugate Bayesian model with unknown variance:
    Normal-Inverse-Gamma.
-4. When `AdvantageMode.TREE` is enabled, the workflow-owned
+1. When `AdvantageMode.TREE` is enabled, the workflow-owned
    `self.tree_advantage_computer.compute(all_nodes)` is the source of truth for
    `advantages` and `returns`. Trainer-side `actor.compute_advantages(...)` must be
    skipped for batches that already contain precomputed tree advantages.
@@ -29,9 +29,9 @@ This design uses the following decisions:
 Add a `dynamic_group_size` mode that:
 
 1. Samples an initial batch of episodes per query
-2. Measures per-query uncertainty from episode rewards, scaled by average step count
-3. Iteratively adds episodes while uncertainty remains above a fixed absolute threshold
-4. Discards reward-degenerate queries only when there are at least 2 episodes and all
+1. Measures per-query uncertainty from episode rewards, scaled by average step count
+1. Iteratively adds episodes while uncertainty remains above a fixed absolute threshold
+1. Discards reward-degenerate queries only when there are at least 2 episodes and all
    rewards are identical
 
 ## Uncertainty Measure
@@ -108,7 +108,7 @@ U(q) <= uncertainty_threshold
 Otherwise, continue sampling one episode at a time until either:
 
 1. `U(q) <= uncertainty_threshold`, or
-2. `n_q >= max_group_size`
+1. `n_q >= max_group_size`
 
 This rule is purely per-query. It does not depend on batch-relative state and does not
 require any workflow-level batch reset mechanism.
@@ -118,7 +118,7 @@ require any workflow-level batch reset mechanism.
 Discard a query only when both conditions hold:
 
 1. `n_episodes >= 2`
-2. all episode rewards are identical
+1. all episode rewards are identical
 
 Single-episode queries are never discarded by this rule.
 
@@ -151,8 +151,8 @@ tensor dict.
 Therefore, when `AdvantageMode.TREE` is enabled:
 
 1. the workflow computes `advantages` and `returns`
-2. the rollout tensor dict returned from the workflow carries those precomputed values
-3. the trainer must not recompute GAE/GRPO advantages via
+1. the rollout tensor dict returned from the workflow carries those precomputed values
+1. the trainer must not recompute GAE/GRPO advantages via
    `self.actor.compute_advantages(rollout_batch)`
 
 Recommended trainer behavior:
@@ -171,13 +171,13 @@ the trainer loop.
 
 New fields added to `TreeBackupConfig`:
 
-| Field | Type | Default | Description |
-|------|------|---------|-------------|
-| `dynamic_group_size` | bool | False | Enable dynamic group size mode |
-| `initial_group_size` | int | 4 | Minimum episodes per query before uncertainty check |
-| `max_group_size` | int | 64 | Hard cap on episodes per query |
-| `uncertainty_threshold` | float | 0.05 | Stop sampling when `U(q)` is at or below this value |
-| `reward_type` | str | `"binary"` | `"binary"` for Beta posterior, `"continuous"` for Normal-Inverse-Gamma posterior |
+| Field                   | Type  | Default    | Description                                                                      |
+| ----------------------- | ----- | ---------- | -------------------------------------------------------------------------------- |
+| `dynamic_group_size`    | bool  | False      | Enable dynamic group size mode                                                   |
+| `initial_group_size`    | int   | 4          | Minimum episodes per query before uncertainty check                              |
+| `max_group_size`        | int   | 64         | Hard cap on episodes per query                                                   |
+| `uncertainty_threshold` | float | 0.05       | Stop sampling when `U(q)` is at or below this value                              |
+| `reward_type`           | str   | `"binary"` | `"binary"` for Beta posterior, `"continuous"` for Normal-Inverse-Gamma posterior |
 
 When `dynamic_group_size=True`:
 
@@ -204,20 +204,20 @@ When dynamic mode is enabled:
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `customized_areal/tree_search/config.py` | Add dynamic sampling config fields |
-| `customized_areal/tree_search/core/uncertainty.py` | Add Bayesian uncertainty helpers |
-| `customized_areal/tree_search/core/customized_grouped_workflow.py` | Add iterative sampling loop, discard rule, uncertainty computation |
-| `areal/experimental/inference_service/controller/controller.py` | Wire new tree-search workflow args |
-| `areal/infra/remote_inf_engine.py` | Wire new tree-search workflow args |
-| `areal/trainer/rl_trainer.py` | Skip `actor.compute_advantages(...)` when rollout trajectories already contain precomputed tree advantages |
-| `tests/customized_areal/test_dynamic_group_size.py` | Add unit tests for config, uncertainty, discard, dynamic sampling, and trainer integration |
+| File                                                               | Change                                                                                                     |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `customized_areal/tree_search/config.py`                           | Add dynamic sampling config fields                                                                         |
+| `customized_areal/tree_search/core/uncertainty.py`                 | Add Bayesian uncertainty helpers                                                                           |
+| `customized_areal/tree_search/core/customized_grouped_workflow.py` | Add iterative sampling loop, discard rule, uncertainty computation                                         |
+| `areal/experimental/inference_service/controller/controller.py`    | Wire new tree-search workflow args                                                                         |
+| `areal/infra/remote_inf_engine.py`                                 | Wire new tree-search workflow args                                                                         |
+| `areal/trainer/rl_trainer.py`                                      | Skip `actor.compute_advantages(...)` when rollout trajectories already contain precomputed tree advantages |
+| `tests/customized_areal/test_dynamic_group_size.py`                | Add unit tests for config, uncertainty, discard, dynamic sampling, and trainer integration                 |
 
 ## Error Handling
 
-- If a fresh episode fails during iterative sampling, skip it and continue if progress is
-  still possible.
+- If a fresh episode fails during iterative sampling, skip it and continue if progress
+  is still possible.
 - If the initial `initial_group_size` episodes all fail, return `None`.
 - If all surviving episodes are discarded by distillation-only filtering, return `None`.
 - If `max_group_size < initial_group_size`, raise `ValueError`.

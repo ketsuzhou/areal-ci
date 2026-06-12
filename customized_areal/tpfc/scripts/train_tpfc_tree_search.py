@@ -73,7 +73,10 @@ def _validate_tree_search_startup(config: TPFCConfig) -> None:
             tree_search.checkpoint_dir,
         )
 
-    if tree_search.max_distill_tokens and tree_search.max_distill_tokens > config.gconfig.max_tokens:
+    if (
+        tree_search.max_distill_tokens
+        and tree_search.max_distill_tokens > config.gconfig.max_tokens
+    ):
         logger.warning(
             "tree_search.max_distill_tokens=%d exceeds gconfig.max_tokens=%d; "
             "teacher requests may still be skipped by the runtime context limit.",
@@ -182,14 +185,14 @@ def main(args: list[str] | None = None) -> None:
         n_samples=n_samples,
     )
 
-    tree_backup_config = tree_search
+    tree_search_config = tree_search
 
     logger.info(
         "Cache config: dir=%s, n_samples=%d, tree_mode=%s, loss_mode=%s",
         tree_search.checkpoint_dir,
         n_samples,
-        tree_backup_config.mode.value,
-        tree_backup_config.loss_mode.value,
+        tree_search_config.mode.value,
+        tree_search_config.loss_mode.value,
     )
 
     # Build workflow kwargs
@@ -198,7 +201,7 @@ def main(args: list[str] | None = None) -> None:
         top_p=getattr(config.gconfig, "top_p", 1.0),
         max_completion_tokens=config.gconfig.max_new_tokens,
         max_tokens=config.gconfig.max_tokens,
-        tree_search_config=tree_backup_config,
+        tree_search_config=tree_search_config,
     )
     eval_workflow_kwargs = workflow_kwargs.copy()
     eval_workflow_kwargs["temperature"] = 0.6
@@ -206,7 +209,7 @@ def main(args: list[str] | None = None) -> None:
     with CustomizedPPOTrainer(
         config,
         cache_config=cache_config,
-        tree_backup_config=tree_backup_config,
+        tree_search_config=tree_search_config,
         train_dataset=train_dataset,
         valid_dataset=valid_dataset,
     ) as trainer:

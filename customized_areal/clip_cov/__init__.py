@@ -10,6 +10,10 @@ Usage:
 """
 
 from .config import ClipCovConfig
-from .patch import patch_ppo_actor_to_use_clip_cov_loss
+from .patch import patch_ppo_actor_to_use_clip_cov_loss, unpatch_ppo_actor_clip_cov_loss
 
-__all__ = ["ClipCovConfig", "patch_ppo_actor_to_use_clip_cov_loss"]
+__all__ = [
+    "ClipCovConfig",
+    "patch_ppo_actor_to_use_clip_cov_loss",
+    "unpatch_ppo_actor_clip_cov_loss",
+]

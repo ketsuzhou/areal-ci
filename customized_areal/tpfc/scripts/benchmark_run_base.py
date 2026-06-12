@@ -121,7 +121,8 @@ class BenchmarkEvaluator(ABC):
             os.makedirs(self.output_dir, exist_ok=True)
             print(f"Created output directory: {self.output_dir}")
         self.evaluation_llm = openai.AsyncOpenAI(
-            api_key=cfg.env.openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", ""),
+            api_key=cfg.env.openrouter_api_key
+            or os.environ.get("OPENROUTER_API_KEY", ""),
             base_url="https://openrouter.ai/api/v1",
         )
         self.tasks: list[BenchmarkTask] = []

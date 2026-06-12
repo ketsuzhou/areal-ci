@@ -14,8 +14,8 @@ import shutil
 
 import torch
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint import FileSystemReader
 from safetensors.torch import save_file
+from torch.distributed.checkpoint import FileSystemReader
 
 
 def load_dcp_model_state(ckpt_path: str) -> dict[str, torch.Tensor]:
@@ -123,7 +123,7 @@ def save_hf_checkpoint(
     index_path = os.path.join(output_path, "model.safetensors.index.json")
     with open(index_path, "w") as f:
         json.dump(index, f, indent=2)
-    print(f"  Saved model.safetensors.index.json")
+    print("  Saved model.safetensors.index.json")
 
     # Copy config, tokenizer, and other HF assets from base model
     # (but NOT model weights or index — those come from the checkpoint)
@@ -163,15 +163,29 @@ def save_hf_checkpoint(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert DCP checkpoint to HuggingFace format")
-    parser.add_argument("--ckpt_path", required=True, help="Path to DCP recover_checkpoint directory")
-    parser.add_argument("--output_path", required=True, help="Output directory for HF checkpoint")
-    parser.add_argument("--base_model_path", required=True, help="Path to base model (for config/tokenizer)")
-    parser.add_argument("--max_shard_size", default="5GB", help="Max shard size for safetensors")
+    parser = argparse.ArgumentParser(
+        description="Convert DCP checkpoint to HuggingFace format"
+    )
+    parser.add_argument(
+        "--ckpt_path", required=True, help="Path to DCP recover_checkpoint directory"
+    )
+    parser.add_argument(
+        "--output_path", required=True, help="Output directory for HF checkpoint"
+    )
+    parser.add_argument(
+        "--base_model_path",
+        required=True,
+        help="Path to base model (for config/tokenizer)",
+    )
+    parser.add_argument(
+        "--max_shard_size", default="5GB", help="Max shard size for safetensors"
+    )
     args = parser.parse_args()
 
     state_dict = load_dcp_model_state(args.ckpt_path)
-    save_hf_checkpoint(state_dict, args.output_path, args.base_model_path, args.max_shard_size)
+    save_hf_checkpoint(
+        state_dict, args.output_path, args.base_model_path, args.max_shard_size
+    )
 
 
 if __name__ == "__main__":

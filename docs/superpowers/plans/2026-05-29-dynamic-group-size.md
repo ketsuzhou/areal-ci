@@ -1,6 +1,8 @@
 # Dynamic Group Size Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add dynamic group size mode to `TreeSearchGroupedRolloutWorkflow` that
 allocates more episodes to uncertain queries, fewer to converged ones, and cleanly
@@ -14,15 +16,18 @@ trainer-side recomputation.
 
 **Tech Stack:** Python 3.12+, PyTorch, no new dependencies.
 
----
+______________________________________________________________________
 
 ### Task 1: Add config fields to `TreeBackupConfig`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/config.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add failing tests asserting these defaults:
+
   - `dynamic_group_size is False`
   - `initial_group_size == 4`
   - `max_group_size == 64`
@@ -40,6 +45,7 @@ reward_type: str = "binary"
 ```
 
 - [ ] Add validation:
+
   - `initial_group_size >= 1`
   - `max_group_size >= initial_group_size`
   - `uncertainty_threshold >= 0`
@@ -51,15 +57,18 @@ reward_type: str = "binary"
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "config"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Implement uncertainty helpers
 
 **Files:**
+
 - Create: `customized_areal/tree_search/core/uncertainty.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add failing tests for:
+
   - binary uncertainty
   - continuous uncertainty with `n=1`
   - continuous uncertainty with `n>=2`
@@ -82,11 +91,13 @@ def should_discard_query(episode_rewards: list[float]) -> bool:
 ```
 
 - [ ] Use:
+
   - `Beta(1, 1)` posterior variance for binary rewards
   - Normal-Inverse-Gamma posterior mean variance for continuous rewards with unknown
     variance
 
 - [ ] `should_discard_query(...)` semantics:
+
   - `False` for `len(rewards) < 2`
   - `True` only if `len(rewards) >= 2` and all rewards are identical
 
@@ -96,17 +107,22 @@ def should_discard_query(episode_rewards: list[float]) -> bool:
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "uncertainty or discard"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Add constructor fields and workflow wiring
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py`
+
 - Modify: `areal/experimental/inference_service/controller/controller.py`
+
 - Modify: `areal/infra/remote_inf_engine.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add failing constructor tests for:
+
   - explicit dynamic config
   - fallback `initial_group_size <- group_size`
   - non-dynamic backward compatibility
@@ -122,6 +138,7 @@ reward_type: str = "binary"
 ```
 
 - [ ] Store:
+
   - `self.dynamic_group_size`
   - `self.initial_group_size`
   - `self.max_group_size`
@@ -129,6 +146,7 @@ reward_type: str = "binary"
   - `self.reward_type`
 
 - [ ] Wire new args through both call sites:
+
   - `areal/experimental/inference_service/controller/controller.py`
   - `areal/infra/remote_inf_engine.py`
 
@@ -138,15 +156,18 @@ reward_type: str = "binary"
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "workflow_constructor"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Implement fixed zero-variance discard
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add failing tests for:
+
   - 2+ identical-reward episodes -> `None`
   - mixed-reward episodes -> kept
   - single-episode result -> kept
@@ -162,21 +183,25 @@ uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "workflow_
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "zero_variance"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Implement per-query dynamic sampling loop
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add failing tests for:
+
   - stop once `U(q) <= uncertainty_threshold`
   - cap at `max_group_size`
   - reuse cached episodes toward `initial_group_size`
   - tolerate failed extra samples
 
 - [ ] Split `_arun_episode_impl(...)` into two internal paths:
+
   - fixed-size legacy path
   - dynamic path
 
@@ -201,15 +226,18 @@ while episode_count < self.max_group_size:
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "dynamic_group_size"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: Preserve TREE-mode precomputed advantages
 
 **Files:**
+
 - Modify: `areal/trainer/rl_trainer.py`
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add a failing test covering:
+
   - rollout trajectories already contain `advantages` and `returns`
   - trainer must not call `self.actor.compute_advantages(...)`
 
@@ -238,14 +266,16 @@ else:
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "precomputed_advantages or trainer"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: End-to-end workflow coverage
 
 **Files:**
+
 - Modify: `tests/customized_areal/test_dynamic_group_size.py`
 
 - [ ] Add end-to-end tests for:
+
   - fixed mode unchanged
   - dynamic mode with binary rewards
   - dynamic mode with continuous rewards
@@ -260,7 +290,7 @@ uv run pytest tests/customized_areal/test_dynamic_group_size.py -v -k "precomput
 uv run pytest tests/customized_areal/test_dynamic_group_size.py -v
 ```
 
----
+______________________________________________________________________
 
 ### Task 8: Repo validation
 
@@ -285,7 +315,7 @@ uv run pytest tests/test_rollout_controller.py -v
 pre-commit run --all-files
 ```
 
----
+______________________________________________________________________
 
 ### Notes
 

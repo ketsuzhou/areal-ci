@@ -12,7 +12,7 @@ import math
 import os
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +79,9 @@ class TeacherConfig:
     def __post_init__(self) -> None:
         if self.teacher_backend == "fireworks":
             if self.teacher_base_url == "http://localhost:8001":
-                env_url = os.getenv("FIREWORKS_BASE_URL", self._FIREWORKS_DEFAULT_BASE_URL)
+                env_url = os.getenv(
+                    "FIREWORKS_BASE_URL", self._FIREWORKS_DEFAULT_BASE_URL
+                )
                 self.teacher_base_url = env_url
             if not self.teacher_api_key:
                 env_key = os.getenv("FIREWORKS_API_KEY", "")
@@ -405,7 +407,6 @@ class TeacherClient:
             raise RuntimeError("Fireworks teacher API returned no choices")
 
         logprobs_data = choices[0].get("logprobs", {})
-        tokens = logprobs_data.get("tokens", [])
         text_offsets = logprobs_data.get("text_offset", [])
         top_logprobs_list = logprobs_data.get("top_logprobs", [])
 
@@ -440,9 +441,7 @@ class TeacherClient:
             teacher_id_map: dict[int, float] = {}
             for token_text, logprob in top_lp.items():
                 try:
-                    encoded = tokenizer.encode(
-                        token_text, add_special_tokens=False
-                    )
+                    encoded = tokenizer.encode(token_text, add_special_tokens=False)
                     if len(encoded) == 1:
                         teacher_id_map[encoded[0]] = float(logprob)
                 except Exception:
@@ -456,9 +455,7 @@ class TeacherClient:
                     # Fallback: decode candidate ID and look up by text
                     try:
                         decoded = tokenizer.decode([tid])
-                        candidate_map[tid] = float(
-                            top_lp.get(decoded, missing_logprob)
-                        )
+                        candidate_map[tid] = float(top_lp.get(decoded, missing_logprob))
                     except Exception:
                         candidate_map[tid] = missing_logprob
             result.append(candidate_map)

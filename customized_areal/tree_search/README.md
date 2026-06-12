@@ -31,8 +31,8 @@ These two trees are **unrelated data structures** that operate at different laye
 │  (extends PPOTrainer with MultiCandidateFSDPPPOActor support)   │
 │                                                                  │
 │  __init__()                                                      │
-│   ├─ Accepts TreeBackupConfig, RolloutCacheConfig               │
-│   └─ Stores tree_backup_config for later use                    │
+│   ├─ Accepts Config, RolloutCacheConfig                         │
+│   └─ Stores tree_search_config for later use                    │
 │                                                                  │
 │  _create_train_engine()                                          │
 │   ├─ If loss_mode != GRPO: returns MultiCandidateFSDPPPOActor   │
@@ -96,7 +96,7 @@ Dataclasses controlling tree backup, caching, and advantage computation.
 
 | Class                | Field                     | Type            | Default                   | Description                                        |
 | -------------------- | ------------------------- | --------------- | ------------------------- | -------------------------------------------------- |
-| `TreeBackupConfig`   | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates            |
+| `Config`             | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates            |
 |                      | `enabled`                 | `bool`          | `True`                    | Enable/disable tree backup                         |
 |                      | `checkpoint_dir`          | `str`           | `""`                      | Directory for MCTS tree checkpoints                |
 |                      | `advantage_mode`          | `AdvantageMode` | `TREE`                    | TREE (Q-values) or GAE advantages                  |
@@ -253,14 +253,14 @@ Serializes/deserializes the full MCTS tree state to disk.
 | `save_trained_episodes(dir, store)` | Save trained episode IDs to recover checkpoint directory                                                      |
 | `load_trained_episodes(dir)`        | Load trained episode IDs from recover checkpoint directory                                                    |
 
-### 5. Tree Search Grouped Rollout Workflow (`core/tree_search_grouped_workflow.py`)
+### 5. Tree Search Grouped Rollout Workflow (`core/customized_grouped_workflow.py`)
 
 `TreeSearchGroupedRolloutWorkflow` is the core component that extends `RolloutWorkflow`
 to provide tree-search-aware rollout with cache reuse and branch sampling.
 
 **Initialization (`__init__`):**
 
-Accepts the full set of configuration parameters (see `TreeBackupConfig` above), plus:
+Accepts the full set of configuration parameters (see `Config` above), plus:
 
 | Parameter            | Type              | Description                                      |
 | -------------------- | ----------------- | ------------------------------------------------ |
@@ -274,7 +274,7 @@ Accepts the full set of configuration parameters (see `TreeBackupConfig` above),
 | `max_tokens`         | `int`             | Max tokens per node sequence (0 = no truncation) |
 | `sample_source`      | `SampleSource`    | SCRATCH, BRANCH, or MIXED                        |
 | `branch_probability` | `float`           | Probability of branch in MIXED mode              |
-| ...                  | ...               | All `TreeBackupConfig` fields (see config table) |
+| ...                  | ...               | All `Config` fields (see config table)           |
 
 - Creates `TreeCheckpointManager` and `MCTSTreeStore`
 - On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
@@ -366,7 +366,7 @@ PPO trainer with tree-search-aware rollout support. Extends `PPOTrainer` directl
 
 **Initialization (`__init__`):**
 
-- Accepts `tree_backup_config` and stores it
+- Accepts `tree_search_config` and stores it
 - Delegates to `PPOTrainer.__init__()`
 
 **`_create_train_engine`:**
@@ -683,7 +683,7 @@ from customized_areal.tree_search import (
     CustomizedPPOTrainer,
     MCTSTreeStore,
     Node,
-    TreeBackupConfig,
+    Config,
     RolloutCacheConfig,
     CacheMode,
     AdvantageMode,
@@ -729,7 +729,7 @@ from customized_areal.tree_search.config import (
     LossMode,
     RolloutCacheConfig,
     SampleSource,
-    TreeBackupConfig,
+    Config,
 )
 from customized_areal.tree_search.training.trainer import CustomizedPPOTrainer
 
@@ -739,7 +739,7 @@ cache_config = RolloutCacheConfig(
     n_samples=8,
 )
 
-tree_backup_config = TreeBackupConfig(
+tree_search_config = Config(
     mode=CacheMode.CROSS_TRAINING,
     checkpoint_dir="/path/to/tree_cache",
     advantage_mode=AdvantageMode.TREE,
@@ -756,7 +756,7 @@ tree_backup_config = TreeBackupConfig(
 with CustomizedPPOTrainer(
     config,
     cache_config=cache_config,
-    tree_backup_config=tree_backup_config,
+    tree_search_config=tree_search_config,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
 ) as trainer:
@@ -770,26 +770,26 @@ with CustomizedPPOTrainer(
 
 ## File Index
 
-| File                                   | Purpose                                                                                            |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `__init__.py`                          | Public API exports and lazy imports for distillation components                                    |
-| `config.py`                            | `TreeBackupConfig`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource` |
-| `core/advantage.py`                    | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                                  |
-| `core/checkpoint.py`                   | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                                 |
-| `core/mcts_tree_store.py`              | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics                               |
-| `core/tree_search_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops                     |
-| `distilling/__init__.py`               | Distilling subpackage exports                                                                      |
-| `distilling/config.py`                 | `OnPolicyDistillConfig`, `AgentConfig`                                                             |
-| `distilling/agent.py`                  | `OnPolicyDistillAgent` — agent for distillation training                                           |
-| `distilling/distill_types.py`          | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward`       |
-| `distilling/reward_compute.py`         | Student vs teacher logprob reward computation                                                      |
-| `distilling/teacher_client.py`         | `TeacherConfig`, `TeacherClient` — async teacher model inference client                            |
-| `distilling/teacher_provider.py`       | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider`                     |
-| `distilling/selected_turn_distill.py`  | Diagnoses episodes and builds position-level teacher rewards                                       |
-| `engine/__init__.py`                   | Engine subpackage exports                                                                          |
-| `engine/fsdp_engine.py`                | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                                     |
-| `training/__init__.py`                 | Training subpackage exports                                                                        |
-| `training/actor.py`                    | `MultiCandidateFSDPPPOActor`, distill-loss patching functions                                      |
-| `training/loss.py`                     | `grpo_distill_loss_fn` — combined GRPO + distillation loss                                         |
-| `training/logprobs.py`                 | Multi-candidate logprob/entropy gathering utilities                                                |
-| `training/trainer.py`                  | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                              |
+| File                                  | Purpose                                                                                      |
+| ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `__init__.py`                         | Public API exports and lazy imports for distillation components                              |
+| `config.py`                           | `Config`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource`     |
+| `core/advantage.py`                   | `TreeAdvantageComputer` — GRPO-normalized tree Q-value advantages                            |
+| `core/checkpoint.py`                  | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                           |
+| `core/tree_store.py`                  | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics                         |
+| `core/customized_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops               |
+| `distilling/__init__.py`              | Distilling subpackage exports                                                                |
+| `distilling/config.py`                | `OnPolicyDistillConfig`, `AgentConfig`                                                       |
+| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent for distillation training                                     |
+| `distilling/distill_types.py`         | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward` |
+| `distilling/reward_compute.py`        | Student vs teacher logprob reward computation                                                |
+| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference client                      |
+| `distilling/teacher_provider.py`      | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider`               |
+| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                                 |
+| `engine/__init__.py`                  | Engine subpackage exports                                                                    |
+| `engine/fsdp_engine.py`               | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                               |
+| `training/__init__.py`                | Training subpackage exports                                                                  |
+| `training/actor.py`                   | `MultiCandidateFSDPPPOActor`, distill-loss patching functions                                |
+| `training/loss.py`                    | `grpo_distill_loss_fn` — combined GRPO + distillation loss                                   |
+| `training/logprobs.py`                | Multi-candidate logprob/entropy gathering utilities                                          |
+| `training/trainer.py`                 | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                        |

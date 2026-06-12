@@ -1,10 +1,10 @@
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
+    Config,
     DistillKLMode,
     LossMode,
     RolloutCacheConfig,
-    TreeBackupConfig,
 )
 from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
 from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -30,7 +30,7 @@ __all__ = [
     "TreeSearchGroupedRolloutWorkflow",
     "RolloutCacheConfig",
     "TreeAdvantageComputer",
-    "TreeBackupConfig",
+    "Config",
     "CacheMode",
     "TreeCheckpointManager",
 ]

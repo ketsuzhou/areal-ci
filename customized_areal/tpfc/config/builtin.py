@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 _TOOL_METHODS = [
     "shell",
     # sb_vision_tool methods

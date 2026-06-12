@@ -250,7 +250,8 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 # Expand to multi-candidate with same token repeated
                 lbl_mc = lbl.long().unsqueeze(-1).expand(-1, max_candidates)
                 lp, ent = gather_logprobs_entropy_multi_candidates(
-                    pred_logits, lbl_mc,
+                    pred_logits,
+                    lbl_mc,
                     temperature=self.config.temperature,
                     tp_group=tp_group,
                 )
@@ -269,7 +270,8 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             lbl = tree_input_ids[label_pos : label_pos + 1].long()
             lbl_mc = lbl.unsqueeze(-1).expand(-1, max_candidates)
             lp, ent = gather_logprobs_entropy_multi_candidates(
-                pred_logit, lbl_mc,
+                pred_logit,
+                lbl_mc,
                 temperature=self.config.temperature,
                 tp_group=tp_group,
             )
@@ -304,7 +306,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     # Check if any internal positions fall in response range
                     # and have topk_ids overrides for this sequence
                     internal_resp_start = max(0, prompt_len - seq_offset)
-                    internal_resp_end = min(num_internal, prompt_len + resp_len - seq_offset)
+                    internal_resp_end = min(
+                        num_internal, prompt_len + resp_len - seq_offset
+                    )
 
                     has_override = (
                         internal_resp_end > internal_resp_start
@@ -332,7 +336,8 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                                 if (cand >= 0).any():
                                     lbl[j] = torch.where(cand >= 0, cand, lbl[j])
                         lp, ent = gather_logprobs_entropy_multi_candidates(
-                            pred_logits, lbl,
+                            pred_logits,
+                            lbl,
                             temperature=self.config.temperature,
                             tp_group=tp_group,
                         )
@@ -376,7 +381,8 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     cand = topk_ids[b, trans_resp_idx].long().unsqueeze(0)
                     cand = torch.where(cand >= 0, cand, fallback)
                     lp, ent = gather_logprobs_entropy_multi_candidates(
-                        pred_logit, cand,
+                        pred_logit,
+                        cand,
                         temperature=self.config.temperature,
                         tp_group=tp_group,
                     )

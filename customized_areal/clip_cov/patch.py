@@ -19,6 +19,7 @@ from .loss import clip_cov_grpo_loss_fn
 logger = logging.getLogger("ClipCov")
 
 _patch_applied = False
+_original_ppo_update = None
 
 
 def patch_ppo_actor_to_use_clip_cov_loss(config: ClipCovConfig) -> None:
@@ -29,9 +30,11 @@ def patch_ppo_actor_to_use_clip_cov_loss(config: ClipCovConfig) -> None:
     Args:
         config: ClipCovConfig with clip_ratio, clip_cov_lb, clip_cov_ub.
     """
-    global _patch_applied
+    global _patch_applied, _original_ppo_update
     if _patch_applied:
         return
+
+    _original_ppo_update = PPOActor._ppo_update
 
     def _ppo_update_with_clip_cov_loss(self, data: dict[str, Any]) -> None:
         attn_mask = data["attention_mask"]
@@ -143,3 +146,13 @@ def patch_ppo_actor_to_use_clip_cov_loss(config: ClipCovConfig) -> None:
         config.clip_cov_lb,
         config.clip_cov_ub,
     )
+
+
+def unpatch_ppo_actor_clip_cov_loss() -> None:
+    """Restore PPOActor._ppo_update after applying the clip-cov patch."""
+    global _patch_applied, _original_ppo_update
+    if _patch_applied and _original_ppo_update is not None:
+        PPOActor._ppo_update = _original_ppo_update
+        _original_ppo_update = None
+        _patch_applied = False
+        logger.info("Restored original PPOActor._ppo_update")

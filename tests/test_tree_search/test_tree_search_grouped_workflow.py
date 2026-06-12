@@ -33,8 +33,13 @@ import pytest
 import torch
 
 from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
-from customized_areal.tree_search.distill_types import PositionRewardInfo
+from customized_areal.tree_search.core.customized_grouped_workflow import (
+    TreeSearchGroupedRolloutWorkflow,
+)
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.distilling.distill_types import PositionRewardInfo
+
+from areal.api import ModelResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -80,8 +85,6 @@ def _make_model_response(
     response_len: int = 10,
 ) -> ModelResponse:
     """Create a ModelResponse with correct constructor (no input_len/output_len)."""
-    from areal.api import ModelResponse
-
     resp = ModelResponse(
         input_tokens=list(range(seq_len)),
         output_tokens=list(range(seq_len, seq_len + response_len)),
@@ -124,10 +127,6 @@ def _make_workflow(
     teacher_provider: str = "external",
 ) -> TreeSearchGroupedRolloutWorkflow:
     """Create a workflow instance with a mock inner workflow."""
-    from customized_areal.tree_search.core.customized_grouped_workflow import (
-        TreeSearchGroupedRolloutWorkflow,
-    )
-
     # TRAIN_ID is required when loading a CROSS_TRAINING checkpoint
     if "TRAIN_ID" not in os.environ:
         os.environ["TRAIN_ID"] = "test_train_id"
@@ -402,11 +401,11 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
-                "customized_areal.tree_search.core.selected_turn_distill.selected_turn_to_position_rewards",
+                "customized_areal.tree_search.distilling.selected_turn_distill.selected_turn_to_position_rewards",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -446,11 +445,11 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
-                "customized_areal.tree_search.core.selected_turn_distill.selected_turn_to_position_rewards",
+                "customized_areal.tree_search.distilling.selected_turn_distill.selected_turn_to_position_rewards",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -483,11 +482,11 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
-                "customized_areal.tree_search.core.selected_turn_distill.selected_turn_to_position_rewards",
+                "customized_areal.tree_search.distilling.selected_turn_distill.selected_turn_to_position_rewards",
                 new=_fake_selected_turn_to_position_rewards,
             ),
         ):
@@ -500,7 +499,9 @@ class TestPrepareDistillForEpisode:
             )
 
         assert result_nodes == nodes
-        assert rewards == {"n1": [PositionRewardInfo(position=0, candidate_token_ids=[1])]}
+        assert rewards == {
+            "n1": [PositionRewardInfo(position=0, candidate_token_ids=[1])]
+        }
 
     @pytest.mark.asyncio
     async def test_guidance_cached_on_last_node_after_diagnose(self):
@@ -526,11 +527,11 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
-                "customized_areal.tree_search.core.selected_turn_distill.selected_turn_to_position_rewards",
+                "customized_areal.tree_search.distilling.selected_turn_distill.selected_turn_to_position_rewards",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -891,7 +892,7 @@ class TestFullArunEpisode:
                 return_value=mock_tokenizer,
             ),
             patch(
-                "customized_areal.tree_search.tree_search_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
         ):
