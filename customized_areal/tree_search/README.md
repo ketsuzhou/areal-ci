@@ -1,4 +1,4 @@
-# Tree Search: MCTS Tree cache, branching, Backup for PPO Training and experience guilded distilling
+# Tree Search: MCTS Tree Cache, Branching, Backup for PPO Training, and Experience-Guided Distilling
 
 This module replaces GAE advantage computation with MCTS tree backup Q-values, enabling
 rollout caching across training steps. It also supports on-policy distillation with a
@@ -25,67 +25,65 @@ These two trees are **unrelated data structures** that operate at different laye
 
 ## Architecture Overview
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     CustomizedPPOTrainer                         │
-│  (extends PPOTrainer with MultiCandidateFSDPPPOActor support)   │
-│                                                                  │
-│  __init__()                                                      │
-│   ├─ Accepts Config, RolloutCacheConfig                         │
-│   └─ Stores tree_search_config for later use                    │
-│                                                                  │
-│  _create_train_engine()                                          │
-│   ├─ If loss_mode != GRPO: returns MultiCandidateFSDPPPOActor   │
-│   └─ Otherwise: delegates to standard PPOTrainer engine          │
-│                                                                  │
-│  train()                                                         │
-│   ├─ If loss_mode != GRPO: applies distill loss patch           │
-│   ├─ Calls super().train() (standard training loop)             │
-│   └─ Restores patch in finally block                             │
-│                                                                  │
-│  _save_hf() / _save_recover_checkpoint()                        │
-│   └─ Writes train_id.json sidecar alongside model checkpoints    │
-│                                                                  │
-│  close()                                                         │
-│   └─ Delegates to parent                                         │
-└──────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│              TreeSearchGroupedRolloutWorkflow                    │
-│  (extends RolloutWorkflow with cache reuse + tree ops)           │
-│                                                                  │
-│  arun_episode()                                                  │
-│   ├─ Checks cache: how many untrained episodes exist?            │
-│   ├─ Generates only needed fresh episodes (with retry support)   │
-│   │   ├─ Decides scratch vs branch via SampleSource             │
-│   │   ├─ Branch: selects candidate, builds branch task, runs    │
-│   │   └─ Scratch: runs fresh episode from scratch               │
-│   ├─ Annotates fresh Nodes with TPFC metadata (task_id, etc.)   │
-│   ├─ Converts fresh results to Nodes via _result_to_nodes()      │
-│   ├─ Loads cached episode Nodes from MCTSTreeStore               │
-│   ├─ Inserts fresh Nodes into tree_store                         │
-│   ├─ Distillation (if loss_mode != GRPO):                        │
-│   │   ├─ Applied on combined fresh+cached node groups           │
-│   │   ├─ Diagnoses episodes to find turns needing improvement    │
-│   │   └─ Reuses cached guidance on previously diagnosed nodes    │
-│   ├─ Computes tree advantages (TREE mode)                        │
-│   ├─ Marks all nodes as trained                                  │
-│   ├─ Saves tree checkpoint per query (CROSS_TRAINING mode)       │
-│   └─ Converts to batched tensor dict                             │
-└──────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                         MCTSTreeStore                            │
-│  (flat trajectory store with MCTS statistics)                    │
-│                                                                  │
-│  insert_batch() → store trajectories                             │
-│  load_untrained_episodes() → retrieve untrained Nodes             │
-│  get_untrained_episode_count() → check cache availability         │
-│  set_trained() / is_trained() → track usage                      │
-│  _backup() → update MCTS Q-values                                │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    trainer["CustomizedPPOTrainer<br/>extends PPOTrainer with MultiCandidateFSDPPPOActor support"]
+    trainer_init["__init__<br/>Accept Config and RolloutCacheConfig<br/>Store tree_search_config"]
+    trainer_engine["_create_train_engine<br/>loss_mode != GRPO: MultiCandidateFSDPPPOActor<br/>otherwise: standard PPOTrainer engine"]
+    trainer_train["train<br/>patch distill loss when enabled<br/>call super().train()<br/>restore patch in finally"]
+    trainer_save["_save_hf / _save_recover_checkpoint<br/>write train_id.json beside checkpoints"]
+
+    workflow["TreeSearchGroupedRolloutWorkflow<br/>extends RolloutWorkflow with cache reuse and tree ops"]
+    cache["Check cache<br/>count untrained episodes"]
+    fresh["Generate only missing fresh episodes<br/>retry support"]
+    source{"SampleSource"}
+    scratch["SCRATCH<br/>run fresh episode"]
+    branch["BRANCH<br/>select candidate<br/>build branch task<br/>run from branch point"]
+    annotate["Annotate fresh Nodes<br/>task_id, entropy_stats, need_branch, sandbox"]
+    convert["Convert results to Nodes<br/>_result_to_nodes()"]
+    load_cached["Load cached episode Nodes"]
+    insert["Insert fresh Nodes"]
+    combine["Combine fresh + cached node groups"]
+    distill{"loss_mode != GRPO?"}
+    distill_steps["Distillation<br/>diagnose episodes<br/>reuse cached guidance<br/>attach teacher logprobs and top-k ids"]
+    advantage["Compute tree advantages<br/>TREE mode"]
+    mark["Mark nodes as trained"]
+    save_query["Save per-query checkpoint<br/>CROSS_TRAINING mode"]
+    tensor["Convert to batched tensor dict"]
+
+    store["MCTSTreeStore<br/>flat trajectory store with MCTS statistics"]
+    store_insert["insert_batch<br/>store trajectories"]
+    store_load["load_untrained_episodes<br/>retrieve untrained Nodes"]
+    store_count["get_untrained_episode_count<br/>check cache availability"]
+    store_trained["set_trained / is_trained<br/>track usage"]
+    store_backup["_backup<br/>update MCTS Q-values"]
+
+    trainer --> trainer_init
+    trainer --> trainer_engine
+    trainer --> trainer_train
+    trainer --> trainer_save
+    trainer_train --> workflow
+
+    workflow --> cache --> fresh --> source
+    source --> scratch
+    source --> branch
+    scratch --> annotate
+    branch --> annotate
+    annotate --> convert --> load_cached --> insert --> combine --> distill
+    distill -- yes --> distill_steps --> advantage
+    distill -- no --> advantage
+    advantage --> mark --> save_query --> tensor
+
+    cache -.-> store_count
+    load_cached -.-> store_load
+    insert -.-> store_insert
+    mark -.-> store_trained
+    advantage -.-> store_backup
+    store_count --> store
+    store_load --> store
+    store_insert --> store
+    store_trained --> store
+    store_backup --> store
 ```
 
 ## Component Reference
@@ -529,96 +527,171 @@ leverages TPFC backend infrastructure to create branch tasks from existing sandb
 1. **Cleanup**: `_cleanup_branch()` deletes the branch sandbox and clears the candidate
    node's `need_branch` and `branch_sandbox_id` to prevent re-use.
 
+### Episode Generation Flow
+
+```mermaid
+flowchart TD
+    START["_run_fresh_episode()"]
+    CAND["select_branch_candidate()<br/>(highest entropy among need_branch nodes)"]
+    SRC["choose_sample_source()"]
+
+    START --> CAND --> SRC
+
+    SRC --> M{"mode?"}
+    M -- SCRATCH --> SCRATCH["_retry_episode()<br/>(fresh from start)"]
+    M -- BRANCH --> BC{"has_candidate?"}
+    M -- MIXED --> MC{"random < branch_probability<br/>AND has_candidate?"}
+
+    BC -- Yes --> BRANCH
+    BC -- No --> SCRATCH
+    MC -- Yes --> BRANCH
+    MC -- No --> SCRATCH
+
+    subgraph branch_path["BRANCH Path"]
+        BRANCH["build_branch_task()"]
+        BT["Create TPFC task<br/>Bind candidate sandbox<br/>Copy message prefix"]
+        RUN["_retry_episode()<br/>(from branch point)"]
+        CLEAN["_cleanup_branch()<br/>Delete sandbox, clear candidate flags"]
+        BRANCH --> BT --> RUN --> CLEAN
+    end
+
+    SCRATCH --> META["_with_episode_metadata()"]
+    RUN --> META
+    META --> CONV["_result_to_nodes()"]
+    CONV --> ANN["annotate_nodes_from_run()"]
+```
+
 ### SampleSource Decision Logic
 
-```
-choose_sample_source(mode, branch_probability, has_candidate, random_value)
+```mermaid
+flowchart TD
+    START["choose_sample_source(mode, branch_probability, has_candidate, random_value)"]
+    MODE{"mode?"}
 
-SCRATCH → always SCRATCH
-BRANCH  → BRANCH (if candidate exists), else SCRATCH
-MIXED   → BRANCH with P=branch_probability (if candidate exists), else SCRATCH
+    SCRATCH_RES["Return SCRATCH"]
+    BRANCH_RES["Return BRANCH"]
+
+    HAS_B{"has_candidate?"}
+    HAS_M{"has_candidate AND<br/>random_value < branch_probability?"}
+
+    START --> MODE
+    MODE -- SCRATCH --> SCRATCH_RES
+    MODE -- BRANCH --> HAS_B
+    MODE -- MIXED --> HAS_M
+    HAS_B -- Yes --> BRANCH_RES
+    HAS_B -- No --> SCRATCH_RES
+    HAS_M -- Yes --> BRANCH_RES
+    HAS_M -- No --> SCRATCH_RES
 ```
+
+### Dynamic Group Size
+
+When `dynamic_group_size=True`, the workflow iteratively samples episodes until
+uncertainty drops below a threshold, rather than using a fixed `group_size`:
+
+```mermaid
+flowchart TD
+    START["_arun_episode_dynamic()"]
+    CACHE["1. Check cache<br/>get_untrained_episode_count()"]
+    INIT_GEN["2. Generate initial_group_size<br/>− cached_count episodes"]
+    INIT_LOAD["3. Load cached + fresh nodes"]
+
+    START --> CACHE --> INIT_GEN --> INIT_LOAD
+
+    INIT_LOAD --> COMPUTE["4. Compute initial uncertainty U(q)<br/>via Bayesian posterior variance"]
+
+    COMPUTE --> LOOP{"5. Iterative sampling loop"}
+
+    subgraph loop["Iterative Sampling"]
+        CHECK{"U(q) ≤ threshold<br/>OR episodes ≥ max_group_size?"}
+        SAMPLE["Sample one more episode"]
+        UPDATE["Recompute U(q)"]
+        FAIL_CHECK{"Episode failed?"}
+        CIRCUIT{"Consecutive failures<br/>≥ max_failed?"}
+        CHECK -- Yes --> DONE["Stop sampling"]
+        CHECK -- No --> SAMPLE --> FAIL_CHECK
+        FAIL_CHECK -- Yes --> CIRCUIT
+        CIRCUIT -- Yes --> DONE
+        CIRCUIT -- No --> CHECK
+        FAIL_CHECK -- No --> UPDATE --> CHECK
+    end
+
+    LOOP --> loop
+    DONE --> FINAL["_finalize_episode()"]
+```
+
+The uncertainty metric U(q) uses Bayesian posterior variance adjusted by mean
+episode steps. For binary rewards it uses a Beta(1,1) posterior; for continuous
+rewards it uses a Normal-Inverse-Gamma posterior with weak priors.
 
 ## Data Flow
 
 ### Cache-Aware Training
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                    CustomizedPPOTrainer.train()                          │
-│                                                                          │
-│  If loss_mode != GRPO:                                                   │
-│   ├─ patch_ppo_actor_class_to_use_distill_loss()                         │
-│   ├─ super().train()  (standard training loop)                           │
-│   └─ unpatch_ppo_actor_distill_loss()  (in finally)                      │
-│  Otherwise:                                                              │
-│   └─ super().train()  (standard training loop)                           │
-└─────────────────────────────────┬────────────────────────────────────────┘
-                                  │
-                                  │  per training step
-                                  ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  TreeSearchGroupedRolloutWorkflow.arun_episode()                         │
-│                                                                          │
-│  1. CHECK CACHE                                                          │
-│     ├─ query_id = data.get("query_id", "")                               │
-│     ├─ cached_count = tree_store.get_untrained_episode_count(query_id)   │
-│     └─ need_gen = max(0, group_size - cached_count)                      │
-│                                                                          │
-│  2. GENERATE FRESH EPISODES (if need_gen > 0)                            │
-│     ├─ For each: choose_sample_source() → SCRATCH / BRANCH / MIXED      │
-│     ├─ BRANCH: select_branch_candidate() → build_branch_task()          │
-│     │   ├─ Create TPFC branch task from candidate sandbox               │
-│     │   ├─ Run episode from branch point via _retry_episode()           │
-│     │   └─ _cleanup_branch() — delete sandbox, clear candidate          │
-│     ├─ SCRATCH: run fresh episode via _retry_episode()                   │
-│     ├─ Wrap result in EpisodeRunResult (task_id + raw_messages)         │
-│     ├─ Retry failed episodes via _retry_episode()                        │
-│     └─ Convert results to Nodes via _result_to_nodes()                  │
-│                                                                          │
-│  3. ANNOTATE FRESH NODES                                                 │
-│     └─ annotate_nodes_from_run() — copy TPFC metadata to Nodes           │
-│                                                                          │
-│  4. LOAD CACHED NODES (if cached_count > 0)                              │
-│     └─ tree_store.load_untrained_episodes(query_id, cached_count)        │
-│                                                                          │
-│  5. INSERT FRESH NODES                                                   │
-│     └─ tree_store.insert_batch(fresh_nodes)                              │
-│                                                                          │
-│  6. COMBINE fresh_nodes + cached_nodes                                   │
-│                                                                          │
-│  7. DISTILLATION (if loss_mode != GRPO)                                  │
-│     ├─ Get teacher provider (external API or engine)                     │
-│     ├─ Apply on combined node groups via                                  │
-│     │   _prepare_distill_for_node_groups()                               │
-│     ├─ Diagnose episodes to find turns needing improvement                │
-│     ├─ Reuse cached guidance from previous diagnoses                     │
-│     ├─ Get teacher logprobs for selected turns                           │
-│     └─ Build PositionRewardInfo with candidate tokens + teacher logprobs │
-│                                                                          │
-│  8. TREE OPERATIONS                                                      │
-│     ├─ tree_advantage_computer.compute(all_nodes)  (TREE mode)           │
-│     ├─ Mark all nodes as trained via tree_store.set_trained()            │
-│     └─ Save checkpoint per query (CROSS_TRAINING mode)                   │
-│                                                                          │
-│  9. CONVERT TO TENSOR DICT                                               │
-│     └─ _nodes_to_batched_tensor_dict(all_nodes)                          │
-│                                                                          │
-│  Return: dict[str, torch.Tensor]  (batched tensor dict)                  │
-└──────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Training Engine (MultiCandidateFSDPEngine)                              │
-│                                                                          │
-│  ├─ build_packed_tree_batch() → packs sequences into trie                │
-│  ├─ forward() with tree attention (TrieNode → tree_block_mask)           │
-│  ├─ _compute_logprobs_entropy() → multi-candidate logprobs               │
-│  ├─ ppo_update() with grpo_distill_loss_fn()                             │
-│  │   ├─ Standard GRPO loss (chosen token)                                │
-│  │   └─ Teacher KL loss (all candidates)                                 │
-│  └─ Standard logging and checkpointing                                   │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Trainer["CustomizedPPOTrainer"]
+        T1["train()"]
+        T2{"loss_mode != GRPO?"}
+        T3["patch distill loss"]
+        T4["super().train()<br/>(per-step loop)"]
+        T5["unpatch distill loss"]
+        T6["super().train()"]
+        T1 --> T2
+        T2 -- Yes --> T3 --> T4 --> T5
+        T2 -- No --> T6
+    end
+
+    T4 --> STEP["per training step"]
+    T6 --> STEP
+
+    subgraph WF["TreeSearchGroupedRolloutWorkflow"]
+        W0["arun_episode(engine, data)"]
+        W1{"dynamic_group_size?"}
+        W2["_arun_episode_fixed()"]
+        W3["_arun_episode_dynamic()"]
+        W0 --> W1
+        W1 -- No --> W2
+        W1 -- Yes --> W3
+    end
+
+    STEP --> W0
+
+    W2 --> CC["1. Check cache<br/>cached_count = get_untrained_episode_count()"]
+    W3 --> CC
+    CC --> NG["need_gen = group_size − cached_count"]
+
+    NG --> GEN["2. Generate fresh episodes (parallel)<br/>see Branch Sampling diagram"]
+
+    GEN --> LOAD["3. Load cached + insert fresh + combine"]
+
+    LOAD --> FINAL["_finalize_episode()"]
+
+    FINAL --> ZVD{"Zero-variance<br/>discard?"}
+    ZVD -- Yes --> NONE["Return None"]
+    ZVD -- No --> INS["insert_batch(fresh_nodes)"]
+
+    INS --> DIST{"loss_mode != GRPO?"}
+    DIST -- Yes --> DIST_RUN["Run distillation<br/>(see Distillation Pipeline diagram)"]
+    DIST -- No --> ADV
+    DIST_RUN --> ADV{"advantage_mode == TREE?"}
+
+    ADV -- Yes --> ADV_RUN["tree_advantage_computer.compute()"]
+    ADV -- No --> CONV
+    ADV_RUN --> CONV["_nodes_to_batched_tensor_dict()"]
+
+    CONV --> MARK["set_trained()"]
+    MARK --> SAVE["save_query()"]
+
+    subgraph Engine["Training Engine (MultiCandidateFSDPEngine)"]
+        E1["build_packed_tree_batch()"]
+        E2["forward() with tree attention"]
+        E3["_compute_logprobs_entropy()"]
+        E4["ppo_update() with grpo_distill_loss_fn()"]
+        E1 --> E2 --> E3 --> E4
+    end
+
+    SAVE --> E1
 ```
 
 ### Metadata Propagation
@@ -673,6 +746,90 @@ tree attention efficiency with teacher supervision:
 1. **Tree Attention in Forward**: During the forward pass, tree attention metadata
    (`tree_triton_data` or `tree_block_mask`) is injected into the model inputs, allowing
    the transformer to attend according to the trie structure.
+
+### Distillation Pipeline
+
+```mermaid
+flowchart TD
+    START["_prepare_distill_for_node_groups()"]
+    SETUP["Setup: get tokenizer + build provider<br/>(TeacherClient + DiagnoseProvider)"]
+    START --> SETUP
+
+    subgraph per_episode["Per Episode: _prepare_distill_for_episode()"]
+        CACHED{"node.guidance<br/>cached?"}
+        DIAGNOSE["provider.diagnose_episode()"]
+        PARSE["parse_episode_diagnosis()"]
+        RETRY["Retry on parse failure<br/>(up to 3x, increasing temperature)"]
+        USE_CACHED["Reuse cached guidance"]
+        CACHED -- Yes --> USE_CACHED
+        CACHED -- No --> DIAGNOSE --> PARSE
+        PARSE -- Parse error --> RETRY --> DIAGNOSE
+        PARSE -- Success --> HAS_TURNS
+
+        USE_CACHED --> HAS_TURNS{"Selected turns<br/>exist?"}
+        HAS_TURNS -- No --> SKIP["Skip distillation<br/>(filter if DISTILL mode)"]
+
+        HAS_TURNS -- Yes --> PER_TURN
+
+        subgraph per_turn["Per Selected Turn"]
+            PT_BUILD["build_teacher_prompt_ids()<br/>prefix + guidance + generation"]
+            PT_CAND{"topk_distill?"}
+            PT_TOPK["Use node.topk_ids or<br/>_recompute_student_topk()"]
+            PT_GEN["Candidates = [generated_token_id]"]
+            PT_ALIGN["_ensure_generated_token_first()"]
+            PT_TEACHER["provider.get_logprobs_for_prompt()"]
+            PT_REWARD["Build PositionRewardInfo<br/>(candidate_token_ids, teacher_logprobs, chosen_index)"]
+            PT_BUILD --> PT_CAND
+            PT_CAND -- Yes --> PT_TOPK --> PT_ALIGN
+            PT_CAND -- No --> PT_GEN --> PT_ALIGN
+            PT_ALIGN --> PT_TEACHER --> PT_REWARD
+        end
+
+        PER_TURN --> STORE["Store teacher_logp, topk_ids on Node<br/>Cache guidance on leaf node"]
+    end
+
+    SETUP --> per_episode
+```
+
+### Loss Computation
+
+The `grpo_distill_loss_fn` operates in three modes depending on
+`distill_loss_mode` and `rl_loss_weight`:
+
+```mermaid
+flowchart TD
+    START["grpo_distill_loss_fn()"]
+    INPUTS["Extract: old_logp, advantages, loss_mask,<br/>teacher_logp, rl_loss_weight, distill_loss_weight"]
+    START --> INPUTS --> MODE{"distill_loss_mode +<br/>rl_loss_weight"}
+
+    subgraph evidence["Evidence/RLSD Mode<br/>(teacher_logp present + rl_loss_weight != 0)"]
+        E1["_compute_distill_reweighted_advantages()<br/>δ = student_logp − teacher_logp<br/>evidence_weight = sigmoid(λ · δ · advantage)"]
+        E2["_compute_grpo_loss()<br/>with reweighted advantages"]
+        E3["loss = rl_loss_weight × GRPO_loss"]
+        E1 --> E2 --> E3
+    end
+
+    subgraph distill["DISTILL Mode (rl_loss_weight == 0)"]
+        D1["_compute_teacher_kl_loss()"]
+        D2["loss = distill_loss_weight × KL_loss"]
+        D1 --> D2
+    end
+
+    subgraph both["BOTH Mode (default)"]
+        B1["_compute_grpo_loss()<br/>with original advantages"]
+        B2["_compute_teacher_kl_loss()"]
+        B3["loss = rl_loss_weight × GRPO_loss<br/>+ distill_loss_weight × KL_loss"]
+        B1 --> B2 --> B3
+    end
+
+    MODE -- "evidence / rlsd" --> evidence
+    MODE -- "DISTILL<br/>(rl = 0)" --> distill
+    MODE -- "BOTH (default)<br/>(teacher_logp + default mode)" --> both
+
+    evidence --> RETURN["Return loss"]
+    distill --> RETURN
+    both --> RETURN
+```
 
 ## Public API
 
