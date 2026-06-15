@@ -181,6 +181,73 @@ def _compute_distill_reweighted_advantages(
     return reweighted_advantages, stat
 
 
+def _iter_response_spans(
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    teacher: torch.Tensor,
+    prompt_lens: list[int],
+    cu_seqlens: torch.Tensor | None,
+    orig_shape: torch.Size,
+):
+    """Yield ``(dst, teacher_row, resp_mask)`` per sequence for scattering.
+
+    ``dst`` indexes the output tensors -- a ``slice`` for 1D-packed targets or
+    a ``(row, slice)`` tuple for 2D-batched targets -- so ``aligned[dst] = ...``
+    works uniformly for both layouts. ``teacher_row`` is the response-aligned
+    chosen-logprob slice and ``resp_mask`` the matching ``loss_mask`` slice.
+    A single contiguous response region per sequence is assumed.
+
+    Raises
+    ------
+    ValueError
+        If ``teacher``/``target`` is neither 1D-packed (with ``cu_seqlens``)
+        nor 2D-batched. ``orig_shape`` is only used for the error message.
+    """
+
+    def _prompt_len(b: int) -> int:
+        return prompt_lens[b] if b < len(prompt_lens) else 0
+
+    # 1D packed: per-sequence boundaries come from cu_seqlens. Materialize it
+    # to a CPU list once to avoid a per-iteration device sync.
+    if target.dim() == 1 and teacher.dim() == 2 and cu_seqlens is not None:
+        bounds = (
+            cu_seqlens.tolist() if torch.is_tensor(cu_seqlens) else list(cu_seqlens)
+        )
+        for b in range(min(teacher.shape[0], len(bounds) - 1)):
+            start, end = int(bounds[b]), int(bounds[b + 1])
+            pl = _prompt_len(b)
+            seg_mask = mask[start:end]
+            resp_len = min(int(seg_mask[pl:].sum().item()), teacher.shape[1])
+            if resp_len <= 0:
+                continue
+            yield (
+                slice(start + pl, start + pl + resp_len),
+                teacher[b, :resp_len],
+                seg_mask[pl : pl + resp_len],
+            )
+        return
+
+    # 2D batched: one row per sequence.
+    if target.dim() == 2 and teacher.dim() == 2:
+        for b in range(min(target.shape[0], teacher.shape[0])):
+            pl = _prompt_len(b)
+            resp_len = min(int(mask[b, pl:].sum().item()), teacher.shape[1])
+            if resp_len <= 0:
+                continue
+            yield (
+                (b, slice(pl, pl + resp_len)),
+                teacher[b, :resp_len],
+                mask[b, pl : pl + resp_len],
+            )
+        return
+
+    raise ValueError(
+        "Unsupported teacher_logp shape for distill evidence loss: "
+        f"teacher={tuple(orig_shape)}, target={tuple(target.shape)}, "
+        f"loss_mask={tuple(mask.shape)}"
+    )
+
+
 def _align_teacher_chosen_logprobs(
     teacher_logprobs: torch.Tensor,
     target: torch.Tensor,
@@ -197,15 +264,14 @@ def _align_teacher_chosen_logprobs(
     ``valid`` mask marking which of those positions hold a real (non-padding)
     teacher value.
 
-    Supported shape combinations (checked in order):
+    After dropping a trailing candidate axis (the chosen token is stored
+    first, so ``teacher[..., 0]`` selects it), the teacher is structurally
+    ``[num_seqs, resp_len]`` and is scattered using one of two target layouts:
 
     1. ``teacher.shape == target.shape`` -> used as-is (already aligned).
-    2. 1D packed ``target`` + ``[B, resp_len(, 1)]`` teacher + ``cu_seqlens``:
-       trailing singleton candidate dims are squeezed, then each sequence's
-       response slice is filled via ``cu_seqlens`` boundaries.
-    3. 1D packed ``target`` + 1D teacher: teacher values are dropped onto the
-       first ``loss_mask`` non-zero positions (single-sequence fallback).
-    4. 2D batched ``target`` + 2D teacher: per-row response slice fill.
+    2. 1D packed ``target`` (+ ``cu_seqlens``): per-sequence response slices
+       are located via the cumulative-length boundaries.
+    3. 2D batched ``target`` ``[batch, seq_len]``: per-row response slices.
 
     Parameters
     ----------
@@ -232,91 +298,51 @@ def _align_teacher_chosen_logprobs(
     Raises
     ------
     ValueError
-        If the ``teacher``/``target`` shape combination is not supported
-        (e.g. a multi-candidate ``[B, resp_len, C>1]`` teacher against a 1D
-        packed target, which the evidence path never produces).
+        If, after reducing the candidate axis, the ``teacher``/``target``
+        layout is neither 1D-packed (with ``cu_seqlens``) nor 2D-batched.
 
     Notes
     -----
     Alignment assumes each sequence has a **single contiguous** response
     region: teacher values are written into the slice
-    ``[start + prompt_len, start + prompt_len + resp_len)``. For sequences with
-    multiple non-contiguous ``loss_mask`` segments (some multi-turn layouts)
-    this contiguous placement can misalign later turns. This assumption is
-    shared with the 2D batched branch. Padding-induced over-reads are bounded
-    by ``teacher.shape[1]`` and filtered out by the ``abs() > 1e-8`` check.
+    ``[prompt_len, prompt_len + resp_len)`` of each sequence. For sequences
+    with multiple non-contiguous ``loss_mask`` segments (some multi-turn
+    layouts) this contiguous placement can misalign later turns. Over-reads
+    past real teacher values are bounded by the response length and filtered
+    out by the ``abs() > 1e-8`` validity check.
     """
     if teacher_logprobs.numel() == 0:
         return torch.zeros_like(target), torch.zeros_like(target, dtype=torch.bool)
 
-    # Case 1: teacher already matches the target layout.
-    if teacher_logprobs.shape == target.shape:
-        teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
+    teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
+
+    # Case 1: teacher already matches the target layout, nothing to scatter.
+    if teacher.shape == target.shape:
         valid = loss_mask.bool() & (teacher.abs() > 1e-8)
         return teacher, valid
 
+    # Reduce a trailing candidate axis to the chosen token (stored first).
+    # Response-aligned teacher is structurally [num_seqs, resp_len]; a 3rd
+    # dim is the candidate axis.
+    if teacher.dim() == 3:
+        teacher = teacher[..., 0]
+
     mask = loss_mask.bool()
-    teacher = teacher_logprobs.to(device=target.device, dtype=target.dtype)
     aligned = torch.zeros_like(target)
     valid = torch.zeros_like(target, dtype=torch.bool)
 
-    # Squeeze trailing singleton candidate dimensions first.
-    # Handles teacher [B, resp_len, 1] -> [B, resp_len] when target is
-    # 1D packed, where teacher has 2 extra dims (batch + candidates).
-    while teacher.dim() > target.dim() + 1 and teacher.shape[-1] == 1:
-        teacher = teacher[..., 0]
+    for dst, teacher_row, resp_mask in _iter_response_spans(
+        target=target,
+        mask=mask,
+        teacher=teacher,
+        prompt_lens=prompt_lens,
+        cu_seqlens=(input_data or {}).get("cu_seqlens"),
+        orig_shape=teacher_logprobs.shape,
+    ):
+        aligned[dst] = teacher_row
+        valid[dst] = resp_mask & (teacher_row.abs() > 1e-8)
 
-    cu_seqlens = (input_data or {}).get("cu_seqlens")
-    # Case 2: 1D packed target with per-sequence cu_seqlens boundaries.
-    if target.dim() == 1 and teacher.dim() == 2 and cu_seqlens is not None:
-        for b in range(min(teacher.shape[0], len(cu_seqlens) - 1)):
-            start = int(cu_seqlens[b].item())
-            end = int(cu_seqlens[b + 1].item())
-            pl = prompt_lens[b] if b < len(prompt_lens) else 0
-            seg_mask = mask[start:end]
-            resp_len = min(int(seg_mask[pl:].sum().item()), teacher.shape[1])
-            if resp_len <= 0:
-                continue
-            dst = slice(start + pl, start + pl + resp_len)
-            aligned[dst] = teacher[b, :resp_len]
-            valid[dst] = seg_mask[pl : pl + resp_len] & (
-                teacher[b, :resp_len].abs() > 1e-8
-            )
-        return aligned, valid
-
-    # Non-packed fallback: collapse a single trailing candidate dim.
-    if teacher.dim() == target.dim() + 1:
-        teacher = teacher[..., 0]
-
-    # Case 3: 1D packed target + 1D teacher (single-sequence fallback).
-    if target.dim() == 1 and teacher.dim() == 1:
-        response_positions = mask.nonzero(as_tuple=False).squeeze(-1)
-        n_pos = min(response_positions.numel(), teacher.shape[0])
-        if n_pos > 0:
-            positions = response_positions[:n_pos]
-            aligned[positions] = teacher[:n_pos]
-            valid[positions] = teacher[:n_pos].abs() > 1e-8
-        return aligned, valid
-
-    # Case 4: 2D batched target + 2D teacher, per-row response slice.
-    if target.dim() == 2 and teacher.dim() == 2:
-        batch_size = min(target.shape[0], teacher.shape[0])
-        for b in range(batch_size):
-            pl = prompt_lens[b] if b < len(prompt_lens) else 0
-            resp_len = min(int(mask[b, pl:].sum().item()), teacher.shape[1])
-            if resp_len <= 0:
-                continue
-            aligned[b, pl : pl + resp_len] = teacher[b, :resp_len]
-            valid[b, pl : pl + resp_len] = mask[b, pl : pl + resp_len] & (
-                teacher[b, :resp_len].abs() > 1e-8
-            )
-        return aligned, valid
-
-    raise ValueError(
-        "Unsupported teacher_logp shape for distill evidence loss: "
-        f"teacher={teacher_logprobs.shape}, target={target.shape}, "
-        f"loss_mask={loss_mask.shape}"
-    )
+    return aligned, valid
 
 
 def _compute_teacher_kl_loss(

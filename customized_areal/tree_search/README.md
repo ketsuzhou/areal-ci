@@ -620,9 +620,9 @@ flowchart TD
     DONE --> FINAL["_finalize_episode()"]
 ```
 
-The uncertainty metric U(q) uses Bayesian posterior variance adjusted by mean
-episode steps. For binary rewards it uses a Beta(1,1) posterior; for continuous
-rewards it uses a Normal-Inverse-Gamma posterior with weak priors.
+The uncertainty metric U(q) uses Bayesian posterior variance adjusted by mean episode
+steps. For binary rewards it uses a Beta(1,1) posterior; for continuous rewards it uses
+a Normal-Inverse-Gamma posterior with weak priors.
 
 ## Data Flow
 
@@ -793,8 +793,8 @@ flowchart TD
 
 ### Loss Computation
 
-The `grpo_distill_loss_fn` operates in three modes depending on
-`distill_loss_mode` and `rl_loss_weight`:
+The `grpo_distill_loss_fn` operates in three modes depending on `distill_loss_mode` and
+`rl_loss_weight`:
 
 ```mermaid
 flowchart TD

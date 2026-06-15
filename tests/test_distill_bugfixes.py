@@ -232,9 +232,9 @@ def test_bug13_align_teacher_squeezes_trailing_singleton_candidate_dim():
     prompt_lens = [2, 2, 2]
 
     # teacher_logp: [3, 3, 1] — 3 sequences, 3 response tokens each, 1 candidate
-    teacher_logp = torch.tensor([[[-1.0], [-2.0], [-3.0]],
-                                  [[-4.0], [-5.0], [-6.0]],
-                                  [[-7.0], [-8.0], [-9.0]]])
+    teacher_logp = torch.tensor(
+        [[[-1.0], [-2.0], [-3.0]], [[-4.0], [-5.0], [-6.0]], [[-7.0], [-8.0], [-9.0]]]
+    )
 
     aligned, valid = _align_teacher_chosen_logprobs(
         teacher_logprobs=teacher_logp,
@@ -254,3 +254,148 @@ def test_bug13_align_teacher_squeezes_trailing_singleton_candidate_dim():
     assert aligned[7].item() == -4.0
     assert aligned[8].item() == -5.0
     assert aligned[9].item() == -6.0
+
+
+def test_align_teacher_packed_selects_chosen_candidate():
+    """1D-packed target with a multi-candidate teacher [B, resp_len, C>1]
+    must select the chosen token (candidate index 0) and ignore the rest."""
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    target = torch.zeros(15)
+    loss_mask = torch.tensor(
+        [0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1], dtype=torch.int32
+    )
+    cu_seqlens = torch.tensor([0, 5, 10, 15], dtype=torch.int32)
+
+    # [3, 3, 3]: chosen logprobs in column 0; non-chosen columns are bogus.
+    teacher = torch.full((3, 3, 3), 99.0)
+    teacher[..., 0] = torch.tensor(
+        [[-1.0, -2.0, -3.0], [-4.0, -5.0, -6.0], [-7.0, -8.0, -9.0]]
+    )
+
+    aligned, valid = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher,
+        target=target,
+        loss_mask=loss_mask,
+        prompt_lens=[2, 2, 2],
+        input_data={"cu_seqlens": cu_seqlens},
+    )
+
+    assert aligned[2:5].tolist() == [-1.0, -2.0, -3.0]
+    assert aligned[12:15].tolist() == [-7.0, -8.0, -9.0]
+    # Non-chosen columns (99.0) must never leak into the aligned output.
+    assert 99.0 not in aligned.tolist()
+    assert valid[2:5].all() and not valid[:2].any()
+
+
+def test_align_teacher_2d_batched_per_row_response():
+    """2D-batched target [batch, seq_len] aligns each row's response slice."""
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    target = torch.zeros(2, 6)
+    # row0: prompt_len=2, response at 2:5; row1: prompt_len=1, response at 1:3
+    loss_mask = torch.tensor(
+        [[0, 0, 1, 1, 1, 0], [0, 1, 1, 0, 0, 0]], dtype=torch.int32
+    )
+    teacher = torch.tensor([[[-1.0], [-2.0], [-3.0]], [[-4.0], [-5.0], [0.0]]])
+
+    aligned, valid = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher,
+        target=target,
+        loss_mask=loss_mask,
+        prompt_lens=[2, 1],
+        input_data=None,
+    )
+
+    assert aligned[0, 2:5].tolist() == [-1.0, -2.0, -3.0]
+    assert aligned[1, 1:3].tolist() == [-4.0, -5.0]
+    assert valid[0, 2:5].all() and valid[1, 1:3].all()
+    # Prompt positions stay zero / invalid.
+    assert not valid[0, :2].any() and not valid[1, 0].any()
+
+
+def test_align_teacher_already_aligned_passthrough():
+    """When teacher already matches target shape it is returned as-is, with
+    validity gated by loss_mask and the non-zero check."""
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    target = torch.zeros(4)
+    loss_mask = torch.tensor([0, 1, 1, 0], dtype=torch.int32)
+    teacher = torch.tensor([0.0, -1.0, -2.0, 0.0])
+
+    aligned, valid = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher,
+        target=target,
+        loss_mask=loss_mask,
+        prompt_lens=[1],
+        input_data=None,
+    )
+
+    assert torch.equal(aligned, teacher)
+    assert valid.tolist() == [False, True, True, False]
+
+
+def test_align_teacher_zero_padding_marked_invalid():
+    """Zero-valued (padding/missing) teacher entries inside the response
+    region must be marked invalid even though they are written to aligned."""
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    target = torch.zeros(5)
+    loss_mask = torch.tensor([0, 1, 1, 1, 1], dtype=torch.int32)
+    cu_seqlens = torch.tensor([0, 5], dtype=torch.int32)
+    # 4 response tokens, but the 3rd teacher value is a 0.0 "missing" entry.
+    teacher = torch.tensor([[[-1.0], [-2.0], [0.0], [-4.0]]])
+
+    aligned, valid = _align_teacher_chosen_logprobs(
+        teacher_logprobs=teacher,
+        target=target,
+        loss_mask=loss_mask,
+        prompt_lens=[1],
+        input_data={"cu_seqlens": cu_seqlens},
+    )
+
+    assert aligned[1:5].tolist() == [-1.0, -2.0, 0.0, -4.0]
+    # Position 3 (the 0.0 entry) is invalid; the others are valid.
+    assert valid[1].item() and valid[2].item() and valid[4].item()
+    assert not valid[3].item()
+
+
+def test_align_teacher_unsupported_shape_raises():
+    """An unsupported teacher/target layout (after candidate reduction) must
+    raise ValueError rather than silently producing a wrong alignment."""
+    import torch
+
+    from customized_areal.tree_search.training.losses.distill import (
+        _align_teacher_chosen_logprobs,
+    )
+
+    target = torch.zeros(15)
+    loss_mask = torch.ones(15, dtype=torch.int32)
+    cu_seqlens = torch.tensor([0, 5, 10, 15], dtype=torch.int32)
+    # 4D teacher is not a supported layout.
+    teacher = torch.zeros(3, 3, 3, 3)
+
+    with pytest.raises(ValueError, match="Unsupported teacher_logp shape"):
+        _align_teacher_chosen_logprobs(
+            teacher_logprobs=teacher,
+            target=target,
+            loss_mask=loss_mask,
+            prompt_lens=[2, 2, 2],
+            input_data={"cu_seqlens": cu_seqlens},
+        )

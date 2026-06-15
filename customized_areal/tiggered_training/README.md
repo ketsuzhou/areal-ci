@@ -2,14 +2,29 @@
 
 This directory configures online AReaL training from externally triggered le-agent
 sessions. It still uses `areal.trainer.rl_trainer.PPOTrainer` for the rollout and
-training loop, but `train_triggered_sft_loss.py` patches the actor update to use an
-SFT-style masked negative-log-likelihood loss instead of the default PPO/GRPO objective.
+training loop. `train_triggered_sft_loss.py` supports two actor-loss modes:
+
+- `--loss-mode sft` patches the actor update to use an SFT-style masked
+  negative-log-likelihood loss. This is the default and preserves the original behavior.
+- `--loss-mode grpo` keeps AReaL's stock PPO actor update, which calls `grpo_loss_fn`
+  after computing group-normalized advantages.
 
 Run it with:
 
 ```bash
 uv run customized_areal/tiggered_training/train_triggered_sft_loss.py \
-  --config customized_areal/tiggered_training/config_Qwen3-5L-9B_trggered_training.yaml
+  --config customized_areal/tiggered_training/config_Qwen3-5L-9B_trggered_training.yaml \
+  --loss-mode sft
+```
+
+Run online GRPO with a group size of 4:
+
+```bash
+uv run customized_areal/tiggered_training/train_triggered_sft_loss.py \
+  --config customized_areal/tiggered_training/config_Qwen3-5L-9B_trggered_training.yaml \
+  --loss-mode grpo \
+  gconfig.n_samples=4 \
+  train_dataset.batch_size=1
 ```
 
 ## Training Behavior
@@ -18,12 +33,46 @@ uv run customized_areal/tiggered_training/train_triggered_sft_loss.py \
   wait for external sessions through `OpenAIProxyWorkflow`.
 - `workflow=None` tells the rollout engine to use the online proxy workflow instead of
   constructing a local agent.
-- `TriggeredSFTFSDPPPOActor` is sent to RPC workers as the actor engine class, so
-  worker-side `PPOActor._ppo_update` is patched before model training starts.
-- `triggered_sft_loss_fn` trains on rollout completion tokens where `loss_mask == 1`,
-  computing `-mean(log p_theta(token))`.
-- Rewards are still logged for observability, but they do not scale the actor loss in
-  this mode.
+- In SFT mode, `TriggeredSFTFSDPPPOActor` is sent to RPC workers as the actor engine
+  class, so worker-side `PPOActor._ppo_update` is patched before model training starts.
+  `triggered_sft_loss_fn` trains on rollout completion tokens where `loss_mask == 1`,
+  computing `-mean(log p_theta(token))`. Rewards are logged for observability but do not
+  scale the actor loss.
+- In GRPO mode, no actor patch is installed. The standard `PPOActor._compute_advantages`
+  and `PPOActor._ppo_update` path is used, and `_ppo_update` calls `grpo_loss_fn`. The
+  launcher sets `actor.adv_norm` to group mean/std normalization and sets
+  `actor.adv_norm.group_size = gconfig.n_samples`.
+
+## GRPO Online Group Sampling
+
+For online triggered training, one "query" is one item from PPOTrainer's internal empty
+dataloader. The real prompt/user state comes from the external le-agent session, not
+from the dataloader item.
+
+When `gconfig.n_samples = K`, `PPOTrainer.train()` calls:
+
+```python
+actor.prepare_batch(..., group_size=config.gconfig.n_samples)
+```
+
+The rollout controller wraps the online proxy workflow in `GroupedRolloutWorkflow`. For
+each dataloader item, that wrapper runs the inner workflow `K` times:
+
+1. Each inner `OpenAIProxyWorkflow.arun_episode()` grants proxy capacity.
+1. Because `rollout.agent.mode == "online"`, `_OnlineAgent` waits for one external
+   le-agent session to start and finish.
+1. The completed session is exported with `proxy_client.export_interactions(...)` as one
+   trajectory.
+1. After `K` valid sessions complete, `GroupedRolloutWorkflow` merges their exported
+   interactions into one grouped trajectory.
+1. During training, AReaL sees the grouped trajectory as `K` samples for the same query.
+   Rewards are normalized within that group, producing relative GRPO advantages: roughly
+   `(reward_i - mean(group_rewards)) / std(group_rewards)`.
+
+Operationally, if `gconfig.n_samples=4`, one optimizer step with
+`train_dataset.batch_size=1` waits for four completed online sessions before it has one
+GRPO group. If one session returns no model interactions, it is rejected; the rollout
+controller continues collecting until the batch contains accepted grouped trajectories.
 
 ## Online Session Lifecycle
 

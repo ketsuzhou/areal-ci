@@ -30,7 +30,10 @@ logger = logging.getLogger("OnPolicyDistill")
 
 
 def _patch_clip_cov_from_actor_config(config: Any) -> None:
-    from customized_areal.clip_cov import patch_ppo_actor_to_use_clip_cov_loss, ClipCovConfig
+    from customized_areal.clip_cov import (
+        ClipCovConfig,
+        patch_ppo_actor_to_use_clip_cov_loss,
+    )
 
     patch_ppo_actor_to_use_clip_cov_loss(
         ClipCovConfig(
@@ -126,6 +129,7 @@ class MuonMultiCandidateFSDPPPOActor:
             PPOActorControllerV2 if config._version == "v2" else PPOActorController
         )
         return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
+
 
 _patch_applied = False
 _original_ppo_update = None
