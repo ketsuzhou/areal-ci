@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from enum import Enum
 
@@ -81,6 +82,8 @@ class Config:
     muon_adam_lr: float = 3e-4
     muon_ns_steps: int = 5
     muon_nesterov: bool = True
+    use_fresh_query: bool = False
+    fresh_query_table: str = ""
 
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
@@ -119,6 +122,15 @@ class Config:
             raise ValueError(f"muon_adam_lr must be > 0, got {self.muon_adam_lr}")
         if self.muon_ns_steps < 1:
             raise ValueError(f"muon_ns_steps must be >= 1, got {self.muon_ns_steps}")
+        if self.use_fresh_query:
+            self.fresh_query_table = self.fresh_query_table or os.environ.get(
+                "FRESH_QUERY_TABLE", ""
+            )
+            if not self.fresh_query_table:
+                raise ValueError(
+                    "fresh_query_table must be set when use_fresh_query=True "
+                    "(or set FRESH_QUERY_TABLE)"
+                )
 
 
 @dataclass

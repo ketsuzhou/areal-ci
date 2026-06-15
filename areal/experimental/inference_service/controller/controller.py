@@ -1614,6 +1614,7 @@ class RolloutControllerV2:
             workflow_kwargs = dict(workflow_kwargs)
             tree_search_cfg = workflow_kwargs.pop("tree_search_config")
             max_tokens = workflow_kwargs.pop("max_tokens", 0)
+        use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
 
         # External mode only supports online mode (workflow=None)
         if self.external_mode and workflow is not None:
@@ -1644,7 +1645,7 @@ class RolloutControllerV2:
                 **online_kwargs,
             )
 
-            if group_size > 1:
+            if group_size > 1 or use_tree_search:
                 resolved = self._wrap_grouped(
                     resolved, group_size, tree_search_cfg, max_tokens
                 )
@@ -1684,7 +1685,7 @@ class RolloutControllerV2:
         resolved = self._wrap_agent(agent)
 
         # (e) Optionally wrap in GroupedRolloutWorkflow or TreeSearchGroupedRolloutWorkflow
-        if group_size > 1:
+        if group_size > 1 or use_tree_search:
             resolved = self._wrap_grouped(
                 resolved, group_size, tree_search_cfg, max_tokens
             )
@@ -1737,6 +1738,8 @@ class RolloutControllerV2:
                 uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
                 reward_type=tree_search_cfg.reward_type,
                 max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
+                use_fresh_query=tree_search_cfg.use_fresh_query,
+                fresh_query_table=tree_search_cfg.fresh_query_table,
             )
         else:
             from areal.infra.remote_inf_engine import GroupedRolloutWorkflow

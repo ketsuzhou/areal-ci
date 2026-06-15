@@ -61,11 +61,14 @@ def test_trainer_rejects_clip_cov_with_distill_mode():
 
 def _make_base_config(backend="fsdp", optimizer=None, per_layer_optim_step=False):
     return SimpleNamespace(
+        total_train_steps=8,
+        total_train_epochs=2,
+        train_dataset=SimpleNamespace(batch_size=3),
         actor=SimpleNamespace(
             backend=backend,
             optimizer=optimizer or SimpleNamespace(type="adam"),
             fsdp=SimpleNamespace(per_layer_optim_step=per_layer_optim_step),
-        )
+        ),
     )
 
 
@@ -167,3 +170,60 @@ def test_create_train_engine_uses_muon_fsdp_actor(monkeypatch):
 
     assert isinstance(actor, FakeMuonActor)
     assert created == [("init", "muon", 0.9), ("pg", "dp")]
+
+
+def test_fresh_query_requires_total_train_steps():
+    tree_config = Config(use_fresh_query=True, fresh_query_table="query_bank")
+    base_config = _make_base_config()
+    base_config.total_train_steps = None
+
+    try:
+        trainer_mod.CustomizedPPOTrainer(
+            config=base_config,
+            tree_search_config=tree_config,
+            train_dataset=None,
+        )
+    except ValueError as exc:
+        assert "total_train_steps" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_fresh_query_passes_placeholder_dataset_to_base_init(monkeypatch):
+    calls = []
+
+    def fake_base_init(self, config, train_dataset=None, valid_dataset=None):
+        calls.append((config, train_dataset, valid_dataset))
+
+    monkeypatch.setattr(trainer_mod.PPOTrainer, "__init__", fake_base_init)
+    tree_config = Config(use_fresh_query=True, fresh_query_table="query_bank")
+    base_config = _make_base_config()
+
+    trainer_mod.CustomizedPPOTrainer(
+        config=base_config,
+        tree_search_config=tree_config,
+        train_dataset=None,
+        valid_dataset="valid",
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1] is not None
+    assert calls[0][1][0] == {}
+    assert calls[0][2] == "valid"
+
+
+def test_fresh_query_create_dataloader_returns_empty_loader():
+    trainer = trainer_mod.CustomizedPPOTrainer.__new__(trainer_mod.CustomizedPPOTrainer)
+    trainer._use_fresh_query_dataloader = True
+    trainer.config = _make_base_config()
+
+    dataloader = trainer._create_dataloader(
+        dataset=object(),
+        dataset_config=object(),
+        rank=0,
+        world_size=1,
+    )
+
+    assert len(dataloader) == 4
+    assert dataloader.batch_size == 3
+    assert next(iter(dataloader)) == [{}, {}, {}]

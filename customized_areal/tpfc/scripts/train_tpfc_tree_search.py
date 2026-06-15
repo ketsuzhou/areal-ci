@@ -154,14 +154,23 @@ def main(args: list[str] | None = None) -> None:
     else:
         logger.info("Using Train ID from environment: %s", os.environ["TRAIN_ID"])
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
+    tree_search = config.tree_search
 
-    # Load TPFC dataset
-    train_dataset = get_tpfc_rl_dataset(
-        path=config.train_dataset.path,
-        split="train",
-        tokenizer=tokenizer,
-        max_length=config.train_dataset.max_length,
-    )
+    # Load TPFC dataset unless fresh-query mode pulls training rows from DB.
+    if tree_search.use_fresh_query:
+        train_dataset = None
+        logger.info(
+            "tree_search.use_fresh_query=True; training samples will be loaded "
+            "from database table=%s inside arun_episode",
+            tree_search.fresh_query_table,
+        )
+    else:
+        train_dataset = get_tpfc_rl_dataset(
+            path=config.train_dataset.path,
+            split="train",
+            tokenizer=tokenizer,
+            max_length=config.train_dataset.max_length,
+        )
 
     valid_dataset = get_tpfc_rl_dataset(
         path=config.valid_dataset.path,
@@ -170,11 +179,11 @@ def main(args: list[str] | None = None) -> None:
         max_length=config.valid_dataset.max_length,
     )
 
-    logger.info("Loaded %d training samples", len(train_dataset))
+    if train_dataset is not None:
+        logger.info("Loaded %d training samples", len(train_dataset))
     logger.info("Loaded %d validation samples", len(valid_dataset))
 
     # Build cache / tree backup configs from overrides
-    tree_search = config.tree_search
     _validate_tree_search_startup(config)
 
     n_samples = config.gconfig.n_samples

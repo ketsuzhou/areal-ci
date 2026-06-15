@@ -28,6 +28,7 @@ from customized_areal.tree_search.config import (
 )
 
 from areal import PPOTrainer
+from areal.trainer.rl_trainer import _EmptyDataLoader
 from areal.utils import logging
 from areal.utils.environ import is_single_controller
 from areal.utils.saver import Saver
@@ -41,6 +42,16 @@ from .actor import (
 )
 
 logger = logging.getLogger("TreeBackupPPOTrainer")
+
+
+class _FreshQueryDatasetPlaceholder:
+    """Non-empty placeholder so PPOTrainer can enter dataset-backed setup."""
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, index: int) -> dict[str, Any]:  # noqa: ARG002
+        return {}
 
 
 class CustomizedPPOTrainer(PPOTrainer):
@@ -64,6 +75,22 @@ class CustomizedPPOTrainer(PPOTrainer):
         self.tree_search_config = tree_search_config or Config()
         self._clip_cov_patch_applied = False
         self._muon_patch_applied = False
+        self._use_fresh_query_dataloader = self.tree_search_config.use_fresh_query
+        if self._use_fresh_query_dataloader:
+            if config.total_train_steps is None:
+                raise ValueError(
+                    "total_train_steps must be set when "
+                    "tree_search_config.use_fresh_query=True"
+                )
+            steps_per_epoch = config.total_train_steps // config.total_train_epochs
+            if steps_per_epoch < 1:
+                raise ValueError(
+                    f"total_train_steps ({config.total_train_steps}) must be >= "
+                    f"total_train_epochs ({config.total_train_epochs}) when "
+                    "tree_search_config.use_fresh_query=True"
+                )
+            if train_dataset is None:
+                train_dataset = _FreshQueryDatasetPlaceholder()
         if self.tree_search_config.use_clip_cov:
             if self.tree_search_config.loss_mode != LossMode.GRPO:
                 raise ValueError(
@@ -81,6 +108,18 @@ class CustomizedPPOTrainer(PPOTrainer):
             if self._muon_patch_applied:
                 self._unpatch_muon_optimizer()
             raise
+
+    def _create_dataloader(self, dataset, dataset_config, rank, world_size):
+        if self._use_fresh_query_dataloader:
+            assert self.config.total_train_steps is not None
+            steps_per_epoch = (
+                self.config.total_train_steps // self.config.total_train_epochs
+            )
+            return _EmptyDataLoader(
+                batch_size=self.config.train_dataset.batch_size,
+                steps_per_epoch=steps_per_epoch,
+            )
+        return super()._create_dataloader(dataset, dataset_config, rank, world_size)
 
     def _get_clip_cov_config(self) -> ClipCovConfig:
         return ClipCovConfig(

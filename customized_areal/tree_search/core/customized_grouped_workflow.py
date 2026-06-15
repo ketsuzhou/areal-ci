@@ -94,6 +94,8 @@ from areal.utils import logging
 
 logger = logging.getLogger("TreeSearchGroupedWorkflow")
 
+_FRESH_QUERY_SELECT_LIMIT = 100
+
 
 @dataclass(frozen=True)
 class EpisodeRunResult:
@@ -115,6 +117,58 @@ def _with_episode_metadata(
             raw_messages=raw_messages,
         )
     return result
+
+
+def _normalize_used4train(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if isinstance(item, str)]
+    return []
+
+
+def _apply_fresh_query_row(data: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(data)
+    query_id = row.get("query_id")
+    query = row.get("query")
+    gold_answer = row.get("gold_answer")
+    evaluation_rubric = row.get("evaluation_rubric")
+    used4train = row.get("used4train")
+
+    merged["query_id"] = str(query_id or "")
+    merged["query"] = str(query or "")
+    merged["answer"] = str(gold_answer or "")
+    merged["evaluation_rubric"] = (
+        evaluation_rubric if isinstance(evaluation_rubric, list) else []
+    )
+    merged["used4train"] = _normalize_used4train(used4train)
+    return merged
+
+
+async def _execute_fresh_query_claim_update(
+    query: Any,
+    *,
+    train_id: str,
+) -> Any:
+    query = _apply_train_id_not_contains_filter(query, train_id=train_id)
+    return await query.execute()
+
+
+def _apply_train_id_not_contains_filter(query: Any, *, train_id: str) -> Any:
+    try:
+        return query.not_.contains("used4train", [train_id])
+    except AttributeError:
+        logger.warning(
+            "Supabase client does not expose not_.contains; fresh query claim "
+            "will rely on the query_id update guard only"
+        )
+        return query
+
+
+def _affected_row_count(result: Any) -> int:
+    data = getattr(result, "data", None)
+    if isinstance(data, list):
+        return len(data)
+    count = getattr(result, "count", None)
+    return count if isinstance(count, int) else 0
 
 
 def choose_sample_source(
@@ -556,6 +610,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         reward_type: str = "binary",
         distill_kl_mode: str = "reverse_kl",
         max_distill_tokens: int = 0,
+        use_fresh_query: bool = False,
+        fresh_query_table: str = "",
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -601,6 +657,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.reward_type = reward_type
         self.distill_kl_mode = distill_kl_mode
         self.max_distill_tokens = max_distill_tokens or max_tokens
+        self.use_fresh_query = use_fresh_query
+        self.fresh_query_table = fresh_query_table or os.environ.get(
+            "FRESH_QUERY_TABLE", ""
+        )
+        if self.use_fresh_query and not self.fresh_query_table:
+            raise ValueError(
+                "fresh_query_table must be set when use_fresh_query=True "
+                "(or set FRESH_QUERY_TABLE)"
+            )
         if dynamic_group_size:
             if self.initial_group_size < 1:
                 raise ValueError(
@@ -637,6 +702,79 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             self.tree_store = MCTSTreeStore()
 
         self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
+
+    async def _load_fresh_query_data(
+        self,
+        data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        from customized_areal.db_service import DBConnection
+
+        train_id = os.environ.get("TRAIN_ID", "")
+        if not train_id:
+            raise ValueError("TRAIN_ID must be set when use_fresh_query=True")
+
+        client = await DBConnection().get_client()
+        select_query = (
+            client.table(self.fresh_query_table)
+            .select("query_id,query,gold_answer,evaluation_rubric,used4train")
+            .limit(_FRESH_QUERY_SELECT_LIMIT)
+        )
+        select_query = _apply_train_id_not_contains_filter(
+            select_query,
+            train_id=train_id,
+        )
+        result = await select_query.execute()
+        rows = getattr(result, "data", None)
+        if not isinstance(rows, list):
+            logger.warning(
+                "Fresh query table %s returned non-list data; skipping",
+                self.fresh_query_table,
+            )
+            return None
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            query_id = row.get("query_id")
+            if not isinstance(query_id, str) or not query_id:
+                continue
+            used4train = _normalize_used4train(row.get("used4train"))
+            if train_id in used4train:
+                continue
+
+            next_used4train = [*used4train, train_id]
+            update_query = (
+                client.table(self.fresh_query_table)
+                .update({"used4train": next_used4train})
+                .eq("query_id", query_id)
+            )
+            claim_result = await _execute_fresh_query_claim_update(
+                update_query,
+                train_id=train_id,
+            )
+            if _affected_row_count(claim_result) < 1:
+                logger.info(
+                    "Fresh query claim lost race for query_id=%s train_id=%s; retrying",
+                    query_id,
+                    train_id,
+                )
+                continue
+
+            logger.info(
+                "Claimed fresh query query_id=%s for train_id=%s",
+                query_id,
+                train_id,
+            )
+            claimed_row = dict(row)
+            claimed_row["used4train"] = next_used4train
+            return _apply_fresh_query_row(data, claimed_row)
+
+        logger.warning(
+            "No eligible fresh query rows found in table=%s for train_id=%s",
+            self.fresh_query_table,
+            train_id,
+        )
+        return None
 
     def _result_to_nodes(
         self, result: Any, query_id: str, group_idx: int
@@ -1085,6 +1223,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         return prepared_nodes, rewards_by_node_id
 
     async def arun_episode(self, engine, data: dict[str, Any]) -> dict[str, Any] | None:
+        if self.use_fresh_query:
+            fresh_data = await self._load_fresh_query_data(data)
+            if fresh_data is None:
+                return None
+            data = fresh_data
+
         query_id = data.get("query_id") or ""
         try:
             if self.dynamic_group_size:

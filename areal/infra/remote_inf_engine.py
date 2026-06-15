@@ -604,6 +604,7 @@ class RemoteInfEngine(InferenceEngine):
             workflow_kwargs = dict(workflow_kwargs)
             tree_search_cfg = workflow_kwargs.pop("tree_search_config")
             max_tokens = workflow_kwargs.pop("max_tokens", 0)
+        use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
 
         # 0. None workflow = online mode (config-driven)
         if workflow is None:
@@ -616,7 +617,53 @@ class RemoteInfEngine(InferenceEngine):
             if proxy_addr is None:
                 raise ValueError("proxy_addr is required for online mode")
             resolved = self._wrap_openai_agent(None, proxy_addr=proxy_addr)
-            if group_size > 1:
+            if use_tree_search:
+                from customized_areal.tree_search.core.customized_grouped_workflow import (
+                    TreeSearchGroupedRolloutWorkflow,
+                )
+
+                resolved = TreeSearchGroupedRolloutWorkflow(
+                    resolved,
+                    group_size,
+                    checkpoint_dir=tree_search_cfg.checkpoint_dir,
+                    advantage_mode=tree_search_cfg.advantage_mode,
+                    loss_mode=tree_search_cfg.loss_mode,
+                    cache_mode=tree_search_cfg.mode,
+                    tokenizer_path=self.config.tokenizer_path,
+                    max_reasoning_tokens=tree_search_cfg.max_reasoning_tokens,
+                    rl_loss_weight=tree_search_cfg.rl_loss_weight,
+                    distill_loss_weight=tree_search_cfg.distill_loss_weight,
+                    topk_distill=tree_search_cfg.topk_distill,
+                    teacher_provider=tree_search_cfg.teacher_provider,
+                    teacher_base_url=tree_search_cfg.teacher_base_url,
+                    teacher_backend=tree_search_cfg.teacher_backend,
+                    teacher_model_name=tree_search_cfg.teacher_model_name,
+                    teacher_api_key=tree_search_cfg.teacher_api_key,
+                    teacher_top_k=tree_search_cfg.teacher_top_k,
+                    teacher_max_retries=tree_search_cfg.teacher_max_retries,
+                    teacher_timeout=tree_search_cfg.teacher_timeout,
+                    teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+                    teacher_max_concurrency=tree_search_cfg.teacher_max_concurrency,
+                    diagnose_model_name=tree_search_cfg.diagnose_model_name,
+                    diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
+                    diagnose_temperature=tree_search_cfg.diagnose_temperature,
+                    diagnose_base_url=tree_search_cfg.diagnose_base_url,
+                    diagnose_api_key=tree_search_cfg.diagnose_api_key,
+                    strict_distill_json=tree_search_cfg.strict_distill_json,
+                    max_tokens=max_tokens,
+                    sample_source=tree_search_cfg.sample_source,
+                    branch_probability=tree_search_cfg.branch_probability,
+                    dynamic_group_size=tree_search_cfg.dynamic_group_size,
+                    initial_group_size=tree_search_cfg.initial_group_size,
+                    max_group_size=tree_search_cfg.max_group_size,
+                    uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
+                    reward_type=tree_search_cfg.reward_type,
+                    distill_kl_mode=tree_search_cfg.distill_kl_mode,
+                    max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
+                    use_fresh_query=tree_search_cfg.use_fresh_query,
+                    fresh_query_table=tree_search_cfg.fresh_query_table,
+                )
+            elif group_size > 1:
                 resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
             return resolved
 
@@ -707,8 +754,7 @@ class RemoteInfEngine(InferenceEngine):
             resolved = self._wrap_openai_agent(workflow, proxy_addr=proxy_addr)
 
         # Wrap with GroupedRolloutWorkflow if group_size > 1
-        if group_size > 1:
-            use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
+        if group_size > 1 or use_tree_search:
             if use_tree_search:
                 self.logger.warning("use TreeSearchGroupedRolloutWorkflow")
 
@@ -754,6 +800,8 @@ class RemoteInfEngine(InferenceEngine):
                     reward_type=tree_search_cfg.reward_type,
                     distill_kl_mode=tree_search_cfg.distill_kl_mode,
                     max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
+                    use_fresh_query=tree_search_cfg.use_fresh_query,
+                    fresh_query_table=tree_search_cfg.fresh_query_table,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

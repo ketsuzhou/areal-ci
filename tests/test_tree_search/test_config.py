@@ -118,6 +118,33 @@ class TestMuonConfig:
         with pytest.raises(ValueError, match="muon_momentum"):
             Config(muon_momentum=1.0)
 
+
+class TestFreshQueryConfig:
+    def test_fresh_query_defaults_disabled(self):
+        config = Config()
+
+        assert config.use_fresh_query is False
+        assert config.fresh_query_table == ""
+
+    def test_fresh_query_accepts_configured_table(self):
+        config = Config(use_fresh_query=True, fresh_query_table="query_bank")
+
+        assert config.use_fresh_query is True
+        assert config.fresh_query_table == "query_bank"
+
+    def test_fresh_query_uses_env_table(self, monkeypatch):
+        monkeypatch.setenv("FRESH_QUERY_TABLE", "env_query_bank")
+
+        config = Config(use_fresh_query=True)
+
+        assert config.fresh_query_table == "env_query_bank"
+
+    def test_fresh_query_requires_table(self, monkeypatch):
+        monkeypatch.delenv("FRESH_QUERY_TABLE", raising=False)
+
+        with pytest.raises(ValueError, match="fresh_query_table"):
+            Config(use_fresh_query=True)
+
     def test_muon_rejects_invalid_aux_adam_lr(self):
         with pytest.raises(ValueError, match="muon_adam_lr"):
             Config(muon_adam_lr=0)
