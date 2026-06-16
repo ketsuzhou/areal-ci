@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,6 +127,81 @@ def test_shared_token_manager_write_token_updates_refresh_token_in_dotenv(
     assert payload["refresh_token"] == "refresh-v2"
     assert "REFRESH_TOKEN=refresh-v2\n" in dotenv_file.read_text(encoding="utf-8")
     assert "OTHER=value\n" in dotenv_file.read_text(encoding="utf-8")
+
+
+def test_save_tpfc_agent_id_updates_dotenv_and_process_env(monkeypatch, tmp_path):
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text(
+        "OTHER=value\nTPFC_AGENT_ID=old-agent\nREFRESH_TOKEN=refresh\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(backend_run, "DEFAULT_AGENT_ID", "old-agent")
+
+    backend_run._save_tpfc_agent_id("new-agent", dotenv_file)
+
+    assert dotenv_file.read_text(encoding="utf-8") == (
+        "OTHER=value\nTPFC_AGENT_ID=new-agent\nREFRESH_TOKEN=refresh\n"
+    )
+    assert backend_run.DEFAULT_AGENT_ID == "new-agent"
+    assert backend_run.os.environ["TPFC_AGENT_ID"] == "new-agent"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_id_creates_and_persists_when_configured_id_missing(
+    monkeypatch,
+):
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        async def execute(self):
+            return SimpleNamespace(data=self.data)
+
+    class FakeClient:
+        def table(self, name):
+            assert name == "agents"
+            return FakeQuery([])
+
+    class FakeAgentService:
+        def __init__(self, client):
+            assert isinstance(client, FakeClient)
+
+        async def create_agent(self, user_id, data):
+            assert user_id == "user"
+            assert data.name == "TPFC"
+            return SimpleNamespace(agent_id="created-agent")
+
+    class FakeLoader:
+        async def load_agent(self, agent_id, user_id, load_config=True):
+            assert agent_id == "created-agent"
+            assert user_id == "user"
+            assert load_config is True
+
+    async def fake_get_agent_loader():
+        return FakeLoader()
+
+    saved_agent_ids = []
+    monkeypatch.setenv("TPFC_AGENT_ID", "missing-agent")
+    monkeypatch.setattr(backend_run, "AgentService", FakeAgentService)
+    monkeypatch.setattr(backend_run, "get_agent_loader", fake_get_agent_loader)
+    monkeypatch.setattr(
+        backend_run, "_save_tpfc_agent_id", lambda agent_id: saved_agent_ids.append(agent_id)
+    )
+
+    agent_id = await backend_run._resolve_agent_id(FakeClient(), "user", None)
+
+    assert agent_id == "created-agent"
+    assert saved_agent_ids == ["created-agent"]
 
 
 @pytest.mark.asyncio

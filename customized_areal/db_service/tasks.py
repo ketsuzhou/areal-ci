@@ -159,6 +159,7 @@ async def create_task(
     task_data: dict[str, Any] = {
         "task_id": task_id,
         "account_id": account_id,
+        "user_id": account_id,
         "status": TaskStatus.PENDING,
         "created_at": now,
     }

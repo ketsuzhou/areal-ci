@@ -84,6 +84,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 logger = logging.getLogger("BackendRun")
 
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 DEFAULT_AGENT_ID = os.environ.get("TPFC_AGENT_ID", "")
 DEFAULT_USER_ID = os.environ.get("TPFC_USER_ID", "")
 LE_AGENT_API_URL = os.environ.get("LE_AGENT_API_URL", "http://localhost:8000")
@@ -170,10 +171,52 @@ def _prepare_form_data(
     return form_data
 
 
+def _save_tpfc_agent_id(agent_id: str, env_path: Path = ENV_PATH) -> None:
+    """Persist the TPFC agent ID for later backend runs."""
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    line = f"TPFC_AGENT_ID={agent_id}\n"
+
+    if not env_path.exists():
+        env_path.write_text(line, encoding="utf-8")
+    else:
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        for idx, existing_line in enumerate(lines):
+            if existing_line.lstrip().startswith("TPFC_AGENT_ID="):
+                lines[idx] = line
+                break
+        else:
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] = f"{lines[-1]}\n"
+            lines.append(line)
+        env_path.write_text("".join(lines), encoding="utf-8")
+
+    os.environ["TPFC_AGENT_ID"] = agent_id
+    global DEFAULT_AGENT_ID
+    DEFAULT_AGENT_ID = agent_id
+
+
+async def _agent_exists(client, agent_id: str) -> bool:
+    """Return whether the agent ID exists in the agents table."""
+    result = (
+        await client.table("agents")
+        .select("agent_id")
+        .eq("agent_id", agent_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
+
+
 async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
-    """Return the provided agent_id or create a default one if missing."""
+    """Return an existing agent_id or create and persist a default one."""
+    agent_id = agent_id or os.environ.get("TPFC_AGENT_ID", "")
     if agent_id:
-        return agent_id
+        if await _agent_exists(client, agent_id):
+            return agent_id
+        logger.warning(
+            "Configured TPFC_AGENT_ID=%s was not found in database; creating a new agent",
+            agent_id,
+        )
 
     agent_service = AgentService(client)
     from customized_areal.tpfc.config.builtin import TPFC_CONFIG
@@ -189,6 +232,7 @@ async def _resolve_agent_id(client, user_id: str, agent_id: str | None) -> str:
     agent_id = created_agent.agent_id
     loader = await get_agent_loader()
     await loader.load_agent(agent_id, user_id, load_config=True)
+    _save_tpfc_agent_id(agent_id)
     logger.info("Created agent: %s", agent_id)
     return agent_id
 
@@ -892,6 +936,7 @@ async def run_backend(
                 name=task_description[:100] if task_description else None,
             )
             logger.info("Task created: %s", task_id)
+            print("Task created: %s", task_id)
 
         async def _do_run():
             nonlocal agent_started, terminal_status
