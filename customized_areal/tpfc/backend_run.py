@@ -87,12 +87,16 @@ logger = logging.getLogger("BackendRun")
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 DEFAULT_AGENT_ID = os.environ.get("TPFC_AGENT_ID", "")
 DEFAULT_USER_ID = os.environ.get("TPFC_USER_ID", "")
+DEFAULT_BRIDGE_USER_ID = os.environ.get("TPFC_BRIDGE_USER_ID") or os.environ.get(
+    "BRIDGE_USER_ID", ""
+)
 LE_AGENT_API_URL = os.environ.get("LE_AGENT_API_URL", "http://localhost:8000")
 
 _AUTH_ERROR_STATUS_CODES = {401, 403}
 _RUN_TIMEOUT = 1500
 _TERMINAL_STATUSES = {"completed", "failed", "stopped", "canceled"}
 TERMINAL_SSE_EVENTS = {"task_end", "error"}
+_BRIDGE_USER_HEADER = "X-Bridge-User-Id"
 
 _TRANSIENT_HTTP_ERRORS = (
     httpx.ReadTimeout,
@@ -107,6 +111,14 @@ _TRANSIENT_HTTP_ERRORS = (
 
 def _agent_start_http_timeout() -> Timeout:
     return Timeout(connect=30.0, read=_RUN_TIMEOUT, write=300.0, pool=60.0)
+
+
+def _auth_headers(auth_token: str, user_id: str | None = None) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    bridge_user_id = DEFAULT_BRIDGE_USER_ID or user_id or DEFAULT_USER_ID
+    if bridge_user_id:
+        headers[_BRIDGE_USER_HEADER] = bridge_user_id
+    return headers
 
 
 @dataclass(frozen=True)
@@ -242,6 +254,7 @@ async def _start_agent_run(
     auth_token: str,
     form_data: dict,
     task_file_path: list[str] | None,
+    user_id: str | None = None,
     max_retries: int = 3,
 ) -> dict:
     """Start the agent run via HTTP and return the JSON response."""
@@ -267,7 +280,7 @@ async def _start_agent_run(
 
                     response = await http_client.post(
                         f"{api_base_url}/api/agent/start",
-                        headers={"Authorization": f"Bearer {auth_token}"},
+                        headers=_auth_headers(auth_token, user_id),
                         data=form_data,
                         files=files if files else None,
                     )
@@ -314,6 +327,7 @@ async def _start_agent_run_with_refresh(
     auth_token: str,
     form_data: dict,
     task_file_path: list[str] | None,
+    user_id: str | None = None,
 ) -> tuple[dict, str]:
     """Start the agent run with refresh-token and credential-login fallbacks."""
     try:
@@ -322,6 +336,7 @@ async def _start_agent_run_with_refresh(
             auth_token=auth_token,
             form_data=form_data,
             task_file_path=task_file_path,
+            user_id=user_id,
         )
         return result, auth_token
     except AuthTokenExpiredError:
@@ -335,6 +350,7 @@ async def _start_agent_run_with_refresh(
                 auth_token=fresh_token,
                 form_data=form_data,
                 task_file_path=task_file_path,
+                user_id=user_id,
             )
             return result, fresh_token
         except AuthTokenExpiredError:
@@ -348,6 +364,7 @@ async def _start_agent_run_with_refresh(
                     auth_token=login_token,
                     form_data=form_data,
                     task_file_path=task_file_path,
+                    user_id=user_id,
                 )
                 return result, login_token
             except AuthTokenExpiredError:
@@ -363,6 +380,7 @@ async def _start_agent_run_with_refresh(
                             auth_token=legacy_token,
                             form_data=form_data,
                             task_file_path=task_file_path,
+                            user_id=user_id,
                         )
                         return result, legacy_token
                     except AuthTokenExpiredError:
@@ -387,7 +405,7 @@ async def _start_branch_agent_run_for_task(
     api_key: str | None,
 ) -> dict[str, Any]:
     """Start a run for an existing task whose messages are already in the DB."""
-    del client, account_id
+    del client
     endpoint = os.environ.get("LE_AGENT_BRANCH_RUN_ENDPOINT", "/api/agent/start-branch")
     url = (
         endpoint
@@ -409,7 +427,7 @@ async def _start_branch_agent_run_for_task(
         )
         response = await http_client.post(
             url,
-            headers={"Authorization": f"Bearer {auth_token}"},
+            headers=_auth_headers(auth_token, account_id),
             json=request_body,
         )
     if response.status_code in _AUTH_ERROR_STATUS_CODES:
@@ -925,6 +943,11 @@ async def run_backend(
             )
 
     try:
+        token_manager = SharedTokenManager(
+            refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
+        )
+        auth_token = await token_manager.get_valid_token()
+
         resolved_agent_id = None
         if not seed_messages_already_inserted:
             resolved_agent_id = await _resolve_agent_id(client, user_id, agent_id)
@@ -939,11 +962,7 @@ async def run_backend(
             print("Task created: %s", task_id)
 
         async def _do_run():
-            nonlocal agent_started, terminal_status
-            token_manager = SharedTokenManager(
-                refresh_token=refresh_token or DEFAULT_REFRESH_TOKEN
-            )
-            auth_token = await token_manager.get_valid_token()
+            nonlocal agent_started, terminal_status, auth_token
 
             if seed_messages_already_inserted:
                 (
@@ -978,6 +997,7 @@ async def run_backend(
                     auth_token=auth_token,
                     form_data=form_data,
                     task_file_path=task_file_path,
+                    user_id=user_id,
                 )
                 logger.info("Agent run started via API: %s", result)
             agent_started = True
@@ -1062,9 +1082,9 @@ if __name__ == "__main__":
             gt=gt,
             tags=["debug", "0421"],
             user_id=DEFAULT_USER_ID,
-            model_name="openrouter/qwen/qwen3-vl-8b-thinking",
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
-            base_url=os.environ.get("OPENROUTER_BASE_URL"),
+            model_name="qwen3.5-9b-areal",
+            # api_key=os.environ.get("OPENROUTER_API_KEY"),
+            # base_url=os.environ.get("OPENROUTER_BASE_URL"),
             refresh_token=DEFAULT_REFRESH_TOKEN,
         )
     )

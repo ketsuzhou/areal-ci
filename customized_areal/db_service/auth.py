@@ -111,11 +111,12 @@ def _is_token_valid(token: str, margin: int = TOKEN_REFRESH_MARGIN) -> bool:
 def _is_auth_token_usable(token: str, margin: int = TOKEN_REFRESH_MARGIN) -> bool:
     """Return True for LeAgent-compatible Supabase access tokens."""
     header = _decode_jwt_header(token)
-    return (
-        header.get("alg") == "ES256"
-        and isinstance(header.get("kid"), str)
-        and _is_token_valid(token, margin=margin)
-    )
+    alg = header.get("alg")
+    if alg == "ES256":
+        return isinstance(header.get("kid"), str) and _is_token_valid(
+            token, margin=margin
+        )
+    return alg == "HS256" and _is_token_valid(token, margin=margin)
 
 
 def _is_refresh_token_usable(refresh_token: str | None) -> bool:
@@ -204,6 +205,40 @@ def _mint_legacy_hs256_auth_token(access_token: str) -> str | None:
     claims["exp"] = min(int(claims.get("exp", now + 3600)), now + 3600)
     claims.setdefault("aud", "authenticated")
     claims.setdefault("role", "authenticated")
+
+    header = {"alg": "HS256", "typ": "JWT"}
+    signing_input = f"{_base64url_json(header)}.{_base64url_json(claims)}"
+    signature = hmac.new(
+        jwt_secret.encode(),
+        signing_input.encode(),
+        hashlib.sha256,
+    ).digest()
+    signature_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+    return f"{signing_input}.{signature_b64}"
+
+
+def _mint_hs256_auth_token_for_user(user_id: str, email: str | None = None) -> str:
+    """Mint an HS256 Supabase-compatible JWT for a known self-hosted auth user."""
+    jwt_secret = os.environ.get("SUPABASE_JWT_SECRET") or os.environ.get(
+        "AUTH_JWT_SECRET"
+    )
+    if not jwt_secret:
+        raise RuntimeError(
+            "SUPABASE_JWT_SECRET or AUTH_JWT_SECRET must be set to mint a local "
+            "self-hosted Supabase auth token"
+        )
+
+    now = int(time.time())
+    claims: dict[str, Any] = {
+        "aud": "authenticated",
+        "exp": now + 3600,
+        "iat": now,
+        "iss": f"{os.environ.get('SUPABASE_URL', '').rstrip('/')}/auth/v1",
+        "role": "authenticated",
+        "sub": user_id,
+    }
+    if email:
+        claims["email"] = email
 
     header = {"alg": "HS256", "typ": "JWT"}
     signing_input = f"{_base64url_json(header)}.{_base64url_json(claims)}"
@@ -407,7 +442,23 @@ class SharedTokenManager:
                     )
 
             try:
-                access_token, refresh_token = await _login_with_env_credentials()
+                try:
+                    access_token, refresh_token = await _login_with_env_credentials()
+                except RuntimeError:
+                    user_id = os.environ.get("TPFC_USER_ID")
+                    if not user_id:
+                        raise
+                    logger.warning(
+                        "Supabase credential login failed; minting local HS256 token "
+                        "for self-hosted TPFC user"
+                    )
+                    access_token, refresh_token = (
+                        _mint_hs256_auth_token_for_user(
+                            user_id=user_id,
+                            email=os.environ.get("SUPABASE_AUTH_EMAIL"),
+                        ),
+                        "",
+                    )
                 self.write_token(access_token, refresh_token)
                 return access_token
             finally:
@@ -577,7 +628,20 @@ async def _refresh_access_token(refresh_token: str) -> tuple[str, str]:
             "Refresh token failed (status=%s), attempting email/password login",
             resp.status_code,
         )
-        return await _login_with_credentials(supabase_url, supabase_anon_key, client)
+        try:
+            return await _login_with_credentials(supabase_url, supabase_anon_key, client)
+        except RuntimeError:
+            user_id = os.environ.get("TPFC_USER_ID")
+            if not user_id:
+                raise
+            logger.warning(
+                "Supabase credential login failed; minting local HS256 token for "
+                "self-hosted TPFC user"
+            )
+            return _mint_hs256_auth_token_for_user(
+                user_id=user_id,
+                email=os.environ.get("SUPABASE_AUTH_EMAIL"),
+            ), ""
 
 
 async def _login_with_credentials(
@@ -610,7 +674,14 @@ async def _login_with_credentials(
                 },
                 json={"email": email, "password": password},
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                details = _safe_response_json(resp)
+                raise RuntimeError(
+                    "Failed to re-authenticate with Supabase: "
+                    f"status={resp.status_code}, "
+                    f"error_code={details.get('error_code')!r}, "
+                    f"msg={details.get('msg')!r}"
+                )
         except httpx.HTTPError as exc:
             raise RuntimeError("Failed to re-authenticate with Supabase") from exc
 

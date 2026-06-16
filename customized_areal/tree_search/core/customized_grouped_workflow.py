@@ -133,6 +133,8 @@ def _apply_fresh_query_row(data: dict[str, Any], row: dict[str, Any]) -> dict[st
     evaluation_rubric = row.get("evaluation_rubric")
     used4train = row.get("used4train")
 
+    file_paths = row.get("file_paths")
+
     merged["query_id"] = str(query_id or "")
     merged["query"] = str(query or "")
     merged["answer"] = str(gold_answer or "")
@@ -140,6 +142,7 @@ def _apply_fresh_query_row(data: dict[str, Any], row: dict[str, Any]) -> dict[st
         evaluation_rubric if isinstance(evaluation_rubric, list) else []
     )
     merged["used4train"] = _normalize_used4train(used4train)
+    merged["file_paths"] = file_paths if isinstance(file_paths, list) else []
     return merged
 
 

@@ -1,5 +1,5 @@
 experiment_name: tpfc-grpo
-trial_name: trial_0525
+trial_name: self_play_0616
 seed: 1
 
 # Tree search configuration
@@ -15,6 +15,7 @@ tree_search:
   fresh_query_table: query_bank
 
 total_train_epochs: 4
+total_train_steps: 200
 tokenizer_path: ${actor.path}
 
 # TPFC Agent workflow
@@ -30,15 +31,15 @@ agent:
 
 cluster:
   n_nodes: 1
-  n_gpus_per_node: 3
+  n_gpus_per_node: 2
   fileroot: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/experiments
   name_resolve:
     type: nfs
     nfs_record_root: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/name_resolve
 
-# 3 GPUs: 1 for inference (sglang DP), 2 for training (fsdp DP)
-# train_dataset.batch_size must be divisible by fsdp DP size (2)
-allocation_mode: sglang:d1+fsdp:d2
+# 2 GPUs: 1 for inference (sglang DP), 1 for training (fsdp DP)
+# train_dataset.batch_size must be divisible by fsdp DP size (1)
+allocation_mode: sglang:d1+fsdp:d1
 
 scheduler:
   type: local
@@ -64,18 +65,18 @@ rollout:
     reasoning_parser: qwen3
     export_style: individual
     turn_discount: 1.0
-    engine_max_tokens: 12032
+    engine_max_tokens: 10112
 
 gconfig:
   n_samples: 8
   min_new_tokens: 0
   max_new_tokens: 1024
-  max_tokens: 12032
+  max_tokens: 10112
   greedy: false
   temperature: 1.0
 
 actor:
-  backend: fsdp:d2
+  backend: fsdp:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   attn_impl: sdpa
@@ -91,7 +92,7 @@ actor:
   pad_to_maximum: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 12032
+    max_tokens_per_mb: 10112
   optimizer:
     type: adam
     lr: 1.70e-6
@@ -133,7 +134,7 @@ actor:
         PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
 
 ref:
-  backend: fsdp:d2
+  backend: fsdp:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   path: ${actor.path}
@@ -143,7 +144,7 @@ ref:
   pad_to_maximum: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 12032
+    max_tokens_per_mb: 10112
   optimizer: null
   scheduling_strategy:
     type: colocation
@@ -179,7 +180,7 @@ train_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 12032
+  max_length: 10112
 
 valid_dataset:
   batch_size: 4
@@ -187,7 +188,7 @@ valid_dataset:
   num_workers: 2
   path: customized_areal/tpfc/data/generated_training_final_update.parquet
   type: rl
-  max_length: 12032
+  max_length: 10112
 
 # Utilities
 saver:

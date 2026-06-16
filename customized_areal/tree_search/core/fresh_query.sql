@@ -9,6 +9,8 @@
     level text,
     task_id text,
     label text[] not null default '{}',
+    file_paths text[] not null default '{}',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   );
+
