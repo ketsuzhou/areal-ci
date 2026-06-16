@@ -126,6 +126,8 @@ Dataclasses controlling tree backup, caching, and advantage computation.
 |                      | `strict_distill_json`     | `bool`          | `True`                    | Enforce strict JSON parsing in distillation        |
 |                      | `sample_source`           | `SampleSource`  | `SCRATCH`                 | Episode sampling strategy                          |
 |                      | `branch_probability`      | `float`         | `0.5`                     | Probability of branch when MIXED                   |
+|                      | `use_fresh_query`         | `bool`          | `False`                   | Enable database-backed query loading               |
+|                      | `fresh_query_table`       | `str`           | `""`                      | DB table name (or `FRESH_QUERY_TABLE` env var)     |
 | `RolloutCacheConfig` | `cache_dir`               | `str`           | `""`                      | Directory for rollout cache                        |
 |                      | `enabled`                 | `bool`          | `True`                    | Enable/disable caching                             |
 |                      | `n_samples`               | `int`           | `1`                       | Number of rollout samples per prompt               |
@@ -623,6 +625,140 @@ flowchart TD
 The uncertainty metric U(q) uses Bayesian posterior variance adjusted by mean episode
 steps. For binary rewards it uses a Beta(1,1) posterior; for continuous rewards it uses
 a Normal-Inverse-Gamma posterior with weak priors.
+
+## Fresh Query Mode
+
+When `use_fresh_query=True`, the training pipeline dynamically loads training queries from
+a shared database table instead of iterating over a static local dataset. This is designed
+for distributed training where multiple runs need non-overlapping samples, or when training
+data is populated in real time by an external pipeline.
+
+### Configuration
+
+| Field                | Type     | Default | Description                                                        |
+| -------------------- | -------- | ------- | ------------------------------------------------------------------ |
+| `use_fresh_query`    | `bool`   | `False` | Enable database-backed query loading                               |
+| `fresh_query_table`  | `str`    | `""`    | Database table name (or set `FRESH_QUERY_TABLE` env var)           |
+| `TRAIN_ID` env var   | `str`    | —       | **Required when enabled**. Unique training-run ID for claim tracking |
+
+Validation in `Config.__post_init__`:
+
+- `fresh_query_table` must be non-empty when `use_fresh_query=True` (falls back to
+  `FRESH_QUERY_TABLE` env var, then raises `ValueError` if still empty).
+- `TRAIN_ID` env var must be set at runtime (checked in `_load_fresh_query_data`).
+- `total_train_steps` must be set in the training config (checked in
+  `CustomizedPPOTrainer.__init__`).
+- `total_train_steps // total_train_epochs >= 1` (at least one step per epoch).
+
+### Database Table Schema
+
+The expected table schema (see `core/fresh_query.sql`):
+
+```sql
+CREATE TABLE IF NOT EXISTS public.query_bank (
+    query_id         TEXT PRIMARY KEY,
+    query            TEXT NOT NULL,
+    gold_answer      TEXT NOT NULL,
+    evaluation_rubric TEXT[] NOT NULL DEFAULT '{}',
+    used4train       TEXT[] NOT NULL DEFAULT '{}',   -- array of TRAIN_IDs that claimed this row
+    synthetic        BOOLEAN DEFAULT NULL,
+    level            TEXT,
+    task_id          TEXT,
+    label            TEXT[] NOT NULL DEFAULT '{}',
+    file_paths       TEXT[] NOT NULL DEFAULT '{}',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+The `used4train` column is the claim mechanism: each training run appends its `TRAIN_ID` to
+this array when it claims a row, preventing other runs from picking the same query.
+
+### How It Works
+
+1. **Trainer side** — `CustomizedPPOTrainer` detects `use_fresh_query=True` in `__init__`:
+   - Replaces the training dataset with `_FreshQueryDatasetPlaceholder` (a 1-item dummy
+     so `PPOTrainer` enters dataset-backed setup).
+   - Overrides `_create_dataloader` to return `_EmptyDataLoader`, which yields empty dicts
+     for exactly `total_train_steps // total_train_epochs` steps per epoch. The actual
+     query content comes from the database, not the dataloader.
+
+2. **Workflow side** — At the start of each `arun_episode` call, if `use_fresh_query=True`:
+   - Calls `_load_fresh_query_data(data)` which fetches an eligible row from
+     `fresh_query_table` and atomically claims it.
+   - If no eligible row is found, returns `None` (episode skipped).
+   - The claimed row's fields overwrite the placeholder data dict.
+
+3. **Claim flow** (`_load_fresh_query_data`):
+
+   ```mermaid
+   flowchart TD
+       START["_load_fresh_query_data(data)"]
+       ENV["Get TRAIN_ID from env<br/>(raise ValueError if missing)"]
+       CLIENT["Get Supabase client<br/>via DBConnection"]
+       SELECT["SELECT query_id, query, gold_answer,<br/>evaluation_rubric, used4train<br/>FROM fresh_query_table<br/>LIMIT 100"]
+       FILTER["Filter: used4train NOT CONTAINS TRAIN_ID"]
+       ROWS["Iterate returned rows"]
+       SKIP{"train_id in<br/>used4train?"}
+       CLAIM["UPDATE used4train = [..., train_id]<br/>WHERE query_id = row.query_id"]
+       RACE{"Affected rows >= 1?"}
+       WIN["Claimed! Return merged data"]
+       LOSE["Lost race → try next row"]
+       EXHAUSTED["No eligible rows found → return None"]
+
+       START --> ENV --> CLIENT --> SELECT --> FILTER --> ROWS
+       ROWS --> SKIP
+       SKIP -- Yes --> ROWS
+       SKIP -- No --> CLAIM --> RACE
+       RACE -- Yes --> WIN
+       RACE -- No --> LOSE --> ROWS
+       ROWS -- exhausted --> EXHAUSTED
+   ```
+
+   The claim is **optimistic**: the `not_.contains("used4train", [train_id])` filter
+   excludes already-claimed rows at select time, and the update-result row-count check
+   handles concurrent races. If two workers select the same row simultaneously, only one
+   update succeeds (the other sees `< 1` affected rows) and the loser retries with the
+   next row.
+
+4. **Data merge** (`_apply_fresh_query_row`): The claimed row's fields overwrite the
+   placeholder data:
+
+   | Claimed DB field  | Merged data key         |
+   | ----------------- | ----------------------- |
+   | `query_id`        | `query_id`              |
+   | `query`           | `query`                 |
+   | `gold_answer`     | `answer`                |
+   | `evaluation_rubric` | `evaluation_rubric`   |
+   | `used4train`      | `used4train`            |
+   | `file_paths`      | `file_paths`            |
+
+### Comparison: Static vs Fresh Query
+
+| Aspect             | `use_fresh_query=False`                      | `use_fresh_query=True`                                    |
+| ------------------ | -------------------------------------------- | --------------------------------------------------------- |
+| **Data source**    | Local parquet files via `get_tpfc_rl_dataset` | Database table (`fresh_query_table`)                      |
+| **Dataloader**     | Standard dataset-backed                      | `_EmptyDataLoader` (empty dicts, step-count driven)       |
+| **Query selection**| Sequential iteration over dataset            | Dynamic fetch + atomic claim per step                     |
+| **Deduplication**  | N/A (single-run)                             | `used4train` array + `TRAIN_ID` prevents cross-run reuse  |
+| **Env requirements**| Standard training variables                 | `TRAIN_ID` + `FRESH_QUERY_TABLE` + DB access              |
+| **On query exhaustion** | N/A (wraps around)                      | Episode skipped (returns `None`), training continues      |
+
+### Example YAML Configuration
+
+```yaml
+tree_search:
+  use_fresh_query: true
+  fresh_query_table: query_bank
+  # ... other tree_search fields ...
+```
+
+And the required environment variables:
+
+```bash
+export TRAIN_ID="run-2026-06-16-abc123"
+export FRESH_QUERY_TABLE=query_bank   # optional if set in config
+```
 
 ## Data Flow
 
