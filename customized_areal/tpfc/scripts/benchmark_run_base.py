@@ -57,6 +57,7 @@ class AttemptStats(TypedDict):
     llm_as_judge_result: str | None
     is_correct: bool
     error_message: str | None
+    backend_task_ids: list[str]
 
 
 class BenchmarkResult(BaseModel):
@@ -205,6 +206,10 @@ class BenchmarkEvaluator(ABC):
                     response = ""
                     max_retries = 6
                     retry_count = 0
+                    # Every run_backend call creates a fresh leagent backend task;
+                    # collect its task_id (BackendRunResult.task_id) per retry so each
+                    # attempt's log records the backend task(s) that produced it.
+                    backend_task_ids: list[str] = []
                     while final_boxed_answer == "" and retry_count < max_retries:
                         try:
                             run_result = await run_backend(
@@ -223,9 +228,10 @@ class BenchmarkEvaluator(ABC):
                                 api_key=api_key,
                                 model_name=cfg.llm.model_name,
                             )
+                            if run_result.task_id:
+                                backend_task_ids.append(run_result.task_id)
                             response = _last_assistant_content(run_result.messages)
                             final_boxed_answer = run_result.final_answer or ""
-                            log_file_path = run_result.log_path
                             retry_count += 1
                             if final_boxed_answer == "" and retry_count < max_retries:
                                 print(
@@ -236,6 +242,8 @@ class BenchmarkEvaluator(ABC):
                             attempt_result["error_message"] = str(e)
                             print(f"    Error in attempt {attempt}: {e}")
                             break
+
+                    attempt_result["backend_task_ids"] = backend_task_ids
 
                     if attempt_result.get("error_message"):
                         pass  # Exception occurred, skip processing
@@ -254,6 +262,7 @@ class BenchmarkEvaluator(ABC):
                             "output": attempt_result["model_response"],
                             "final_boxed_answer": final_boxed_answer or "",
                             "task_id": task.task_id,
+                            "backend_task_ids": backend_task_ids,
                             "ground_truth": task.ground_truth,
                             "timestamp": timestamp,
                         }
@@ -370,6 +379,7 @@ class BenchmarkEvaluator(ABC):
             "llm_as_judge_result": None,
             "is_correct": False,
             "error_message": None,
+            "backend_task_ids": [],
         }
         trace_filename_pattern = f"task_{task.task_id}_attempt_{attempt}_*.json"
         matched_logs = self.output_dir.glob(trace_filename_pattern)
@@ -383,6 +393,9 @@ class BenchmarkEvaluator(ABC):
 
         with open(latest_log) as f:
             log_data = json.loads(f.read())
+            attempt_result["backend_task_ids"] = list(
+                log_data.get("backend_task_ids", [])
+            )
             if log_data.get("final_boxed_answer"):
                 attempt_result["status"] = TaskStatus.RUN_COMPLETED
                 attempt_result["model_boxed_answer"] = log_data["final_boxed_answer"]
@@ -660,14 +673,17 @@ async def entrypoint(cfg, data_dir="") -> float:
 
     import glob
 
-    folder_path = cfg.output_dir + "/*_attempt_1"
-    runned = glob.glob(folder_path)
+    # Resume
+    # itself never writes to log_path, so the resume marker is the benchmark's own
+    # per-attempt log file `task_{task_id}_attempt_1_*.json` written below.
+    runned = glob.glob(str(Path(cfg.output_dir) / "task_*_attempt_1_*.json"))
+    runned_ = [
+        Path(p).name.split("_attempt_1")[0].removeprefix("task_") for p in runned
+    ]
+    # Re-filter by level (resume list spans all levels) and drop completed task_ids.
+    tasks = [t for t in tasks if t.Level == level and t.task_id not in runned_]
 
-    runned_ = [i.split(cfg.output_dir + "/")[1].split("_attempt_1")[0] for i in runned]
-    # tasks = [t for t in tasks if t.Level == level and t.task_id not in runned_]
-    tasks = [t for t in tasks if t.Level == 1 and t.task_id not in runned_]
-
-    if len(evaluator.tasks) == 0:
+    if len(tasks) == 0:
         print("No tasks loaded. Exiting.")
         return 0.0
 
@@ -718,14 +734,14 @@ def main():
                     "metadata_file": "metadata.jsonl",
                     "whitelist": [],
                 },
-                "execution": {"max_concurrent": 20, "max_tasks": 166, "pass_at_k": 3},
+                "execution": {"max_concurrent": 53, "max_tasks": 166, "pass_at_k": 1},
             },
             "llm": {
                 "provider": "openai",
-                # "model_name": "openrouter/gpt-5",
-                # "model_name": "openai-compatible/gpt-5",
-                "model_name": "openrouter/qwen/qwen3.5-9b",
+                # Registered, OpenRouter-routed slugs only — see backend/core/infra/llm/models.yaml.
+                # `openrouter/qwen/qwen3.5-9b` / `openrouter/gpt-5` are NOT registered and 422.
                 # "model_name": "openrouter/qwen/qwen3-vl-8b-thinking",
+                "model_name": "openrouter/qwen/qwen3.5-9b",
                 # "model_name": "openrouter/qwen/qwen3-32b",
                 # "enable_thinking": False,
                 "reasoning_effort": "low",
@@ -746,7 +762,7 @@ def main():
     cfg.tags = [
         f"{cfg.benchmark.name}",
         f"{cfg.llm.model_name}",
-        "base_0603_think",
+        "base_0617",
         # "compression_1w",
         f"level_{cfg.level}",
     ]
