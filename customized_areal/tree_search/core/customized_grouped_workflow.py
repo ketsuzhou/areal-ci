@@ -615,6 +615,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         max_distill_tokens: int = 0,
         use_fresh_query: bool = False,
         fresh_query_table: str = "",
+        enable_generative_critic: bool = False,
+        critic_gamma: float = 1.0,
+        critic_lambda: float = 0.95,
+        critic_avg_success_rate: float = 0.29,
+        critic_score_max: int = 10,
+        critic_max_new_tokens: int = 1024,
+        critic_temperature: float = 0.0,
+        critic_target_scale: float = 1.0,
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -625,6 +633,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.workflow = workflow
         self.group_size = group_size
         self.advantage_mode = advantage_mode
+        self.enable_generative_critic = enable_generative_critic
+        self.critic_gamma = critic_gamma
+        self.critic_lambda = critic_lambda
+        self.critic_avg_success_rate = critic_avg_success_rate
+        self.critic_score_max = critic_score_max
+        self.critic_max_new_tokens = critic_max_new_tokens
+        self.critic_temperature = critic_temperature
+        self.critic_target_scale = critic_target_scale
         self.loss_mode = loss_mode
         self.cache_mode = cache_mode
         self.tokenizer_path = tokenizer_path
@@ -705,6 +721,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             self.tree_store = MCTSTreeStore()
 
         self.tree_advantage_computer = TreeAdvantageComputer(self.tree_store)
+        from customized_areal.tree_search.core.advantage import GAEAdvantageComputer
+
+        self.gae_advantage_computer = GAEAdvantageComputer(
+            self.tree_store,
+            gamma=self.critic_gamma,
+            lam=self.critic_lambda,
+        )
+        # Lazily constructed on first use (needs the tokenizer).
+        self._critic_value_client = None
 
     async def _load_fresh_query_data(
         self,
@@ -835,6 +860,74 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 tokenizer = load_hf_tokenizer(self.tokenizer_path)
                 self._tokenizer_cache[self.tokenizer_path] = tokenizer
             return tokenizer
+
+    async def _get_tokenizer_unconditional(self):
+        """Load the tokenizer regardless of loss_mode (needed by the critic)."""
+        if not self.tokenizer_path:
+            raise ValueError(
+                "tokenizer_path is required when enable_generative_critic=True"
+            )
+        async with self._tokenizer_lock:
+            tokenizer = self._tokenizer_cache.get(self.tokenizer_path)
+            if tokenizer is None:
+                from areal.utils.hf_utils import load_hf_tokenizer
+
+                tokenizer = load_hf_tokenizer(self.tokenizer_path)
+                self._tokenizer_cache[self.tokenizer_path] = tokenizer
+            return tokenizer
+
+    async def _annotate_critic_values(self, engine, all_nodes) -> None:
+        """Compute generative-critic state values v_phi(s_t) onto Node.value.
+
+        Values are computed per episode (so the critic sees the correct partial
+        conversation through each turn) using the actor's shared inference
+        engine. Stored on both the Node and the tree store.
+        """
+        from customized_areal.tree_search.core.critic_value_client import (
+            CriticValueClient,
+        )
+
+        if self._critic_value_client is None:
+            tokenizer = await self._get_tokenizer_unconditional()
+            self._critic_value_client = CriticValueClient(
+                tokenizer,
+                score_max=self.critic_score_max,
+                avg_success_rate=self.critic_avg_success_rate,
+                max_new_tokens=self.critic_max_new_tokens,
+                temperature=self.critic_temperature,
+            )
+        for episode_nodes in _group_nodes_by_episode(all_nodes):
+            await self._critic_value_client.annotate_episode(
+                engine, episode_nodes, self.tree_store
+            )
+
+    def _attach_critic_train_data(self, result_dict, all_nodes) -> None:
+        """Attach critic soft-regression training data to the batch.
+
+        Built from the same critic prompts used at rollout, with the tree
+        ``q_value`` as the regression target. Stored as a Python object that the
+        patched ``_ppo_update`` pops before tensor ops (mirrors position_rewards).
+        Best-effort: never raise into the rollout path.
+        """
+        try:
+            if self._critic_value_client is None or not all_nodes:
+                return
+            from customized_areal.tree_search.training.losses.critic import (
+                build_critic_training_batch,
+            )
+
+            critic_batch = build_critic_training_batch(
+                self._critic_value_client,
+                list(all_nodes),
+                tree_store=self.tree_store,
+                target_scale=self.critic_target_scale,
+                score_max=self.critic_score_max,
+            )
+            result_dict["critic_train_data"] = critic_batch
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to attach critic_train_data (skipping critic step): %s", exc
+            )
 
     async def _setup_distill_provider(self, engine, tokenizer=None):
         from customized_areal.tree_search.distilling.diagnose_provider import (
@@ -1527,9 +1620,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 )
                 return None
 
+            # Compute generative-critic state values v_phi(s_t) before advantages.
+            if self.enable_generative_critic:
+                await self._annotate_critic_values(engine, all_nodes)
+
             # Compute tree advantages
             if self.advantage_mode == AdvantageMode.TREE:
                 self.tree_advantage_computer.compute(all_nodes)
+            elif self.advantage_mode == AdvantageMode.GAE:
+                self.gae_advantage_computer.compute(all_nodes)
 
             # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
@@ -1540,6 +1639,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
             if not result_dict:
                 return None
+
+            # Attach critic regression data (Python object, popped in _ppo_update
+            # before tensor ops -- mirrors position_rewards). Enables the shared
+            # model's combined soft-regression critic step.
+            if self.enable_generative_critic:
+                self._attach_critic_train_data(result_dict, all_nodes)
 
             # Mark nodes as trained only after the batch is materialized.
             for node in all_nodes:

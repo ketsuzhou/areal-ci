@@ -628,18 +628,18 @@ a Normal-Inverse-Gamma posterior with weak priors.
 
 ## Fresh Query Mode
 
-When `use_fresh_query=True`, the training pipeline dynamically loads training queries from
-a shared database table instead of iterating over a static local dataset. This is designed
-for distributed training where multiple runs need non-overlapping samples, or when training
-data is populated in real time by an external pipeline.
+When `use_fresh_query=True`, the training pipeline dynamically loads training queries
+from a shared database table instead of iterating over a static local dataset. This is
+designed for distributed training where multiple runs need non-overlapping samples, or
+when training data is populated in real time by an external pipeline.
 
 ### Configuration
 
-| Field                | Type     | Default | Description                                                        |
-| -------------------- | -------- | ------- | ------------------------------------------------------------------ |
-| `use_fresh_query`    | `bool`   | `False` | Enable database-backed query loading                               |
-| `fresh_query_table`  | `str`    | `""`    | Database table name (or set `FRESH_QUERY_TABLE` env var)           |
-| `TRAIN_ID` env var   | `str`    | —       | **Required when enabled**. Unique training-run ID for claim tracking |
+| Field               | Type   | Default | Description                                                          |
+| ------------------- | ------ | ------- | -------------------------------------------------------------------- |
+| `use_fresh_query`   | `bool` | `False` | Enable database-backed query loading                                 |
+| `fresh_query_table` | `str`  | `""`    | Database table name (or set `FRESH_QUERY_TABLE` env var)             |
+| `TRAIN_ID` env var  | `str`  | —       | **Required when enabled**. Unique training-run ID for claim tracking |
 
 Validation in `Config.__post_init__`:
 
@@ -671,25 +671,29 @@ CREATE TABLE IF NOT EXISTS public.query_bank (
 );
 ```
 
-The `used4train` column is the claim mechanism: each training run appends its `TRAIN_ID` to
-this array when it claims a row, preventing other runs from picking the same query.
+The `used4train` column is the claim mechanism: each training run appends its `TRAIN_ID`
+to this array when it claims a row, preventing other runs from picking the same query.
 
 ### How It Works
 
-1. **Trainer side** — `CustomizedPPOTrainer` detects `use_fresh_query=True` in `__init__`:
+1. **Trainer side** — `CustomizedPPOTrainer` detects `use_fresh_query=True` in
+   `__init__`:
+
    - Replaces the training dataset with `_FreshQueryDatasetPlaceholder` (a 1-item dummy
      so `PPOTrainer` enters dataset-backed setup).
-   - Overrides `_create_dataloader` to return `_EmptyDataLoader`, which yields empty dicts
-     for exactly `total_train_steps // total_train_epochs` steps per epoch. The actual
-     query content comes from the database, not the dataloader.
+   - Overrides `_create_dataloader` to return `_EmptyDataLoader`, which yields empty
+     dicts for exactly `total_train_steps // total_train_epochs` steps per epoch. The
+     actual query content comes from the database, not the dataloader.
 
-2. **Workflow side** — At the start of each `arun_episode` call, if `use_fresh_query=True`:
+1. **Workflow side** — At the start of each `arun_episode` call, if
+   `use_fresh_query=True`:
+
    - Calls `_load_fresh_query_data(data)` which fetches an eligible row from
      `fresh_query_table` and atomically claims it.
    - If no eligible row is found, returns `None` (episode skipped).
    - The claimed row's fields overwrite the placeholder data dict.
 
-3. **Claim flow** (`_load_fresh_query_data`):
+1. **Claim flow** (`_load_fresh_query_data`):
 
    ```mermaid
    flowchart TD
@@ -721,28 +725,28 @@ this array when it claims a row, preventing other runs from picking the same que
    update succeeds (the other sees `< 1` affected rows) and the loser retries with the
    next row.
 
-4. **Data merge** (`_apply_fresh_query_row`): The claimed row's fields overwrite the
+1. **Data merge** (`_apply_fresh_query_row`): The claimed row's fields overwrite the
    placeholder data:
 
-   | Claimed DB field  | Merged data key         |
-   | ----------------- | ----------------------- |
-   | `query_id`        | `query_id`              |
-   | `query`           | `query`                 |
-   | `gold_answer`     | `answer`                |
-   | `evaluation_rubric` | `evaluation_rubric`   |
-   | `used4train`      | `used4train`            |
-   | `file_paths`      | `file_paths`            |
+   | Claimed DB field    | Merged data key     |
+   | ------------------- | ------------------- |
+   | `query_id`          | `query_id`          |
+   | `query`             | `query`             |
+   | `gold_answer`       | `answer`            |
+   | `evaluation_rubric` | `evaluation_rubric` |
+   | `used4train`        | `used4train`        |
+   | `file_paths`        | `file_paths`        |
 
 ### Comparison: Static vs Fresh Query
 
-| Aspect             | `use_fresh_query=False`                      | `use_fresh_query=True`                                    |
-| ------------------ | -------------------------------------------- | --------------------------------------------------------- |
-| **Data source**    | Local parquet files via `get_tpfc_rl_dataset` | Database table (`fresh_query_table`)                      |
-| **Dataloader**     | Standard dataset-backed                      | `_EmptyDataLoader` (empty dicts, step-count driven)       |
-| **Query selection**| Sequential iteration over dataset            | Dynamic fetch + atomic claim per step                     |
-| **Deduplication**  | N/A (single-run)                             | `used4train` array + `TRAIN_ID` prevents cross-run reuse  |
-| **Env requirements**| Standard training variables                 | `TRAIN_ID` + `FRESH_QUERY_TABLE` + DB access              |
-| **On query exhaustion** | N/A (wraps around)                      | Episode skipped (returns `None`), training continues      |
+| Aspect                  | `use_fresh_query=False`                       | `use_fresh_query=True`                                   |
+| ----------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| **Data source**         | Local parquet files via `get_tpfc_rl_dataset` | Database table (`fresh_query_table`)                     |
+| **Dataloader**          | Standard dataset-backed                       | `_EmptyDataLoader` (empty dicts, step-count driven)      |
+| **Query selection**     | Sequential iteration over dataset             | Dynamic fetch + atomic claim per step                    |
+| **Deduplication**       | N/A (single-run)                              | `used4train` array + `TRAIN_ID` prevents cross-run reuse |
+| **Env requirements**    | Standard training variables                   | `TRAIN_ID` + `FRESH_QUERY_TABLE` + DB access             |
+| **On query exhaustion** | N/A (wraps around)                            | Episode skipped (returns `None`), training continues     |
 
 ### Example YAML Configuration
 
@@ -1086,3 +1090,88 @@ with CustomizedPPOTrainer(
 | `training/loss.py`                    | `grpo_distill_loss_fn` — combined GRPO + distillation loss                                   |
 | `training/logprobs.py`                | Multi-candidate logprob/entropy gathering utilities                                          |
 | `training/trainer.py`                 | `CustomizedPPOTrainer` — PPO trainer with distillation engine support                        |
+
+## Generative Critic (Shared Model) with GAE
+
+When `tree_search.enable_generative_critic=true`, the **actor's own model** (same
+weights, same SGLang server) doubles as a **generative critic** that scores
+partial-solution states, and those scores drive **GAE** advantages for the actor.
+
+### How it works
+
+1. **Value computation (rollout).** For each turn `t` of an episode, the critic prompt
+   is built from the actual conversation messages through that turn plus an appended
+   instruction:
+
+   ```
+   [system, turn 1, turn 2, ... turn t]  +  [critic_instruction]
+   ```
+
+   The `critic_instruction` asks the model to estimate its probability of eventual
+   success as an integer in `[0, critic_score_max]` (the average dataset success rate
+   `critic_avg_success_rate`, default `0.29`, is embedded in the prompt). The model is
+   queried for the answer-position distribution over the digit tokens and the **soft
+   expected value** `v_phi(s_t) = Σ_i p_i · (i / score_max)` is stored on `Node.value`.
+
+1. **GAE advantages.** With `enable_generative_critic=true`, `advantage_mode` is forced
+   to `gae`. `GAEAdvantageComputer` treats each turn as a step `s_t`, with sparse
+   rewards (`r_t = 0` intermediate, `r_T = outcome_reward` at the leaf) and a zero
+   terminal bootstrap:
+
+   ```
+   delta_t = r_t + gamma · v(s_{t+1}) - v(s_t)
+   A_t     = delta_t + gamma · lambda · A_{t+1}
+   ret_t   = A_t + v(s_t)
+   ```
+
+   Defaults `gamma=1.0`, `lambda=0.95`. `A_t`/`ret_t` are broadcast over each node's
+   response positions and consumed by the standard PPO actor update.
+
+1. **Critic regression (training).** The same shared model is additionally trained with
+   an **expected-value soft regression**: at the answer position it produces a
+   distribution over the digit tokens, and the expected value is regressed (MSE) toward
+   the tree-stored MCTS `q_value` target,
+   `target = clamp(q_value / critic_target_scale, 0, 1)`. The combined objective is
+
+   ```
+   loss = actor_loss + critic_loss_weight · critic_loss
+   ```
+
+   This step reuses the multi-candidate logprob gathering path (the digit tokens are the
+   candidates at the answer position), so it is active when the
+   `MultiCandidateFSDPEngine` is selected (`loss_mode=BOTH`/`DISTILL`). With
+   `loss_mode=GRPO` the critic still drives GAE advantages, while the extra regression
+   step is skipped gracefully.
+
+### Config fields (`tree_search`)
+
+| Field                      | Default | Meaning                                                     |
+| -------------------------- | ------- | ----------------------------------------------------------- |
+| `enable_generative_critic` | `false` | Enable the shared-model generative critic (forces GAE).     |
+| `critic_avg_success_rate`  | `0.29`  | Average dataset success rate embedded in the critic prompt. |
+| `critic_gamma`             | `1.0`   | GAE discount.                                               |
+| `critic_lambda`            | `0.95`  | GAE lambda.                                                 |
+| `critic_score_max`         | `10`    | Max integer score label (`0..score_max`).                   |
+| `critic_target_scale`      | `1.0`   | Divisor applied to `q_value` before clamping to `[0, 1]`.   |
+| `critic_max_new_tokens`    | `1024`  | Max tokens for the critic's generation.                     |
+| `critic_temperature`       | `0.0`   | Critic generation temperature.                              |
+| `critic_loss_weight`       | `1.0`   | Weight of the critic regression term in the combined loss.  |
+
+### Tokenization caveat
+
+A single answer position has one next-token distribution, so multi-token labels (e.g.
+`"10"`) are represented by their **leading** token. For `critic_score_max=10` the labels
+`"1"` and `"10"` share a leading token, a documented approximation; set
+`critic_score_max=9` for a collision-free 0–9 scale.
+
+### Example
+
+See `customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B_generative_critic.yaml`. Run
+it the same way as the other tree-search configs:
+
+```bash
+uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py \
+  --config customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B_generative_critic.yaml
+```
+
+Logged stats: `critic_loss`, `critic_value_mean`, `critic_target_mean`.

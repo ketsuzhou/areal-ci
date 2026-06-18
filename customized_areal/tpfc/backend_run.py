@@ -1082,9 +1082,9 @@ if __name__ == "__main__":
             gt=gt,
             tags=["debug", "0421"],
             user_id=DEFAULT_USER_ID,
-            model_name="qwen3.5-9b-areal",
-            # api_key=os.environ.get("OPENROUTER_API_KEY"),
-            # base_url=os.environ.get("OPENROUTER_BASE_URL"),
+            model_name="areal/qwen/qwen3_5-9b",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            base_url=os.environ.get("OPENROUTER_BASE_URL"),
             refresh_token=DEFAULT_REFRESH_TOKEN,
         )
     )

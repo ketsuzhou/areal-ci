@@ -75,6 +75,7 @@ class CustomizedPPOTrainer(PPOTrainer):
         self.tree_search_config = tree_search_config or Config()
         self._clip_cov_patch_applied = False
         self._muon_patch_applied = False
+        self._combined_critic_patch_applied = False
         self._use_fresh_query_dataloader = self.tree_search_config.use_fresh_query
         if self._use_fresh_query_dataloader:
             if config.total_train_steps is None:
@@ -262,37 +263,78 @@ class CustomizedPPOTrainer(PPOTrainer):
         """Train with distill loss patch applied if needed."""
         logger.info(
             "CustomizedPPOTrainer.train() called: workflow=%s, loss_mode=%s, "
-            "use_clip_cov=%s",
+            "use_clip_cov=%s, enable_generative_critic=%s",
             workflow,
             self.tree_search_config.loss_mode.value,
             self.tree_search_config.use_clip_cov,
+            self.tree_search_config.enable_generative_critic,
         )
-        if self.tree_search_config.loss_mode != LossMode.GRPO:
-            from .actor import (
-                patch_ppo_actor_class_to_use_distill_loss,
-                unpatch_ppo_actor_distill_loss,
+        critic_enabled = self.tree_search_config.enable_generative_critic
+        if critic_enabled:
+            logger.info(
+                "Generative critic enabled (shared model): advantage_mode=%s, "
+                "gamma=%.3g, lambda=%.3g, score_max=%d, loss_weight=%.4g. The actor "
+                "trains on GAE advantages derived from critic state values; the "
+                "shared model additionally runs a soft-regression critic step.",
+                self.tree_search_config.advantage_mode.value,
+                self.tree_search_config.critic_gamma,
+                self.tree_search_config.critic_lambda,
+                self.tree_search_config.critic_score_max,
+                self.tree_search_config.critic_loss_weight,
             )
-
-            patch_ppo_actor_class_to_use_distill_loss()
-            try:
-                return super().train(
-                    workflow=workflow,
-                    eval_workflow=eval_workflow,
-                    workflow_kwargs=workflow_kwargs,
-                    eval_workflow_kwargs=eval_workflow_kwargs,
-                    dynamic_filter_fn=dynamic_filter_fn,
-                    total_epochs=total_epochs,
+            self._patch_combined_critic_loss()
+        try:
+            if self.tree_search_config.loss_mode != LossMode.GRPO:
+                from .actor import (
+                    patch_ppo_actor_class_to_use_distill_loss,
+                    unpatch_ppo_actor_distill_loss,
                 )
-            finally:
-                unpatch_ppo_actor_distill_loss()
-        return super().train(
-            workflow=workflow,
-            eval_workflow=eval_workflow,
-            workflow_kwargs=workflow_kwargs,
-            eval_workflow_kwargs=eval_workflow_kwargs,
-            dynamic_filter_fn=dynamic_filter_fn,
-            total_epochs=total_epochs,
+
+                patch_ppo_actor_class_to_use_distill_loss()
+                try:
+                    return super().train(
+                        workflow=workflow,
+                        eval_workflow=eval_workflow,
+                        workflow_kwargs=workflow_kwargs,
+                        eval_workflow_kwargs=eval_workflow_kwargs,
+                        dynamic_filter_fn=dynamic_filter_fn,
+                        total_epochs=total_epochs,
+                    )
+                finally:
+                    unpatch_ppo_actor_distill_loss()
+            return super().train(
+                workflow=workflow,
+                eval_workflow=eval_workflow,
+                workflow_kwargs=workflow_kwargs,
+                eval_workflow_kwargs=eval_workflow_kwargs,
+                dynamic_filter_fn=dynamic_filter_fn,
+                total_epochs=total_epochs,
+            )
+        finally:
+            if critic_enabled:
+                self._unpatch_combined_critic_loss()
+
+    def _critic_pad_token_id(self) -> int:
+        tok = getattr(self, "tokenizer", None)
+        pad = getattr(tok, "pad_token_id", None) if tok is not None else None
+        if pad is None:
+            pad = getattr(tok, "eos_token_id", None) if tok is not None else None
+        return int(pad) if pad is not None else 0
+
+    def _patch_combined_critic_loss(self) -> None:
+        from .actor import patch_ppo_actor_class_to_use_combined_critic_loss
+
+        patch_ppo_actor_class_to_use_combined_critic_loss(
+            self.tree_search_config.critic_loss_weight,
+            pad_token_id=self._critic_pad_token_id(),
         )
+        self._combined_critic_patch_applied = True
+
+    def _unpatch_combined_critic_loss(self) -> None:
+        from .actor import unpatch_combined_critic_loss
+
+        unpatch_combined_critic_loss()
+        self._combined_critic_patch_applied = False
 
     @staticmethod
     def _write_train_id_sidecar(checkpoint_dir: str) -> None:
@@ -347,3 +389,5 @@ class CustomizedPPOTrainer(PPOTrainer):
                 self._unpatch_clip_cov_loss()
             if self._muon_patch_applied:
                 self._unpatch_muon_optimizer()
+            if self._combined_critic_patch_applied:
+                self._unpatch_combined_critic_loss()

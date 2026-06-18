@@ -90,3 +90,89 @@ class TreeAdvantageComputer:
             norm_return = self.tree_store.get_normalized_return(node_id)
             traj.advantages = mask.float() * norm_return
             traj.returns = mask.float() * norm_return
+
+
+gae_logger = logging.getLogger("GAEAdvantageComputer")
+
+
+class GAEAdvantageComputer:
+    """Generalized Advantage Estimation over episode turns.
+
+    Each ``Node`` is one turn (one state ``s_t``). The generative critic
+    supplies a bootstrapped state value ``v_phi(s_t)`` (read from ``Node.value``).
+    Rewards are sparse: ``r_t = 0`` for intermediate turns and
+    ``r_T = outcome_reward`` at the terminal (last) turn of the episode, with a
+    zero terminal bootstrap ``v(s_{T+1}) = 0``.
+
+    For each episode (grouped by ``(query_id, episode_id)`` and ordered by
+    ``turn_idx``)::
+
+        delta_t = r_t + gamma * v(s_{t+1}) - v(s_t)
+        A_t     = delta_t + gamma * lam * A_{t+1}       (A_{T+1} = 0)
+        ret_t   = A_t + v(s_t)
+
+    ``A_t`` and ``ret_t`` are broadcast over each node's response positions
+    (``loss_mask == 1``), mirroring ``TreeAdvantageComputer``.
+    """
+
+    def __init__(
+        self,
+        tree_store: MCTSTreeStore,
+        gamma: float = 1.0,
+        lam: float = 0.95,
+    ) -> None:
+        self.tree_store = tree_store
+        self.gamma = gamma
+        self.lam = lam
+
+    @staticmethod
+    def _node_value(node: Node) -> float:
+        return float(getattr(node, "value", 0.0) or 0.0)
+
+    def _assign(self, node: Node, advantage: float, ret: float) -> None:
+        mask = node.loss_mask
+        if not isinstance(mask, torch.Tensor):
+            mask = torch.tensor(mask, dtype=torch.bool)
+        mask_f = mask.float()
+        node.advantages = mask_f * advantage
+        node.returns = mask_f * ret
+
+    def compute(self, trajectories: list[Node]) -> None:
+        """Compute GAE advantages/returns in-place on the given nodes."""
+        # Group nodes into episodes. Nodes without an episode_id are treated as
+        # standalone single-turn episodes keyed by node_id.
+        episodes: dict[tuple[str, str], list[Node]] = {}
+        for traj in trajectories:
+            node_id = getattr(traj, "node_id", None)
+            if node_id is None:
+                continue
+            query_id = traj.query_id or ""
+            ep_id = traj.episode_id or node_id
+            episodes.setdefault((query_id, ep_id), []).append(traj)
+
+        for nodes in episodes.values():
+            # Order turns ascending; ties broken by insertion order (stable).
+            ordered = sorted(nodes, key=lambda n: getattr(n, "turn_idx", 0))
+            n_turns = len(ordered)
+
+            values = [self._node_value(n) for n in ordered]
+            # Sparse reward: only the terminal turn carries outcome_reward.
+            rewards = [0.0] * n_turns
+            if n_turns > 0:
+                rewards[-1] = float(ordered[-1].outcome_reward)
+
+            advantages = [0.0] * n_turns
+            next_adv = 0.0
+            next_value = 0.0  # terminal bootstrap v(s_{T+1}) = 0
+            for t in range(n_turns - 1, -1, -1):
+                delta = rewards[t] + self.gamma * next_value - values[t]
+                next_adv = delta + self.gamma * self.lam * next_adv
+                advantages[t] = next_adv
+                next_value = values[t]
+
+            for n, adv, val in zip(ordered, advantages, values):
+                ret = adv + val
+                self._assign(n, adv, ret)
+                if getattr(n, "node_id", None):
+                    self.tree_store.set_normalized_advantage(n.node_id, adv)
+                    self.tree_store.set_normalized_return(n.node_id, ret)

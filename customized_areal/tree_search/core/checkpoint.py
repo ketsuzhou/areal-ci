@@ -79,6 +79,7 @@ class TreeCheckpointManager:
             "q_values": {
                 k: v for k, v in tree_store._q_values.items() if k in node_id_set
             },
+            "values": {k: v for k, v in tree_store._values.items() if k in node_id_set},
             "rewards": {
                 k: v for k, v in tree_store._rewards.items() if k in node_id_set
             },
@@ -157,6 +158,7 @@ class TreeCheckpointManager:
             store._visit_counts.update(query_metadata.get("visit_counts", {}))
             store._total_values.update(query_metadata.get("total_values", {}))
             store._q_values.update(query_metadata.get("q_values", {}))
+            store._values.update(query_metadata.get("values", {}))
             store._rewards.update(query_metadata.get("rewards", {}))
             store._normalized_advantages.update(
                 query_metadata.get("normalized_advantages", {})
@@ -187,6 +189,7 @@ class TreeCheckpointManager:
             "logprobs": node.logprobs,
             "versions": node.versions,
             "outcome_reward": node.outcome_reward,
+            "value": node.value,
             "node_id": node.node_id,
             "parent_node_id": node.parent_node_id,
             "episode_id": node.episode_id,
@@ -217,6 +220,7 @@ class TreeCheckpointManager:
             logprobs=data["logprobs"],
             versions=data["versions"],
             outcome_reward=data.get("outcome_reward", data.get("reward", 0.0)),
+            value=data.get("value", 0.0),
             node_id=data.get("node_id", ""),
             parent_node_id=data.get("parent_node_id"),
             episode_id=data.get("episode_id", ""),

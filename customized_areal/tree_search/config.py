@@ -85,6 +85,27 @@ class Config:
     use_fresh_query: bool = False
     fresh_query_table: str = ""
 
+    # Generative critic (shared-model) settings.
+    #
+    # When ``enable_generative_critic`` is True, the actor's own model (same
+    # weights, same SGLang server) doubles as a generative critic: it scores
+    # partial-solution states by emitting an integer in ``[0, critic_score_max]``
+    # via a success-probability prompt. The soft expected value over those digit
+    # tokens is used as the state value ``v_phi(s_t)``, which drives GAE
+    # advantages for the actor. The same shared model is trained with a combined
+    # ``actor_loss + critic_loss_weight * critic_loss`` objective, where the
+    # critic loss is an expected-value soft regression toward the tree-stored
+    # MCTS ``q_value`` target.
+    enable_generative_critic: bool = False
+    critic_avg_success_rate: float = 0.29
+    critic_gamma: float = 1.0
+    critic_lambda: float = 0.95
+    critic_score_max: int = 10
+    critic_target_scale: float = 1.0
+    critic_max_new_tokens: int = 1024
+    critic_temperature: float = 0.0
+    critic_loss_weight: float = 1.0
+
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
         if self.initial_group_size < 1:
@@ -131,6 +152,53 @@ class Config:
                     "fresh_query_table must be set when use_fresh_query=True "
                     "(or set FRESH_QUERY_TABLE)"
                 )
+
+        # Generative-critic validation and GAE gating.
+        self.advantage_mode = AdvantageMode(self.advantage_mode)
+        if not 0.0 <= self.critic_avg_success_rate <= 1.0:
+            raise ValueError(
+                "critic_avg_success_rate must be in [0, 1], got "
+                f"{self.critic_avg_success_rate}"
+            )
+        if not 0.0 <= self.critic_gamma <= 1.0:
+            raise ValueError(f"critic_gamma must be in [0, 1], got {self.critic_gamma}")
+        if not 0.0 <= self.critic_lambda <= 1.0:
+            raise ValueError(
+                f"critic_lambda must be in [0, 1], got {self.critic_lambda}"
+            )
+        if self.critic_score_max < 1:
+            raise ValueError(
+                f"critic_score_max must be >= 1, got {self.critic_score_max}"
+            )
+        if self.critic_target_scale <= 0:
+            raise ValueError(
+                f"critic_target_scale must be > 0, got {self.critic_target_scale}"
+            )
+        if self.critic_loss_weight < 0:
+            raise ValueError(
+                f"critic_loss_weight must be >= 0, got {self.critic_loss_weight}"
+            )
+        if self.critic_max_new_tokens < 1:
+            raise ValueError(
+                f"critic_max_new_tokens must be >= 1, got {self.critic_max_new_tokens}"
+            )
+        if self.critic_temperature < 0:
+            raise ValueError(
+                f"critic_temperature must be >= 0, got {self.critic_temperature}"
+            )
+        if self.enable_generative_critic:
+            # The generative critic supplies bootstrapped state values, so the
+            # actor advantage must be GAE. Auto-switch from the default TREE mode
+            # and warn if a conflicting mode was set explicitly.
+            if self.advantage_mode != AdvantageMode.GAE:
+                import warnings
+
+                warnings.warn(
+                    "enable_generative_critic=True requires advantage_mode=GAE; "
+                    f"overriding advantage_mode={self.advantage_mode.value!r} -> 'gae'.",
+                    stacklevel=2,
+                )
+                self.advantage_mode = AdvantageMode.GAE
 
 
 @dataclass

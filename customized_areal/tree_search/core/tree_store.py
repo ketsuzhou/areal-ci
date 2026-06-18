@@ -56,7 +56,13 @@ class Node:
     # Reward
     outcome_reward: float = 0.0
 
-    # Tree-computed advantages/returns (set by TreeAdvantageComputer)
+    # Generative-critic state value v_phi(s_t) for the partial solution through
+    # this turn. Written by the critic value client; consumed by
+    # GAEAdvantageComputer. 0.0 when the critic is disabled.
+    value: float = 0.0
+
+    # Tree-computed advantages/returns (set by TreeAdvantageComputer or
+    # GAEAdvantageComputer)
     advantages: torch.Tensor | None = None
     returns: torch.Tensor | None = None
 
@@ -252,6 +258,8 @@ class MCTSTreeStore:
         self._turn_nodes: dict[str, str] = {}  # turn_id → node_id
         self._normalized_advantages: dict[str, float] = {}
         self._normalized_returns: dict[str, float] = {}
+        # Generative-critic state values v_phi(s_t), keyed by node_id.
+        self._values: dict[str, float] = {}
 
     def _backup(self, node_id: str, reward: float) -> None:
         """Update MCTS stats for a single trajectory."""
@@ -383,6 +391,16 @@ class MCTSTreeStore:
 
     def get_normalized_return(self, node_id: str, default: float = 0.0) -> float:
         return self._normalized_returns.get(node_id, default)
+
+    def set_value(self, node_id: str, value: float) -> None:
+        """Store the generative-critic state value v_phi(s_t) for a node."""
+        self._values[node_id] = value
+
+    def get_value(self, node_id: str, default: float = 0.0) -> float:
+        return self._values.get(node_id, default)
+
+    def has_value(self, node_id: str) -> bool:
+        return node_id in self._values
 
     def get_untrained_count(self, query_id: str) -> int:
         if query_id not in self._query_node_ids:
@@ -535,3 +553,4 @@ class MCTSTreeStore:
         self._turn_nodes.clear()
         self._normalized_advantages.clear()
         self._normalized_returns.clear()
+        self._values.clear()

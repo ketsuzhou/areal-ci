@@ -293,6 +293,74 @@ def unpatch_ppo_actor_distill_loss() -> None:
         logger.info("Restored original PPOActor._ppo_update")
 
 
+_combined_critic_patch_applied = False
+_combined_critic_original_ppo_update = None
+_combined_critic_cfg: dict[str, Any] = {}
+
+
+def patch_ppo_actor_class_to_use_combined_critic_loss(
+    critic_loss_weight: float,
+    pad_token_id: int = 0,
+) -> None:
+    """Patch PPOActor._ppo_update to add the shared-model critic regression step.
+
+    Wraps whatever ``_ppo_update`` is currently installed (so it composes with
+    the distill-loss patch). After the actor update runs, if the batch carries
+    ``critic_train_data`` an additional critic soft-regression step is run on the
+    same model, weighted by ``critic_loss_weight``.
+
+    Idempotent. Restore with :func:`unpatch_combined_critic_loss`.
+    """
+    global _combined_critic_patch_applied, _combined_critic_original_ppo_update
+    global _combined_critic_cfg
+    if _combined_critic_patch_applied:
+        return
+
+    _combined_critic_original_ppo_update = PPOActor._ppo_update
+    _combined_critic_cfg = {
+        "weight": critic_loss_weight,
+        "pad": pad_token_id,
+    }
+    inner = _combined_critic_original_ppo_update
+
+    def _ppo_update_with_combined_critic(self, data: dict[str, Any]) -> None:
+        from .critic_update import run_critic_regression_step
+
+        critic_train_data = None
+        if isinstance(data, dict):
+            critic_train_data = data.pop("critic_train_data", None)
+
+        inner(self, data)
+
+        if critic_train_data is not None:
+            run_critic_regression_step(
+                self,
+                critic_train_data,
+                critic_loss_weight=_combined_critic_cfg["weight"],
+                pad_token_id=_combined_critic_cfg["pad"],
+            )
+
+    PPOActor._ppo_update = _ppo_update_with_combined_critic
+    _combined_critic_patch_applied = True
+    logger.info(
+        "PPOActor patched for combined generative-critic loss (weight=%.4g)",
+        critic_loss_weight,
+    )
+
+
+def unpatch_combined_critic_loss() -> None:
+    """Restore the pre-combined-critic PPOActor._ppo_update method."""
+    global _combined_critic_patch_applied, _combined_critic_original_ppo_update
+    if (
+        _combined_critic_patch_applied
+        and _combined_critic_original_ppo_update is not None
+    ):
+        PPOActor._ppo_update = _combined_critic_original_ppo_update
+        _combined_critic_original_ppo_update = None
+        _combined_critic_patch_applied = False
+        logger.info("Restored PPOActor._ppo_update (combined critic loss)")
+
+
 def _distribute_position_rewards(mb_inputs, position_rewards: list) -> None:
     """Distribute position_rewards to minibatches based on sample_index.
 

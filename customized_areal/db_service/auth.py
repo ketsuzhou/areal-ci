@@ -629,7 +629,9 @@ async def _refresh_access_token(refresh_token: str) -> tuple[str, str]:
             resp.status_code,
         )
         try:
-            return await _login_with_credentials(supabase_url, supabase_anon_key, client)
+            return await _login_with_credentials(
+                supabase_url, supabase_anon_key, client
+            )
         except RuntimeError:
             user_id = os.environ.get("TPFC_USER_ID")
             if not user_id:

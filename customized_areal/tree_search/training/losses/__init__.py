@@ -1,6 +1,14 @@
 """Loss helpers for tree-search training."""
 
 from .combined import grpo_distill_loss_fn
+from .critic import (
+    build_critic_training_batch,
+    combined_actor_critic_loss,
+    critic_softreg_loss_fn,
+    critic_softreg_loss_from_logprobs,
+    expected_value_from_label_logits,
+    expected_value_from_label_logprobs,
+)
 from .distill import (
     _align_teacher_chosen_logprobs,
     _compute_distill_reweighted_advantages,
@@ -17,6 +25,12 @@ from .grpo import (
 
 __all__ = [
     "grpo_distill_loss_fn",
+    "build_critic_training_batch",
+    "combined_actor_critic_loss",
+    "critic_softreg_loss_fn",
+    "critic_softreg_loss_from_logprobs",
+    "expected_value_from_label_logits",
+    "expected_value_from_label_logprobs",
     "_align_teacher_chosen_logprobs",
     "_compute_distill_reweighted_advantages",
     "_compute_grpo_loss",

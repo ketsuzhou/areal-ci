@@ -195,7 +195,9 @@ async def test_resolve_agent_id_creates_and_persists_when_configured_id_missing(
     monkeypatch.setattr(backend_run, "AgentService", FakeAgentService)
     monkeypatch.setattr(backend_run, "get_agent_loader", fake_get_agent_loader)
     monkeypatch.setattr(
-        backend_run, "_save_tpfc_agent_id", lambda agent_id: saved_agent_ids.append(agent_id)
+        backend_run,
+        "_save_tpfc_agent_id",
+        lambda agent_id: saved_agent_ids.append(agent_id),
     )
 
     agent_id = await backend_run._resolve_agent_id(FakeClient(), "user", None)

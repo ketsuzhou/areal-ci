@@ -1,0 +1,236 @@
+experiment_name: tpfc-grpo
+trial_name: self_play_0618
+seed: 1
+
+# Tree search configuration
+tree_search:
+  enabled: true
+  checkpoint_dir: customized_areal/tpfc/data/tree_cache
+  mode: CROSS_TRAINING
+  loss_mode: GRPO
+  teacher_provider: engine
+  sample_source: SCRATCH
+  branch_probability: 0.5
+  use_fresh_query: true
+  fresh_query_table: query_bank
+
+total_train_epochs: 4
+total_train_steps: 200
+tokenizer_path: ${actor.path}
+
+# TPFC Agent workflow
+workflow: customized_areal.tpfc.tpfc_agent.TPFCAgent
+eval_workflow: ${workflow}
+
+agent:
+  trial_name: ${trial_name}
+  model_name: null
+  judge_model_name: null
+  judge_base_url: null
+  judge_api_key: null
+
+cluster:
+  n_nodes: 1
+  n_gpus_per_node: 2
+  fileroot: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/experiments
+  name_resolve:
+    type: nfs
+    nfs_record_root: /dfs/share-groups/letrain/zhoujie/AReaL-main/tmp/areal/name_resolve
+
+# 2 GPUs: 1 for inference (sglang DP), 1 for training (fsdp DP)
+# train_dataset.batch_size must be divisible by fsdp DP size (1)
+allocation_mode: sglang:d1+fsdp:d1
+
+scheduler:
+  type: local
+
+rollout:
+  backend: sglang:d1
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  tokenizer_path: ${tokenizer_path}
+  max_concurrent_rollouts: 1
+  queue_size: 240
+  consumer_batch_size: ${train_dataset.batch_size}
+  max_head_offpolicyness: 40
+  enable_rollout_tracing: false
+  scheduling_spec: ${actor.scheduling_spec}
+  dump_to_file: true
+  agent:
+    mode: inline
+    # Qwen3.5-9B uses qwen25 tool call parser (same format as Qwen2.5)
+    # and qwen3 reasoning parser for <think> tag detection
+    tool_call_parser: qwen25
+    reasoning_parser: qwen3
+    export_style: individual
+    turn_discount: 1.0
+    engine_max_tokens: 10112
+
+gconfig:
+  n_samples: 2
+  min_new_tokens: 0
+  max_new_tokens: 1024
+  max_tokens: 10112
+  greedy: false
+  temperature: 1.0
+
+actor:
+  backend: fsdp:d1
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  attn_impl: sdpa
+  fsdp:
+    offload_params: false
+  # path: /dfs/share-groups/letrain/zhoujie/Qwen3-1.7B
+  # path: /dfs/share-groups/letrain/ckpt/Qwen3-VL-8B-Instruct
+  path: /dfs/share-groups/letrain/ckpt/Qwen3.5-9B
+  init_from_scratch: false
+  disable_dropout: true
+  gradient_checkpointing: true
+  enable_tree_training: true
+  pad_to_maximum: true
+  dtype: bfloat16
+  mb_spec:
+    max_tokens_per_mb: 10112
+  optimizer:
+    type: adam
+    lr: 1.70e-6
+    weight_decay: 0.017
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1e-8
+    lr_scheduler_type: constant
+    gradient_clipping: 1.0
+    warmup_steps_proportion: 0.001
+  eps_clip: 0.4
+  temperature: ${gconfig.temperature}
+  reward_scaling: 10.0
+  reward_bias: -0.5
+  kl_ctl: 0.0
+  ppo_n_minibatches: 1
+  recompute_logprob: true
+  use_decoupled_loss: true
+  rejection_sampling:
+    level: token
+    action: mask
+    metric: ratio
+    upper: 5.0
+  reward_norm: null
+  adv_norm:
+    mean_level: group
+    std_level: group
+  weight_update_mode: xccl
+  max_new_tokens: ${gconfig.max_new_tokens}
+  scheduling_spec:
+    - task_type: worker
+      port_count: 2
+      gpu: 1
+      cmd: python3 -m areal.infra.rpc.rpc_server
+      env_vars:
+        NCCL_DEBUG: "WARN"
+        NCCL_IB_DISABLE: "1"
+        NCCL_SOCKET_IFNAME: "eth0"
+        PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+
+ref:
+  backend: fsdp:d1
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  path: ${actor.path}
+  init_from_scratch: false
+  disable_dropout: true
+  enable_tree_training: true
+  pad_to_maximum: true
+  dtype: ${actor.dtype}
+  mb_spec:
+    max_tokens_per_mb: 10112
+  optimizer: null
+  scheduling_strategy:
+    type: colocation
+    target: actor
+  scheduling_spec: ${actor.scheduling_spec}
+
+# SGLang
+sglang:
+  model_path: ${actor.path}
+  random_seed: ${seed}
+  skip_tokenizer_init: true
+  dtype: ${actor.dtype}
+  max_running_requests: null
+  context_length: 15000
+  mem_fraction_static: 0.85
+  enable_multimodal: true
+
+vllm:
+  model: ${actor.path}
+  seed: ${seed}
+  skip_tokenizer_init: false
+  dtype: ${actor.dtype}
+  max_model_len: 65536
+  gpu_memory_utilization: 0.8
+
+# datasets
+# TPFC dataset configuration - uses generated_training_final.parquet
+# NOTE: All samples have ~1034-1366 tokens due to long system prompts
+train_dataset:
+  batch_size: 2
+  shuffle: false
+  pin_memory: true
+  num_workers: 2
+  path: customized_areal/tpfc/data/generated_training_final_update.parquet
+  type: rl
+  max_length: 10112
+
+valid_dataset:
+  batch_size: 4
+  pin_memory: true
+  num_workers: 2
+  path: customized_areal/tpfc/data/generated_training_final_update.parquet
+  type: rl
+  max_length: 10112
+
+# Utilities
+saver:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  freq_epochs: 1
+  freq_steps: 2
+  freq_secs: 7200
+
+recover:
+  mode: "on"
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  freq_epochs: 1
+  freq_steps: 2
+  freq_secs: 7200
+
+evaluator:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  freq_epochs: null
+  freq_steps: null
+  freq_secs: null
+
+stats_logger:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  wandb:
+    mode: disabled
+  swanlab:
+    project: tpfc-grpo
+    mode: cloud
+    api_key: ${oc.env:SWANLAB_API_KEY,""}
+
+perf_tracer:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  fileroot: ${cluster.fileroot}
+  enabled: true
+  session_tracer:
+    enabled: true

@@ -25,7 +25,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_TABLE = "query_bank"
 
 
@@ -78,7 +77,9 @@ def _apply_eq_filters(query: Any, eq_filters: list[list[str]] | None) -> Any:
 
 def _require_filter(args: argparse.Namespace) -> None:
     if not args.eq:
-        raise SystemExit("Refusing to modify all rows. Add at least one --eq COLUMN VALUE filter.")
+        raise SystemExit(
+            "Refusing to modify all rows. Add at least one --eq COLUMN VALUE filter."
+        )
 
 
 def _print_json(data: Any) -> None:
@@ -136,13 +137,17 @@ def cmd_delete(client: Any, args: argparse.Namespace) -> None:
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--table", default=DEFAULT_TABLE, help=f"Table name. Default: {DEFAULT_TABLE}")
+    parser.add_argument(
+        "--table", default=DEFAULT_TABLE, help=f"Table name. Default: {DEFAULT_TABLE}"
+    )
     parser.add_argument(
         "--service-role",
         action="store_true",
         help="Use SUPABASE_SERVICE_ROLE_KEY instead of SUPABASE_ANON_KEY.",
     )
-    parser.add_argument("--key", help="Explicit Supabase API key. Overrides environment keys.")
+    parser.add_argument(
+        "--key", help="Explicit Supabase API key. Overrides environment keys."
+    )
 
 
 def _add_read_filters(parser: argparse.ArgumentParser) -> None:
@@ -161,34 +166,56 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="Read rows from the table.")
-    list_parser.add_argument("--select", default="*", help="Columns to select. Default: *")
+    list_parser.add_argument(
+        "--select", default="*", help="Columns to select. Default: *"
+    )
     list_parser.add_argument("--limit", type=int, default=20)
     list_parser.add_argument("--offset", type=int)
-    list_parser.add_argument("--order", help="Column to order by. Prefix with '-' for descending.")
+    list_parser.add_argument(
+        "--order", help="Column to order by. Prefix with '-' for descending."
+    )
     _add_read_filters(list_parser)
     list_parser.set_defaults(func=cmd_list)
 
     get_parser = subparsers.add_parser("get", help="Read matching rows.")
-    get_parser.add_argument("--select", default="*", help="Columns to select. Default: *")
+    get_parser.add_argument(
+        "--select", default="*", help="Columns to select. Default: *"
+    )
     get_parser.add_argument("--limit", type=int, default=1)
     _add_read_filters(get_parser)
     get_parser.set_defaults(func=cmd_get)
 
-    insert_parser = subparsers.add_parser("insert", help="Insert one object or a list of objects.")
-    insert_parser.add_argument("--data", required=True, help="JSON object/list, or @path/to/file.json")
+    insert_parser = subparsers.add_parser(
+        "insert", help="Insert one object or a list of objects."
+    )
+    insert_parser.add_argument(
+        "--data", required=True, help="JSON object/list, or @path/to/file.json"
+    )
     insert_parser.set_defaults(func=cmd_insert)
 
-    upsert_parser = subparsers.add_parser("upsert", help="Insert or update one object or a list of objects.")
-    upsert_parser.add_argument("--data", required=True, help="JSON object/list, or @path/to/file.json")
-    upsert_parser.add_argument("--on-conflict", help="Comma-separated conflict target columns.")
+    upsert_parser = subparsers.add_parser(
+        "upsert", help="Insert or update one object or a list of objects."
+    )
+    upsert_parser.add_argument(
+        "--data", required=True, help="JSON object/list, or @path/to/file.json"
+    )
+    upsert_parser.add_argument(
+        "--on-conflict", help="Comma-separated conflict target columns."
+    )
     upsert_parser.set_defaults(func=cmd_upsert)
 
-    update_parser = subparsers.add_parser("update", help="Update rows matching --eq filters.")
-    update_parser.add_argument("--data", required=True, help="JSON object, or @path/to/file.json")
+    update_parser = subparsers.add_parser(
+        "update", help="Update rows matching --eq filters."
+    )
+    update_parser.add_argument(
+        "--data", required=True, help="JSON object, or @path/to/file.json"
+    )
     _add_read_filters(update_parser)
     update_parser.set_defaults(func=cmd_update)
 
-    delete_parser = subparsers.add_parser("delete", help="Delete rows matching --eq filters.")
+    delete_parser = subparsers.add_parser(
+        "delete", help="Delete rows matching --eq filters."
+    )
     _add_read_filters(delete_parser)
     delete_parser.set_defaults(func=cmd_delete)
 

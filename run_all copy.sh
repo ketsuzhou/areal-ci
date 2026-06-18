@@ -30,3 +30,6 @@ gnome-terminal -- bash -c 'cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B-opd.yaml   2>&1 | tee training_opd.log
 
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B_tree_search_self_play.yaml 2>&1 | tee training_self_play.log
+
+
+cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B_self_play_test.yaml 2>&1 | tee training_self_play.log

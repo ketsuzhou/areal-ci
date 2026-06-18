@@ -662,6 +662,14 @@ class RemoteInfEngine(InferenceEngine):
                     max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
                     use_fresh_query=tree_search_cfg.use_fresh_query,
                     fresh_query_table=tree_search_cfg.fresh_query_table,
+                    enable_generative_critic=tree_search_cfg.enable_generative_critic,
+                    critic_gamma=tree_search_cfg.critic_gamma,
+                    critic_lambda=tree_search_cfg.critic_lambda,
+                    critic_avg_success_rate=tree_search_cfg.critic_avg_success_rate,
+                    critic_score_max=tree_search_cfg.critic_score_max,
+                    critic_max_new_tokens=tree_search_cfg.critic_max_new_tokens,
+                    critic_temperature=tree_search_cfg.critic_temperature,
+                    critic_target_scale=tree_search_cfg.critic_target_scale,
                 )
             elif group_size > 1:
                 resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
@@ -802,6 +810,14 @@ class RemoteInfEngine(InferenceEngine):
                     max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
                     use_fresh_query=tree_search_cfg.use_fresh_query,
                     fresh_query_table=tree_search_cfg.fresh_query_table,
+                    enable_generative_critic=tree_search_cfg.enable_generative_critic,
+                    critic_gamma=tree_search_cfg.critic_gamma,
+                    critic_lambda=tree_search_cfg.critic_lambda,
+                    critic_avg_success_rate=tree_search_cfg.critic_avg_success_rate,
+                    critic_score_max=tree_search_cfg.critic_score_max,
+                    critic_max_new_tokens=tree_search_cfg.critic_max_new_tokens,
+                    critic_temperature=tree_search_cfg.critic_temperature,
+                    critic_target_scale=tree_search_cfg.critic_target_scale,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")
