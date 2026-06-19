@@ -11,8 +11,10 @@ from areal.utils.logging import getLogger
 from .losses import grpo as _grpo
 from .losses.combined import grpo_distill_loss_fn
 from .losses.critic import (
+    AdaptiveMCWeight,
     build_critic_training_batch,
     combined_actor_critic_loss,
+    compute_critic_targets,
     critic_softreg_loss_fn,
     expected_value_from_label_logits,
 )
@@ -37,8 +39,10 @@ def _compute_position_level_grpo_loss(*args, **kwargs):
 
 __all__ = [
     "grpo_distill_loss_fn",
+    "AdaptiveMCWeight",
     "build_critic_training_batch",
     "combined_actor_critic_loss",
+    "compute_critic_targets",
     "critic_softreg_loss_fn",
     "expected_value_from_label_logits",
     "_align_teacher_chosen_logprobs",

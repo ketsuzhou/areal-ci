@@ -670,6 +670,10 @@ class RemoteInfEngine(InferenceEngine):
                     critic_max_new_tokens=tree_search_cfg.critic_max_new_tokens,
                     critic_temperature=tree_search_cfg.critic_temperature,
                     critic_target_scale=tree_search_cfg.critic_target_scale,
+                    critic_mc_weight=tree_search_cfg.critic_mc_weight,
+                    critic_td_n_steps=tree_search_cfg.critic_td_n_steps,
+                    critic_mc_adaptive=tree_search_cfg.critic_mc_adaptive,
+                    critic_mc_c=tree_search_cfg.critic_mc_c,
                 )
             elif group_size > 1:
                 resolved = GroupedRolloutWorkflow(resolved, group_size, self.logger)
@@ -818,6 +822,10 @@ class RemoteInfEngine(InferenceEngine):
                     critic_max_new_tokens=tree_search_cfg.critic_max_new_tokens,
                     critic_temperature=tree_search_cfg.critic_temperature,
                     critic_target_scale=tree_search_cfg.critic_target_scale,
+                    critic_mc_weight=tree_search_cfg.critic_mc_weight,
+                    critic_td_n_steps=tree_search_cfg.critic_td_n_steps,
+                    critic_mc_adaptive=tree_search_cfg.critic_mc_adaptive,
+                    critic_mc_c=tree_search_cfg.critic_mc_c,
                 )
             else:
                 self.logger.warning("use GroupedRolloutWorkflow")

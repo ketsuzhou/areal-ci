@@ -230,3 +230,218 @@ def build_critic_training_batch(
         "targets": torch.tensor(clamped_targets, dtype=torch.float32),
         "leading_token_ids": leading_token_ids,
     }
+
+
+# ---------------------------------------------------------------------------
+# Unified TD / MC critic target
+# ---------------------------------------------------------------------------
+#
+# The critic regression target is a convex blend of two estimators of the same
+# state value ``v_phi(s_t)``, both expressed in normalized ``[0, 1]`` space::
+#
+#     y_mc_t = q_mcts(s_t) / target_scale                          # Monte-Carlo (MCTS)
+#     y_td_t = (Sum_{k<n} gamma^k r_{t+k}) / target_scale
+#              + gamma^n * v(s_{t+n})                               # n-step bootstrap
+#     y_t    = (1 - w) * y_td_t + w * y_mc_t   (clamped to [0, 1])
+#
+# ``w`` (``mc_weight``) recovers the previous behavior exactly at ``w = 1`` (pure
+# MCTS target) and yields pure n-step TD at ``w = 0``. ``w`` may be a fixed float
+# or determined automatically per node via :class:`AdaptiveMCWeight`.
+#
+# Rewards are sparse: only the terminal turn of an episode carries
+# ``outcome_reward``; the terminal bootstrap is ``v(s_{T+1}) = 0``. The bootstrap
+# value ``v(s_{t+n})`` is the critic's stored ``Node.value`` (a constant target,
+# i.e. semi-gradient TD).
+
+
+def _episode_groups(nodes: list[Any]) -> dict[tuple[str, str], list[Any]]:
+    """Group nodes by ``(query_id, episode_id)``.
+
+    Nodes without an ``episode_id`` are treated as standalone single-turn
+    episodes keyed by their ``node_id`` (mirrors ``GAEAdvantageComputer``).
+    """
+    groups: dict[tuple[str, str], list[Any]] = {}
+    for n in nodes:
+        node_id = getattr(n, "node_id", None)
+        if node_id is None:
+            continue
+        query_id = getattr(n, "query_id", "") or ""
+        ep_id = getattr(n, "episode_id", "") or node_id
+        groups.setdefault((query_id, ep_id), []).append(n)
+    return groups
+
+
+class AdaptiveMCWeight:
+    """Automatically determine the MC/TD blend weight per node.
+
+    The weight follows an inverse-variance (reliability) rule::
+
+        mc_weight_t = N_t * eps2 / (N_t * eps2 + c)
+
+    where ``N_t`` is the node's MCTS visit count (reliability of the MC target,
+    which grows with visits) and ``eps2`` is an EMA of the critic regression MSE
+    (the TD bootstrap is unreliable while the critic is inaccurate). Limits:
+
+    * ``eps2`` large (critic still bad) -> weight -> 1 (rely on MCTS / MC).
+    * ``eps2`` small (critic mature)    -> weight -> 0 (rely on TD bootstrap).
+    * ``N_t`` large (well-visited node) -> weight -> 1 (MCTS Q reliable).
+    * ``N_t`` small                     -> weight -> 0 (bootstrap instead).
+
+    During ``warmup_steps`` (before the critic-error EMA is meaningful) the
+    weight is forced to ``1.0`` so a randomly-initialized critic never poisons
+    the target. The weight is clamped to ``[w_min, w_max]`` so neither estimator
+    is ever fully discarded.
+
+    Note
+    ----
+    ``update_critic_error`` must be fed the training-side critic MSE to close the
+    loop. When that feedback is unavailable (e.g. the target is built in a
+    different process than the critic loss), ``eps2`` stays at its initial value
+    and the controller degenerates to a pure visit-count rule
+    ``N_t / (N_t + c / eps2_init)``.
+    """
+
+    def __init__(
+        self,
+        c: float = 4.0,
+        ema_beta: float = 0.95,
+        warmup_steps: int = 50,
+        w_min: float = 0.05,
+        w_max: float = 0.95,
+        eps2_init: float = 1.0,
+    ) -> None:
+        if c <= 0:
+            raise ValueError(f"c must be > 0, got {c}")
+        if not 0.0 <= ema_beta < 1.0:
+            raise ValueError(f"ema_beta must be in [0, 1), got {ema_beta}")
+        if warmup_steps < 0:
+            raise ValueError(f"warmup_steps must be >= 0, got {warmup_steps}")
+        if not 0.0 <= w_min <= w_max <= 1.0:
+            raise ValueError(
+                f"require 0 <= w_min <= w_max <= 1, got w_min={w_min}, w_max={w_max}"
+            )
+        if eps2_init <= 0:
+            raise ValueError(f"eps2_init must be > 0, got {eps2_init}")
+        self.c = c
+        self.ema_beta = ema_beta
+        self.warmup_steps = warmup_steps
+        self.w_min = w_min
+        self.w_max = w_max
+        self._eps2 = eps2_init
+        self._steps = 0
+
+    def update_critic_error(self, critic_mse: float) -> None:
+        """Feed the observed critic regression MSE (one critic step)."""
+        mse = float(critic_mse)
+        if mse < 0:
+            raise ValueError(f"critic_mse must be >= 0, got {mse}")
+        self._eps2 = self.ema_beta * self._eps2 + (1.0 - self.ema_beta) * mse
+        self._steps += 1
+
+    def weight(self, visit_count: int) -> float:
+        """Per-node MC weight in ``[w_min, w_max]`` (1.0 during warmup)."""
+        if self._steps < self.warmup_steps:
+            return 1.0
+        n = max(int(visit_count), 1)
+        w = (n * self._eps2) / (n * self._eps2 + self.c)
+        return min(self.w_max, max(self.w_min, w))
+
+
+def compute_critic_targets(
+    nodes: list[Any],
+    *,
+    tree_store: Any | None = None,
+    mc_weight: float | AdaptiveMCWeight | None = 1.0,
+    n_steps: int = 1,
+    gamma: float = 1.0,
+    target_scale: float = 1.0,
+) -> list[float]:
+    """Unified critic regression targets in ``[0, 1]``, aligned to ``nodes`` order.
+
+    Blends the MCTS Monte-Carlo target with an n-step bootstrapped TD target::
+
+        y_t = (1 - w) * y_td_t + w * y_mc_t    (clamped to [0, 1])
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Nodes to score. Grouped into episodes internally for the TD horizon.
+    tree_store : MCTSTreeStore | None
+        Source of MCTS ``q_value`` (MC target) and ``_visit_counts`` (adaptive
+        weighting). When None, the MC target falls back to ``node.outcome_reward``
+        and adaptive weighting uses a visit count of 1.
+    mc_weight : float | AdaptiveMCWeight | None
+        Weight on the MC target. ``1.0`` (or ``None``) reproduces the pure-MCTS
+        target. ``0.0`` is pure n-step TD. An :class:`AdaptiveMCWeight` computes a
+        per-node weight from MCTS visit counts and critic error.
+    n_steps : int
+        Horizon of the TD component (``1`` == one-step TD).
+    gamma : float
+        Discount factor.
+    target_scale : float
+        Divisor applied to ``q_value`` and ``outcome_reward`` before blending.
+
+    Returns
+    -------
+    list[float]
+        Targets clamped to ``[0, 1]``, in the same order as ``nodes``.
+    """
+    if n_steps < 1:
+        raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+    if not 0.0 <= gamma <= 1.0:
+        raise ValueError(f"gamma must be in [0, 1], got {gamma}")
+    if target_scale <= 0:
+        raise ValueError(f"target_scale must be > 0, got {target_scale}")
+
+    adaptive = isinstance(mc_weight, AdaptiveMCWeight)
+    if not adaptive:
+        fixed_w = 1.0 if mc_weight is None else float(mc_weight)
+        if not 0.0 <= fixed_w <= 1.0:
+            raise ValueError(f"mc_weight must be in [0, 1], got {fixed_w}")
+
+    target_by_id: dict[str, float] = {}
+    for group in _episode_groups(nodes).values():
+        ordered = sorted(group, key=lambda x: getattr(x, "turn_idx", 0))
+        n_turns = len(ordered)
+        values = [float(getattr(x, "value", 0.0) or 0.0) for x in ordered]
+        rewards = [0.0] * n_turns
+        if n_turns:
+            rewards[-1] = float(getattr(ordered[-1], "outcome_reward", 0.0)) / (
+                target_scale
+            )
+
+        for t, node in enumerate(ordered):
+            node_id = getattr(node, "node_id", "")
+
+            # MC target: MCTS q_value, fall back to outcome_reward.
+            q = None
+            if tree_store is not None and node_id:
+                q = tree_store.get_q_value(node_id)
+            if q is None:
+                q = getattr(node, "outcome_reward", 0.0)
+            y_mc = float(q) / target_scale
+
+            # n-step TD target with terminal bootstrap v(s_{T+1}) = 0.
+            horizon = min(n_steps, n_turns - t)
+            y_td = 0.0
+            disc = 1.0
+            for k in range(horizon):
+                y_td += disc * rewards[t + k]
+                disc *= gamma
+            boot_idx = t + n_steps
+            if boot_idx < n_turns:  # s_{t+n} exists and is non-terminal
+                y_td += disc * values[boot_idx]  # disc == gamma ** n_steps here
+
+            # Blend weight (per node when adaptive).
+            if adaptive:
+                visit_count = 1
+                if tree_store is not None and node_id:
+                    visit_count = tree_store._visit_counts.get(node_id, 1)
+                w = mc_weight.weight(visit_count)
+            else:
+                w = fixed_w
+
+            y = (1.0 - w) * y_td + w * y_mc
+            target_by_id[node_id] = min(1.0, max(0.0, y))
+
+    return [target_by_id.get(getattr(n, "node_id", ""), 0.0) for n in nodes]

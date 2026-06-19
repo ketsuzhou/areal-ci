@@ -105,6 +105,18 @@ class Config:
     critic_max_new_tokens: int = 1024
     critic_temperature: float = 0.0
     critic_loss_weight: float = 1.0
+    # Unified TD/MC critic target. The regression target is a convex blend
+    #   y = (1 - w) * y_td + w * y_mc
+    # where y_mc is the MCTS Monte-Carlo q_value and y_td is an n-step
+    # bootstrapped return. ``critic_mc_weight`` is the fixed weight ``w``
+    # (1.0 == previous pure-MCTS behavior, 0.0 == pure n-step TD).
+    # ``critic_td_n_steps`` is the TD horizon. When ``critic_mc_adaptive`` is
+    # True the weight is determined per node from MCTS visit counts (and, when
+    # fed back, critic error) with scale ``critic_mc_c``.
+    critic_mc_weight: float = 1.0
+    critic_td_n_steps: int = 1
+    critic_mc_adaptive: bool = False
+    critic_mc_c: float = 4.0
 
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
@@ -186,6 +198,16 @@ class Config:
             raise ValueError(
                 f"critic_temperature must be >= 0, got {self.critic_temperature}"
             )
+        if not 0.0 <= self.critic_mc_weight <= 1.0:
+            raise ValueError(
+                f"critic_mc_weight must be in [0, 1], got {self.critic_mc_weight}"
+            )
+        if self.critic_td_n_steps < 1:
+            raise ValueError(
+                f"critic_td_n_steps must be >= 1, got {self.critic_td_n_steps}"
+            )
+        if self.critic_mc_c <= 0:
+            raise ValueError(f"critic_mc_c must be > 0, got {self.critic_mc_c}")
         if self.enable_generative_critic:
             # The generative critic supplies bootstrapped state values, so the
             # actor advantage must be GAE. Auto-switch from the default TREE mode

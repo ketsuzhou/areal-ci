@@ -623,6 +623,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         critic_max_new_tokens: int = 1024,
         critic_temperature: float = 0.0,
         critic_target_scale: float = 1.0,
+        critic_mc_weight: float = 1.0,
+        critic_td_n_steps: int = 1,
+        critic_mc_adaptive: bool = False,
+        critic_mc_c: float = 4.0,
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -641,6 +645,22 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.critic_max_new_tokens = critic_max_new_tokens
         self.critic_temperature = critic_temperature
         self.critic_target_scale = critic_target_scale
+        self.critic_mc_weight = critic_mc_weight
+        self.critic_td_n_steps = critic_td_n_steps
+        self.critic_mc_adaptive = critic_mc_adaptive
+        self.critic_mc_c = critic_mc_c
+        # Resolved blend weight passed to ``compute_critic_targets``: either the
+        # fixed float ``critic_mc_weight`` or an adaptive controller. The
+        # controller is stateful and persists across rollouts so its critic-error
+        # EMA can be updated if/when training-side feedback is wired in.
+        if critic_mc_adaptive:
+            from customized_areal.tree_search.training.losses.critic import (
+                AdaptiveMCWeight,
+            )
+
+            self._mc_mixer: Any = AdaptiveMCWeight(c=critic_mc_c)
+        else:
+            self._mc_mixer = critic_mc_weight
         self.loss_mode = loss_mode
         self.cache_mode = cache_mode
         self.tokenizer_path = tokenizer_path
@@ -904,23 +924,48 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     def _attach_critic_train_data(self, result_dict, all_nodes) -> None:
         """Attach critic soft-regression training data to the batch.
 
-        Built from the same critic prompts used at rollout, with the tree
-        ``q_value`` as the regression target. Stored as a Python object that the
-        patched ``_ppo_update`` pops before tensor ops (mirrors position_rewards).
-        Best-effort: never raise into the rollout path.
+        Built from the same critic prompts used at rollout. The regression
+        target unifies the MCTS Monte-Carlo ``q_value`` with an n-step
+        bootstrapped TD return via :func:`compute_critic_targets`; the blend is
+        controlled by ``self._mc_mixer`` (a fixed weight or an adaptive,
+        visit-count-driven controller). With the defaults
+        (``critic_mc_weight=1.0``) this reproduces the previous pure-MCTS target.
+        Stored as a Python object that the patched ``_ppo_update`` pops before
+        tensor ops (mirrors position_rewards). Best-effort: never raise into the
+        rollout path.
+
+        TODO(agent): close the adaptive loop by feeding the training-side critic
+        MSE back into ``self._mc_mixer.update_critic_error(...)``. The critic loss
+        is computed in ``run_critic_regression_step`` (training engine), which is
+        a different component than this rollout-side target builder, so the
+        feedback needs cross-boundary plumbing (shared stat / RPC). Until then the
+        adaptive weight degenerates to a pure visit-count rule.
         """
         try:
             if self._critic_value_client is None or not all_nodes:
                 return
             from customized_areal.tree_search.training.losses.critic import (
                 build_critic_training_batch,
+                compute_critic_targets,
             )
 
+            nodes = list(all_nodes)
+            # Unified target in [0, 1]; pass target_scale=1.0 to build_* since
+            # compute_critic_targets already applied scaling and clamping.
+            targets = compute_critic_targets(
+                nodes,
+                tree_store=self.tree_store,
+                mc_weight=self._mc_mixer,
+                n_steps=self.critic_td_n_steps,
+                gamma=self.critic_gamma,
+                target_scale=self.critic_target_scale,
+            )
             critic_batch = build_critic_training_batch(
                 self._critic_value_client,
-                list(all_nodes),
+                nodes,
+                targets=targets,
                 tree_store=self.tree_store,
-                target_scale=self.critic_target_scale,
+                target_scale=1.0,
                 score_max=self.critic_score_max,
             )
             result_dict["critic_train_data"] = critic_batch

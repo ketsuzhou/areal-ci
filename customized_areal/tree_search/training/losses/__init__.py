@@ -2,8 +2,10 @@
 
 from .combined import grpo_distill_loss_fn
 from .critic import (
+    AdaptiveMCWeight,
     build_critic_training_batch,
     combined_actor_critic_loss,
+    compute_critic_targets,
     critic_softreg_loss_fn,
     critic_softreg_loss_from_logprobs,
     expected_value_from_label_logits,
@@ -25,8 +27,10 @@ from .grpo import (
 
 __all__ = [
     "grpo_distill_loss_fn",
+    "AdaptiveMCWeight",
     "build_critic_training_batch",
     "combined_actor_critic_loss",
+    "compute_critic_targets",
     "critic_softreg_loss_fn",
     "critic_softreg_loss_from_logprobs",
     "expected_value_from_label_logits",
