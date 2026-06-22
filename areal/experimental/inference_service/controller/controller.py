@@ -1752,6 +1752,10 @@ class RolloutControllerV2:
                 critic_td_n_steps=tree_search_cfg.critic_td_n_steps,
                 critic_mc_adaptive=tree_search_cfg.critic_mc_adaptive,
                 critic_mc_c=tree_search_cfg.critic_mc_c,
+                enable_judge_process_reward=tree_search_cfg.enable_judge_process_reward,
+                judge_process_reward_beta=tree_search_cfg.judge_process_reward_beta,
+                judge_model_name=tree_search_cfg.judge_model_name,
+                judge_max_concurrency=tree_search_cfg.judge_max_concurrency,
             )
         else:
             from areal.infra.remote_inf_engine import GroupedRolloutWorkflow

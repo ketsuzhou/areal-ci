@@ -1175,3 +1175,75 @@ uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py \
 ```
 
 Logged stats: `critic_loss`, `critic_value_mean`, `critic_target_mean`.
+
+## LLM-Judge Step-Level Process Reward (Critic + Actor)
+
+Only the final step of an episode has a verifiable gold answer, so by default
+training relies on a sparse terminal `outcome_reward` bootstrapped through TD/GAE.
+When `tree_search.enable_judge_process_reward=true`, a **larger judge model**
+evaluates each step of a full episode (given the whole trajectory plus the gold
+answer) and assigns each assistant turn an integer credit in `[0, critic_score_max]`.
+Those scores become a **dense per-turn process reward** `r_t` that feeds **both**
+the actor (GAE advantages) and the critic (regression targets), while the verified
+terminal reward remains the anchor.
+
+This reuses the existing teacher/diagnose OpenAI-compatible client
+(`ExternalDiagnoseProvider`); the new `score_episode` method sends the full episode
++ gold answer and parses per-turn scores from structured XML
+(`<judgment><turns><turn><turn_idx>…</turn_idx><score>…</score></turn>…`).
+
+### Reward math
+
+Per episode, the raw integer judge scores are turned into a credit *distribution*
+and blended convexly with the verified outcome on the terminal turn:
+
+```
+mean_raw_t = mean(judge_scores[node_id])      # mean across episodes traversing the node
+jbar_t     = mean_raw_t / Σ_t mean_raw_t       # per-episode credit distribution (Σ_t jbar_t = 1)
+r_t        = β · jbar_t                          # intermediate turns (t < T)
+r_T        = (1 − β) · outcome_reward + β · jbar_T   # terminal turn
+```
+
+The episode return is bounded in `[0, 1]` for any `β ∈ [0, 1]`:
+
+```
+G = Σ_t r_t = β · Σ_t jbar_t + (1 − β) · outcome_reward = β + (1 − β) · outcome_reward
+```
+
+Because the value function stays in `[0, 1]`, it matches the generative critic's
+`[0, 1]` output (`i / score_max`), so **`critic_target_scale` stays `1.0`** and no
+remapping is needed.
+
+### Branching (shared prefix nodes)
+
+Tree-search episodes share prefix nodes. A shared step is judged once **per
+distinct episode** that traverses it, so each node accumulates a `list[float]` of
+raw scores in the tree store (`add_judge_score` / `get_mean_judge_score`). The
+process reward uses the **mean** raw score per node, then re-normalizes within each
+ordered episode (`jbar_t = mean_raw_t / Σ_t mean_raw_t`) so `Σ_t jbar_t = 1` holds
+exactly and the `[0, 1]` bound is preserved regardless of branching. Judge scores
+are persisted in the tree checkpoint.
+
+### Fallback (graceful)
+
+If the judge call fails, the mode is disabled, or an episode has no usable judge
+signal (`Σ_t mean_raw_t == 0`), the reward construction falls back to the **sparse
+terminal-only** form (`r_t = 0` intermediate, `r_T = outcome_reward`) — byte-for-byte
+identical to the no-judge path. The verified outcome is never down-weighted by
+`(1 − β)` without a judge signal. Judging is gated entirely by the config flag, and
+each episode is judged at most once (cached by `episode_id`).
+
+### Config fields (`tree_search`)
+
+| Field                         | Default | Meaning                                                                       |
+| ----------------------------- | ------- | ----------------------------------------------------------------------------- |
+| `enable_judge_process_reward` | `false` | Enable LLM-judge step-level process rewards (dense `r_t` for actor + critic).  |
+| `judge_process_reward_beta`   | `0.2`   | Convex shaping weight `β ∈ [0, 1]`; `0` reproduces the sparse terminal reward. |
+| `judge_model_name`            | `""`    | Judge model name; falls back to the diagnose model when empty.                 |
+| `judge_max_concurrency`       | `4`     | Max concurrent judge requests per query.                                       |
+
+The judge reuses the `diagnose_*` endpoint/credentials (`diagnose_base_url`,
+`diagnose_api_key`, `diagnose_model_name`) and the existing `critic_score_max`
+scale. With the generative critic enabled, the dense rewards flow into GAE and the
+critic regression target automatically; pure TD targets (`critic_mc_weight=0`)
+consume the dense per-turn reward directly.

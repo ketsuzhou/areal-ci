@@ -179,3 +179,67 @@ class TestAdaptiveMCWeight:
     def test_update_critic_error_negative_raises(self):
         with pytest.raises(ValueError):
             AdaptiveMCWeight(warmup_steps=0).update_critic_error(-1.0)
+
+
+class TestComputeCriticTargetsJudgeShaping:
+    def test_dense_rewards_in_td_target(self):
+        # judge scores equal -> jbar=[0.5,0.5]; beta=0.5; outcome=1.0.
+        # dense rewards = [0.25, 0.75]; pure TD (mc_weight=0), n_steps large.
+        store = MCTSTreeStore()
+        store.add_judge_score("a", 4)
+        store.add_judge_score("b", 4)
+        nodes = [
+            _node("a", 1, value=0.3),
+            _node("b", 2, value=0.8, reward=1.0),
+        ]
+        targets = compute_critic_targets(
+            nodes,
+            tree_store=store,
+            mc_weight=0.0,
+            n_steps=10,
+            gamma=1.0,
+            judge_beta=0.5,
+            judge_score_max=10,
+        )
+        # Monte-Carlo return from dense rewards: t0 = r0 + r1 = 0.25 + 0.75 = 1.0;
+        # terminal = r1 = 0.75.
+        assert targets == pytest.approx([1.0, 0.75])
+
+    def test_judge_beta_zero_unchanged(self):
+        store = MCTSTreeStore()
+        store.add_judge_score("a", 4)
+        store.add_judge_score("b", 4)
+        nodes = [
+            _node("a", 1, value=0.3),
+            _node("b", 2, value=0.8, reward=1.0),
+        ]
+        baseline = compute_critic_targets(
+            nodes, tree_store=store, mc_weight=0.0, n_steps=1, gamma=1.0
+        )
+        with_flag_off = compute_critic_targets(
+            nodes,
+            tree_store=store,
+            mc_weight=0.0,
+            n_steps=1,
+            gamma=1.0,
+            judge_beta=0.0,
+        )
+        assert with_flag_off == pytest.approx(baseline)
+
+    def test_no_judge_signal_falls_back(self):
+        # beta>0 but no scores -> sparse terminal-only behavior.
+        store = MCTSTreeStore()
+        nodes = [
+            _node("a", 1, value=0.3),
+            _node("b", 2, value=0.8, reward=1.0),
+        ]
+        targets = compute_critic_targets(
+            nodes,
+            tree_store=store,
+            mc_weight=0.0,
+            n_steps=1,
+            gamma=1.0,
+            judge_beta=0.5,
+        )
+        # Identical to the sparse one-step TD target.
+        assert targets == pytest.approx([0.8, 1.0])

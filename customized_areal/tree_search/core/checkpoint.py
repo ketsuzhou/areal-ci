@@ -80,6 +80,9 @@ class TreeCheckpointManager:
                 k: v for k, v in tree_store._q_values.items() if k in node_id_set
             },
             "values": {k: v for k, v in tree_store._values.items() if k in node_id_set},
+            "judge_scores": {
+                k: v for k, v in tree_store._judge_scores.items() if k in node_id_set
+            },
             "rewards": {
                 k: v for k, v in tree_store._rewards.items() if k in node_id_set
             },
@@ -159,6 +162,7 @@ class TreeCheckpointManager:
             store._total_values.update(query_metadata.get("total_values", {}))
             store._q_values.update(query_metadata.get("q_values", {}))
             store._values.update(query_metadata.get("values", {}))
+            store._judge_scores.update(query_metadata.get("judge_scores", {}))
             store._rewards.update(query_metadata.get("rewards", {}))
             store._normalized_advantages.update(
                 query_metadata.get("normalized_advantages", {})

@@ -944,3 +944,30 @@ class TestNodeToTensorDict:
         )
         result = _node_to_tensor_dict(node, "q1", "t1")
         assert result["logp"].shape == (1, 3)
+
+
+class TestJudgeScores:
+    def test_empty_returns_none(self):
+        store = MCTSTreeStore()
+        assert store.get_mean_judge_score("missing") is None
+        assert store.get_judge_scores("missing") == []
+
+    def test_single_score(self):
+        store = MCTSTreeStore()
+        store.add_judge_score("n1", 7)
+        assert store.get_judge_scores("n1") == [7.0]
+        assert store.get_mean_judge_score("n1") == 7.0
+
+    def test_shared_node_accumulates_across_episodes(self):
+        # A shared prefix node judged once per traversing episode.
+        store = MCTSTreeStore()
+        store.add_judge_score("shared", 8)  # from episode A
+        store.add_judge_score("shared", 4)  # from episode B
+        assert store.get_judge_scores("shared") == [8.0, 4.0]
+        assert store.get_mean_judge_score("shared") == 6.0
+
+    def test_zero_score_is_distinct_from_unjudged(self):
+        store = MCTSTreeStore()
+        store.add_judge_score("n1", 0)
+        assert store.get_mean_judge_score("n1") == 0.0
+        assert store.get_mean_judge_score("n2") is None

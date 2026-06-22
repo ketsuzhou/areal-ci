@@ -355,6 +355,8 @@ def compute_critic_targets(
     n_steps: int = 1,
     gamma: float = 1.0,
     target_scale: float = 1.0,
+    judge_beta: float = 0.0,
+    judge_score_max: int = 10,
 ) -> list[float]:
     """Unified critic regression targets in ``[0, 1]``, aligned to ``nodes`` order.
 
@@ -404,11 +406,28 @@ def compute_critic_targets(
         ordered = sorted(group, key=lambda x: getattr(x, "turn_idx", 0))
         n_turns = len(ordered)
         values = [float(getattr(x, "value", 0.0) or 0.0) for x in ordered]
-        rewards = [0.0] * n_turns
-        if n_turns:
-            rewards[-1] = float(getattr(ordered[-1], "outcome_reward", 0.0)) / (
-                target_scale
+        # Sparse reward (terminal-only) unless LLM-judge shaping is enabled, in
+        # which case the per-turn reward becomes dense. The helper falls back to
+        # the sparse array when no judge signal exists, so judge_beta == 0 keeps
+        # the target byte-for-byte unchanged.
+        if judge_beta > 0.0 and tree_store is not None:
+            from customized_areal.tree_search.core.process_reward import (
+                build_episode_process_rewards,
             )
+
+            dense = build_episode_process_rewards(
+                ordered,
+                tree_store,
+                beta=judge_beta,
+                score_max=judge_score_max,
+            )
+            rewards = [r / target_scale for r in dense]
+        else:
+            rewards = [0.0] * n_turns
+            if n_turns:
+                rewards[-1] = float(getattr(ordered[-1], "outcome_reward", 0.0)) / (
+                    target_scale
+                )
 
         for t, node in enumerate(ordered):
             node_id = getattr(node, "node_id", "")

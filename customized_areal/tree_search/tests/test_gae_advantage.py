@@ -136,3 +136,45 @@ class TestGAEComputer:
         # epA terminal reward 1.0 -> A0 = 1.0; epB reward 0 -> A0 = 0.0
         torch.testing.assert_close(nodes[0].advantages, torch.tensor([1.0]))
         torch.testing.assert_close(nodes[1].advantages, torch.tensor([0.0]))
+
+
+class TestGAEJudgeShaping:
+    def test_dense_rewards_shift_advantages(self):
+        # 2 turns, terminal outcome=1.0, judge scores equal -> jbar=[0.5,0.5].
+        # beta=0.5 -> rewards=[0.25, 0.75]; values=0; gamma=1, lam=1.
+        store = MCTSTreeStore()
+        store.add_judge_score("n0", 2)
+        store.add_judge_score("n1", 2)
+        gae = GAEAdvantageComputer(
+            store, gamma=1.0, lam=1.0, judge_beta=0.5, judge_score_max=10
+        )
+        nodes = [
+            _make_node("n0", "ep", 0, [1], 0.0, 1.0),
+            _make_node("n1", "ep", 1, [1], 0.0, 1.0),
+        ]
+        gae.compute(nodes)
+        # A1 = r1 = 0.75 ; A0 = r0 + A1 = 0.25 + 0.75 = 1.0
+        torch.testing.assert_close(nodes[0].advantages, torch.tensor([1.0]))
+        torch.testing.assert_close(nodes[1].advantages, torch.tensor([0.75]))
+        # Root return equals episode return G = beta + (1-beta)*outcome = 1.0.
+        torch.testing.assert_close(nodes[0].returns, torch.tensor([1.0]))
+
+    def test_no_judge_scores_falls_back_to_sparse(self):
+        # judge_beta > 0 but no scores recorded -> identical to sparse path.
+        store = MCTSTreeStore()
+        gae_judge = GAEAdvantageComputer(store, gamma=1.0, lam=0.95, judge_beta=0.5)
+        gae_sparse = GAEAdvantageComputer(MCTSTreeStore(), gamma=1.0, lam=0.95)
+
+        def _nodes():
+            return [
+                _make_node("n0", "ep", 0, [0, 1], 0.2, 1.0),
+                _make_node("n1", "ep", 1, [1], 0.8, 1.0),
+            ]
+
+        nodes_j = _nodes()
+        nodes_s = _nodes()
+        gae_judge.compute(nodes_j)
+        gae_sparse.compute(nodes_s)
+        for a, b in zip(nodes_j, nodes_s):
+            torch.testing.assert_close(a.advantages, b.advantages)
+            torch.testing.assert_close(a.returns, b.returns)

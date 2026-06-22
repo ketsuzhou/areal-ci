@@ -124,6 +124,18 @@ class TestTreeCheckpointManager:
         node_ids = loaded._query_node_ids["q2"]
         assert loaded._q_values[node_ids[0]] == 0.5
 
+    def test_load_preserves_judge_scores(self, tmp_path):
+        manager = TreeCheckpointManager(str(tmp_path))
+        store = _make_store_with_data()
+        q1_node = store._query_node_ids["q1"][0]
+        store.add_judge_score(q1_node, 8)
+        store.add_judge_score(q1_node, 4)
+        manager.save(store)
+
+        loaded = manager.load()
+        assert loaded.get_judge_scores(q1_node) == [8.0, 4.0]
+        assert loaded.get_mean_judge_score(q1_node) == 6.0
+
     def test_load_preserves_train_id(self, tmp_path):
         manager = TreeCheckpointManager(str(tmp_path))
         store = _make_store_with_data()

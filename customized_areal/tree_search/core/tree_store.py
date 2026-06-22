@@ -260,6 +260,10 @@ class MCTSTreeStore:
         self._normalized_returns: dict[str, float] = {}
         # Generative-critic state values v_phi(s_t), keyed by node_id.
         self._values: dict[str, float] = {}
+        # LLM-judge raw integer credit scores, keyed by node_id. A shared prefix
+        # node accumulates one score per episode that traverses it; the dense
+        # process reward uses the mean. Empty/missing -> no judge signal.
+        self._judge_scores: dict[str, list[float]] = {}
 
     def _backup(self, node_id: str, reward: float) -> None:
         """Update MCTS stats for a single trajectory."""
@@ -401,6 +405,31 @@ class MCTSTreeStore:
 
     def has_value(self, node_id: str) -> bool:
         return node_id in self._values
+
+    def add_judge_score(self, node_id: str, score: float) -> None:
+        """Append a raw LLM-judge credit score for a node.
+
+        A node may be scored multiple times -- once per episode that traverses
+        it (branching shares prefix nodes). Scores accumulate so the downstream
+        process reward can use their mean.
+        """
+        self._judge_scores.setdefault(node_id, []).append(float(score))
+
+    def get_judge_scores(self, node_id: str) -> list[float]:
+        """Return the list of raw judge scores accumulated for a node."""
+        return list(self._judge_scores.get(node_id, []))
+
+    def get_mean_judge_score(self, node_id: str) -> float | None:
+        """Mean of the raw judge scores, or None when the node was never judged.
+
+        ``None`` (rather than ``0.0``) lets the reward builder distinguish an
+        unjudged node from a node judged with score 0, driving the sparse
+        fallback when no judge signal exists.
+        """
+        scores = self._judge_scores.get(node_id)
+        if not scores:
+            return None
+        return sum(scores) / len(scores)
 
     def get_untrained_count(self, query_id: str) -> int:
         if query_id not in self._query_node_ids:

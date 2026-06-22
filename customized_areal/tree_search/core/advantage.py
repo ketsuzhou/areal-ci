@@ -120,10 +120,16 @@ class GAEAdvantageComputer:
         tree_store: MCTSTreeStore,
         gamma: float = 1.0,
         lam: float = 0.95,
+        judge_beta: float = 0.0,
+        judge_score_max: int = 10,
     ) -> None:
         self.tree_store = tree_store
         self.gamma = gamma
         self.lam = lam
+        # LLM-judge process-reward shaping. ``judge_beta == 0`` reproduces the
+        # sparse terminal-only reward exactly (no behavioural change).
+        self.judge_beta = judge_beta
+        self.judge_score_max = judge_score_max
 
     @staticmethod
     def _node_value(node: Node) -> float:
@@ -157,9 +163,24 @@ class GAEAdvantageComputer:
 
             values = [self._node_value(n) for n in ordered]
             # Sparse reward: only the terminal turn carries outcome_reward.
-            rewards = [0.0] * n_turns
-            if n_turns > 0:
-                rewards[-1] = float(ordered[-1].outcome_reward)
+            # With LLM-judge shaping (judge_beta > 0) the reward becomes dense
+            # per-turn; the helper falls back to the sparse array when no judge
+            # signal exists, so judge_beta == 0 is byte-for-byte unchanged.
+            if self.judge_beta > 0.0:
+                from customized_areal.tree_search.core.process_reward import (
+                    build_episode_process_rewards,
+                )
+
+                rewards = build_episode_process_rewards(
+                    ordered,
+                    self.tree_store,
+                    beta=self.judge_beta,
+                    score_max=self.judge_score_max,
+                )
+            else:
+                rewards = [0.0] * n_turns
+                if n_turns > 0:
+                    rewards[-1] = float(ordered[-1].outcome_reward)
 
             advantages = [0.0] * n_turns
             next_adv = 0.0

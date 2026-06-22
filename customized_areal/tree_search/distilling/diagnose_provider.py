@@ -161,6 +161,101 @@ class ExternalDiagnoseProvider:
             temperature=temp,
         )
 
+    async def _chat_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        *,
+        model_name: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Dispatch a chat completion through the configured backend.
+
+        Mirrors the backend selection used by :meth:`diagnose_episode`: the
+        OpenAI-compatible ``diagnose_base_url`` when set, otherwise the teacher
+        client's chat/text completion. Reused by :meth:`score_episode`.
+        """
+        model = model_name or self.diagnose_model_name
+        max_toks = max_tokens if max_tokens is not None else self.diagnose_max_tokens
+        if self.diagnose_base_url:
+            client = self._get_openai_client()
+            loop = asyncio.get_event_loop()
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_toks,
+                        temperature=temperature,
+                        extra_body={"enable_thinking": False},
+                    ),
+                )
+            except (OpenAIError, httpx.HTTPError) as exc:
+                raise TeacherServiceError(f"Judge API request failed: {exc}") from exc
+            content = response.choices[0].message.content
+            if not content:
+                finish_reason = response.choices[0].finish_reason
+                raise TeacherServiceError(
+                    f"Judge API returned empty content "
+                    f"(finish_reason={finish_reason}, model={model})"
+                )
+            return content
+
+        client_config = getattr(self.client, "config", None)
+        if client_config is not None and getattr(client_config, "teacher_base_url", ""):
+            return await self.client.chat_complete(
+                messages=messages,
+                model=model or None,
+                max_tokens=max_toks,
+                temperature=temperature,
+            )
+        prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+        return await self.client.complete_text(
+            prompt,
+            model=model or None,
+            max_tokens=max_toks,
+            temperature=temperature,
+        )
+
+    async def score_episode(
+        self,
+        conversation: list[dict[str, str]],
+        gold_answer: str,
+        *,
+        score_max: int,
+        model_name: str | None = None,
+        temperature: float | None = None,
+    ) -> dict[int, int]:
+        """Return per-turn integer judge credit ``{turn_idx: score}``.
+
+        The larger judge model sees the full episode plus the gold answer and
+        scores each assistant turn's contribution in ``[0, score_max]``. Raises
+        :class:`TeacherServiceError` on API failure so callers can fall back to
+        the sparse terminal reward.
+        """
+        from customized_areal.tree_search.core.judge_prompt import (
+            build_judge_instruction,
+            parse_turn_scores,
+        )
+
+        instruction = build_judge_instruction(score_max, gold_answer)
+        if isinstance(conversation, str):
+            conversation_messages = [{"role": "user", "content": conversation}]
+        else:
+            conversation_messages = list(conversation)
+        messages = conversation_messages + [{"role": "user", "content": instruction}]
+        temp = temperature if temperature is not None else self.diagnose_temperature
+        content = await self._chat_complete(
+            messages, temp, model_name=model_name or self.diagnose_model_name
+        )
+        logger.debug(
+            "Judge API response (len=%d, first 300): %s",
+            len(content),
+            content[:300],
+        )
+        return parse_turn_scores(content, score_max)
+
     async def get_logprobs_for_prompt(
         self,
         prompt_ids: list[int],
