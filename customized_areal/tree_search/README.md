@@ -356,6 +356,122 @@ with the hybrid values.
 > one-hot distribution with zero categorical variance, so `hybrid_critic_var_floor`
 > dominates `var_theta` and the blend collapses toward the MC value on eligible nodes.
 
+#### GAE recursion diagram
+
+Each `Node` is one turn (`s_t`). The critic supplies `v(s_t)`; rewards are sparse
+(`r_T = outcome_reward`, else `0`). The recursion walks turns **backward** from the
+terminal `T`, accumulating the TD error `delta_t` into `A_t` with GAE's exponential
+decay `gamma * lam`. The terminal bootstrap is `v(s_{T+1}) = 0`. `A_t` and
+`ret_t = A_t + v(s_t)` are then broadcast over the node's response positions
+(`loss_mask == 1`).
+
+```mermaid
+flowchart TD
+    subgraph episode["Episode (turns ordered by turn_idx)"]
+        T1["Turn 1: s_1<br/>v(s_1) from critic"]
+        T2["Turn 2: s_2<br/>v(s_2) from critic"]
+        TDOTS["..."]
+        TT["Turn T: s_T<br/>v(s_T) from critic<br/>r_T = outcome_reward"]
+    end
+
+    T1 --> T2 --> TDOTS --> TT
+
+    subgraph gae["GAE backward pass (T → 1)"]
+        BOOT["next_value = 0<br/>next_adv = 0<br/>(terminal bootstrap v(s_T+1) = 0)"]
+        DT["delta_T = r_T + gamma·next_value − v(s_T)<br/>A_T = delta_T + gamma·lam·next_adv<br/>next_value ← v(s_T)<br/>next_adv ← A_T"]
+        DTM1["delta_{T-1} = 0 + gamma·v(s_T) − v(s_{T-1})<br/>A_{T-1} = delta_{T-1} + gamma·lam·A_T<br/>next_value ← v(s_{T-1})<br/>next_adv ← A_{T-1}"]
+        D1["delta_1 = 0 + gamma·v(s_2) − v(s_1)<br/>A_1 = delta_1 + gamma·lam·A_2"]
+        BOOT --> DT --> DTM1 --> D1
+    end
+
+    TT -.->. DT
+    TDOTS -.->. DTM1
+    T1 -.->. D1
+
+    subgraph assign["Per-node assignment"]
+        A1["Node_1: A_1, ret_1 = A_1 + v(s_1)<br/>broadcast over loss_mask==1 positions"]
+        A2["Node_2: A_2, ret_2 = A_2 + v(s_2)"]
+        AT["Node_T: A_T, ret_T = A_T + v(s_T)"]
+        STORE["tree_store.set_normalized_advantage(node_id, A_t)<br/>tree_store.set_normalized_return(node_id, ret_t)"]
+    end
+
+    D1 --> A1
+    DTM1 --> A2
+    DT --> AT
+    A1 --> STORE
+    A2 --> STORE
+    AT --> STORE
+```
+
+With `enable_judge_process_reward=True` and `judge_beta > 0`, the sparse `r_t` row is
+replaced by the dense LLM-judge process reward (intermediate turns get
+`beta * jbar_t`, terminal gets `(1-beta) * outcome_reward + beta * jbar_T`); the
+recursion structure above is unchanged.
+
+#### HybridGAE: LOO-MC blend with critic estimation
+
+`HybridGAEAdvantageComputer` overrides only the **value source** for eligible nodes.
+Before the GAE recursion runs, each turn's `v(s_t)` is optionally replaced by an
+inverse-variance blend of the critic and a **leave-one-out** MC estimate. The current
+episode's own return is excluded from the MC aggregate so the bootstrap is not
+self-referential.
+
+```mermaid
+flowchart TD
+    START["Per turn t in episode (ordered by turn_idx)"]
+    ELIG{"Eligible for blend?<br/>need_branch == True<br/>AND visit_count >= hybrid_mc_min_visits"}
+
+    START --> ELIG
+
+    ELIG -- "No (most turns)" --> CRIT_ONLY["v(s_t) = v_theta(s_t)<br/>(plain critic value, same as GAE)"]
+    CRIT_ONLY --> USE["values[t] = v(s_t)"]
+
+    ELIG -- "Yes (branched, well-visited)" --> LOO
+
+    subgraph loo["Leave-one-out MC estimate (tree store)"]
+        AGG["Node's MCTS aggregates:<br/>n = visit_count<br/>S = total_value (sum of returns)<br/>Q = sum_sq_value (sum of squared returns)"]
+        EXCL["excluded_reward = episode's own<br/>terminal outcome_reward<br/>(the sample to leave out)"]
+        SUB["n' = n - 1<br/>S' = S - excluded_reward<br/>Q' = Q - excluded_reward^2"]
+        MC_VAL["loo_mean = S' / n'<br/>loo_var = (Q' - S'^2/n') / (n'-1)<br/>var_mc = loo_var / n'<br/>(variance of the LOO mean)"]
+        AGG --> EXCL --> SUB --> MC_VAL
+    end
+
+    LOO --> AGG
+
+    MC_VAL --> CASES{"var_mc cases"}
+
+    CASES -- "n' < 2 or var_mc < 0<br/>(too few samples)" --> CRIT_ONLY
+    CASES -- "var_mc == 0<br/>(all remaining samples identical)" --> PURE_MC["v_hat = v_mc<br/>(maximally confident MC)"]
+    CASES -- "var_mc > 0<br/>(normal case)" --> BLEND
+
+    subgraph blend["Inverse-variance (Bayesian) blend"]
+        VTH["var_theta = max(categorical_var(critic),<br/>hybrid_critic_var_floor)<br/>(Node.value_variance, floored)"]
+        W["w_mc = 1 / var_mc<br/>w_theta = 1 / var_theta"]
+        VHAT["v_hat = (v_mc·w_mc + v_theta·w_theta)<br/>/ (w_mc + w_theta)"]
+        VTH --> W --> VHAT
+    end
+
+    PURE_MC --> USE
+    BLEND --> VHAT --> USE
+
+    USE --> RECUR["GAE recursion uses values[] for BOTH<br/>v(s_t) and bootstrap v(s_{t+1})<br/>(self-consistent)"]
+    RECUR --> GAE_REC["→ GAE backward pass (see diagram above)"]
+```
+
+**Key invariants:**
+
+- The LOO set has `n' = visit_count - 1` samples because the episode's own return is
+  excluded; `visit_count >= hybrid_mc_min_visits` (default `5`) guarantees `n' >= 4`.
+- The blend is **inverse-variance**: the estimator with lower variance gets more weight.
+  When the critic is one-hot (`var_theta` floored to `1e-3`) and the MC samples are
+  tight (`var_mc` small), the blend collapses toward the MC value — this is the intended
+  behavior on well-visited branched nodes where MCTS has accumulated reliable statistics.
+- `excluded_reward` is the episode's terminal `outcome_reward` (shared across all turns
+  of the episode, since the MCTS backup walks the full parent chain from the terminal).
+- Self-consistency: the blended `values[]` array is used for **both** `v(s_t)` in
+  `delta_t` and the bootstrap `v(s_{t+1})` from the previous iteration, so the GAE
+  recursion never mixes blended and raw-critic values for the same state.
+
 #### Branch-selection gate (`branch_td_threshold`)
 
 Independent of the advantage computer, `branch_td_threshold` concentrates branch budget
