@@ -6,7 +6,11 @@ from customized_areal.tree_search.config import (
     LossMode,
     RolloutCacheConfig,
 )
-from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
+from customized_areal.tree_search.core.advantage import (
+    GAEAdvantageComputer,
+    HybridGAEAdvantageComputer,
+    TreeAdvantageComputer,
+)
 from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 from customized_areal.tree_search.distilling.distill_types import (
@@ -30,6 +34,8 @@ __all__ = [
     "TreeSearchGroupedRolloutWorkflow",
     "RolloutCacheConfig",
     "TreeAdvantageComputer",
+    "GAEAdvantageComputer",
+    "HybridGAEAdvantageComputer",
     "Config",
     "CacheMode",
     "TreeCheckpointManager",

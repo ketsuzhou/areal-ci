@@ -197,3 +197,40 @@ def expected_value_from_logprobs(
         value += prob * (i / score_max)
     # Numerical guard.
     return min(1.0, max(0.0, value))
+
+
+def variance_from_logprobs(
+    label_logprobs: dict[int, float],
+    score_max: int = 10,
+) -> float:
+    """Categorical variance of the critic's score distribution on [0, 1].
+
+    Uses the same renormalization as :func:`expected_value_from_logprobs` and
+    returns ``Sum_i p_i * (i/score_max - v)^2`` where ``v`` is the expected
+    normalized value. This is the critic's own uncertainty about ``v`` and is
+    used as ``var_theta`` in the variance-aware hybrid blend. A degenerate
+    one-hot distribution yields ``0.0`` (the caller applies a variance floor).
+
+    Returns ``0.0`` if no labels are present.
+    """
+    if score_max < 1:
+        raise ValueError(f"score_max must be >= 1, got {score_max}")
+    if not label_logprobs:
+        return 0.0
+
+    max_lp = max(label_logprobs.values())
+    weights = {i: math.exp(lp - max_lp) for i, lp in label_logprobs.items()}
+    total = sum(weights.values())
+    if total <= 0.0:
+        return 0.0
+
+    mean = 0.0
+    for i, w in weights.items():
+        mean += (w / total) * (i / score_max)
+
+    var = 0.0
+    for i, w in weights.items():
+        prob = w / total
+        diff = (i / score_max) - mean
+        var += prob * diff * diff
+    return max(0.0, var)

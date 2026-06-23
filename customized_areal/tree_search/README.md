@@ -92,45 +92,48 @@ flowchart TD
 
 Dataclasses controlling tree backup, caching, and advantage computation.
 
-| Class                | Field                     | Type            | Default                   | Description                                        |
-| -------------------- | ------------------------- | --------------- | ------------------------- | -------------------------------------------------- |
-| `Config`             | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates            |
-|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable tree backup                         |
-|                      | `checkpoint_dir`          | `str`           | `""`                      | Directory for MCTS tree checkpoints                |
-|                      | `advantage_mode`          | `AdvantageMode` | `TREE`                    | TREE (Q-values) or GAE advantages                  |
-|                      | `loss_mode`               | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                             |
-|                      | `max_reasoning_tokens`    | `int`           | `1000`                    | Max tokens for reasoning                           |
-|                      | `rl_loss_weight`          | `float`         | `1.0`                     | Weight for RL loss in BOTH mode                    |
-|                      | `distill_loss_weight`     | `float`         | `0.005`                   | Weight for distillation loss                       |
-|                      | `reward_bias`             | `float`         | `0.0`                     | Bias added to outcome rewards                      |
-|                      | `reward_scaling`          | `float`         | `1.0`                     | Scaling factor for outcome rewards                 |
-|                      | `reward_clip`             | `float`         | `20.0`                    | Reward clipping threshold                          |
-|                      | `overlong_reward_penalty` | `bool`          | `False`                   | Apply penalty for overlong episodes                |
-|                      | `overlong_tokens`         | `int \| None`   | `None`                    | Token threshold for overlong penalty               |
-|                      | `overlong_penalty_factor` | `float \| None` | `None`                    | Penalty factor for overlong episodes               |
-|                      | `topk_distill`            | `bool`          | `False`                   | Use top-k distillation                             |
-|                      | `teacher_provider`        | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`) |
-|                      | `teacher_base_url`        | `str`           | `"http://localhost:8001"` | Teacher API endpoint                               |
-|                      | `teacher_backend`         | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)    |
-|                      | `teacher_model_name`      | `str`           | `""`                      | Teacher model identifier                           |
-|                      | `teacher_api_key`         | `str`           | `""`                      | API key for teacher endpoint                       |
-|                      | `teacher_top_k`           | `int`           | `10`                      | Top-k tokens from teacher                          |
-|                      | `teacher_max_retries`     | `int`           | `3`                       | Max retries for teacher requests                   |
-|                      | `teacher_timeout`         | `float`         | `300.0`                   | Timeout for teacher requests                       |
-|                      | `teacher_missing_logprob` | `float`         | `-23.0`                   | Default logprob for missing teacher tokens         |
-|                      | `diagnose_model_name`     | `str`           | `""`                      | Model name for episode diagnosis                   |
-|                      | `diagnose_max_tokens`     | `int`           | `1024`                    | Max tokens for diagnosis responses                 |
-|                      | `diagnose_temperature`    | `float`         | `0.0`                     | Temperature for diagnosis sampling                 |
-|                      | `diagnose_base_url`       | `str`           | `""`                      | Base URL for diagnosis API                         |
-|                      | `diagnose_api_key`        | `str`           | `""`                      | API key for diagnosis endpoint                     |
-|                      | `strict_distill_json`     | `bool`          | `True`                    | Enforce strict JSON parsing in distillation        |
-|                      | `sample_source`           | `SampleSource`  | `SCRATCH`                 | Episode sampling strategy                          |
-|                      | `branch_probability`      | `float`         | `0.5`                     | Probability of branch when MIXED                   |
-|                      | `use_fresh_query`         | `bool`          | `False`                   | Enable database-backed query loading               |
-|                      | `fresh_query_table`       | `str`           | `""`                      | DB table name (or `FRESH_QUERY_TABLE` env var)     |
-| `RolloutCacheConfig` | `cache_dir`               | `str`           | `""`                      | Directory for rollout cache                        |
-|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable caching                             |
-|                      | `n_samples`               | `int`           | `1`                       | Number of rollout samples per prompt               |
+| Class                | Field                     | Type            | Default                   | Description                                               |
+| -------------------- | ------------------------- | --------------- | ------------------------- | --------------------------------------------------------- |
+| `Config`             | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates                   |
+|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable tree backup                                |
+|                      | `checkpoint_dir`          | `str`           | `""`                      | Directory for MCTS tree checkpoints                       |
+|                      | `advantage_mode`          | `AdvantageMode` | `TREE`                    | TREE (Q-values), GAE, or HYBRID_GAE (LOO-MC blend)        |
+|                      | `hybrid_mc_min_visits`    | `int`           | `5`                       | Min node visit count for LOO-MC substitution (HYBRID_GAE) |
+|                      | `hybrid_critic_var_floor` | `float`         | `1e-3`                    | Floor on critic categorical variance in the blend         |
+|                      | `branch_td_threshold`     | `float`         | `0.0`                     | Min                                                       |
+|                      | `loss_mode`               | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                                    |
+|                      | `max_reasoning_tokens`    | `int`           | `1000`                    | Max tokens for reasoning                                  |
+|                      | `rl_loss_weight`          | `float`         | `1.0`                     | Weight for RL loss in BOTH mode                           |
+|                      | `distill_loss_weight`     | `float`         | `0.005`                   | Weight for distillation loss                              |
+|                      | `reward_bias`             | `float`         | `0.0`                     | Bias added to outcome rewards                             |
+|                      | `reward_scaling`          | `float`         | `1.0`                     | Scaling factor for outcome rewards                        |
+|                      | `reward_clip`             | `float`         | `20.0`                    | Reward clipping threshold                                 |
+|                      | `overlong_reward_penalty` | `bool`          | `False`                   | Apply penalty for overlong episodes                       |
+|                      | `overlong_tokens`         | `int \| None`   | `None`                    | Token threshold for overlong penalty                      |
+|                      | `overlong_penalty_factor` | `float \| None` | `None`                    | Penalty factor for overlong episodes                      |
+|                      | `topk_distill`            | `bool`          | `False`                   | Use top-k distillation                                    |
+|                      | `teacher_provider`        | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`)        |
+|                      | `teacher_base_url`        | `str`           | `"http://localhost:8001"` | Teacher API endpoint                                      |
+|                      | `teacher_backend`         | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)           |
+|                      | `teacher_model_name`      | `str`           | `""`                      | Teacher model identifier                                  |
+|                      | `teacher_api_key`         | `str`           | `""`                      | API key for teacher endpoint                              |
+|                      | `teacher_top_k`           | `int`           | `10`                      | Top-k tokens from teacher                                 |
+|                      | `teacher_max_retries`     | `int`           | `3`                       | Max retries for teacher requests                          |
+|                      | `teacher_timeout`         | `float`         | `300.0`                   | Timeout for teacher requests                              |
+|                      | `teacher_missing_logprob` | `float`         | `-23.0`                   | Default logprob for missing teacher tokens                |
+|                      | `diagnose_model_name`     | `str`           | `""`                      | Model name for episode diagnosis                          |
+|                      | `diagnose_max_tokens`     | `int`           | `1024`                    | Max tokens for diagnosis responses                        |
+|                      | `diagnose_temperature`    | `float`         | `0.0`                     | Temperature for diagnosis sampling                        |
+|                      | `diagnose_base_url`       | `str`           | `""`                      | Base URL for diagnosis API                                |
+|                      | `diagnose_api_key`        | `str`           | `""`                      | API key for diagnosis endpoint                            |
+|                      | `strict_distill_json`     | `bool`          | `True`                    | Enforce strict JSON parsing in distillation               |
+|                      | `sample_source`           | `SampleSource`  | `SCRATCH`                 | Episode sampling strategy                                 |
+|                      | `branch_probability`      | `float`         | `0.5`                     | Probability of branch when MIXED                          |
+|                      | `use_fresh_query`         | `bool`          | `False`                   | Enable database-backed query loading                      |
+|                      | `fresh_query_table`       | `str`           | `""`                      | DB table name (or `FRESH_QUERY_TABLE` env var)            |
+| `RolloutCacheConfig` | `cache_dir`               | `str`           | `""`                      | Directory for rollout cache                               |
+|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable caching                                    |
+|                      | `n_samples`               | `int`           | `1`                       | Number of rollout samples per prompt                      |
 
 **`CacheMode`** values:
 
@@ -221,6 +224,38 @@ count = 1 currently). Stored in `_visit_counts`, `_total_values`, `_q_values`.
 inference engine (a UUID string). The Node's `query_id` is set during insertion.
 
 ### 3. Advantage Computer (`core/advantage.py`)
+
+### Variance-aware hybrid GAE (`advantage_mode=HYBRID_GAE`)
+
+`HybridGAEAdvantageComputer` keeps GAE's per-turn credit assignment but, on **branched**
+nodes that have accumulated enough Monte-Carlo samples, replaces the noisy critic value
+`v_theta(s_t)` with an inverse-variance (Bayesian) blend of the critic and a
+**leave-one-out** MC value:
+
+```
+v_mc      = LOO mean of the node's backed-up returns (excluding this episode)
+var_mc    = loo_sample_var / (n - 1)            # variance of the LOO mean
+var_theta = max(categorical_var(critic), hybrid_critic_var_floor)
+v_hat     = (v_mc/var_mc + v_theta/var_theta) / (1/var_mc + 1/var_theta)
+```
+
+A node is eligible only when `need_branch` is set and its MCTS
+`visit_count >= hybrid_mc_min_visits`. With no eligible node the output is identical to
+plain GAE. The MC estimate exists because completed episodes are backed up root-ward
+along `parent_node_id` (branch episodes link their first turn to their branch-point
+node), so shared prefix nodes aggregate returns across all episodes that traverse them.
+`var_mc <= 0` (all remaining samples identical) short-circuits to `v_hat = v_mc`.
+
+> Note: a meaningful (non-floored) critic variance requires the soft top-k
+> `logprob_query_fn` path on the critic. Without it the critic emits a one-hot
+> distribution with zero categorical variance, so `hybrid_critic_var_floor` dominates
+> `var_theta`.
+
+The branch gate (`branch_td_threshold`) concentrates branch budget where the critic
+disagrees with reality: a candidate is kept only if
+`|r_t + gamma*v(s_{t+1}) - v(s_t)| >= branch_td_threshold` (critic values only), then
+survivors are ranked by entropy. `branch_td_threshold = 0` keeps the previous
+entropy-only behavior.
 
 `TreeAdvantageComputer` replaces GAE advantages with normalized MCTS Q-values.
 
@@ -324,25 +359,25 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 
 **Utility functions and dataclasses:**
 
-| Name                                    | Description                                                                                                                               |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `EpisodeRunResult`                      | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                              |
-| `choose_sample_source()`                | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                       |
-| `select_branch_candidate()`             | Select the best node for branching (highest max-entropy among `need_branch` nodes with a sandbox)                                         |
-| `build_branch_task()`                   | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                    |
-| `annotate_nodes_from_run()`             | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                      |
-| `_with_episode_metadata()`              | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                             |
-| `_max_entropy()`                        | Extract max_entropy value from a Node's entropy_stats                                                                                     |
-| `interactions_dict_to_nodes()`          | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
-| `_result_to_nodes()`                    | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                 |
-| `_nodes_to_batched_tensor_dict()`       | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                   |
-| `_input_ids_to_messages()`              | Convert full-context token IDs to a list of role/content message dicts using chat template markers                                        |
-| `_retry_episode()`                      | Retry a failed episode with exponential backoff (up to 1 retry)                                                                           |
-| `_prepare_distill_for_episode()`        | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                          |
-| `_prepare_distill_for_node_groups()`    | Apply distillation to multiple episode groups with error handling                                                                         |
-| `_group_nodes_by_episode()`             | Group a flat list of Nodes by `episode_id`                                                                                                |
-| `_filter_distill_episode_failure()`     | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                            |
-| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                        |
+| Name                                    | Description                                                                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EpisodeRunResult`                      | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                                                  |
+| `choose_sample_source()`                | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                                           |
+| `select_branch_candidate()`             | Select the best node for branching: highest max-entropy among `need_branch` nodes with a sandbox, optionally gated by critic TD-error (`branch_td_threshold`) |
+| `build_branch_task()`                   | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                                        |
+| `annotate_nodes_from_run()`             | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                                          |
+| `_with_episode_metadata()`              | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                                                 |
+| `_max_entropy()`                        | Extract max_entropy value from a Node's entropy_stats                                                                                                         |
+| `interactions_dict_to_nodes()`          | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None)                     |
+| `_result_to_nodes()`                    | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                                     |
+| `_nodes_to_batched_tensor_dict()`       | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                                       |
+| `_input_ids_to_messages()`              | Convert full-context token IDs to a list of role/content message dicts using chat template markers                                                            |
+| `_retry_episode()`                      | Retry a failed episode with exponential backoff (up to 1 retry)                                                                                               |
+| `_prepare_distill_for_episode()`        | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                                              |
+| `_prepare_distill_for_node_groups()`    | Apply distillation to multiple episode groups with error handling                                                                                             |
+| `_group_nodes_by_episode()`             | Group a flat list of Nodes by `episode_id`                                                                                                                    |
+| `_filter_distill_episode_failure()`     | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                                                |
+| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                                            |
 
 **Methods:**
 
@@ -1178,24 +1213,25 @@ Logged stats: `critic_loss`, `critic_value_mean`, `critic_target_mean`.
 
 ## LLM-Judge Step-Level Process Reward (Critic + Actor)
 
-Only the final step of an episode has a verifiable gold answer, so by default
-training relies on a sparse terminal `outcome_reward` bootstrapped through TD/GAE.
-When `tree_search.enable_judge_process_reward=true`, a **larger judge model**
-evaluates each step of a full episode (given the whole trajectory plus the gold
-answer) and assigns each assistant turn an integer credit in `[0, critic_score_max]`.
-Those scores become a **dense per-turn process reward** `r_t` that feeds **both**
-the actor (GAE advantages) and the critic (regression targets), while the verified
-terminal reward remains the anchor.
+Only the final step of an episode has a verifiable gold answer, so by default training
+relies on a sparse terminal `outcome_reward` bootstrapped through TD/GAE. When
+`tree_search.enable_judge_process_reward=true`, a **larger judge model** evaluates each
+step of a full episode (given the whole trajectory plus the gold answer) and assigns
+each assistant turn an integer credit in `[0, critic_score_max]`. Those scores become a
+**dense per-turn process reward** `r_t` that feeds **both** the actor (GAE advantages)
+and the critic (regression targets), while the verified terminal reward remains the
+anchor.
 
 This reuses the existing teacher/diagnose OpenAI-compatible client
 (`ExternalDiagnoseProvider`); the new `score_episode` method sends the full episode
-+ gold answer and parses per-turn scores from structured XML
-(`<judgment><turns><turn><turn_idx>…</turn_idx><score>…</score></turn>…`).
+
+- gold answer and parses per-turn scores from structured XML
+  (`<judgment><turns><turn><turn_idx>…</turn_idx><score>…</score></turn>…`).
 
 ### Reward math
 
-Per episode, the raw integer judge scores are turned into a credit *distribution*
-and blended convexly with the verified outcome on the terminal turn:
+Per episode, the raw integer judge scores are turned into a credit *distribution* and
+blended convexly with the verified outcome on the terminal turn:
 
 ```
 mean_raw_t = mean(judge_scores[node_id])      # mean across episodes traversing the node
@@ -1216,34 +1252,34 @@ remapping is needed.
 
 ### Branching (shared prefix nodes)
 
-Tree-search episodes share prefix nodes. A shared step is judged once **per
-distinct episode** that traverses it, so each node accumulates a `list[float]` of
-raw scores in the tree store (`add_judge_score` / `get_mean_judge_score`). The
-process reward uses the **mean** raw score per node, then re-normalizes within each
-ordered episode (`jbar_t = mean_raw_t / Σ_t mean_raw_t`) so `Σ_t jbar_t = 1` holds
-exactly and the `[0, 1]` bound is preserved regardless of branching. Judge scores
-are persisted in the tree checkpoint.
+Tree-search episodes share prefix nodes. A shared step is judged once **per distinct
+episode** that traverses it, so each node accumulates a `list[float]` of raw scores in
+the tree store (`add_judge_score` / `get_mean_judge_score`). The process reward uses the
+**mean** raw score per node, then re-normalizes within each ordered episode
+(`jbar_t = mean_raw_t / Σ_t mean_raw_t`) so `Σ_t jbar_t = 1` holds exactly and the
+`[0, 1]` bound is preserved regardless of branching. Judge scores are persisted in the
+tree checkpoint.
 
 ### Fallback (graceful)
 
-If the judge call fails, the mode is disabled, or an episode has no usable judge
-signal (`Σ_t mean_raw_t == 0`), the reward construction falls back to the **sparse
+If the judge call fails, the mode is disabled, or an episode has no usable judge signal
+(`Σ_t mean_raw_t == 0`), the reward construction falls back to the **sparse
 terminal-only** form (`r_t = 0` intermediate, `r_T = outcome_reward`) — byte-for-byte
-identical to the no-judge path. The verified outcome is never down-weighted by
-`(1 − β)` without a judge signal. Judging is gated entirely by the config flag, and
-each episode is judged at most once (cached by `episode_id`).
+identical to the no-judge path. The verified outcome is never down-weighted by `(1 − β)`
+without a judge signal. Judging is gated entirely by the config flag, and each episode
+is judged at most once (cached by `episode_id`).
 
 ### Config fields (`tree_search`)
 
-| Field                         | Default | Meaning                                                                       |
-| ----------------------------- | ------- | ----------------------------------------------------------------------------- |
+| Field                         | Default | Meaning                                                                        |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------ |
 | `enable_judge_process_reward` | `false` | Enable LLM-judge step-level process rewards (dense `r_t` for actor + critic).  |
 | `judge_process_reward_beta`   | `0.2`   | Convex shaping weight `β ∈ [0, 1]`; `0` reproduces the sparse terminal reward. |
 | `judge_model_name`            | `""`    | Judge model name; falls back to the diagnose model when empty.                 |
 | `judge_max_concurrency`       | `4`     | Max concurrent judge requests per query.                                       |
 
 The judge reuses the `diagnose_*` endpoint/credentials (`diagnose_base_url`,
-`diagnose_api_key`, `diagnose_model_name`) and the existing `critic_score_max`
-scale. With the generative critic enabled, the dense rewards flow into GAE and the
-critic regression target automatically; pure TD targets (`critic_mc_weight=0`)
-consume the dense per-turn reward directly.
+`diagnose_api_key`, `diagnose_model_name`) and the existing `critic_score_max` scale.
+With the generative critic enabled, the dense rewards flow into GAE and the critic
+regression target automatically; pure TD targets (`critic_mc_weight=0`) consume the
+dense per-turn reward directly.

@@ -197,3 +197,132 @@ class GAEAdvantageComputer:
                 if getattr(n, "node_id", None):
                     self.tree_store.set_normalized_advantage(n.node_id, adv)
                     self.tree_store.set_normalized_return(n.node_id, ret)
+
+
+hybrid_gae_logger = logging.getLogger("HybridGAEAdvantageComputer")
+
+
+class HybridGAEAdvantageComputer(GAEAdvantageComputer):
+    """Variance-aware GAE that blends the critic with a leave-one-out MC value.
+
+    Identical to :class:`GAEAdvantageComputer` except that, before running the
+    GAE recursion, each turn's state value is (optionally) replaced by an
+    inverse-variance blend of the learned critic ``v_theta(s_t)`` and a
+    leave-one-out Monte-Carlo estimate ``v_mc^{(-i)}(s_t)`` accumulated in the
+    tree. The substitution applies only to **branched** nodes that have enough
+    MCTS samples (``need_branch`` and ``visit_count >= mc_min_visits``); all
+    other turns keep the critic value, so with no eligible node the output is
+    identical to plain GAE.
+
+    For an eligible node, with critic variance ``var_theta`` (floored) and LOO
+    MC variance ``var_mc``::
+
+        v_hat = (v_mc/var_mc + v_theta/var_theta) / (1/var_mc + 1/var_theta)
+
+    A non-positive ``var_mc`` (all remaining MC samples identical) short-circuits
+    to ``v_hat = v_mc`` (the MC estimate is maximally confident). The blended
+    array is used for both ``v(s_t)`` and the bootstrap ``v(s_{t+1})`` so the
+    recursion stays self-consistent.
+    """
+
+    def __init__(
+        self,
+        tree_store,
+        gamma: float = 1.0,
+        lam: float = 0.95,
+        judge_beta: float = 0.0,
+        judge_score_max: int = 10,
+        mc_min_visits: int = 5,
+        critic_var_floor: float = 1e-3,
+    ) -> None:
+        super().__init__(
+            tree_store,
+            gamma=gamma,
+            lam=lam,
+            judge_beta=judge_beta,
+            judge_score_max=judge_score_max,
+        )
+        self.mc_min_visits = mc_min_visits
+        self.critic_var_floor = critic_var_floor
+
+    def _blended_value(self, node: Node, excluded_reward: float) -> float:
+        """Critic value for ``node``, blended with LOO MC when eligible."""
+        v_theta = self._node_value(node)
+        node_id = getattr(node, "node_id", None)
+        if not node_id or not getattr(node, "need_branch", False):
+            return v_theta
+        if self.tree_store.get_visit_count(node_id) < self.mc_min_visits:
+            return v_theta
+        v_mc, var_mc, n_loo = self.tree_store.get_loo_value_and_variance(
+            node_id, excluded_reward
+        )
+        if n_loo < 2 or var_mc < 0.0:
+            # Not enough LOO samples to trust the MC estimate -> keep critic.
+            return v_theta
+        if var_mc <= 0.0:
+            # All remaining MC samples identical -> MC is maximally confident.
+            return v_mc
+        var_theta = max(
+            self.tree_store.get_value_variance(
+                node_id, float(getattr(node, "value_variance", 0.0) or 0.0)
+            ),
+            self.critic_var_floor,
+        )
+        w_mc = 1.0 / var_mc
+        w_theta = 1.0 / var_theta
+        return (v_mc * w_mc + v_theta * w_theta) / (w_mc + w_theta)
+
+    def compute(self, trajectories: list[Node]) -> None:
+        """Compute hybrid GAE advantages/returns in-place on the given nodes."""
+        episodes: dict[tuple[str, str], list[Node]] = {}
+        for traj in trajectories:
+            node_id = getattr(traj, "node_id", None)
+            if node_id is None:
+                continue
+            query_id = traj.query_id or ""
+            ep_id = traj.episode_id or node_id
+            episodes.setdefault((query_id, ep_id), []).append(traj)
+
+        for nodes in episodes.values():
+            ordered = sorted(nodes, key=lambda n: getattr(n, "turn_idx", 0))
+            n_turns = len(ordered)
+
+            # The episode's own backed-up return (the sample to leave out) is
+            # its terminal outcome_reward, shared across all turns.
+            excluded_reward = float(ordered[-1].outcome_reward) if n_turns > 0 else 0.0
+
+            # Blended per-turn values: critic, with LOO MC substituted on
+            # eligible branched nodes. Used for both v(s_t) and bootstrap.
+            values = [self._blended_value(n, excluded_reward) for n in ordered]
+
+            if self.judge_beta > 0.0:
+                from customized_areal.tree_search.core.process_reward import (
+                    build_episode_process_rewards,
+                )
+
+                rewards = build_episode_process_rewards(
+                    ordered,
+                    self.tree_store,
+                    beta=self.judge_beta,
+                    score_max=self.judge_score_max,
+                )
+            else:
+                rewards = [0.0] * n_turns
+                if n_turns > 0:
+                    rewards[-1] = float(ordered[-1].outcome_reward)
+
+            advantages = [0.0] * n_turns
+            next_adv = 0.0
+            next_value = 0.0  # terminal bootstrap v(s_{T+1}) = 0
+            for t in range(n_turns - 1, -1, -1):
+                delta = rewards[t] + self.gamma * next_value - values[t]
+                next_adv = delta + self.gamma * self.lam * next_adv
+                advantages[t] = next_adv
+                next_value = values[t]
+
+            for n, adv, val in zip(ordered, advantages, values):
+                ret = adv + val
+                self._assign(n, adv, ret)
+                if getattr(n, "node_id", None):
+                    self.tree_store.set_normalized_advantage(n.node_id, adv)
+                    self.tree_store.set_normalized_return(n.node_id, ret)

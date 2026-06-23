@@ -102,6 +102,10 @@ class EpisodeRunResult:
     result: Any
     task_id: str
     raw_messages: list[dict[str, Any]]
+    # node_id of the branch-point node this episode was branched from, when the
+    # episode is a branch (None for scratch episodes). Used to link the
+    # episode's first turn into the shared tree for MCTS root-ward backup.
+    branch_point_node_id: str | None = None
 
 
 def _with_episode_metadata(
@@ -110,11 +114,17 @@ def _with_episode_metadata(
 ) -> Any:
     task_id = data.get("_backend_run_task_id")
     raw_messages = data.get("_backend_run_raw_messages")
+    branch_point_node_id = data.get("_branch_point_node_id")
     if isinstance(task_id, str) and isinstance(raw_messages, list):
         return EpisodeRunResult(
             result=result,
             task_id=task_id,
             raw_messages=raw_messages,
+            branch_point_node_id=(
+                branch_point_node_id
+                if isinstance(branch_point_node_id, str) and branch_point_node_id
+                else None
+            ),
         )
     return result
 
@@ -198,7 +208,41 @@ def _max_entropy(node: Node) -> float:
     return float(value)
 
 
-def select_branch_candidate(nodes: list[Node], query_id: str) -> Node | None:
+def _critic_value(node: Node, tree_store: Any | None) -> tuple[float, bool]:
+    """Return ``(v(s_t), has_value)`` for a node from the critic.
+
+    Prefers the tree store's recorded value (authoritative ``has_value``);
+    falls back to ``Node.value`` where a non-zero value is treated as present.
+    A missing value (``has_value is False``) makes the caller bypass the TD gate.
+    """
+    node_id = getattr(node, "node_id", "") or ""
+    if tree_store is not None and node_id and tree_store.has_value(node_id):
+        return float(tree_store.get_value(node_id)), True
+    v = float(getattr(node, "value", 0.0) or 0.0)
+    return v, v != 0.0
+
+
+def select_branch_candidate(
+    nodes: list[Node],
+    query_id: str,
+    tree_store: Any | None = None,
+    td_threshold: float = 0.0,
+    gamma: float = 1.0,
+) -> Node | None:
+    """Pick the best branch candidate, optionally gated by critic TD-error.
+
+    Candidates are ``need_branch`` nodes (with a task + sandbox) for this query.
+    When ``td_threshold > 0`` and a tree store is supplied, a candidate is kept
+    only if its critic TD-error magnitude meets the threshold::
+
+        |delta_t| = |r_t + gamma * v(s_{t+1}) - v(s_t)|
+
+    computed from critic values only, where ``v(s_{t+1})`` is the candidate's
+    successor turn in the same episode (terminal: ``r_t = outcome_reward`` and
+    ``v(s_{t+1}) = 0``). Candidates whose own critic value is unavailable bypass
+    the gate (entropy-only fallback), so disabling the critic degrades to the
+    previous entropy-only behavior. Surviving candidates are ranked by entropy.
+    """
     candidates = [
         node
         for node in nodes
@@ -209,7 +253,36 @@ def select_branch_candidate(nodes: list[Node], query_id: str) -> Node | None:
     ]
     if not candidates:
         return None
-    return max(candidates, key=_max_entropy)
+    if tree_store is None or td_threshold <= 0.0:
+        return max(candidates, key=_max_entropy)
+
+    # Successor lookup over all query nodes (the successor need not be a
+    # branch candidate itself).
+    by_turn: dict[tuple[str, int], Node] = {}
+    for n in nodes:
+        if n.query_id == query_id and n.episode_id:
+            by_turn[(n.episode_id, getattr(n, "turn_idx", 0))] = n
+
+    gated: list[Node] = []
+    for node in candidates:
+        v_t, has_v = _critic_value(node, tree_store)
+        if not has_v:
+            # No critic value -> cannot gate; keep as entropy-only fallback.
+            gated.append(node)
+            continue
+        successor = by_turn.get((node.episode_id, getattr(node, "turn_idx", 0) + 1))
+        if successor is not None:
+            r_t = 0.0
+            v_next, _ = _critic_value(successor, tree_store)
+        else:
+            r_t = float(getattr(node, "outcome_reward", 0.0) or 0.0)
+            v_next = 0.0
+        delta = abs(r_t + gamma * v_next - v_t)
+        if delta >= td_threshold:
+            gated.append(node)
+    if not gated:
+        return None
+    return max(gated, key=_max_entropy)
 
 
 async def build_branch_task(
@@ -627,6 +700,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         critic_td_n_steps: int = 1,
         critic_mc_adaptive: bool = False,
         critic_mc_c: float = 4.0,
+        hybrid_mc_min_visits: int = 5,
+        hybrid_critic_var_floor: float = 1e-3,
+        branch_td_threshold: float = 0.0,
         enable_judge_process_reward: bool = False,
         judge_process_reward_beta: float = 0.2,
         judge_model_name: str = "",
@@ -653,6 +729,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.critic_td_n_steps = critic_td_n_steps
         self.critic_mc_adaptive = critic_mc_adaptive
         self.critic_mc_c = critic_mc_c
+        # Variance-aware hybrid GAE + TD-gated branching knobs.
+        self.hybrid_mc_min_visits = hybrid_mc_min_visits
+        self.hybrid_critic_var_floor = hybrid_critic_var_floor
+        self.branch_td_threshold = branch_td_threshold
         # LLM-judge process-reward shaping.
         self.enable_judge_process_reward = enable_judge_process_reward
         self.judge_process_reward_beta = judge_process_reward_beta
@@ -767,6 +847,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             ),
             judge_score_max=self.critic_score_max,
         )
+        from customized_areal.tree_search.core.advantage import (
+            HybridGAEAdvantageComputer,
+        )
+
+        self.hybrid_gae_advantage_computer = HybridGAEAdvantageComputer(
+            self.tree_store,
+            gamma=self.critic_gamma,
+            lam=self.critic_lambda,
+            judge_beta=(
+                self.judge_process_reward_beta
+                if self.enable_judge_process_reward
+                else 0.0
+            ),
+            judge_score_max=self.critic_score_max,
+            mc_min_visits=self.hybrid_mc_min_visits,
+            critic_var_floor=self.hybrid_critic_var_floor,
+        )
         # Lazily constructed on first use (needs the tokenizer).
         self._critic_value_client = None
 
@@ -851,9 +948,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         task_id: str | None = None
         raw_messages: list[dict[str, Any]] | None = None
+        branch_point_node_id: str | None = None
         if isinstance(result, EpisodeRunResult):
             task_id = result.task_id
             raw_messages = result.raw_messages
+            branch_point_node_id = result.branch_point_node_id
             result = result.result
 
         if isinstance(result, dict) and all(
@@ -880,6 +979,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             node.query_id = query_id
             if not node.turn_idx:
                 node.turn_idx = turn_idx
+        # Link a branch episode's first turn to its branch-point node so the
+        # MCTS root-ward backup aggregates returns at the shared prefix.
+        if branch_point_node_id and nodes:
+            nodes[0].parent_node_id = branch_point_node_id
         if isinstance(task_id, str) and isinstance(raw_messages, list):
             annotate_nodes_from_run(nodes, task_id=task_id, raw_messages=raw_messages)
         return nodes
@@ -1326,7 +1429,13 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     ) -> Any:
         episode_data = dict(data)
         all_query_nodes = self.tree_store.trajectories.get(query_id, [])
-        candidate = select_branch_candidate(all_query_nodes, query_id)
+        candidate = select_branch_candidate(
+            all_query_nodes,
+            query_id,
+            tree_store=self.tree_store,
+            td_threshold=self.branch_td_threshold,
+            gamma=self.critic_gamma,
+        )
         source = choose_sample_source(
             self.sample_source,
             branch_probability=self.branch_probability,
@@ -1348,6 +1457,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             if branch_task_id:
                 branch_data["task_id"] = branch_task_id
                 branch_data["seed_messages_already_inserted"] = True
+                # Link this branch episode's first turn to the branch-point node
+                # so MCTS backup aggregates returns at the shared prefix.
+                if candidate.node_id:
+                    branch_data["_branch_point_node_id"] = candidate.node_id
                 try:
                     result = await self._retry_episode(engine, branch_data, group_idx)
                 finally:
@@ -1774,6 +1887,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 self.tree_advantage_computer.compute(all_nodes)
             elif self.advantage_mode == AdvantageMode.GAE:
                 self.gae_advantage_computer.compute(all_nodes)
+            elif self.advantage_mode == AdvantageMode.HYBRID_GAE:
+                self.hybrid_gae_advantage_computer.compute(all_nodes)
 
             # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(

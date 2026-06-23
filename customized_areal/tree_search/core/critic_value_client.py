@@ -40,6 +40,7 @@ from customized_areal.tree_search.core.critic_prompt import (
     digit_token_ids,
     expected_value_from_logprobs,
     reconstruct_messages_through_turn,
+    variance_from_logprobs,
 )
 
 LogprobQueryFn = Callable[[Any, list[int]], Awaitable[dict[int, float]]]
@@ -123,10 +124,25 @@ class CriticValueClient:
         return None
 
     # -- value computation --------------------------------------------------
-    async def compute_value(self, engine: Any, node: Any) -> float:
+    async def compute_value_and_variance(
+        self, engine: Any, node: Any
+    ) -> tuple[float, float]:
+        """Return ``(v_phi(s_t), var_theta(s_t))`` from one label-logprob query.
+
+        ``var_theta`` is the categorical variance of the critic's score
+        distribution; it is ``0.0`` on the one-hot fallback path (no soft
+        logprobs available), in which case the consumer applies a variance
+        floor.
+        """
         prompt_ids = self.build_prompt_ids(node)
         label_logprobs = await self._query_label_logprobs(engine, prompt_ids)
-        return expected_value_from_logprobs(label_logprobs, self.score_max)
+        value = expected_value_from_logprobs(label_logprobs, self.score_max)
+        variance = variance_from_logprobs(label_logprobs, self.score_max)
+        return value, variance
+
+    async def compute_value(self, engine: Any, node: Any) -> float:
+        value, _variance = await self.compute_value_and_variance(engine, node)
+        return value
 
     async def annotate_episode(
         self,
@@ -136,8 +152,10 @@ class CriticValueClient:
     ) -> None:
         """Compute and store v_phi(s_t) for each node of an episode."""
         for node in nodes:
-            value = await self.compute_value(engine, node)
+            value, variance = await self.compute_value_and_variance(engine, node)
             node.value = float(value)
+            node.value_variance = float(variance)
             node_id = getattr(node, "node_id", None)
             if tree_store is not None and node_id:
                 tree_store.set_value(node_id, float(value))
+                tree_store.set_value_variance(node_id, float(variance))

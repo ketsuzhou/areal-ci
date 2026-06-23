@@ -61,6 +61,11 @@ class Node:
     # GAEAdvantageComputer. 0.0 when the critic is disabled.
     value: float = 0.0
 
+    # Critic's own uncertainty about ``value``: the categorical variance of the
+    # critic's score distribution. Used as var_theta in the variance-aware
+    # hybrid blend. 0.0 when the critic is one-hot or disabled.
+    value_variance: float = 0.0
+
     # Tree-computed advantages/returns (set by TreeAdvantageComputer or
     # GAEAdvantageComputer)
     advantages: torch.Tensor | None = None
@@ -250,6 +255,10 @@ class MCTSTreeStore:
         self._visit_counts: dict[str, int] = {}
         self._total_values: dict[str, float] = {}
         self._q_values: dict[str, float] = {}
+        # Running sum of squared backed-up returns, keyed by node_id. Tracked
+        # alongside _total_values so the per-node MC variance (and its
+        # leave-one-out form) can be recovered without storing every sample.
+        self._sum_sq_values: dict[str, float] = {}
 
         self.current_train_id: str = os.environ.get("TRAIN_ID", "")
         self._rewards: dict[str, float] = {}
@@ -260,18 +269,87 @@ class MCTSTreeStore:
         self._normalized_returns: dict[str, float] = {}
         # Generative-critic state values v_phi(s_t), keyed by node_id.
         self._values: dict[str, float] = {}
+        # Critic categorical variance var_theta(s_t), keyed by node_id.
+        self._value_variances: dict[str, float] = {}
         # LLM-judge raw integer credit scores, keyed by node_id. A shared prefix
         # node accumulates one score per episode that traverses it; the dense
         # process reward uses the mean. Empty/missing -> no judge signal.
         self._judge_scores: dict[str, list[float]] = {}
 
-    def _backup(self, node_id: str, reward: float) -> None:
-        """Update MCTS stats for a single trajectory."""
+    def _node_parent_id(self, node_id: str) -> str | None:
+        """Return the parent_node_id of an indexed node, or None."""
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return None
+        query_id, idx = key
+        node = self.trajectories[query_id][idx]
+        if isinstance(node, dict):
+            return node.get("parent_node_id")
+        return node.parent_node_id
+
+    def _backup_node(self, node_id: str, reward: float) -> None:
+        """Add one Monte-Carlo sample (``reward``) to a single node's stats."""
         self._visit_counts[node_id] = self._visit_counts.get(node_id, 0) + 1
         self._total_values[node_id] = self._total_values.get(node_id, 0.0) + reward
+        self._sum_sq_values[node_id] = (
+            self._sum_sq_values.get(node_id, 0.0) + reward * reward
+        )
         self._q_values[node_id] = (
             self._total_values[node_id] / self._visit_counts[node_id]
         )
+
+    def _backup_path(self, terminal_node_id: str, reward: float) -> None:
+        """Propagate one episode's return root-ward along the parent chain.
+
+        Starting from ``terminal_node_id`` (the episode's last turn) the reward
+        is added once to every ancestor reachable via ``parent_node_id`` -- the
+        episode's own turns and, when a branch episode links its first turn to
+        its branch-point node, the shared prefix above that branch point. Each
+        traversing episode therefore contributes exactly one MC sample per node
+        on its path, so ``_visit_counts[node_id]`` is the number of episodes
+        that passed through state ``s_t`` and ``get_q_value`` is their mean
+        return. A ``visited`` guard makes the walk robust to malformed cycles.
+        """
+        visited: set[str] = set()
+        current: str | None = terminal_node_id
+        while current and current not in visited and current in self._node_id_to_key:
+            visited.add(current)
+            self._backup_node(current, reward)
+            current = self._node_parent_id(current)
+
+    def _backup_inserted_episodes(self, node_ids: list[str]) -> None:
+        """Run a root-ward backup once per episode among freshly inserted nodes.
+
+        Nodes are grouped by ``episode_id``; the highest-``turn_idx`` node of
+        each episode is the terminal from which the backup walks. Nodes without
+        an ``episode_id`` are backed up individually.
+        """
+        episode_terminal: dict[str, tuple[int, str, float]] = {}
+        for node_id in node_ids:
+            key = self._node_id_to_key.get(node_id)
+            if key is None:
+                continue
+            query_id, idx = key
+            node = self.trajectories[query_id][idx]
+            if isinstance(node, dict):
+                ep_id = node.get("episode_id", "") or ""
+                turn_idx = int(node.get("turn_idx", 0) or 0)
+                reward = float(
+                    node.get("outcome_reward", node.get("reward", 0.0)) or 0.0
+                )
+            else:
+                ep_id = node.episode_id or ""
+                turn_idx = int(node.turn_idx or 0)
+                reward = float(node.outcome_reward or 0.0)
+            if not ep_id:
+                # Standalone node: back up just itself (its own path).
+                self._backup_path(node_id, reward)
+                continue
+            prev = episode_terminal.get(ep_id)
+            if prev is None or turn_idx >= prev[0]:
+                episode_terminal[ep_id] = (turn_idx, node_id, reward)
+        for _turn_idx, terminal_id, reward in episode_terminal.values():
+            self._backup_path(terminal_id, reward)
 
     def _insert_single(self, query_id: str, node: Node) -> str:
         """Insert a single Node, reading node_id from the node itself.
@@ -300,7 +378,9 @@ class MCTSTreeStore:
             node.query_id = query_id
             outcome_reward = node.outcome_reward
 
-        self._backup(node_id, outcome_reward)
+        # MCTS stats are accumulated per-episode via a root-ward backup in
+        # insert_batch (see _backup_inserted_episodes); _insert_single only
+        # indexes the node and records its own reward.
         self._rewards[node_id] = outcome_reward
 
         return node_id
@@ -309,8 +389,12 @@ class MCTSTreeStore:
         """Insert Node trajectories into the store.
 
         Each Node is inserted directly. Nodes that already have a
-        node_id assigned (loaded from cache) are skipped.
+        node_id assigned (loaded from cache) are skipped. After indexing,
+        Monte-Carlo stats are accumulated with one root-ward backup per newly
+        inserted episode so shared prefix nodes aggregate returns across all
+        episodes that traverse them.
         """
+        inserted_node_ids: list[str] = []
         for node in trajectories:
             existing_id = getattr(node, "node_id", "")
             if existing_id != "" and existing_id in self._node_id_to_key:
@@ -320,7 +404,8 @@ class MCTSTreeStore:
                 if isinstance(node, dict)
                 else (node.query_id or "")
             )
-            self._insert_single(query_id, node)
+            inserted_node_ids.append(self._insert_single(query_id, node))
+        self._backup_inserted_episodes(inserted_node_ids)
 
     def set_trained(self, node_id: str, trained: bool = True) -> None:
         """Stamp the node with current_train_id to mark it as trained."""
@@ -381,6 +466,58 @@ class MCTSTreeStore:
     def get_q_value(self, node_id: str) -> float:
         return self._q_values.get(node_id, 0.0)
 
+    def get_visit_count(self, node_id: str) -> int:
+        """Number of episodes whose root-ward backup passed through this node.
+
+        This is the MC sample size of ``get_q_value(node_id)``.
+        """
+        return self._visit_counts.get(node_id, 0)
+
+    def get_total_value(self, node_id: str) -> float:
+        """Sum of backed-up returns for this node (numerator of get_q_value)."""
+        return self._total_values.get(node_id, 0.0)
+
+    def get_sum_sq_value(self, node_id: str) -> float:
+        """Sum of squared backed-up returns for this node."""
+        return self._sum_sq_values.get(node_id, 0.0)
+
+    def get_loo_value_and_variance(
+        self, node_id: str, excluded_reward: float
+    ) -> tuple[float, float, int]:
+        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size.
+
+        Removes a single sample equal to ``excluded_reward`` (the current
+        episode's own backed-up return) from this node's aggregates, then
+        returns ``(loo_mean, var_mc, n_loo)`` where::
+
+            n'      = n - 1
+            S'      = S - r_i
+            Q'      = Q - r_i^2
+            loo_mean = S' / n'
+            loo_var  = (Q' - S'^2 / n') / (n' - 1)      # unbiased sample var
+            var_mc   = loo_var / n'                      # variance of the mean
+
+        When fewer than two LOO samples remain (``n' < 2``) the variance is not
+        defined; a sentinel ``var_mc = -1.0`` is returned and the caller should
+        fall back to the critic. A non-negative ``var_mc`` of exactly ``0.0``
+        means all remaining samples are identical (maximally confident MC).
+        """
+        n = self._visit_counts.get(node_id, 0)
+        n_loo = n - 1
+        if n_loo < 2:
+            return 0.0, -1.0, max(n_loo, 0)
+        total = self._total_values.get(node_id, 0.0)
+        sum_sq = self._sum_sq_values.get(node_id, 0.0)
+        s_prime = total - excluded_reward
+        q_prime = sum_sq - excluded_reward * excluded_reward
+        loo_mean = s_prime / n_loo
+        loo_var = (q_prime - s_prime * s_prime / n_loo) / (n_loo - 1)
+        # Numerical guard: clamp tiny negative variance from float error to 0.
+        if loo_var < 0.0:
+            loo_var = 0.0
+        var_mc = loo_var / n_loo
+        return loo_mean, var_mc, n_loo
+
     def set_normalized_advantage(self, node_id: str, value: float) -> None:
         self._normalized_advantages[node_id] = value
 
@@ -405,6 +542,13 @@ class MCTSTreeStore:
 
     def has_value(self, node_id: str) -> bool:
         return node_id in self._values
+
+    def set_value_variance(self, node_id: str, variance: float) -> None:
+        """Store the critic's categorical variance var_theta(s_t) for a node."""
+        self._value_variances[node_id] = variance
+
+    def get_value_variance(self, node_id: str, default: float = 0.0) -> float:
+        return self._value_variances.get(node_id, default)
 
     def add_judge_score(self, node_id: str, score: float) -> None:
         """Append a raw LLM-judge credit score for a node.
@@ -578,8 +722,10 @@ class MCTSTreeStore:
         self._visit_counts.clear()
         self._total_values.clear()
         self._q_values.clear()
+        self._sum_sq_values.clear()
         self._rewards.clear()
         self._turn_nodes.clear()
         self._normalized_advantages.clear()
         self._normalized_returns.clear()
         self._values.clear()
+        self._value_variances.clear()

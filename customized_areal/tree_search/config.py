@@ -12,6 +12,7 @@ class CacheMode(str, Enum):
 class AdvantageMode(str, Enum):
     GAE = "gae"
     TREE = "tree"
+    HYBRID_GAE = "hybrid_gae"
 
 
 class LossMode(str, Enum):
@@ -117,6 +118,21 @@ class Config:
     critic_td_n_steps: int = 1
     critic_mc_adaptive: bool = False
     critic_mc_c: float = 4.0
+
+    # Variance-aware hybrid GAE (advantage_mode=HYBRID_GAE). On branched nodes
+    # with enough MCTS samples, the noisy critic value v_theta(s_t) is blended
+    # with a leave-one-out Monte-Carlo value via inverse-variance weighting.
+    # ``hybrid_mc_min_visits`` is the minimum node visit count required before
+    # MC substitution applies (the LOO set then has >= value-1 samples).
+    # ``hybrid_critic_var_floor`` floors the critic's categorical variance so a
+    # one-hot critic does not appear infinitely confident.
+    hybrid_mc_min_visits: int = 5
+    hybrid_critic_var_floor: float = 1e-3
+    # Fixed absolute TD-error threshold for the branch-selection gate: only
+    # need_branch candidates whose |delta_t| (from critic values) meets this
+    # threshold are eligible; survivors are then ranked by entropy. 0.0 keeps
+    # the previous entropy-only behavior.
+    branch_td_threshold: float = 0.0
 
     # LLM-judge step-level process reward.
     #
@@ -248,13 +264,18 @@ class Config:
             )
         if self.enable_generative_critic:
             # The generative critic supplies bootstrapped state values, so the
-            # actor advantage must be GAE. Auto-switch from the default TREE mode
-            # and warn if a conflicting mode was set explicitly.
-            if self.advantage_mode != AdvantageMode.GAE:
+            # actor advantage must be GAE or the variance-aware HYBRID_GAE
+            # (which also consumes the critic). Auto-switch from the default
+            # TREE mode and warn if a conflicting mode was set explicitly.
+            if self.advantage_mode not in (
+                AdvantageMode.GAE,
+                AdvantageMode.HYBRID_GAE,
+            ):
                 import warnings
 
                 warnings.warn(
-                    "enable_generative_critic=True requires advantage_mode=GAE; "
+                    "enable_generative_critic=True requires "
+                    "advantage_mode=GAE or HYBRID_GAE; "
                     f"overriding advantage_mode={self.advantage_mode.value!r} -> 'gae'.",
                     stacklevel=2,
                 )
