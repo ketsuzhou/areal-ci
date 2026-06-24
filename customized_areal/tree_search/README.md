@@ -356,6 +356,33 @@ with the hybrid values.
 > one-hot distribution with zero categorical variance, so `hybrid_critic_var_floor`
 > dominates `var_theta` and the blend collapses toward the MC value on eligible nodes.
 
+> **MC-value scale & estimand caveat.** The LOO MC value
+> (`get_loo_value_and_variance`) is the mean of backed-up `outcome_reward`, while the
+> critic value `v_theta` lives in `[0, 1]` (`i / score_max`). `_blended_value` mixes the
+> two **without** applying `critic_target_scale` or clamping.
+>
+> - *Scale (a non-issue in the standard setup).* When `outcome_reward ∈ {0, 1}`, the
+>   judge process reward is per-episode normalized so `Σ_t jbar_t = 1`, and the episode
+>   return `G = β + (1−β)·outcome ∈ [0, 1]`, every quantity is already in `[0, 1]` and
+>   `critic_target_scale = 1.0`. The blend is then scale-consistent and **no rescaling is
+>   needed**. (Rescaling/clamping `v_mc` only matters if a future reward scheme moves
+>   `outcome_reward` outside `[0, 1]` or sets `critic_target_scale != 1.0`.)
+> - *Estimand mismatch (the real issue when `judge_beta > 0`).* The MCTS backup
+>   (`_backup_inserted_episodes`) propagates **only `outcome_reward`**, so
+>   `v_mc(s_t) = P(success | s_t)`. But with `judge_beta > 0` the GAE recursion
+>   accumulates the **dense** shaped rewards, whose value-to-go is
+>   `V(s_t) = β·(credit-to-go) + (1−β)·P(success | s_t)`. Both are in `[0, 1]`, but they
+>   are **different quantities**, so substituting `v_mc` for `v(s_t)` on eligible nodes
+>   injects a systematic bias of ≈ `β·(credit-to-go) − β·jbar`-style terms (e.g. it
+>   under-credits a failed episode by ≈ `β·(1−P)` at the start). When `judge_beta = 0`
+>   (sparse, `γ = 1`) the return-to-go from every turn *is* `outcome`, so
+>   `v_mc = V(s_t)` exactly and HybridGAE is fully consistent.
+> - *Mitigation.* The backup runs inside `insert_batch` **before** judge scores exist, so
+>   `G` cannot be backed up at insert time. Either (a) re-run the backup after judging
+>   using per-turn return-to-go `Σ_{k≥t} r_k`, or (b) correct `v_mc` analytically in
+>   `_blended_value` via `v_mc_consistent = (1−β)·v_mc + β·credit_to_go_t` (and scale
+>   `var_mc` by `(1−β)^2`), which reduces to a no-op when `β = 0`.
+
 #### GAE recursion diagram
 
 Each `Node` is one turn (`s_t`). The critic supplies `v(s_t)`; rewards are sparse

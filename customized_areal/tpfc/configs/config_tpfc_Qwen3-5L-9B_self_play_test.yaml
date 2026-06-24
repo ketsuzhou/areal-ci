@@ -1,5 +1,5 @@
 experiment_name: tpfc-grpo
-trial_name: self_play_0618
+trial_name: self_play_0623
 seed: 1
 
 # Tree search configuration

@@ -124,10 +124,19 @@ class Config:
     # with a leave-one-out Monte-Carlo value via inverse-variance weighting.
     # ``hybrid_mc_min_visits`` is the minimum node visit count required before
     # MC substitution applies (the LOO set then has >= value-1 samples).
-    # ``hybrid_critic_var_floor`` floors the critic's categorical variance so a
-    # one-hot critic does not appear infinitely confident.
+    # ``hybrid_critic_var_floor`` floors the critic's error variance so a
+    # perfectly-confident critic does not appear infinitely reliable.
+    # ``hybrid_critic_error_var`` is the static prior on the critic's *error*
+    # variance E[(v_theta - V)^2] (the critic regression MSE), used as
+    # ``var_theta`` in the inverse-variance blend so it is unit-consistent with
+    # the MC mean's sampling variance ``var_mc``. With returns in [0, 1] a
+    # moderately-trained critic (RMSE ~0.22) sits near 0.05, comparable to
+    # ``var_mc`` at the minimum visit count, so MC and critic blend ~50/50 there
+    # and MC gains weight as visits accumulate. When a live critic-MSE EMA is
+    # wired in (AdaptiveMCWeight) it overrides this prior per rollout.
     hybrid_mc_min_visits: int = 5
     hybrid_critic_var_floor: float = 1e-3
+    hybrid_critic_error_var: float = 0.05
     # Fixed absolute TD-error threshold for the branch-selection gate: only
     # need_branch candidates whose |delta_t| (from critic values) meets this
     # threshold are eligible; survivors are then ranked by entropy. 0.0 keeps

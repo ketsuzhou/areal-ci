@@ -338,6 +338,21 @@ class AdaptiveMCWeight:
         self._eps2 = self.ema_beta * self._eps2 + (1.0 - self.ema_beta) * mse
         self._steps += 1
 
+    def live_critic_error_var(self) -> float | None:
+        """Current EMA of the critic regression MSE, or ``None`` if not yet fed.
+
+        This is the critic's *error* variance ``E[(v_theta - V)^2]`` -- an
+        estimator-error quantity in the same units as the MC mean's sampling
+        variance ``var_mc``. ``HybridGAEAdvantageComputer`` consumes it as
+        ``var_theta`` for a unit-consistent inverse-variance blend. Returns
+        ``None`` until ``update_critic_error`` has been called at least once, so
+        callers can fall back to a static prior rather than the uninformative
+        ``eps2_init``.
+        """
+        if self._steps <= 0:
+            return None
+        return self._eps2
+
     def weight(self, visit_count: int) -> float:
         """Per-node MC weight in ``[w_min, w_max]`` (1.0 during warmup)."""
         if self._steps < self.warmup_steps:

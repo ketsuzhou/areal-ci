@@ -385,7 +385,7 @@ class MCTSTreeStore:
 
         return node_id
 
-    def insert_batch(self, trajectories: list[Node]) -> None:
+    def insert_batch(self, trajectories: list[Node], backup: bool = True) -> None:
         """Insert Node trajectories into the store.
 
         Each Node is inserted directly. Nodes that already have a
@@ -393,6 +393,14 @@ class MCTSTreeStore:
         Monte-Carlo stats are accumulated with one root-ward backup per newly
         inserted episode so shared prefix nodes aggregate returns across all
         episodes that traverse them.
+
+        When ``backup`` is ``False`` the MC backup is *deferred*: only indexing
+        runs, and the caller is responsible for accumulating MC statistics later
+        (e.g. ``backup_episode_returns`` after dense process rewards are known).
+        This is used when ``judge_beta > 0`` so the backup can propagate the
+        per-node return-to-go of the dense shaped reward instead of the bare
+        terminal ``outcome_reward`` -- the judge scores do not exist yet at
+        insert time.
         """
         inserted_node_ids: list[str] = []
         for node in trajectories:
@@ -405,7 +413,73 @@ class MCTSTreeStore:
                 else (node.query_id or "")
             )
             inserted_node_ids.append(self._insert_single(query_id, node))
-        self._backup_inserted_episodes(inserted_node_ids)
+        if backup:
+            self._backup_inserted_episodes(inserted_node_ids)
+
+    def backup_episode_terminal(self, terminal_node_id: str, reward: float) -> None:
+        """Public entry: root-ward backup of one episode's terminal return.
+
+        Adds ``reward`` once to ``terminal_node_id`` and every ancestor reachable
+        via ``parent_node_id`` (the same walk used by the default insert-time
+        backup). Used for *branched* episodes, whose path crosses into a shared
+        prefix owned by another episode, where a per-node return-to-go cannot be
+        attributed cleanly.
+        """
+        self._backup_path(terminal_node_id, float(reward))
+
+    def backup_episode_returns(
+        self, ordered_nodes: list[Node], returns: list[float]
+    ) -> None:
+        """Back up a private (non-branched) episode with per-node return-to-go.
+
+        Unlike the terminal-return path walk, this assigns a distinct sample
+        ``g_t`` (the discounted return-to-go) to each turn, so ``q_value(s_t)``
+        estimates ``E[return-to-go]`` rather than ``E[outcome]``. This is only
+        correct for episodes whose node chain is private (not shared with other
+        episodes); branched episodes must use ``backup_episode_terminal``.
+        """
+        for node, g in zip(ordered_nodes, returns):
+            node_id = (
+                node.node_id if isinstance(node, Node) else node.get("node_id", "")
+            )
+            if node_id and node_id in self._node_id_to_key:
+                self._backup_node(node_id, float(g))
+
+    def get_node(self, node_id: str) -> Node | None:
+        """Return the indexed ``Node`` for ``node_id`` (or ``None`` if absent)."""
+        key = self._node_id_to_key.get(node_id)
+        if key is None:
+            return None
+        query_id, idx = key
+        return self.trajectories[query_id][idx]
+
+    def backup_path_returns(
+        self, terminal_node_id: str, returns_by_node_id: dict[str, float]
+    ) -> None:
+        """Root-ward backup assigning each node on the path its own return-to-go.
+
+        Walks ``parent_node_id`` from ``terminal_node_id`` to the root (the same
+        cycle-guarded traversal as ``_backup_path``) and adds, to each node, the
+        return-to-go sample supplied in ``returns_by_node_id`` for *this*
+        episode. Unlike ``backup_episode_terminal`` (which adds one shared
+        terminal outcome to every node), every sample here is a return-to-go
+        value, so a shared prefix node accumulates a *homogeneous* set of
+        return-to-go samples across all episodes that traverse it and its LOO
+        mean converges to ``V(s_t)`` -- not ``P(success | s_t)``. This is the
+        unified backup used for both scratch and branch episodes when
+        ``judge_beta > 0``.
+
+        Nodes on the path missing from ``returns_by_node_id`` are skipped (no
+        sample added), keeping visit counts consistent with the reward path.
+        """
+        visited: set[str] = set()
+        current: str | None = terminal_node_id
+        while current and current not in visited and current in self._node_id_to_key:
+            visited.add(current)
+            g = returns_by_node_id.get(current)
+            if g is not None:
+                self._backup_node(current, float(g))
+            current = self._node_parent_id(current)
 
     def set_trained(self, node_id: str, trained: bool = True) -> None:
         """Stamp the node with current_train_id to mark it as trained."""
@@ -495,12 +569,29 @@ class MCTSTreeStore:
             Q'      = Q - r_i^2
             loo_mean = S' / n'
             loo_var  = (Q' - S'^2 / n') / (n' - 1)      # unbiased sample var
-            var_mc   = loo_var / n'                      # variance of the mean
+            var_mc   = max(loo_var / n', var_floor)      # variance of the mean
 
         When fewer than two LOO samples remain (``n' < 2``) the variance is not
         defined; a sentinel ``var_mc = -1.0`` is returned and the caller should
-        fall back to the critic. A non-negative ``var_mc`` of exactly ``0.0``
-        means all remaining samples are identical (maximally confident MC).
+        fall back to the critic.
+
+        **Bayesian variance floor.** All backed-up returns are bounded in
+        ``[0, 1]`` (``outcome_reward in {0, 1}`` and the shaped return
+        ``G = β + (1 − β)·outcome ∈ [0, 1]``), so the per-sample variance is at
+        most the Bernoulli variance ``p(1 − p)``. With a ``Beta(1, 1)`` prior
+        (add-one smoothing) the posterior variance of the *mean* is::
+
+            a        = S' + 1
+            b        = (n' − S') + 1
+            var_floor = a·b / ((n'+2)^2 · (n'+3))
+
+        which is **strictly positive even when every remaining sample is
+        identical**. Flooring ``var_mc`` with it prevents the inverse-variance
+        blend from treating a small all-equal sample (e.g. four ``1.0`` binary
+        outcomes that happen to agree by chance) as infinitely confident and
+        discarding the critic. The floor only binds when the empirical
+        variance-of-the-mean is smaller; with genuine spread the empirical value
+        dominates and the floor is inert.
         """
         n = self._visit_counts.get(node_id, 0)
         n_loo = n - 1
@@ -516,6 +607,16 @@ class MCTSTreeStore:
         if loo_var < 0.0:
             loo_var = 0.0
         var_mc = loo_var / n_loo
+        # Beta(1, 1) posterior variance of the mean as a strictly-positive floor
+        # (returns are bounded in [0, 1]; see docstring). ``s_prime`` is the sum
+        # of [0, 1] samples, clamped defensively to [0, n'].
+        s_clamped = min(max(s_prime, 0.0), float(n_loo))
+        a = s_clamped + 1.0
+        b = (n_loo - s_clamped) + 1.0
+        nn = a + b  # == n' + 2
+        var_floor = (a * b) / (nn * nn * (nn + 1.0))
+        if var_floor > var_mc:
+            var_mc = var_floor
         return loo_mean, var_mc, n_loo
 
     def set_normalized_advantage(self, node_id: str, value: float) -> None:

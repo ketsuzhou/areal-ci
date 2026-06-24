@@ -14,13 +14,18 @@ def _populate(store, node_id, rewards):
 
 
 class TestLeaveOneOut:
-    def test_identical_returns_zero_variance(self):
+    def test_identical_returns_floored_variance(self):
+        # All-equal remaining samples -> empirical variance 0, but the Beta(1,1)
+        # posterior floor keeps var_mc strictly positive so the inverse-variance
+        # blend cannot treat this as infinitely confident.
         store = MCTSTreeStore()
         _populate(store, "a", [1.0, 1.0, 1.0, 1.0, 1.0])
         loo_mean, var_mc, n_loo = store.get_loo_value_and_variance("a", 1.0)
         assert n_loo == 4
         assert loo_mean == 1.0
-        assert var_mc == 0.0
+        # S'=4, n'=4 -> a=5, b=1, nn=6 -> 5/(36*7).
+        assert abs(var_mc - 5.0 / 252.0) < 1e-12
+        assert var_mc > 0.0
 
     def test_known_mixed_returns(self):
         # Samples [0, 1, 0, 1, 0], exclude one 0.0 -> remaining [0,1,1,0] effectively
@@ -38,11 +43,13 @@ class TestLeaveOneOut:
     def test_excluding_reward_removes_that_sample(self):
         store = MCTSTreeStore()
         _populate(store, "a", [0.0, 0.0, 0.0, 0.0, 4.0])
-        # Exclude the 4.0 outlier -> remaining all-zero -> mean 0, var 0.
+        # Exclude the 4.0 outlier -> remaining all-zero -> mean 0. Empirical
+        # variance is 0, but var_mc is floored by the Beta(1,1) posterior.
         loo_mean, var_mc, n_loo = store.get_loo_value_and_variance("a", 4.0)
         assert n_loo == 4
         assert abs(loo_mean) < 1e-9
-        assert abs(var_mc) < 1e-9
+        # S'=0, n'=4 -> a=1, b=5, nn=6 -> 5/(36*7).
+        assert abs(var_mc - 5.0 / 252.0) < 1e-12
 
     def test_insufficient_loo_samples_returns_sentinel(self):
         store = MCTSTreeStore()

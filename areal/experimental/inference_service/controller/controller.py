@@ -1754,6 +1754,7 @@ class RolloutControllerV2:
                 critic_mc_c=tree_search_cfg.critic_mc_c,
                 hybrid_mc_min_visits=tree_search_cfg.hybrid_mc_min_visits,
                 hybrid_critic_var_floor=tree_search_cfg.hybrid_critic_var_floor,
+                hybrid_critic_error_var=tree_search_cfg.hybrid_critic_error_var,
                 branch_td_threshold=tree_search_cfg.branch_td_threshold,
                 enable_judge_process_reward=tree_search_cfg.enable_judge_process_reward,
                 judge_process_reward_beta=tree_search_cfg.judge_process_reward_beta,

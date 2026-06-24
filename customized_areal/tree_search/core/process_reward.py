@@ -103,3 +103,32 @@ def build_episode_process_rewards(
         else:
             rewards.append(beta * jbar)
     return rewards
+
+
+def episode_returns_to_go(rewards: list[float], gamma: float = 1.0) -> list[float]:
+    """Discounted return-to-go ``g_t = sum_{k>=t} gamma^{k-t} * r_k`` per turn.
+
+    This is the Monte-Carlo target the MCTS backup should accumulate per node so
+    that ``q_value(s_t)`` estimates ``E[return-to-go]`` -- the value the GAE
+    recursion needs -- rather than ``E[outcome]``. With sparse terminal-only
+    rewards and ``gamma == 1`` this reduces to ``g_t == outcome`` for every turn,
+    matching the legacy outcome-only backup exactly.
+
+    Parameters
+    ----------
+    rewards : list[float]
+        Per-turn rewards ordered ascending by ``turn_idx``.
+    gamma : float
+        Discount factor (use the same value as the GAE recursion).
+
+    Returns
+    -------
+    list[float]
+        Per-turn discounted return-to-go aligned to ``rewards``.
+    """
+    g = [0.0] * len(rewards)
+    acc = 0.0
+    for t in range(len(rewards) - 1, -1, -1):
+        acc = rewards[t] + gamma * acc
+        g[t] = acc
+    return g

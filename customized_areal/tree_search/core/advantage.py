@@ -223,6 +223,18 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
     to ``v_hat = v_mc`` (the MC estimate is maximally confident). The blended
     array is used for both ``v(s_t)`` and the bootstrap ``v(s_{t+1})`` so the
     recursion stays self-consistent.
+
+    **Commensurable variances.** ``var_mc`` is the *sampling variance of the MC
+    mean* -- an estimator-error quantity ``Var[G|s]/n'`` that shrinks as samples
+    accumulate. The critic side must therefore also be an estimator-error
+    quantity ``E[(v_theta - V)^2]``, i.e. the critic's regression MSE, **not**
+    the categorical variance of the critic's output distribution. The latter is
+    (when calibrated) the *target spread* ``Var[G|s]`` -- roughly ``n'`` times
+    too large and not an error of ``v_theta`` -- so blending it against
+    ``var_mc`` compares a single-sample spread to a mean's standard error and
+    spuriously favours MC as visits grow regardless of critic quality. ``var_theta``
+    is sourced from ``critic_error_var`` (a static prior) or, once a live critic
+    MSE is wired in, ``critic_error_var_fn`` (e.g. ``AdaptiveMCWeight``'s EMA).
     """
 
     def __init__(
@@ -234,6 +246,8 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
         judge_score_max: int = 10,
         mc_min_visits: int = 5,
         critic_var_floor: float = 1e-3,
+        critic_error_var: float = 0.05,
+        critic_error_var_fn=None,
     ) -> None:
         super().__init__(
             tree_store,
@@ -244,6 +258,20 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
         )
         self.mc_min_visits = mc_min_visits
         self.critic_var_floor = critic_var_floor
+        # Critic error variance E[(v_theta - V)^2] used as ``var_theta`` in the
+        # blend. ``critic_error_var`` is a static prior; ``critic_error_var_fn``
+        # (optional) returns a live estimate (e.g. an EMA of the critic MSE) or
+        # ``None`` to fall back to the prior.
+        self.critic_error_var = critic_error_var
+        self.critic_error_var_fn = critic_error_var_fn
+
+    def _critic_error_var(self) -> float:
+        """Current critic error-variance estimate (live if available)."""
+        if self.critic_error_var_fn is not None:
+            live = self.critic_error_var_fn()
+            if live is not None:
+                return float(live)
+        return self.critic_error_var
 
     def _blended_value(self, node: Node, excluded_reward: float) -> float:
         """Critic value for ``node``, blended with LOO MC when eligible."""
@@ -260,14 +288,16 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
             # Not enough LOO samples to trust the MC estimate -> keep critic.
             return v_theta
         if var_mc <= 0.0:
-            # All remaining MC samples identical -> MC is maximally confident.
+            # Defensive guard only: get_loo_value_and_variance now floors var_mc
+            # with a strictly-positive Beta(1, 1) posterior variance, so this
+            # branch is unreachable for n_loo >= 2. Kept so a future caller that
+            # bypasses the floor still degrades gracefully to pure MC instead of
+            # dividing by zero.
             return v_mc
-        var_theta = max(
-            self.tree_store.get_value_variance(
-                node_id, float(getattr(node, "value_variance", 0.0) or 0.0)
-            ),
-            self.critic_var_floor,
-        )
+        # var_theta is the critic's *error* variance (regression MSE), in the
+        # same units as var_mc (variance of an estimate of V(s_t)) -- NOT the
+        # categorical variance of the critic's output distribution.
+        var_theta = max(self._critic_error_var(), self.critic_var_floor)
         w_mc = 1.0 / var_mc
         w_theta = 1.0 / var_theta
         return (v_mc * w_mc + v_theta * w_theta) / (w_mc + w_theta)
@@ -287,17 +317,13 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
             ordered = sorted(nodes, key=lambda n: getattr(n, "turn_idx", 0))
             n_turns = len(ordered)
 
-            # The episode's own backed-up return (the sample to leave out) is
-            # its terminal outcome_reward, shared across all turns.
-            excluded_reward = float(ordered[-1].outcome_reward) if n_turns > 0 else 0.0
-
-            # Blended per-turn values: critic, with LOO MC substituted on
-            # eligible branched nodes. Used for both v(s_t) and bootstrap.
-            values = [self._blended_value(n, excluded_reward) for n in ordered]
-
+            # Per-turn rewards. With LLM-judge shaping (judge_beta > 0) the reward
+            # is dense; otherwise it is sparse terminal-only (byte-for-byte
+            # identical to the legacy path).
             if self.judge_beta > 0.0:
                 from customized_areal.tree_search.core.process_reward import (
                     build_episode_process_rewards,
+                    episode_returns_to_go,
                 )
 
                 rewards = build_episode_process_rewards(
@@ -306,10 +332,27 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
                     beta=self.judge_beta,
                     score_max=self.judge_score_max,
                 )
+                # The sample this episode contributed to each node's MC aggregate
+                # is the per-node discounted return-to-go (see
+                # MCTSTreeStore.backup_episode_returns), so the leave-one-out must
+                # exclude g_t -- not the terminal outcome -- to stay consistent
+                # with what was backed up.
+                excluded = episode_returns_to_go(rewards, gamma=self.gamma)
             else:
                 rewards = [0.0] * n_turns
                 if n_turns > 0:
                     rewards[-1] = float(ordered[-1].outcome_reward)
+                # Legacy LOO sample: the episode's terminal outcome, shared
+                # across all turns (the insert-time backup added it to every
+                # node on the path).
+                term = float(ordered[-1].outcome_reward) if n_turns > 0 else 0.0
+                excluded = [term] * n_turns
+
+            # Blended per-turn values: critic, with LOO MC substituted on
+            # eligible branched nodes. Used for both v(s_t) and bootstrap.
+            values = [
+                self._blended_value(n, excluded[i]) for i, n in enumerate(ordered)
+            ]
 
             advantages = [0.0] * n_turns
             next_adv = 0.0

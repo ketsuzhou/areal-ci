@@ -702,6 +702,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         critic_mc_c: float = 4.0,
         hybrid_mc_min_visits: int = 5,
         hybrid_critic_var_floor: float = 1e-3,
+        hybrid_critic_error_var: float = 0.05,
         branch_td_threshold: float = 0.0,
         enable_judge_process_reward: bool = False,
         judge_process_reward_beta: float = 0.2,
@@ -732,6 +733,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         # Variance-aware hybrid GAE + TD-gated branching knobs.
         self.hybrid_mc_min_visits = hybrid_mc_min_visits
         self.hybrid_critic_var_floor = hybrid_critic_var_floor
+        self.hybrid_critic_error_var = hybrid_critic_error_var
         self.branch_td_threshold = branch_td_threshold
         # LLM-judge process-reward shaping.
         self.enable_judge_process_reward = enable_judge_process_reward
@@ -851,6 +853,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             HybridGAEAdvantageComputer,
         )
 
+        # When the adaptive MC mixer is active, let HybridGAE's critic-side
+        # variance track the live critic-MSE EMA (falls back to the static prior
+        # until the EMA has been fed).
+        critic_error_var_fn = getattr(self._mc_mixer, "live_critic_error_var", None)
         self.hybrid_gae_advantage_computer = HybridGAEAdvantageComputer(
             self.tree_store,
             gamma=self.critic_gamma,
@@ -863,6 +869,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             judge_score_max=self.critic_score_max,
             mc_min_visits=self.hybrid_mc_min_visits,
             critic_var_floor=self.hybrid_critic_var_floor,
+            critic_error_var=self.hybrid_critic_error_var,
+            critic_error_var_fn=critic_error_var_fn,
         )
         # Lazily constructed on first use (needs the tokenizer).
         self._critic_value_client = None
@@ -1794,6 +1802,67 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         """Count distinct episodes in a node list."""
         return len({n.episode_id for n in nodes if n.episode_id})
 
+    def _backup_fresh_with_returns(
+        self, fresh_nodes: list[Node], judge_beta: float
+    ) -> None:
+        """Accumulate MC stats for freshly inserted episodes (deferred backup).
+
+        Called only when ``judge_beta > 0`` (the insert-time backup was skipped).
+        Every fresh episode -- scratch *and* branch -- is backed up with its own
+        per-node discounted return-to-go ``g_t`` of the dense shaped reward, so
+        ``q_value(s_t)`` estimates ``E[return-to-go]`` rather than
+        ``E[outcome]``. Crucially this is done along the episode's **full**
+        root-ward path: a branch episode's shared prefix (owned by another
+        episode) therefore accumulates a *return-to-go* sample from this episode
+        too, keeping the prefix node's MC aggregate a homogeneous set of
+        return-to-go samples. That removes the mixed-estimand bias that arises
+        when branch episodes contribute bare terminal outcomes to a shared
+        branch point while scratch episodes contribute return-to-go.
+
+        The full path is reconstructed by walking ``parent_node_id`` from the
+        episode's terminal (not by sorting on ``turn_idx``, because branch
+        suffixes restart their turn numbering at 1), so ordering is correct
+        across the branch boundary.
+        """
+        from customized_areal.tree_search.core.process_reward import (
+            build_episode_process_rewards,
+            episode_returns_to_go,
+        )
+
+        for ep_nodes in _group_nodes_by_episode(fresh_nodes):
+            ordered_fresh = sorted(ep_nodes, key=lambda n: getattr(n, "turn_idx", 0))
+            if not ordered_fresh:
+                continue
+            terminal = ordered_fresh[-1]
+            if not terminal.node_id:
+                continue
+
+            # Reconstruct the FULL causal path (branch suffix + shared prefix)
+            # by walking parents from the terminal; reverse to ascending order.
+            path: list[Node] = []
+            seen: set[str] = set()
+            current: str | None = terminal.node_id
+            while current and current not in seen:
+                node = self.tree_store.get_node(current)
+                if node is None:
+                    break
+                seen.add(current)
+                path.append(node)
+                current = node.parent_node_id
+            ordered = list(reversed(path))
+            if not ordered:
+                continue
+
+            rewards = build_episode_process_rewards(
+                ordered,
+                self.tree_store,
+                beta=judge_beta,
+                score_max=self.critic_score_max,
+            )
+            returns = episode_returns_to_go(rewards, gamma=self.critic_gamma)
+            g_by_id = {n.node_id: g for n, g in zip(ordered, returns) if n.node_id}
+            self.tree_store.backup_path_returns(terminal.node_id, g_by_id)
+
     async def _finalize_episode(
         self,
         fresh_nodes: list[Node],
@@ -1834,10 +1903,17 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         provider_client = None
         provider = None
         tokenizer = None
+        # When dense judge shaping is active, defer the MC backup until after
+        # the judge scores are annotated so it can propagate each node's
+        # return-to-go (consistent with the dense reward) instead of the bare
+        # terminal outcome. judge_beta == 0 keeps the insert-time backup.
+        defer_backup = (
+            self.enable_judge_process_reward and self.judge_process_reward_beta > 0.0
+        )
         try:
             # Insert fresh nodes into tree
             if fresh_nodes:
-                self.tree_store.insert_batch(fresh_nodes)
+                self.tree_store.insert_batch(fresh_nodes, backup=not defer_backup)
 
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
@@ -1876,6 +1952,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     )
                 await self._annotate_judge_process_rewards(
                     provider, all_nodes, data, tokenizer
+                )
+
+            # Deferred MC backup: now that judge scores exist, accumulate the
+            # per-node return-to-go for freshly inserted episodes (SCRATCH) and
+            # the terminal return for branched episodes. Skipped entirely when
+            # judge_beta == 0 (the insert-time backup already ran).
+            if defer_backup and fresh_nodes:
+                self._backup_fresh_with_returns(
+                    fresh_nodes, self.judge_process_reward_beta
                 )
 
             # Compute generative-critic state values v_phi(s_t) before advantages.
