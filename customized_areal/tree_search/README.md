@@ -302,6 +302,96 @@ byte-for-byte unchanged. Defaults: `gamma=1.0`, `lam=0.95`.
 Requires `enable_generative_critic=True` (the config auto-switches `advantage_mode` to
 `GAE` if a conflicting mode was set).
 
+#### Theoretical Foundation: GAE as λ-Return for Advantage Estimation
+
+Generalized Advantage Estimation (GAE) is the λ-return method applied to estimating the
+advantage function. Following the n-step return idea used in the λ-return formulation, we
+can list N advantage estimators of increasing horizon:
+
+```
+A_t^{(1)} = -V_θ(S_t) + R_t + γ·V_θ(S_{t+1})                              = δ_t
+A_t^{(2)} = -V_θ(S_t) + R_t + γ·R_{t+1} + γ²·V_θ(S_{t+2})                 = δ_t + γ·δ_{t+1}
+...                                                                        ...
+A_t^{(n)} = -V_θ(S_t) + R_t + γ·R_{t+1} + ... + γⁿ·V_θ(S_{t+n})           = Σ_{k=0}^{n} γ^k·δ_{t+k}
+...                                                                        ...
+A_t^{(N)} = -V_θ(S_t) + R_t + γ·R_{t+1} + ... + γ^N·R_{t+N}               = Σ_{k=0}^{N} γ^k·δ_{t+k}
+```
+
+- `A_t^{(1)}` is the 1-step TD advantage (the TD error `δ_t`).
+- `A_t^{(n)}` is the n-step advantage, trading critic bias for return variance as `n`
+  grows.
+- `A_t^{(N)}` (with `N` = episode horizon) is the pure Monte-Carlo advantage: no
+  bootstrap value, zero critic bias, but the highest variance and no credit assignment
+  within the episode.
+
+GAE's `A_t^{GAE(γ,λ)}` is the exponentially-weighted average of these n-step estimators,
+`A_t^{GAE} = (1−λ)·Σ_{n=1}^∞ λ^{n−1}·A_t^{(n)}`, which collapses to
+`(1−λ)·Σ_{k=0}^∞ (γλ)^k·δ_{t+k}` — the backward recursion implemented in
+`GAEAdvantageComputer` above. So GAE sits on a continuum between `A_t^{(1)}` (λ=0,
+pure TD) and `A_t^{(N)}` (λ=1, pure MC), interpolated by `λ`.
+
+##### Replacing `V_θ(S_t)` with Monte-Carlo estimation when the critic is untrustworthy
+
+In `A_t^{(N)} = −V_θ(S_t) + Σ_{k=0}^{N} γ^k·R_{t+k}`, the learned critic enters only
+through the leading `−V_θ(S_t)` baseline (the `+γⁿ·V_θ(S_{t+n})` bootstrap vanishes once
+`n` reaches the horizon). When `V_θ` is not trustworthy — early in training before the
+critic has regressed, on states the critic has never seen, or whenever
+`var_theta(s_t)` is large — that `−V_θ(S_t)` term injects bias directly into every
+finite-horizon estimator `A_t^{(n)}` for `n < ∞`, and even the MC estimator `A_t^{(N)}`
+inherits the bias through the baseline.
+
+The fix is to **replace `V_θ(S_t)` with a Monte-Carlo estimate of `V(s_t)`** built from
+empirical returns observed from `s_t`. In the tree-search setting, every episode that
+traverses `s_t` contributes one backed-up return, so the MCTS store already maintains
+the MC value:
+
+```
+V_mc(s_t) = (1 / N_t) · Σ_{i=1}^{N_t} G_i           # mean of returns observed from s_t
+```
+
+Substituting `V_mc(s_t)` for `V_θ(S_t)` in the N-step advantage,
+
+```
+Â_t^{(N)} = −V_mc(s_t) + Σ_{k=0}^{N} γ^k·R_{t+k}
+```
+
+removes the critic's approximation error from the baseline. Two practical refinements
+make this substitution safe in code:
+
+1. **Leave-one-out MC.** The current episode's own return `G_i` is one of the `N_t`
+   samples, so the naive `V_mc(s_t)` is self-referential when the same episode is being
+   trained. The LOO estimator `V_mc^{(-i)}(s_t) = (1/(N_t−1))·Σ_{j≠i} G_j` excludes the
+   current episode and is what `MCTSTreeStore.get_loo_value_and_variance` returns. This
+   is exactly the substitution `HybridGAEAdvantageComputer` performs on eligible
+   branched nodes.
+
+1. **Inverse-variance blending (don't fully trust MC either).** MC has high variance
+   when `N_t` is small. Rather than always replacing `V_θ` with `V_mc`, the hybrid
+   estimator uses
+
+   ```
+   v_hat = (v_mc/var_mc + v_theta/var_theta) / (1/var_mc + 1/var_theta)
+   ```
+
+   which collapses to `v_mc` when the critic variance is large (untrustworthy critic)
+   and to `v_theta` when the MC variance is large (too few samples). This is the
+   `_blended_value` override in `HybridGAEAdvantageComputer`.
+
+So the N-step → MC substitution is not a single hard swap; it is a continuum gated by
+eligibility (`need_branch` + `visit_count >= hybrid_mc_min_visits`) and weighted by
+relative variance. Mapping the theory back to the three `AdvantageMode` values:
+
+| Mode        | N-step analogue                                     | `V_θ(S_t)` treatment                            |
+| ----------- | --------------------------------------------------- | ----------------------------------------------- |
+| `GAE`       | λ-weighted blend of `A_t^{(1..N)}`                 | raw critic `v_theta(s_t)` everywhere            |
+| `HYBRID_GAE`| same λ-weighted blend, with `V_mc` baseline on eligible nodes | inverse-variance `v_hat` on branched nodes, `v_theta` elsewhere |
+| `TREE`      | `A_t^{(N)}` extreme (pure MC, no bootstrap)        | `V_mc(s_t)` (MCTS Q-value) on every node        |
+
+With `advantage_mode=HYBRID_GAE` and eligible branched nodes, the recursion effectively
+runs `A_t` with `V_mc^{(-i)}` in place of `V_θ`; with `advantage_mode=TREE`, every node
+uses the pure MC Q-value as both value and return (the `A_t^{(N)}` extreme with no
+critic at all).
+
 #### `HybridGAEAdvantageComputer` (`advantage_mode=HYBRID_GAE`)
 
 A strict subclass of `GAEAdvantageComputer` that overrides only `_blended_value`. The
