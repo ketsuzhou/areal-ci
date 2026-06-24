@@ -145,7 +145,11 @@ def find_free_ports(
     free_ports: list[int] = []
     attempted_ports = set()
 
-    # Try preferred ports first, in order.
+    # Try preferred ports first, in order. Note the final `return sorted(...)`
+    # does not preserve this ordering, so the "first free preferred port"
+    # guarantee only holds for the proxy-rollout use case where count == 1.
+    # If preferred_ports is ever used with count > 1 and callers depend on
+    # preference order in the result, return the unsorted list instead.
     for port in preferred_ports or []:
         if len(free_ports) >= count:
             break
