@@ -196,7 +196,7 @@ def create_app(state: GuardState) -> Flask:
 
         Expected JSON payload::
 
-            {"count": 5}
+            {"count": 5, "preferred_ports": [17727]}
         """
         try:
             data = request.get_json(silent=True)
@@ -213,9 +213,22 @@ def create_app(state: GuardState) -> Flask:
                     400,
                 )
 
+            preferred_ports = data.get("preferred_ports") or []
+            if not isinstance(preferred_ports, list) or not all(
+                isinstance(p, int) for p in preferred_ports
+            ):
+                return (
+                    jsonify({"error": "'preferred_ports' must be a list of integers"}),
+                    400,
+                )
+
             s = get_state()
             with s.allocated_ports_lock:
-                ports = find_free_ports(count, exclude_ports=s.allocated_ports)
+                ports = find_free_ports(
+                    count,
+                    exclude_ports=s.allocated_ports,
+                    preferred_ports=preferred_ports,
+                )
                 s.allocated_ports.update(ports)
 
             return jsonify({"status": "success", "ports": ports, "host": s.server_host})

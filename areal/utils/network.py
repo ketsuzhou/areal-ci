@@ -115,6 +115,7 @@ def find_free_ports(
     count: int,
     port_range: tuple = (10000, 32767),
     exclude_ports: set[int] | None = None,
+    preferred_ports: list[int] | None = None,
 ) -> list[int]:
     """
     Find multiple free ports within a specified range.
@@ -125,6 +126,11 @@ def find_free_ports(
             Defaults to (10000, 32767) to avoid the OS ephemeral range
             (typically 32768-60999 on Linux) which causes TOCTOU collisions.
         exclude_ports: Set of ports to exclude from search
+        preferred_ports: Optional list of ports to try first, in order, before
+            falling back to random scan. Used to pin specific worker roles
+            (e.g. proxy-rollout) to a fixed port so downstream bridges can
+            reach them deterministically. Preferred ports that are taken or
+            excluded are silently skipped.
 
     Returns:
         List of free port numbers
@@ -136,16 +142,26 @@ def find_free_ports(
         exclude_ports = set()
 
     min_port, max_port = port_range
-    free_ports = []
+    free_ports: list[int] = []
     attempted_ports = set()
+
+    # Try preferred ports first, in order.
+    for port in preferred_ports or []:
+        if len(free_ports) >= count:
+            break
+        if port in attempted_ports or port in exclude_ports:
+            continue
+        attempted_ports.add(port)
+        if is_port_free(port):
+            free_ports.append(port)
 
     # Calculate available port range
     available_range = max_port - min_port + 1 - len(exclude_ports)
 
-    if count > available_range:
+    if count > available_range + len(free_ports):
         raise ValueError(
             f"Cannot find {count} ports in range {port_range}. "
-            f"Only {available_range} ports available."
+            f"Only {available_range + len(free_ports)} ports available."
         )
 
     max_attempts = count * 10  # Reasonable limit to avoid infinite loops
