@@ -26,6 +26,25 @@ from customized_areal.tree_search.dag.execution_dag import (
     EdgeType,
     ExecutionDAG,
 )
+from customized_areal.tree_search.dag.integration import (
+    BranchCandidate,
+    BranchMaterializationResult,
+    BranchMaterializer,
+    BranchStarter,
+    MulticaIssueForker,
+    cleanup_cloud_branch,
+    finalize_with_verifier,
+    materialize_cloud_branch,
+)
+from customized_areal.tree_search.dag.rl_session import (
+    RLBridgeClient,
+    RLSessionRewardWriter,
+)
+from customized_areal.tree_search.dag.verifier import (
+    ObjectiveVerifier,
+    Verifier,
+    VerifierResult,
+)
 
 __all__ = [
     # execution_dag
@@ -42,4 +61,20 @@ __all__ = [
     "ForkResult",
     "SnapshotError",
     "SnapshotResult",
+    # verifier (Phase 2 slice)
+    "ObjectiveVerifier",
+    "Verifier",
+    "VerifierResult",
+    # rl_session
+    "RLBridgeClient",
+    "RLSessionRewardWriter",
+    # integration
+    "BranchCandidate",
+    "BranchMaterializationResult",
+    "BranchMaterializer",
+    "BranchStarter",
+    "MulticaIssueForker",
+    "cleanup_cloud_branch",
+    "finalize_with_verifier",
+    "materialize_cloud_branch",
 ]
