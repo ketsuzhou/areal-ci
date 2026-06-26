@@ -52,6 +52,11 @@ class Node:
     entropy_stats: dict[str, Any] | None = None
     need_branch: bool = False
     branch_sandbox_id: str | None = None
+    # Cloud-env branch refs (Phase 3 slice; used by the Phase 4 BranchMaterializer
+    # / cleanup path). branch_env_snapshot_id marks a node as a cloud-env branch
+    # candidate; branch_issue_id is the forked Multica issue to clean up.
+    branch_issue_id: str | None = None
+    branch_env_snapshot_id: str | None = None
 
     # Reward
     outcome_reward: float = 0.0
