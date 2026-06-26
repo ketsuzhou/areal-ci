@@ -1,3 +1,9 @@
+# NOTE: only torch-free, dependency-light symbols (config enums/dataclasses) are
+# imported eagerly. Torch-heavy symbols (advantage / checkpoint / tree_store) and
+# distillation types (which pull optional deps like ``openai``) are loaded lazily
+# via ``__getattr__`` below, so torch-free subpackages such as
+# ``customized_areal.tree_search.dag`` can be imported and unit-tested without the
+# training stack installed.
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
@@ -5,19 +11,6 @@ from customized_areal.tree_search.config import (
     DistillKLMode,
     LossMode,
     RolloutCacheConfig,
-)
-from customized_areal.tree_search.core.advantage import (
-    GAEAdvantageComputer,
-    HybridGAEAdvantageComputer,
-    TreeAdvantageComputer,
-)
-from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
-from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
-from customized_areal.tree_search.distilling.distill_types import (
-    DiagnosisTurn,
-    EpisodeDiagnosis,
-    InteractionWithTokenLevelReward,
-    PositionRewardInfo,
 )
 
 __all__ = [
@@ -43,6 +36,37 @@ __all__ = [
 
 
 def __getattr__(name):
+    # Lazy imports for torch-heavy core components (keeps the package importable
+    # without torch for torch-free subpackages like ``dag``).
+    if name == "TreeAdvantageComputer":
+        from .core.advantage import TreeAdvantageComputer
+
+        return TreeAdvantageComputer
+    if name == "GAEAdvantageComputer":
+        from .core.advantage import GAEAdvantageComputer
+
+        return GAEAdvantageComputer
+    if name == "HybridGAEAdvantageComputer":
+        from .core.advantage import HybridGAEAdvantageComputer
+
+        return HybridGAEAdvantageComputer
+    if name == "TreeCheckpointManager":
+        from .core.checkpoint import TreeCheckpointManager
+
+        return TreeCheckpointManager
+    if name in ("MCTSTreeStore", "Node"):
+        from .core import tree_store
+
+        return getattr(tree_store, name)
+    if name in (
+        "DiagnosisTurn",
+        "EpisodeDiagnosis",
+        "InteractionWithTokenLevelReward",
+        "PositionRewardInfo",
+    ):
+        from .distilling import distill_types
+
+        return getattr(distill_types, name)
     # Lazy imports for distillation components
     if name == "OnPolicyDistillConfig":
         from .distilling.config import OnPolicyDistillConfig
