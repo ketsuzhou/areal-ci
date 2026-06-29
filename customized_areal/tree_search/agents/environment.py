@@ -203,3 +203,135 @@ class FleetSandboxProvider:
             raise EnvironmentError(
                 f"cleanup failed: status={resp.status_code} body={resp.text[:200]}"
             )
+
+
+class MulticaSweLegoProvider:
+    """:class:`ForkableEnvironment` backed by multica's cloud-runtime proxy.
+
+    Calls the EXISTING endpoints that ``cloud_runtime.go`` already exposes
+    (``server/internal/handler/cloud_runtime.go:108-127``):
+      POST /api/v1/sandboxes/{id}/snapshot  → SnapshotResult
+      POST /api/v1/sandboxes/fork           → ForkResult
+      POST /api/v1/sandboxes/{id}/restore   → None
+      DELETE /api/v1/sandboxes/{id}         → None   (idempotent on 404)
+
+    Identical surface to :class:`FleetSandboxProvider` so :class:`BranchMaterializer`
+    is unchanged — only the injected provider class differs. ``base_url`` /
+    ``api_key`` default to ``MULTICA_BASE_URL`` / ``MULTICA_API_KEY``.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        transport: httpx.BaseTransport | None = None,
+        timeout: float = 60.0,
+        api_key: str | None = None,
+        max_concurrent_forks: int | None = None,
+    ) -> None:
+        self._base_url = (base_url or os.environ.get("MULTICA_BASE_URL") or "").rstrip(
+            "/"
+        )
+        if not self._base_url:
+            raise ValueError(
+                "MulticaSweLegoProvider requires base_url or MULTICA_BASE_URL"
+            )
+        self._api_key = api_key or os.environ.get("MULTICA_API_KEY")
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url, timeout=timeout, transport=transport
+        )
+
+        cap = max_concurrent_forks
+        if cap is None:
+            try:
+                cap = int(os.environ.get("GROUP_SIZE", "2"))
+            except ValueError:
+                cap = 2
+        if cap < 1:
+            raise ValueError(f"max_concurrent_forks must be >= 1, got {cap}")
+        self._fork_semaphore = asyncio.Semaphore(cap)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def snapshot(self, sandbox_id: str) -> SnapshotResult:
+        try:
+            resp = await self._client.post(
+                f"/api/v1/sandboxes/{sandbox_id}/snapshot",
+                headers=self._headers(),
+            )
+        except httpx.HTTPError as exc:
+            raise SnapshotError(f"snapshot transport error: {exc}") from exc
+        if resp.status_code != 200:
+            raise SnapshotError(
+                f"snapshot failed: status={resp.status_code} body={resp.text[:200]}"
+            )
+        body = resp.json()
+        snap_id = body.get("snapshot_id")
+        if not isinstance(snap_id, str) or not snap_id:
+            raise SnapshotError(f"snapshot response missing snapshot_id: {body!r}")
+        return SnapshotResult(snapshot_id=snap_id, source_sandbox_id=sandbox_id)
+
+    async def fork(
+        self,
+        *,
+        source_sandbox_id: str | None = None,
+        snapshot_id: str | None = None,
+    ) -> ForkResult:
+        if (source_sandbox_id is None) == (snapshot_id is None):
+            raise ValueError(
+                "fork requires exactly one of source_sandbox_id or snapshot_id"
+            )
+        payload: dict[str, str] = {}
+        if source_sandbox_id is not None:
+            payload["source_sandbox_id"] = source_sandbox_id
+        if snapshot_id is not None:
+            payload["snapshot_id"] = snapshot_id
+        async with self._fork_semaphore:
+            try:
+                resp = await self._client.post(
+                    "/api/v1/sandboxes/fork", json=payload, headers=self._headers()
+                )
+            except httpx.HTTPError as exc:
+                raise ForkError(f"fork transport error: {exc}") from exc
+        if resp.status_code != 200:
+            raise ForkError(
+                f"fork failed: status={resp.status_code} body={resp.text[:200]}"
+            )
+        body = resp.json()
+        sbx_id = body.get("sandbox_id")
+        if not isinstance(sbx_id, str) or not sbx_id:
+            raise ForkError(f"fork response missing sandbox_id: {body!r}")
+        return ForkResult(sandbox_id=sbx_id)
+
+    async def restore(self, sandbox_id: str) -> None:
+        try:
+            resp = await self._client.post(
+                f"/api/v1/sandboxes/{sandbox_id}/restore", headers=self._headers()
+            )
+        except httpx.HTTPError as exc:
+            raise EnvironmentError(f"restore transport error: {exc}") from exc
+        if resp.status_code not in (200, 204):
+            raise EnvironmentError(
+                f"restore failed: status={resp.status_code} body={resp.text[:200]}"
+            )
+
+    async def cleanup(self, sandbox_id: str) -> None:
+        try:
+            resp = await self._client.delete(
+                f"/api/v1/sandboxes/{sandbox_id}", headers=self._headers()
+            )
+        except httpx.HTTPError as exc:
+            raise EnvironmentError(f"cleanup transport error: {exc}") from exc
+        if resp.status_code == 404:
+            return
+        if resp.status_code not in (200, 204):
+            raise EnvironmentError(
+                f"cleanup failed: status={resp.status_code} body={resp.text[:200]}"
+            )

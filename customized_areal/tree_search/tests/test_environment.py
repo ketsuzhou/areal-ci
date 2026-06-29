@@ -21,6 +21,7 @@ from customized_areal.tree_search.agents.environment import (
     FleetSandboxProvider,
     ForkableEnvironment,
     ForkResult,
+    MulticaSweLegoProvider,
     SnapshotResult,
 )
 
@@ -310,3 +311,98 @@ def test_dag_package_exports_environment_types() -> None:
     assert ExportedProtocol is ForkableEnvironment
     assert ExportedForkResult is ForkResult
     assert ExportedSnapshotResult is SnapshotResult
+
+
+# -- MulticaSweLegoProvider -------------------------------------------------
+
+
+def test_multica_provider_requires_base_url(monkeypatch):
+    monkeypatch.delenv("MULTICA_BASE_URL", raising=False)
+    with pytest.raises(ValueError, match="MulticaSweLegoProvider requires base_url"):
+        MulticaSweLegoProvider()
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_hits_cloud_runtime_path():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        assert request.headers["Authorization"] == "Bearer secret"
+        return httpx.Response(200, json={"snapshot_id": "snap-1"})
+
+    transport = _router({("POST", "/api/v1/sandboxes/sbx-1/snapshot"): handler})
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", api_key="secret", transport=transport
+    )
+    result = await prov.snapshot("sbx-1")
+    assert result == SnapshotResult(snapshot_id="snap-1", source_sandbox_id="sbx-1")
+    assert seen == ["POST /api/v1/sandboxes/sbx-1/snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_fork_sends_source_sandbox_id():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"sandbox_id": "forked-1"})
+
+    transport = _router({("POST", "/api/v1/sandboxes/fork"): handler})
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport, max_concurrent_forks=2
+    )
+    result = await prov.fork(source_sandbox_id="sbx-1")
+    assert result == ForkResult(sandbox_id="forked-1")
+    assert captured["body"] == {"source_sandbox_id": "sbx-1"}
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_cleanup_treats_404_as_success():
+    transport = _router(
+        {("DELETE", "/api/v1/sandboxes/gone*"): lambda r: httpx.Response(404, json={})}
+    )
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    await prov.cleanup("gone")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_error_on_500():
+    transport = _router(
+        {
+            ("POST", "/api/v1/sandboxes/sbx-1/snapshot*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
+    )
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.SnapshotError):
+        await prov.snapshot("sbx-1")
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_fork_error_on_500():
+    transport = _router(
+        {
+            ("POST", "/api/v1/sandboxes/fork*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
+    )
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.ForkError):
+        await prov.fork(source_sandbox_id="sbx-1")
+
+
+def test_multica_provider_satisfies_forkable_environment_protocol():
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example",
+        transport=_router({}),
+    )
+    assert isinstance(prov, ForkableEnvironment)
