@@ -39,6 +39,11 @@ class Config:
     checkpoint_dir: str = ""
     advantage_mode: AdvantageMode = AdvantageMode.TREE
     loss_mode: LossMode = LossMode.GRPO
+    # Weight of the co-trained generative-critic value loss in the combined
+    # actor+critic objective (``actor_PG + critic_loss_weight * critic_value_loss``)
+    # when ``advantage_mode == GAE`` for DAG runs (Phase 3). Start small to limit
+    # gradient interference on the shared trunk.
+    critic_loss_weight: float = 0.5
     max_reasoning_tokens: int = 1000
     rl_loss_weight: float = 1.0
     distill_loss_weight: float = 0.005
@@ -174,6 +179,10 @@ class Config:
 
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
+        if self.critic_loss_weight < 0:
+            raise ValueError(
+                f"critic_loss_weight must be >= 0, got {self.critic_loss_weight}"
+            )
         if self.initial_group_size < 1:
             raise ValueError(
                 f"initial_group_size must be >= 1, got {self.initial_group_size}"

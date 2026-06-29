@@ -1478,6 +1478,7 @@ When `tree_search.enable_generative_critic=true`, the **actor's own model** (sam
 weights, same SGLang server) doubles as a **generative critic** that scores
 partial-solution states, and those scores drive **GAE** advantages for the actor.
 
+
 ### How it works
 
 1. **Value computation (rollout).** For each turn `t` of an episode, the critic prompt

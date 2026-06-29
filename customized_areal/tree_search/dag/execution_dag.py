@@ -51,6 +51,11 @@ class AgentRunNode:
     issue_id: str
     task_id: str
 
+    # RL session assigned to this run at ``rl_start_session`` time. The verifier
+    # agent addresses rewards per ``session_id`` (design decision 3). ``None``
+    # until a session is started (or for replayed/historical nodes).
+    session_id: str | None = None
+
     # Branch boundary: the (task_id, seq) step this run can be forked at.
     branch_seq: int | None = None
 
@@ -62,6 +67,11 @@ class AgentRunNode:
     # floats so the DAG stays torch-free; the training Node carries tensors.
     process_reward: float = 0.0
     outcome_reward: float = 0.0
+
+    # Critic value V_{t+1}: the next-state value the generative critic produced
+    # when this run's turn completed (framework B global trajectory, Phase 3).
+    # ``None`` until the critic scores it.
+    value: float | None = None
 
     metadata: dict = field(default_factory=dict)
 
@@ -161,6 +171,37 @@ class ExecutionDAG:
 
     def out_degree(self, node_id: str) -> int:
         return len(self._out[node_id])
+
+    # -- RL session mapping ----------------------------------------------
+
+    def set_session_id(self, node_id: str, session_id: str) -> None:
+        """Bind an RL ``session_id`` to a run (called at ``rl_start_session``)."""
+        self.get(node_id).session_id = session_id
+
+    def session_map(self) -> dict[str, str | None]:
+        """Return ``{node_id: session_id}`` for every run in the DAG.
+
+        Session-less runs (no ``rl_start_session`` yet) map to ``None``. The
+        verifier agent uses this to address per-agent rewards by ``session_id``.
+        """
+        return {nid: node.session_id for nid, node in self._nodes.items()}
+
+    # -- serialization ---------------------------------------------------
+
+    def to_records(self) -> tuple[list[dict], list[dict]]:
+        """Serialize to ``(runs, edges)`` records for a checkpoint round-trip.
+
+        The inverse of :meth:`from_records` with explicit edges. Every
+        ``AgentRunNode`` field (including ``session_id`` and the ``branch_*``
+        provenance) is emitted so the DAG can be reconstructed verbatim.
+        """
+        from dataclasses import asdict
+
+        runs = [asdict(node) for node in self._nodes.values()]
+        edges = [
+            {"src": e.src, "dst": e.dst, "type": e.type.value} for e in self._edges
+        ]
+        return runs, edges
 
     # -- structural queries ---------------------------------------------
 
