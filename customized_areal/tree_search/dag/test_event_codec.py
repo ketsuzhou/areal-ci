@@ -28,6 +28,7 @@ from customized_areal.tree_search.dag.execution_dag import (
     EdgeType,
     ExecutionDAG,
 )
+from customized_areal.tree_search.dag.gae import GlobalEvent, events_from_nodes
 
 ORDER = ["O0", "R0", "C0", "T0", "C1", "O1"]
 EDGES = [
@@ -239,3 +240,31 @@ def test_replay_prefix_for_ambiguous_branch_point_raises() -> None:
     events = dag_to_events(dag, ordering=ORDER)
     with pytest.raises(DAGError):
         replay_prefix_for(events, branch_point=("task-dup", 42))
+
+
+def _old_events_from_nodes(ordered_nodes):
+    """Snapshot of the pre-refactor logic, for parity comparison."""
+    out = []
+    for node in ordered_nodes:
+        value = getattr(node, "value", None)
+        out.append(
+            GlobalEvent(
+                node_id=node.node_id,
+                value=float(value) if value is not None else 0.0,
+                reward=float(node.process_reward) + float(node.outcome_reward),
+            )
+        )
+    return out
+
+
+def test_events_from_nodes_parity_with_old_logic() -> None:
+    dag = _build_dag()
+    nodes = [dag.get(nid) for nid in ORDER]
+    assert events_from_nodes(nodes) == _old_events_from_nodes(nodes)
+
+
+def test_events_from_nodes_unscored_value_is_zero() -> None:
+    node = AgentRunNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
+    node.process_reward = 0.25
+    (ev,) = events_from_nodes([node])
+    assert ev == GlobalEvent(node_id="n", value=0.0, reward=0.25)
