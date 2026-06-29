@@ -603,15 +603,10 @@ git commit -m "feat(swe-lego): add Dockerfile template for daemon-in-docker imag
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests, but pointing at the multica cloud-runtime proxy paths and `MULTICA_BASE_URL`/`MULTICA_API_KEY` env):
+Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests, but pointing at the multica cloud-runtime proxy paths and `MULTICA_BASE_URL`/`MULTICA_API_KEY` env). The existing test file already imports `FleetSandboxProvider`, `ForkableEnvironment`, `ForkResult`, `SnapshotResult` at the top and aliases the environment module as `env_mod` — **add `MulticaSweLegoProvider` to that existing import (alphabetical order, between `ForkResult` and `SnapshotResult`) and use the `env_mod.` prefix for the error types** (`env_mod.SnapshotError`, `env_mod.ForkError`) instead of introducing a separate mid-file import block. Match the existing test file's `@pytest.mark.asyncio` + `async def` + `await` style rather than `asyncio.run(...)`:
 
 ```python
-from customized_areal.tree_search.agents.environment import (
-    EnvironmentError,
-    ForkError,
-    MulticaSweLegoProvider,
-    SnapshotError,
-)
+# -- MulticaSweLegoProvider -------------------------------------------------
 
 
 def test_multica_provider_requires_base_url(monkeypatch):
@@ -620,10 +615,11 @@ def test_multica_provider_requires_base_url(monkeypatch):
         MulticaSweLegoProvider()
 
 
-def test_multica_provider_snapshot_hits_cloud_runtime_path():
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_hits_cloud_runtime_path():
     seen: list[str] = []
 
-    def handler(request: httpx.Request):
+    def handler(request: httpx.Request) -> httpx.Response:
         seen.append(f"{request.method} {request.url.path}")
         assert request.headers["Authorization"] == "Bearer secret"
         return httpx.Response(200, json={"snapshot_id": "snap-1"})
@@ -632,15 +628,16 @@ def test_multica_provider_snapshot_hits_cloud_runtime_path():
     prov = MulticaSweLegoProvider(
         base_url="https://multica.example", api_key="secret", transport=transport
     )
-    result = asyncio.run(prov.snapshot("sbx-1"))
+    result = await prov.snapshot("sbx-1")
     assert result == SnapshotResult(snapshot_id="snap-1", source_sandbox_id="sbx-1")
     assert seen == ["POST /api/v1/sandboxes/sbx-1/snapshot"]
 
 
-def test_multica_provider_fork_sends_source_sandbox_id():
+@pytest.mark.asyncio
+async def test_multica_provider_fork_sends_source_sandbox_id():
     captured: dict = {}
 
-    def handler(request: httpx.Request):
+    def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"sandbox_id": "forked-1"})
 
@@ -648,35 +645,52 @@ def test_multica_provider_fork_sends_source_sandbox_id():
     prov = MulticaSweLegoProvider(
         base_url="https://multica.example", transport=transport, max_concurrent_forks=2
     )
-    result = asyncio.run(prov.fork(source_sandbox_id="sbx-1"))
+    result = await prov.fork(source_sandbox_id="sbx-1")
     assert result == ForkResult(sandbox_id="forked-1")
     assert captured["body"] == {"source_sandbox_id": "sbx-1"}
 
 
-def test_multica_provider_cleanup_treats_404_as_success():
+@pytest.mark.asyncio
+async def test_multica_provider_cleanup_treats_404_as_success():
     transport = _router(
         {("DELETE", "/api/v1/sandboxes/gone*"): lambda r: httpx.Response(404, json={})}
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    asyncio.run(prov.cleanup("gone"))  # must not raise
-
-
-def test_multica_provider_snapshot_error_on_500():
-    transport = _router(
-        {("POST", "/api/v1/sandboxes/sbx-1/snapshot*"): lambda r: httpx.Response(500, text="boom")}
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    with pytest.raises(SnapshotError):
-        asyncio.run(prov.snapshot("sbx-1"))
+    await prov.cleanup("gone")  # must not raise
 
 
-def test_multica_provider_fork_error_on_500():
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_error_on_500():
     transport = _router(
-        {("POST", "/api/v1/sandboxes/fork*"): lambda r: httpx.Response(500, text="boom")}
+        {
+            ("POST", "/api/v1/sandboxes/sbx-1/snapshot*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    with pytest.raises(ForkError):
-        asyncio.run(prov.fork(source_sandbox_id="sbx-1"))
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.SnapshotError):
+        await prov.snapshot("sbx-1")
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_fork_error_on_500():
+    transport = _router(
+        {
+            ("POST", "/api/v1/sandboxes/fork*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
+    )
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.ForkError):
+        await prov.fork(source_sandbox_id="sbx-1")
 
 
 def test_multica_provider_satisfies_forkable_environment_protocol():
