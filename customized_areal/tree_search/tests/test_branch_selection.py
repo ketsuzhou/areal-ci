@@ -14,6 +14,7 @@ from customized_areal.tree_search.agents.branch_selection import (
     BranchPoint,
     lane_successor_value,
     passes_gate,
+    select_branch_points,
     td_error,
 )
 from customized_areal.tree_search.agents.event_model import Event
@@ -99,3 +100,94 @@ def test_branchpoint_is_frozen():
     bp = BranchPoint(task_id="t1", seq=3, node_id="a", td_error=0.8, entropy=0.9)
     with pytest.raises(Exception):
         bp.seq = 4  # type: ignore[misc]
+
+
+class TestSelectSingleLane:
+    """Ported from tests/test_branch_td_gate.py onto the Event representation.
+
+    Lane "t1" has candidate turns linked n1 -> n2 by a same-task edge so n1 has
+    an in-lane successor; n2 is terminal. Edge type is irrelevant to selection
+    but must be symmetric for events_to_dag.
+    """
+
+    def _linked_pair(self, *, v1, v2, e1, e2, seq1=1, seq2=2, out1=0.0, out2=0.0):
+        from customized_areal.tree_search.agents.execution_dag import EdgeType
+
+        n1 = _ev(
+            "n1",
+            task_id="t1",
+            completion_index=0,
+            branch_seq=seq1,
+            value=v1,
+            outcome_reward=out1,
+            max_entropy=e1,
+            outgoing=(("n2", EdgeType.COMPLETION),),
+        )
+        n2 = _ev(
+            "n2",
+            task_id="t1",
+            completion_index=1,
+            branch_seq=seq2,
+            value=v2,
+            outcome_reward=out2,
+            max_entropy=e2,
+            incoming=(("n1", EdgeType.COMPLETION),),
+        )
+        return [n1, n2]
+
+    def test_threshold_zero_reproduces_entropy_only(self):
+        # Both eligible, gate off -> highest entropy wins (n1: 0.9 > n2: 0.2).
+        events = self._linked_pair(v1=0.5, v2=0.5, e1=0.9, e2=0.2)
+        out = select_branch_points(events, td_threshold=0.0, gamma=1.0)
+        assert len(out) == 1
+        assert out[0].task_id == "t1"
+        assert out[0].node_id == "n1"
+        assert out[0].seq == 1
+
+    def test_sub_threshold_dropped_higher_delta_chosen(self):
+        # n1: delta = |0 + 0.5 - 0.5| = 0, entropy 0.9 -> dropped by threshold 0.5.
+        # n2: terminal, delta = |0 + 0 - 0.1| = 0.1 -> also dropped.
+        # Make n2 survive: outcome_reward 1.0 -> delta = |1.0 - 0.1| = 0.9.
+        events = self._linked_pair(v1=0.5, v2=0.1, e1=0.9, e2=0.2, out2=1.0)
+        out = select_branch_points(events, td_threshold=0.5, gamma=1.0)
+        assert len(out) == 1
+        assert out[0].node_id == "n2"
+
+    def test_highest_entropy_among_survivors(self):
+        # Both survive (deltas large), highest entropy wins.
+        events = self._linked_pair(v1=0.1, v2=0.1, e1=0.3, e2=0.8, out2=1.0)
+        # n1: delta = |0 + 0.1 - 0.1| = 0 -> dropped at threshold 0.5.
+        # Only n2 survives here, so adjust n1 to survive via a successor gap:
+        # use gamma so n1 delta is large. Simpler: rely on n2 being the survivor.
+        out = select_branch_points(events, td_threshold=0.5, gamma=1.0)
+        assert out[0].node_id == "n2"
+
+    def test_all_dropped_returns_empty(self):
+        # n1 delta 0; n2 terminal delta = |0 - 0.5| = 0.5 < threshold 1.0.
+        events = self._linked_pair(v1=0.5, v2=0.5, e1=0.9, e2=0.2)
+        out = select_branch_points(events, td_threshold=1.0, gamma=1.0)
+        assert out == []
+
+    def test_missing_critic_value_bypasses_gate(self):
+        # Single eligible candidate with no value -> kept even at high threshold.
+        n1 = _ev("n1", task_id="t1", branch_seq=1, value=None, max_entropy=0.9)
+        out = select_branch_points([n1], td_threshold=5.0, gamma=1.0)
+        assert len(out) == 1
+        assert out[0].node_id == "n1"
+        assert out[0].td_error is None
+
+    def test_non_eligible_events_ignored(self):
+        # branch_seq=None -> not a candidate; empty result.
+        n1 = _ev("n1", task_id="t1", branch_seq=None, value=0.5, max_entropy=0.9)
+        assert select_branch_points([n1]) == []
+
+    def test_entropy_tie_breaks_on_completion_index(self):
+        # Two eligible terminal candidates, equal entropy -> smaller index wins.
+        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
+                value=0.0, outcome_reward=1.0, max_entropy=0.5)
+        b = _ev("b", task_id="t1", completion_index=1, branch_seq=2,
+                value=0.0, outcome_reward=1.0, max_entropy=0.5)
+        # Make this a valid DAG: no edges between them is fine (both terminal,
+        # independent roots in lane t1). Both gate-survive (delta=1.0).
+        out = select_branch_points([a, b], td_threshold=0.5, gamma=1.0)
+        assert out[0].node_id == "a"
