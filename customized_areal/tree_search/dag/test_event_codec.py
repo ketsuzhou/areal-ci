@@ -137,7 +137,17 @@ def test_events_to_dag_rejects_non_dense_index() -> None:
     dag = _build_dag()
     events = list(dag_to_events(dag, ordering=ORDER))
     events[2] = replace(events[2], completion_index=0)
-    with pytest.raises(DAGError):
+    with pytest.raises(DAGError, match="dense"):
+        events_to_dag(events)
+
+
+def test_events_to_dag_rejects_duplicate_node_id() -> None:
+    dag = _build_dag()
+    events = list(dag_to_events(dag, ordering=ORDER))
+    # Reuse O0's node_id for R0 while keeping completion_index dense and unique
+    # so the duplicate-node_id branch fires (not the density check).
+    events[1] = replace(events[1], node_id=events[0].node_id)
+    with pytest.raises(DAGError, match="duplicate node_id"):
         events_to_dag(events)
 
 
@@ -150,7 +160,7 @@ def test_events_to_dag_rejects_asymmetric_edges() -> None:
         else e
         for e in events
     ]
-    with pytest.raises(DAGError):
+    with pytest.raises(DAGError, match="symmetry mismatch"):
         events_to_dag(events)
 
 
@@ -165,7 +175,7 @@ def test_events_to_dag_rejects_non_topological_index() -> None:
             swapped.append(replace(e, completion_index=0))
         else:
             swapped.append(e)
-    with pytest.raises(DAGError):
+    with pytest.raises(DAGError, match="not topological"):
         events_to_dag(swapped)
 
 
