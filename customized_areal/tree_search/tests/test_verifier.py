@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.verifier import (
+from customized_areal.tree_search.agents.verifier import (
     ObjectiveVerifier,
     Verifier,
     VerifierResult,

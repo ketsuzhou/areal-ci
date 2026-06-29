@@ -114,7 +114,7 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     Duck-typed against ``AgentRunNode``; identity fields are read defensively so
     minimal node-likes still work (they do not affect the projection).
     """
-    from customized_areal.tree_search.dag.event_model import Event
+    from customized_areal.tree_search.agents.event_model import Event
 
     events: list[GlobalEvent] = []
     for idx, node in enumerate(ordered_nodes):

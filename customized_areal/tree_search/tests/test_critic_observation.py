@@ -17,7 +17,7 @@ Torch-free.
 
 from __future__ import annotations
 
-from customized_areal.tree_search.dag.critic_observation import (
+from customized_areal.tree_search.agents.critic_observation import (
     DEFAULT_CRITIC_FIELDS,
     CriticObservation,
     build_critic_observations,

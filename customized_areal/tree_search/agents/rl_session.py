@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
-from customized_areal.tree_search.dag.verifier import VerifierResult
+from customized_areal.tree_search.agents.verifier import VerifierResult
 
 logger = logging.getLogger("RLSessionRewardWriter")
 

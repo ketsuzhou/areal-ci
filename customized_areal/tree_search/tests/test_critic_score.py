@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.critic_score import (
+from customized_areal.tree_search.agents.critic_score import (
     SCORE_BUCKETS,
     build_critic_score_prompt,
     expected_value_from_logits_py,
@@ -79,7 +79,7 @@ def test_expected_value_two_point_distribution() -> None:
 
 def test_expected_score_value_torch_matches_reference_and_is_differentiable() -> None:
     torch = pytest.importorskip("torch")
-    from customized_areal.tree_search.dag.critic_score import expected_score_value
+    from customized_areal.tree_search.agents.critic_score import expected_score_value
 
     logits = torch.tensor(
         [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0]],

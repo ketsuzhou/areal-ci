@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.asyncio
 async def test_concurrency_semaphore_caps_forks_at_group_size_8() -> None:
     """Fire 8 concurrent forks; the semaphore caps in-flight at the configured max."""
-    from customized_areal.tree_search.dag.environment import FleetSandboxProvider
+    from customized_areal.tree_search.agents.environment import FleetSandboxProvider
 
     provider = FleetSandboxProvider(max_concurrent_forks=4)
     try:

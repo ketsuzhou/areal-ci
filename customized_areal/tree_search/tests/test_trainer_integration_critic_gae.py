@@ -20,7 +20,7 @@ _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 def test_combined_actor_critic_loss_weights_and_backprops() -> None:
     torch = pytest.importorskip("torch")
-    from customized_areal.tree_search.dag.critic_advantage import (
+    from customized_areal.tree_search.agents.critic_advantage import (
         combined_actor_critic_loss,
     )
 

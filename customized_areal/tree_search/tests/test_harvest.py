@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 
-from customized_areal.tree_search.dag.agentic_verifier import AgenticVerifier
-from customized_areal.tree_search.dag.harvest import (
+from customized_areal.tree_search.agents.agentic_verifier import AgenticVerifier
+from customized_areal.tree_search.agents.harvest import (
     FinalizeResult,
     VerifierFinalizer,
 )

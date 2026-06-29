@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from customized_areal.tree_search.dag.agentic_verifier import (
+from customized_areal.tree_search.agents.agentic_verifier import (
     AgenticVerifier,
     VerifierRun,
 )

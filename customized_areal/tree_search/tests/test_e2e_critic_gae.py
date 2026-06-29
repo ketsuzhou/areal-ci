@@ -21,14 +21,14 @@ import json
 
 import pytest
 
-from customized_areal.tree_search.dag.agentic_verifier import AgenticVerifier
-from customized_areal.tree_search.dag.dag_advantage import assemble_node_advantages
-from customized_areal.tree_search.dag.execution_dag import (
+from customized_areal.tree_search.agents.agentic_verifier import AgenticVerifier
+from customized_areal.tree_search.agents.dag_advantage import assemble_node_advantages
+from customized_areal.tree_search.agents.execution_dag import (
     AgentRunNode,
     EdgeType,
     ExecutionDAG,
 )
-from customized_areal.tree_search.dag.harvest import VerifierFinalizer
+from customized_areal.tree_search.agents.harvest import VerifierFinalizer
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 

@@ -13,7 +13,7 @@ To run against a live stack:
        export MULTICA_API_KEY=mul_...
        export FLEET_BASE_URL=http://localhost:...
        export FLEET_API_KEY=...
-  4. Run: pytest customized_areal/tree_search/dag/test_e2e_branch_lifecycle.py -v
+  4. Run: pytest customized_areal/tree_search/agents/test_e2e_branch_lifecycle.py -v
 
 For v1 this is a smoke check that the providers construct and the Fleet
 endpoint is reachable; a full run that provisions a live issue + sandbox is a
@@ -37,8 +37,8 @@ async def test_branch_lifecycle_at_group_size_2() -> None:
     """Smoke-check the full chain wiring: providers construct + Fleet reachable."""
     import httpx
 
-    from customized_areal.tree_search.dag.environment import FleetSandboxProvider
-    from customized_areal.tree_search.dag.integration import MulticaIssueForker
+    from customized_areal.tree_search.agents.environment import FleetSandboxProvider
+    from customized_areal.tree_search.agents.integration import MulticaIssueForker
 
     env = FleetSandboxProvider()  # reads FLEET_BASE_URL / FLEET_API_KEY
     forker = MulticaIssueForker()  # reads MULTICA_BASE_URL / MULTICA_API_KEY

@@ -2,7 +2,7 @@
 # imported eagerly. Torch-heavy symbols (advantage / checkpoint / tree_store) and
 # distillation types (which pull optional deps like ``openai``) are loaded lazily
 # via ``__getattr__`` below, so torch-free subpackages such as
-# ``customized_areal.tree_search.dag`` can be imported and unit-tested without the
+# ``customized_areal.tree_search.agents`` can be imported and unit-tested without the
 # training stack installed.
 from customized_areal.tree_search.config import (
     AdvantageMode,

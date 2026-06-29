@@ -14,12 +14,12 @@ from __future__ import annotations
 import pytest
 
 from customized_areal.tree_search.config import Config
-from customized_areal.tree_search.dag.dag_advantage import (
+from customized_areal.tree_search.agents.dag_advantage import (
     AssembledAdvantages,
     assemble_node_advantages,
     explained_variance,
 )
-from customized_areal.tree_search.dag.execution_dag import AgentRunNode
+from customized_areal.tree_search.agents.execution_dag import AgentRunNode
 
 
 def _node(nid: str, *, value: float, process: float = 0.0, outcome: float = 0.0):

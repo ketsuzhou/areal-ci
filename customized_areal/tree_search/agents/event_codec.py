@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from customized_areal.tree_search.dag.event_model import Event, message_timeline
-from customized_areal.tree_search.dag.execution_dag import (
+from customized_areal.tree_search.agents.event_model import Event, message_timeline
+from customized_areal.tree_search.agents.execution_dag import (
     AgentRunNode,
     DAGError,
     EdgeType,

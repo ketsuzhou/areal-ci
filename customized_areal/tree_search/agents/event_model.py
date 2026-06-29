@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from customized_areal.tree_search.dag.execution_dag import DAGError, EdgeType
+from customized_areal.tree_search.agents.execution_dag import DAGError, EdgeType
 
 EdgeRef = tuple[str, EdgeType]
 

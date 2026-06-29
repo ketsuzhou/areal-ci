@@ -1,4 +1,4 @@
-"""Contract tests for :mod:`customized_areal.tree_search.dag.environment`.
+"""Contract tests for :mod:`customized_areal.tree_search.agents.environment`.
 
 The ``_FakeEnv`` provider stands in for the real Fleet provider to exercise the
 Protocol contract (ordering, return shapes). ``FleetSandboxProvider`` tests use
@@ -16,8 +16,8 @@ from collections.abc import Awaitable, Callable
 import httpx
 import pytest
 
-import customized_areal.tree_search.dag.environment as env_mod
-from customized_areal.tree_search.dag.environment import (
+import customized_areal.tree_search.agents.environment as env_mod
+from customized_areal.tree_search.agents.environment import (
     FleetSandboxProvider,
     ForkableEnvironment,
     ForkResult,
@@ -293,16 +293,16 @@ async def test_fleet_provider_fork_semaphore_gates_concurrency() -> None:
 
 
 def test_dag_package_exports_environment_types() -> None:
-    from customized_areal.tree_search.dag import (
+    from customized_areal.tree_search.agents import (
         FleetSandboxProvider as ExportedProvider,
     )
-    from customized_areal.tree_search.dag import (
+    from customized_areal.tree_search.agents import (
         ForkableEnvironment as ExportedProtocol,
     )
-    from customized_areal.tree_search.dag import (
+    from customized_areal.tree_search.agents import (
         ForkResult as ExportedForkResult,
     )
-    from customized_areal.tree_search.dag import (
+    from customized_areal.tree_search.agents import (
         SnapshotResult as ExportedSnapshotResult,
     )
 

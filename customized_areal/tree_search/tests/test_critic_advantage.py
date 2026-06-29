@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.critic_advantage import (
+from customized_areal.tree_search.agents.critic_advantage import (
     assign_token_advantages,
     huber_loss_py,
     value_targets_from_gae,
 )
-from customized_areal.tree_search.dag.gae import NodeGAEResult
+from customized_areal.tree_search.agents.gae import NodeGAEResult
 
 
 def test_assign_token_advantages_broadcasts_per_turn() -> None:
@@ -49,7 +49,7 @@ def test_huber_loss_py_quadratic_and_linear_regions() -> None:
 
 def test_broadcast_node_advantages_torch_matches_python() -> None:
     torch = pytest.importorskip("torch")
-    from customized_areal.tree_search.dag.critic_advantage import (
+    from customized_areal.tree_search.agents.critic_advantage import (
         broadcast_node_advantages,
     )
 
@@ -62,7 +62,7 @@ def test_broadcast_node_advantages_torch_matches_python() -> None:
 
 def test_critic_huber_loss_torch_is_differentiable() -> None:
     torch = pytest.importorskip("torch")
-    from customized_areal.tree_search.dag.critic_advantage import critic_huber_loss
+    from customized_areal.tree_search.agents.critic_advantage import critic_huber_loss
 
     values = torch.tensor([0.2, 0.9], requires_grad=True)
     targets = torch.tensor([1.0, 1.0])

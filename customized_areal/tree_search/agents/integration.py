@@ -26,8 +26,8 @@ from typing import Any, Protocol
 
 import httpx
 
-from customized_areal.tree_search.dag.environment import ForkableEnvironment
-from customized_areal.tree_search.dag.verifier import VerifierResult
+from customized_areal.tree_search.agents.environment import ForkableEnvironment
+from customized_areal.tree_search.agents.verifier import VerifierResult
 
 logger = logging.getLogger("BranchMaterializer")
 

@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 
-from customized_areal.tree_search.dag.integration import (
+from customized_areal.tree_search.agents.integration import (
     cleanup_cloud_branch,
     finalize_with_verifier,
     materialize_cloud_branch,
 )
-from customized_areal.tree_search.dag.rl_session import RLSessionRewardWriter
-from customized_areal.tree_search.dag.verifier import ObjectiveVerifier
+from customized_areal.tree_search.agents.rl_session import RLSessionRewardWriter
+from customized_areal.tree_search.agents.verifier import ObjectiveVerifier
 
 
 class _RecordingBridge:

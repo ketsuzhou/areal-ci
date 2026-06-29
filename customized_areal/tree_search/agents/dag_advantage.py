@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from customized_areal.tree_search.dag.gae import (
+from customized_areal.tree_search.agents.gae import (
     compute_global_gae,
     events_from_nodes,
 )

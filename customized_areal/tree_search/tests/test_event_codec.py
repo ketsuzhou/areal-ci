@@ -15,23 +15,23 @@ from dataclasses import replace
 
 import pytest
 
-from customized_areal.tree_search.dag.critic_observation import (
+from customized_areal.tree_search.agents.critic_observation import (
     build_critic_observations,
 )
-from customized_areal.tree_search.dag.event_codec import (
+from customized_areal.tree_search.agents.event_codec import (
     ReplayPrefix,
     dag_to_events,
     events_to_dag,
     replay_prefix_for,
 )
-from customized_areal.tree_search.dag.event_model import Event, message_timeline
-from customized_areal.tree_search.dag.execution_dag import (
+from customized_areal.tree_search.agents.event_model import Event, message_timeline
+from customized_areal.tree_search.agents.execution_dag import (
     AgentRunNode,
     DAGError,
     EdgeType,
     ExecutionDAG,
 )
-from customized_areal.tree_search.dag.gae import GlobalEvent, events_from_nodes
+from customized_areal.tree_search.agents.gae import GlobalEvent, events_from_nodes
 
 ORDER = ["O0", "R0", "C0", "T0", "C1", "O1"]
 EDGES = [
@@ -289,7 +289,7 @@ def test_critic_observations_match_message_timeline_of_events() -> None:
 
 
 def test_public_exports_available_from_package() -> None:
-    import customized_areal.tree_search.dag as d
+    import customized_areal.tree_search.agents as d
 
     for name in (
         "Event",

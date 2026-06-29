@@ -10,7 +10,7 @@ Torch-free -- runs without the training stack.
 
 from __future__ import annotations
 
-from customized_areal.tree_search.dag.execution_dag import (
+from customized_areal.tree_search.agents.execution_dag import (
     AgentRunNode,
     EdgeType,
     ExecutionDAG,

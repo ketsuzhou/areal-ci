@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.event_model import Event, message_timeline
-from customized_areal.tree_search.dag.execution_dag import DAGError, EdgeType
+from customized_areal.tree_search.agents.event_model import Event, message_timeline
+from customized_areal.tree_search.agents.execution_dag import DAGError, EdgeType
 
 
 def _sample_event() -> Event:

@@ -12,8 +12,8 @@ from typing import Any
 import httpx
 import pytest
 
-from customized_areal.tree_search.dag.environment import ForkResult, SnapshotResult
-from customized_areal.tree_search.dag.integration import (
+from customized_areal.tree_search.agents.environment import ForkResult, SnapshotResult
+from customized_areal.tree_search.agents.integration import (
     BranchMaterializer,
     MulticaIssueForker,
 )

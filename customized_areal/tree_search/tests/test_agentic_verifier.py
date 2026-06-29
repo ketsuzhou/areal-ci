@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.agentic_verifier import (
+from customized_areal.tree_search.agents.agentic_verifier import (
     AgenticVerifier,
     VerifierRun,
     parse_verifier_output,

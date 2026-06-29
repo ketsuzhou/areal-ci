@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from customized_areal.tree_search.dag.gae import NodeGAEResult
+from customized_areal.tree_search.agents.gae import NodeGAEResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import torch
