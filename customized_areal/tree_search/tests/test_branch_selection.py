@@ -191,3 +191,51 @@ class TestSelectSingleLane:
         # independent roots in lane t1). Both gate-survive (delta=1.0).
         out = select_branch_points([a, b], td_threshold=0.5, gamma=1.0)
         assert out[0].node_id == "a"
+
+
+class TestMultiLaneAndIntegration:
+    def test_two_lanes_emit_two_branch_points(self):
+        # Lane t1 winner "a", lane t2 winner "c". Both terminal, gate off.
+        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
+                value=0.0, outcome_reward=1.0, max_entropy=0.9)
+        b = _ev("b", task_id="t1", completion_index=1, branch_seq=2,
+                value=0.0, outcome_reward=1.0, max_entropy=0.1)
+        c = _ev("c", task_id="t2", completion_index=2, branch_seq=3,
+                value=0.0, outcome_reward=1.0, max_entropy=0.7)
+        out = select_branch_points([a, b, c], td_threshold=0.0, gamma=1.0)
+        assert [bp.task_id for bp in out] == ["t1", "t2"]  # sorted by task_id
+        assert {bp.node_id for bp in out} == {"a", "c"}
+
+    def test_determinism_under_shuffled_input(self):
+        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
+                value=0.0, outcome_reward=1.0, max_entropy=0.9)
+        b = _ev("b", task_id="t2", completion_index=1, branch_seq=2,
+                value=0.0, outcome_reward=1.0, max_entropy=0.7)
+        out1 = select_branch_points([a, b])
+        out2 = select_branch_points([b, a])
+        assert out1 == out2
+
+    def test_empty_log_returns_empty(self):
+        assert select_branch_points([]) == []
+
+    def test_emitted_point_round_trips_through_replay_prefix(self):
+        from customized_areal.tree_search.agents.event_codec import replay_prefix_for
+
+        # Single eligible terminal event whose (task_id, branch_seq) is the key.
+        a = _ev("a", task_id="t1", completion_index=0, branch_seq=4,
+                value=0.0, outcome_reward=1.0, max_entropy=0.9)
+        out = select_branch_points([a])
+        assert len(out) == 1
+        bp = out[0]
+        prefix = replay_prefix_for([a], branch_point=(bp.task_id, bp.seq))
+        assert prefix.task_id == "t1"
+        assert prefix.seq == 4
+
+    def test_malformed_log_propagates_dag_error(self):
+        from customized_areal.tree_search.agents.execution_dag import DAGError
+
+        # Non-dense completion_index (0 then 2) -> events_to_dag raises DAGError.
+        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1)
+        b = _ev("b", task_id="t1", completion_index=2, branch_seq=2)
+        with pytest.raises(DAGError):
+            select_branch_points([a, b])
