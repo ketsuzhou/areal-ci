@@ -522,9 +522,9 @@ Expected: FAIL with "undefined: SweLegoDockerfile".
 
 The build script from Task 2 writes a `Dockerfile` at `/tmp/swe-lego-build/Dockerfile` before `docker build`. Append to `swe_lego_image.go`:
 
-```go
-import "text/template"
+> **Merge `"text/template"` into the existing import block** — Go does not allow multiple import blocks in the same file. The existing `swe_lego_image.go` already has `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`; add `"text/template"` in alphabetical order (after `"strings"`, before `"time"`).
 
+```go
 // sweLegoDockerfileTmpl is the Dockerfile baked into each SWE-Lego image.
 // The daemon binary is built from the existing multica daemon source and
 // copied in at image-build time — it is the same binary that runs locally
@@ -558,10 +558,15 @@ Also update `SweLegoBuildScript` to write the Dockerfile before `docker build`. 
 
 ```go
 	// Write the Dockerfile, then build.
-	dockerfile, _ := SweLegoDockerfile(baseImage)
+	dockerfile, err := SweLegoDockerfile(baseImage)
+	if err != nil {
+		return "", fmt.Errorf("render dockerfile: %w", err)
+	}
 	fmt.Fprintf(&b, "cat > /tmp/swe-lego-build/Dockerfile <<'EOF'\n%s\nEOF\n", dockerfile)
 	fmt.Fprintf(&b, "docker build -t %s -f /tmp/swe-lego-build/Dockerfile .\n", shellQuote(imageRef))
 ```
+
+> Propagate the `SweLegoDockerfile` error instead of swallowing it with `dockerfile, _ :=`. `SweLegoBuildScript` already returns `(string, error)`, so a template parse/render failure should bubble up as `render dockerfile: %w`. The `:=` reuses the existing `err` variable in scope (from `issueTime, err := time.Parse(...)` at the top of the function) since `dockerfile` is new on the left-hand side — valid Go.
 
 And create the template file on disk for documentation/reference (Go embeds it via the const above, but committing the `.tmpl` makes the asset discoverable):
 
