@@ -366,7 +366,7 @@ func TestBuildOrReuse_CacheHitShortCircuits(t *testing.T) {
 func TestBuildOrReuse_CacheMissRunsBuild(t *testing.T) {
 	ctx := context.Background()
 	fe := &fakeNodeExec{inspectOK: false, buildExitOK: true}
-	ref, nodeID, err := BuildOrReuse(ctx, fe, "r", "c", "d", "b")
+	ref, nodeID, err := BuildOrReuse(ctx, fe, "r", "c", "2025-03-14T09:30:00Z", "b")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -388,14 +388,14 @@ func TestBuildOrReuse_CacheMissRunsBuild(t *testing.T) {
 func TestBuildOrReuse_BuildFailureReturnsError(t *testing.T) {
 	ctx := context.Background()
 	fe := &fakeNodeExec{inspectOK: false, buildExitOK: false}
-	_, _, err := BuildOrReuse(ctx, fe, "r", "c", "d", "b")
+	_, _, err := BuildOrReuse(ctx, fe, "r", "c", "2025-03-14T09:30:00Z", "b")
 	if err == nil {
 		t.Fatal("expected error on build failure")
 	}
 }
 ```
 
-Add `"context"` and `"fmt"` to the test file's imports.
+Add `"context"` and `"fmt"` to the test file's imports. The cache-miss tests pass a valid RFC3339 `issueDate` (`"2025-03-14T09:30:00Z"`) because Task 2's `SweLegoBuildScript` parses `issueDate` and returns an error on invalid input; using `"d"` would short-circuit the build path at script generation rather than exercising the actual build execution.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -428,13 +428,9 @@ type NodeExec interface {
 
 Append to `swe_lego_image.go`:
 
-```go
-import (
-	"context"
-	"errors"
-	"strings"
-)
+Merge `"context"` and `"errors"` into the existing import block in `swe_lego_image.go` (alphabetical order: `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`). Do NOT add a second `import (...)` block — Go does not allow multiple import blocks in the same file, and the existing block from Tasks 1 and 2 already contains `crypto/sha256`, `encoding/hex`, `fmt`, `strings`, and `time`.
 
+```go
 // ErrSweLegoBuildFailed is returned when the build script exits non-zero.
 var ErrSweLegoBuildFailed = errors.New("swe-lego image build failed")
 
@@ -461,7 +457,10 @@ func BuildOrReuse(ctx context.Context, exec NodeExec, repoURL, baseCommit, issue
 	}
 
 	// 2. Cache miss: ship the build script and run it on the node.
-	script := SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey)
+	script, err := SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey)
+	if err != nil {
+		return "", "", fmt.Errorf("build script: %w", err)
+	}
 	_, exitCode, err = exec.Exec(ctx, node, []string{"sh", "-c", script})
 	if err != nil {
 		return "", "", fmt.Errorf("build transport error: %w", err)
@@ -471,9 +470,6 @@ func BuildOrReuse(ctx context.Context, exec NodeExec, repoURL, baseCommit, issue
 	}
 	return ref, node, nil
 }
-
-// ensure strings is used (build-script generation references it via shellQuote)
-var _ = strings.Contains
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
