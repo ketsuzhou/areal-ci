@@ -11,9 +11,12 @@ Torch-free.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from customized_areal.tree_search.dag.event_codec import dag_to_events
+from customized_areal.tree_search.dag.event_codec import dag_to_events, events_to_dag
+from customized_areal.tree_search.dag.event_model import Event
 from customized_areal.tree_search.dag.execution_dag import (
     AgentRunNode,
     DAGError,
@@ -116,3 +119,69 @@ def test_dag_to_events_messages_by_node_overrides_metadata() -> None:
     }
     assert events["O0"].messages == ({"role": "assistant", "content": "override"},)
     assert events["R0"].messages == ({"role": "assistant", "content": "R0-out"},)
+
+
+def test_events_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
+    dag = _build_dag()
+    events = dag_to_events(dag, ordering=ORDER)
+    rebuilt = events_to_dag(events)
+    assert sorted(rebuilt.node_ids()) == sorted(ORDER)
+    orig = {(e.src, e.dst, e.type) for e in dag.edges}
+    back = {(e.src, e.dst, e.type) for e in rebuilt.edges}
+    assert back == orig
+    assert rebuilt.get("O1").outcome_reward == 1.0
+    assert rebuilt.get("C0").value == pytest.approx(0.2)
+
+
+def test_events_to_dag_rejects_non_dense_index() -> None:
+    dag = _build_dag()
+    events = list(dag_to_events(dag, ordering=ORDER))
+    events[2] = replace(events[2], completion_index=0)
+    with pytest.raises(DAGError):
+        events_to_dag(events)
+
+
+def test_events_to_dag_rejects_asymmetric_edges() -> None:
+    dag = _build_dag()
+    events = list(dag_to_events(dag, ordering=ORDER))
+    events = [
+        replace(e, incoming_edges=(("R0", EdgeType.MENTION),))
+        if e.node_id == "C0"
+        else e
+        for e in events
+    ]
+    with pytest.raises(DAGError):
+        events_to_dag(events)
+
+
+def test_events_to_dag_rejects_non_topological_index() -> None:
+    dag = _build_dag()
+    events = list(dag_to_events(dag, ordering=ORDER))
+    swapped = []
+    for e in events:
+        if e.node_id == "O0":
+            swapped.append(replace(e, completion_index=1))
+        elif e.node_id == "R0":
+            swapped.append(replace(e, completion_index=0))
+        else:
+            swapped.append(e)
+    with pytest.raises(DAGError):
+        events_to_dag(swapped)
+
+
+def test_events_to_dag_empty_returns_empty_dag() -> None:
+    rebuilt = events_to_dag([])
+    assert rebuilt.node_ids() == []
+
+
+def test_full_dict_round_trip_identity() -> None:
+    dag = _build_dag()
+    events = dag_to_events(dag, ordering=ORDER)
+    redecoded = [Event.from_dict(e.to_dict()) for e in events]
+    assert redecoded == events
+    dag_a = events_to_dag(events)
+    dag_b = events_to_dag(redecoded)
+    assert {(e.src, e.dst, e.type) for e in dag_a.edges} == {
+        (e.src, e.dst, e.type) for e in dag_b.edges
+    }
+    assert sorted(dag_a.node_ids()) == sorted(dag_b.node_ids())

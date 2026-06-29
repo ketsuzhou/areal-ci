@@ -14,6 +14,7 @@ from collections.abc import Sequence
 
 from customized_areal.tree_search.dag.event_model import Event
 from customized_areal.tree_search.dag.execution_dag import (
+    AgentRunNode,
     DAGError,
     EdgeType,
     ExecutionDAG,
@@ -98,4 +99,73 @@ def dag_to_events(
     return events
 
 
-__all__ = ["dag_to_events"]
+def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
+    """Losslessly rebuild an ExecutionDAG from a linear Event log.
+
+    Steps (each failure raises ``DAGError``):
+      1. completion_index must be dense 0..n-1, unique, non-negative.
+      2. edge lists must be symmetric (every A.outgoing (A->B) has a matching
+         B.incoming (A->B) with the same EdgeType).
+      3. add nodes (faithful AgentRunNode; messages/index stay in the log only).
+      4. add edges (idempotent).
+      5. enforce the topological-order invariant: for every edge src->dst,
+         index(src) < index(dst).
+    """
+    events = list(events)
+    if not events:
+        return ExecutionDAG()
+
+    indices = sorted(e.completion_index for e in events)
+    if indices != list(range(len(events))):
+        raise DAGError(
+            f"completion_index must be dense 0..{len(events) - 1}, got {indices}"
+        )
+    ordered = sorted(events, key=lambda e: e.completion_index)
+    index_of = {e.node_id: e.completion_index for e in ordered}
+    if len(index_of) != len(ordered):
+        raise DAGError("duplicate node_id across events")
+
+    incoming_set = {
+        (src, e.node_id, t) for e in ordered for (src, t) in e.incoming_edges
+    }
+    outgoing_set = {
+        (e.node_id, dst, t) for e in ordered for (dst, t) in e.outgoing_edges
+    }
+    if incoming_set != outgoing_set:
+        diff = incoming_set ^ outgoing_set
+        raise DAGError(
+            f"edge symmetry mismatch (incoming XOR outgoing): {sorted(diff)}"
+        )
+
+    dag = ExecutionDAG()
+    for e in ordered:
+        dag.add_node(
+            AgentRunNode(
+                node_id=e.node_id,
+                agent_id=e.agent_id,
+                issue_id=e.issue_id,
+                task_id=e.task_id,
+                session_id=e.session_id,
+                branch_seq=e.branch_seq,
+                branch_issue_id=e.branch_issue_id,
+                branch_env_snapshot_id=e.branch_env_snapshot_id,
+                process_reward=e.process_reward,
+                outcome_reward=e.outcome_reward,
+                value=e.value,
+                metadata=dict(e.metadata),
+            )
+        )
+
+    for src, dst, t in sorted(incoming_set):
+        dag.add_edge(src, dst, t)
+
+    for src, dst, _ in incoming_set:
+        if index_of[src] >= index_of[dst]:
+            raise DAGError(
+                f"event order is not topological: edge {src!r}->{dst!r} has "
+                f"index {index_of[src]} >= {index_of[dst]}"
+            )
+    return dag
+
+
+__all__ = ["dag_to_events", "events_to_dag"]
