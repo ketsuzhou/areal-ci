@@ -286,3 +286,18 @@ def test_critic_observations_match_message_timeline_of_events() -> None:
     assert [o.value_index for o in obs_from_events] == [o.value_index for o in obs_hand]
     assert obs_from_events[0].node_id is None
     assert len(obs_from_events) == len(ORDER) + 1
+
+
+def test_public_exports_available_from_package() -> None:
+    import customized_areal.tree_search.dag as d
+
+    for name in (
+        "Event",
+        "message_timeline",
+        "dag_to_events",
+        "events_to_dag",
+        "replay_prefix_for",
+        "ReplayPrefix",
+    ):
+        assert name in d.__all__, f"{name} missing from __all__"
+        assert hasattr(d, name), f"{name} not importable from package"
