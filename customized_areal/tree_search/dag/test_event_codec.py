@@ -15,13 +15,16 @@ from dataclasses import replace
 
 import pytest
 
+from customized_areal.tree_search.dag.critic_observation import (
+    build_critic_observations,
+)
 from customized_areal.tree_search.dag.event_codec import (
     ReplayPrefix,
     dag_to_events,
     events_to_dag,
     replay_prefix_for,
 )
-from customized_areal.tree_search.dag.event_model import Event
+from customized_areal.tree_search.dag.event_model import Event, message_timeline
 from customized_areal.tree_search.dag.execution_dag import (
     AgentRunNode,
     DAGError,
@@ -268,3 +271,18 @@ def test_events_from_nodes_unscored_value_is_zero() -> None:
     node.process_reward = 0.25
     (ev,) = events_from_nodes([node])
     assert ev == GlobalEvent(node_id="n", value=0.0, reward=0.25)
+
+
+def test_critic_observations_match_message_timeline_of_events() -> None:
+    dag = _build_dag()
+    events = dag_to_events(dag, ordering=ORDER)
+    timeline_from_events = message_timeline(events)
+    obs_from_events = build_critic_observations(timeline_from_events)
+    hand_built = [
+        {"role": "assistant", "content": f"{nid}-out", "node_id": nid} for nid in ORDER
+    ]
+    obs_hand = build_critic_observations(hand_built)
+    assert [o.node_id for o in obs_from_events] == [o.node_id for o in obs_hand]
+    assert [o.value_index for o in obs_from_events] == [o.value_index for o in obs_hand]
+    assert obs_from_events[0].node_id is None
+    assert len(obs_from_events) == len(ORDER) + 1
