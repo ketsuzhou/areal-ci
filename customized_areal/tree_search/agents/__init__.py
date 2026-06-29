@@ -11,7 +11,7 @@ Submodules:
 
 from __future__ import annotations
 
-from customized_areal.tree_search.dag.agentic_verifier import (
+from customized_areal.tree_search.agents.agentic_verifier import (
     AgenticVerifier,
     PiVerifierLauncher,
     VerifierReward,
@@ -19,18 +19,25 @@ from customized_areal.tree_search.dag.agentic_verifier import (
     build_verifier_prompt,
     parse_verifier_output,
 )
-from customized_areal.tree_search.dag.critic_observation import (
+from customized_areal.tree_search.agents.branch_selection import (
+    BranchPoint,
+    lane_successor_value,
+    passes_gate,
+    select_branch_points,
+    td_error,
+)
+from customized_areal.tree_search.agents.critic_observation import (
     DEFAULT_CRITIC_FIELDS,
     CriticObservation,
     build_critic_observations,
     build_observation_after_turn,
 )
-from customized_areal.tree_search.dag.dag_advantage import (
+from customized_areal.tree_search.agents.dag_advantage import (
     AssembledAdvantages,
     assemble_node_advantages,
     explained_variance,
 )
-from customized_areal.tree_search.dag.environment import (
+from customized_areal.tree_search.agents.environment import (
     EnvironmentError,
     FleetSandboxProvider,
     ForkableEnvironment,
@@ -39,36 +46,36 @@ from customized_areal.tree_search.dag.environment import (
     SnapshotError,
     SnapshotResult,
 )
-from customized_areal.tree_search.dag.event_codec import (
+from customized_areal.tree_search.agents.event_codec import (
     ReplayPrefix,
     dag_to_events,
     events_to_dag,
     replay_prefix_for,
 )
-from customized_areal.tree_search.dag.event_model import (
+from customized_areal.tree_search.agents.event_model import (
     Event,
     message_timeline,
 )
-from customized_areal.tree_search.dag.execution_dag import (
+from customized_areal.tree_search.agents.execution_dag import (
     AgentRunNode,
     DAGError,
     Edge,
     EdgeType,
     ExecutionDAG,
 )
-from customized_areal.tree_search.dag.gae import (
+from customized_areal.tree_search.agents.gae import (
     GlobalEvent,
     NodeGAEResult,
     compute_global_gae,
     events_from_nodes,
 )
-from customized_areal.tree_search.dag.harvest import (
+from customized_areal.tree_search.agents.harvest import (
     FinalizeResult,
     RewardWriter,
     TrajectoryHarvester,
     VerifierFinalizer,
 )
-from customized_areal.tree_search.dag.integration import (
+from customized_areal.tree_search.agents.integration import (
     BranchCandidate,
     BranchMaterializationResult,
     BranchMaterializer,
@@ -78,11 +85,11 @@ from customized_areal.tree_search.dag.integration import (
     finalize_with_verifier,
     materialize_cloud_branch,
 )
-from customized_areal.tree_search.dag.rl_session import (
+from customized_areal.tree_search.agents.rl_session import (
     RLBridgeClient,
     RLSessionRewardWriter,
 )
-from customized_areal.tree_search.dag.verifier import (
+from customized_areal.tree_search.agents.verifier import (
     ObjectiveVerifier,
     Verifier,
     VerifierResult,
@@ -136,6 +143,12 @@ __all__ = [
     "NodeGAEResult",
     "compute_global_gae",
     "events_from_nodes",
+    # branch selection (branch-point selection policy over the Event sequence)
+    "BranchPoint",
+    "lane_successor_value",
+    "passes_gate",
+    "select_branch_points",
+    "td_error",
     # dag advantage assembler (Phase 3 -- GAE replaces GRPO for DAG runs)
     "AssembledAdvantages",
     "assemble_node_advantages",

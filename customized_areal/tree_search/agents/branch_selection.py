@@ -62,9 +62,7 @@ def lane_successor_value(
     return float(event.outcome_reward), 0.0
 
 
-def td_error(
-    event: Event, r_t: float, v_next: float, *, gamma: float
-) -> float | None:
+def td_error(event: Event, r_t: float, v_next: float, *, gamma: float) -> float | None:
     """``|r_t + gamma*v_next - v(s_t)|`` with ``v(s_t) = event.value``.
 
     Returns ``None`` when ``event.value`` is ``None`` (gate bypassed).

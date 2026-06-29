@@ -183,10 +183,24 @@ class TestSelectSingleLane:
 
     def test_entropy_tie_breaks_on_completion_index(self):
         # Two eligible terminal candidates, equal entropy -> smaller index wins.
-        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
-                value=0.0, outcome_reward=1.0, max_entropy=0.5)
-        b = _ev("b", task_id="t1", completion_index=1, branch_seq=2,
-                value=0.0, outcome_reward=1.0, max_entropy=0.5)
+        a = _ev(
+            "a",
+            task_id="t1",
+            completion_index=0,
+            branch_seq=1,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.5,
+        )
+        b = _ev(
+            "b",
+            task_id="t1",
+            completion_index=1,
+            branch_seq=2,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.5,
+        )
         # Make this a valid DAG: no edges between them is fine (both terminal,
         # independent roots in lane t1). Both gate-survive (delta=1.0).
         out = select_branch_points([a, b], td_threshold=0.5, gamma=1.0)
@@ -196,21 +210,56 @@ class TestSelectSingleLane:
 class TestMultiLaneAndIntegration:
     def test_two_lanes_emit_two_branch_points(self):
         # Lane t1 winner "a", lane t2 winner "c". Both terminal, gate off.
-        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
-                value=0.0, outcome_reward=1.0, max_entropy=0.9)
-        b = _ev("b", task_id="t1", completion_index=1, branch_seq=2,
-                value=0.0, outcome_reward=1.0, max_entropy=0.1)
-        c = _ev("c", task_id="t2", completion_index=2, branch_seq=3,
-                value=0.0, outcome_reward=1.0, max_entropy=0.7)
+        a = _ev(
+            "a",
+            task_id="t1",
+            completion_index=0,
+            branch_seq=1,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.9,
+        )
+        b = _ev(
+            "b",
+            task_id="t1",
+            completion_index=1,
+            branch_seq=2,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.1,
+        )
+        c = _ev(
+            "c",
+            task_id="t2",
+            completion_index=2,
+            branch_seq=3,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.7,
+        )
         out = select_branch_points([a, b, c], td_threshold=0.0, gamma=1.0)
         assert [bp.task_id for bp in out] == ["t1", "t2"]  # sorted by task_id
         assert {bp.node_id for bp in out} == {"a", "c"}
 
     def test_determinism_under_shuffled_input(self):
-        a = _ev("a", task_id="t1", completion_index=0, branch_seq=1,
-                value=0.0, outcome_reward=1.0, max_entropy=0.9)
-        b = _ev("b", task_id="t2", completion_index=1, branch_seq=2,
-                value=0.0, outcome_reward=1.0, max_entropy=0.7)
+        a = _ev(
+            "a",
+            task_id="t1",
+            completion_index=0,
+            branch_seq=1,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.9,
+        )
+        b = _ev(
+            "b",
+            task_id="t2",
+            completion_index=1,
+            branch_seq=2,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.7,
+        )
         out1 = select_branch_points([a, b])
         out2 = select_branch_points([b, a])
         assert out1 == out2
@@ -222,8 +271,15 @@ class TestMultiLaneAndIntegration:
         from customized_areal.tree_search.agents.event_codec import replay_prefix_for
 
         # Single eligible terminal event whose (task_id, branch_seq) is the key.
-        a = _ev("a", task_id="t1", completion_index=0, branch_seq=4,
-                value=0.0, outcome_reward=1.0, max_entropy=0.9)
+        a = _ev(
+            "a",
+            task_id="t1",
+            completion_index=0,
+            branch_seq=4,
+            value=0.0,
+            outcome_reward=1.0,
+            max_entropy=0.9,
+        )
         out = select_branch_points([a])
         assert len(out) == 1
         bp = out[0]
@@ -239,3 +295,17 @@ class TestMultiLaneAndIntegration:
         b = _ev("b", task_id="t1", completion_index=2, branch_seq=2)
         with pytest.raises(DAGError):
             select_branch_points([a, b])
+
+
+def test_public_symbols_exported_from_dag_package():
+    import customized_areal.tree_search.agents as d
+
+    for name in (
+        "BranchPoint",
+        "select_branch_points",
+        "lane_successor_value",
+        "td_error",
+        "passes_gate",
+    ):
+        assert name in d.__all__, f"{name} missing from dag.__all__"
+        assert hasattr(d, name), f"{name} not importable from dag"
