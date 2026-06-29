@@ -15,7 +15,12 @@ from dataclasses import replace
 
 import pytest
 
-from customized_areal.tree_search.dag.event_codec import dag_to_events, events_to_dag
+from customized_areal.tree_search.dag.event_codec import (
+    ReplayPrefix,
+    dag_to_events,
+    events_to_dag,
+    replay_prefix_for,
+)
 from customized_areal.tree_search.dag.event_model import Event
 from customized_areal.tree_search.dag.execution_dag import (
     AgentRunNode,
@@ -195,3 +200,42 @@ def test_full_dict_round_trip_identity() -> None:
         (e.src, e.dst, e.type) for e in dag_b.edges
     }
     assert sorted(dag_a.node_ids()) == sorted(dag_b.node_ids())
+
+
+def _build_dag_with_branch() -> ExecutionDAG:
+    dag = _build_dag()
+    c1 = dag.get("C1")
+    c1.branch_seq = 7
+    c1.branch_env_snapshot_id = "snap-C1"
+    return dag
+
+
+def test_replay_prefix_for_returns_ancestor_slice() -> None:
+    dag = _build_dag_with_branch()
+    events = dag_to_events(dag, ordering=ORDER)
+    prefix = replay_prefix_for(events, branch_point=("task-C1", 7))
+    assert isinstance(prefix, ReplayPrefix)
+    assert prefix.task_id == "task-C1"
+    assert prefix.seq == 7
+    assert prefix.source_issue_id == "iss-C1"
+    assert prefix.branch_env_snapshot_id == "snap-C1"
+    contents = [m["content"] for m in prefix.replay_messages]
+    assert contents == ["O0-out", "R0-out", "C0-out", "T0-out", "C1-out"]
+
+
+def test_replay_prefix_for_unknown_branch_point_raises() -> None:
+    dag = _build_dag_with_branch()
+    events = dag_to_events(dag, ordering=ORDER)
+    with pytest.raises(DAGError):
+        replay_prefix_for(events, branch_point=("task-C1", 999))
+
+
+def test_replay_prefix_for_ambiguous_branch_point_raises() -> None:
+    dag = _build_dag_with_branch()
+    dag.get("C0").task_id = "task-dup"
+    dag.get("C0").branch_seq = 42
+    dag.get("T0").task_id = "task-dup"
+    dag.get("T0").branch_seq = 42
+    events = dag_to_events(dag, ordering=ORDER)
+    with pytest.raises(DAGError):
+        replay_prefix_for(events, branch_point=("task-dup", 42))

@@ -11,8 +11,9 @@ Pure: no mutation of inputs, no I/O, torch-free. All failures raise ``DAGError``
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from customized_areal.tree_search.dag.event_model import Event
+from customized_areal.tree_search.dag.event_model import Event, message_timeline
 from customized_areal.tree_search.dag.execution_dag import (
     AgentRunNode,
     DAGError,
@@ -104,11 +105,12 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
 
     Steps (each failure raises ``DAGError``):
       1. completion_index must be dense 0..n-1, unique, non-negative.
-      2. edge lists must be symmetric (every A.outgoing (A->B) has a matching
+      2. node_ids must be unique (no duplicate node_id across events).
+      3. edge lists must be symmetric (every A.outgoing (A->B) has a matching
          B.incoming (A->B) with the same EdgeType).
-      3. add nodes (faithful AgentRunNode; messages/index stay in the log only).
-      4. add edges (idempotent).
-      5. enforce the topological-order invariant: for every edge src->dst,
+      4. add nodes (faithful AgentRunNode; messages/index stay in the log only).
+      5. add edges (idempotent).
+      6. enforce the topological-order invariant: for every edge src->dst,
          index(src) < index(dst).
     """
     events = list(events)
@@ -168,4 +170,51 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
     return dag
 
 
-__all__ = ["dag_to_events", "events_to_dag"]
+__all__ = ["ReplayPrefix", "dag_to_events", "events_to_dag", "replay_prefix_for"]
+
+
+@dataclass(frozen=True)
+class ReplayPrefix:
+    """Branch replay data, shaped to ``BranchMaterializer.materialize`` inputs."""
+
+    replay_messages: list[dict]
+    task_id: str
+    seq: int
+    source_issue_id: str
+    branch_env_snapshot_id: str | None
+
+
+def replay_prefix_for(
+    events: Sequence[Event],
+    *,
+    branch_point: tuple[str, int],
+) -> ReplayPrefix:
+    """Derive the replay prefix for a branch point from a linear Event log.
+
+    ``branch_point = (task_id, seq)`` where ``seq`` is the ``task_message.seq``
+    the run is allowed to branch at. Locates the unique Event with matching
+    ``task_id`` and ``branch_seq == seq`` (zero or multiple matches -> DAGError),
+    collects that node's ancestors (plus the node itself) in completion order,
+    and flattens their message payloads via ``message_timeline``.
+    """
+    task_id, seq = branch_point
+    dag = events_to_dag(events)
+    matches = [e for e in events if e.task_id == task_id and e.branch_seq == seq]
+    if len(matches) != 1:
+        raise DAGError(
+            f"branch point (task_id={task_id!r}, seq={seq}) matched {len(matches)} "
+            f"nodes; expected exactly 1"
+        )
+    branch_ev = matches[0]
+    ancestor_ids = dag.ancestors(branch_ev.node_id) | {branch_ev.node_id}
+    prefix_events = sorted(
+        (e for e in events if e.node_id in ancestor_ids),
+        key=lambda e: e.completion_index,
+    )
+    return ReplayPrefix(
+        replay_messages=message_timeline(prefix_events),
+        task_id=task_id,
+        seq=seq,
+        source_issue_id=branch_ev.issue_id,
+        branch_env_snapshot_id=branch_ev.branch_env_snapshot_id,
+    )
