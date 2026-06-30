@@ -11,12 +11,14 @@ import logging
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 
 from areal.api import cli_args as cli_args_module
 from areal.api.cli_args import PPOActorConfig
 from areal.experimental.openai.cache import InteractionCache
+from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
 # ---------------------------------------------------------------------------
 # Tests: PPOActorConfig enable_remote_rollout warning (spec tests 18-20)
@@ -210,3 +212,284 @@ class TestRecomputeGate:
 
         assert result.id == "chatcmpl-remote-1"
         assert client._recompute_verified is True
+
+
+# ---------------------------------------------------------------------------
+# Real tokenizer fixture (spec tests 8-13).
+#
+# Deviation from plan: load via AutoTokenizer.from_pretrained directly instead
+# of tests.utils.get_model_path + areal.utils.hf_utils.load_hf_tokenizer.
+# The plan's path imports areal.utils.testing_utils, which builds a
+# module-level DENSE_MODEL_PATHS dict that calls get_model_path for ~8 models
+# at import time — most are not cached in this environment, so the import
+# hangs on network downloads. load_hf_tokenizer also passes force_download=True
+# which forces a network call even when the tokenizer is cached. Direct
+# AutoTokenizer.from_pretrained uses the HF cache without forcing a download.
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def real_tokenizer():
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B", trust_remote_code=True)
+
+
+def _make_chat_completion(
+    completion_id: str = "chatcmpl-remote-1",
+    content: str = "Hello there.",
+    finish_reason: str = "stop",
+    tool_calls=None,
+) -> ChatCompletion:
+    """Build a minimal ChatCompletion as OpenRouter would return."""
+    message = ChatCompletionMessage(
+        role="assistant",
+        content=content,
+        tool_calls=tool_calls,
+    )
+    return ChatCompletion(
+        id=completion_id,
+        choices=[
+            Choice(
+                finish_reason=finish_reason,
+                index=0,
+                message=message,
+            )
+        ],
+        created=0,
+        model="openai/gpt-4o-mini",
+        object="chat.completion",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: remote client happy path and failures (spec tests 8-13)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateCompletionHappyPath:
+    @pytest.mark.asyncio
+    async def test_happy_path_stores_interaction(self, real_tokenizer, monkeypatch):
+        """OpenRouter returns a completion → InteractionWithTokenLogpReward stored correctly."""
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer,
+            chat_template_type="hf",
+            recompute_enabled=True,
+        )
+        fake_completion = _make_chat_completion(
+            completion_id="chatcmpl-remote-xyz",
+            content="The answer is 42.",
+            finish_reason="stop",
+        )
+        monkeypatch.setattr(
+            client,
+            "_call_openrouter",
+            lambda *a, **kw: _async_return(fake_completion),
+        )
+
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "What is the answer?"}],
+        }
+        result = await client.create_completion(request, cache)
+
+        # Returned completion is the remote one, unmodified.
+        assert result is fake_completion
+        # Cache contains the interaction under the remote ID.
+        assert "chatcmpl-remote-xyz" in cache
+        interaction = cache["chatcmpl-remote-xyz"]
+        assert isinstance(interaction, InteractionWithTokenLogpReward)
+        assert interaction.completion is fake_completion
+        # ModelResponse built with local tokenization.
+        assert interaction.model_response is not None
+        mr = interaction.model_response
+        assert len(mr.input_tokens) > 0
+        # Output tokens = local encoding of "The answer is 42." + EOS.
+        expected_output = real_tokenizer.encode(
+            "The answer is 42.", add_special_tokens=False
+        ) + [real_tokenizer.eos_token_id]
+        assert mr.output_tokens == expected_output
+        # Placeholder logprobs and versions.
+        assert mr.output_logprobs == [0.0] * len(mr.output_tokens)
+        assert mr.output_versions == [-1] * len(mr.output_tokens)
+        assert mr.stop_reason == "stop"
+        # Output message list preserved from remote.
+        assert interaction.output_message_list == [
+            fake_completion.choices[0].message.model_dump(exclude_none=True)
+        ]
+        # Gate flipped.
+        assert client._recompute_verified is True
+
+
+class TestCreateCompletionFailures:
+    @pytest.mark.asyncio
+    async def test_empty_remote_output_returns_400(self, real_tokenizer, monkeypatch):
+        """Empty content and no tool_calls → 400, no cache entry."""
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer, chat_template_type="hf", recompute_enabled=True
+        )
+        fake_completion = _make_chat_completion(content="", finish_reason="stop")
+        monkeypatch.setattr(
+            client, "_call_openrouter", lambda *a, **kw: _async_return(fake_completion)
+        )
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await client.create_completion(request, cache)
+        assert exc_info.value.status_code == 400
+        assert len(cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_openrouter_4xx_returns_502_no_cache(
+        self, real_tokenizer, monkeypatch
+    ):
+        """OpenRouter APIStatusError → 502, no cache entry.
+
+        Deviation from plan: stub the underlying OpenAI client (via
+        _get_openrouter_client) rather than _call_openrouter, so the real
+        _call_openrouter wrapping logic (APIStatusError → 502) actually runs.
+        The plan's stub of _call_openrouter bypassed that wrapping.
+        """
+        from openai import APIStatusError
+
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer, chat_template_type="hf", recompute_enabled=True
+        )
+
+        async def _raise(*a, **kw):
+            mock_response = MagicMock()
+            mock_response.status_code = 429
+            mock_response.headers.get.return_value = None
+            raise APIStatusError(
+                message="upstream 429",
+                response=mock_response,
+                body=None,
+            )
+
+        mock_openai_client = MagicMock()
+        mock_openai_client.chat.completions.create = _raise
+        monkeypatch.setattr(
+            client, "_get_openrouter_client", lambda: mock_openai_client
+        )
+
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await client.create_completion(request, cache)
+        assert exc_info.value.status_code == 502
+        assert len(cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_openrouter_network_error_returns_504_no_cache(
+        self, real_tokenizer, monkeypatch
+    ):
+        """OpenRouter APIError (network) → 504, no cache entry.
+
+        Deviation from plan: stub the underlying OpenAI client (via
+        _get_openrouter_client) rather than _call_openrouter, so the real
+        _call_openrouter wrapping logic (APIError → 504) actually runs.
+        """
+        from openai import APIConnectionError
+
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer, chat_template_type="hf", recompute_enabled=True
+        )
+
+        async def _raise(*a, **kw):
+            raise APIConnectionError(request=None)
+
+        mock_openai_client = MagicMock()
+        mock_openai_client.chat.completions.create = _raise
+        monkeypatch.setattr(
+            client, "_get_openrouter_client", lambda: mock_openai_client
+        )
+
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await client.create_completion(request, cache)
+        assert exc_info.value.status_code == 504
+        assert len(cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_output_tokenization_failure_removes_cache_entry(
+        self, real_tokenizer, monkeypatch
+    ):
+        """tokenizer.encode raising after cache insert → 500, cache entry removed.
+
+        Deviation from plan: the flaky encode (raise on 2nd call) never
+        triggered because apply_chat_template uses tokenizer.apply_chat_template,
+        not tokenizer.encode — so encode is called exactly once (at step 6).
+        Make encode raise on the first call to exercise the post-cache-insert
+        cleanup path.
+        """
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer, chat_template_type="hf", recompute_enabled=True
+        )
+        fake_completion = _make_chat_completion(
+            content="some output", finish_reason="stop"
+        )
+        monkeypatch.setattr(
+            client, "_call_openrouter", lambda *a, **kw: _async_return(fake_completion)
+        )
+
+        def _failing_encode(text, add_special_tokens=False):
+            raise RuntimeError("simulated encode failure")
+
+        monkeypatch.setattr(real_tokenizer, "encode", _failing_encode)
+
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await client.create_completion(request, cache)
+        assert exc_info.value.status_code == 500
+        # Cache entry was inserted at step 5 then removed on failure.
+        assert len(cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_missing_api_key_returns_500_before_network(
+        self, real_tokenizer, monkeypatch
+    ):
+        """No OPENROUTER_API_KEY → 500 before any network call."""
+        from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+        client = RemoteRolloutClient(
+            tokenizer=real_tokenizer, chat_template_type="hf", recompute_enabled=True
+        )
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        # Reset the lazy client so _get_openrouter_client re-reads env.
+        client._openrouter_client = None
+
+        cache = InteractionCache()
+        request = {
+            "model": "remote:openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await client.create_completion(request, cache)
+        assert exc_info.value.status_code == 500
+        assert "OPENROUTER_API_KEY" in exc_info.value.detail
+        assert len(cache) == 0
