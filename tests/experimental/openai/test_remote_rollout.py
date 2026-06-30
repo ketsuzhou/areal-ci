@@ -568,11 +568,18 @@ def _routing_client():
 
 
 async def _fake_local_create(*, messages=None, stream=None, areal_cache=None, **kwargs):
-    return _make_chat_completion(
+    completion = _make_chat_completion(
         completion_id="chatcmpl-local",
         content="local response",
         finish_reason="stop",
     )
+    # Mirror what the real ArealOpenAI client does: store the interaction
+    # in the session cache so downstream reward/export lookups find it.
+    if areal_cache is not None:
+        areal_cache["chatcmpl-local"] = InteractionWithTokenLogpReward(
+            completion=completion,
+        )
+    return completion
 
 
 async def _fake_remote_create(request, session_cache):
@@ -780,3 +787,201 @@ class TestRoutingDispatch:
                 },
             )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-to-end cache/export (spec tests 15-17)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _e2e_env(monkeypatch, real_tokenizer):
+    """Full server env with a real-tokenizer RemoteRolloutClient and stubbed OpenRouter."""
+    monkeypatch.setattr(srv, "_session_cache", {})
+    monkeypatch.setattr(srv, "_api_key_to_session", {})
+    monkeypatch.setattr(srv, "_session_to_api_key", {})
+    monkeypatch.setattr(srv, "_capacity", 0)
+    monkeypatch.setattr(srv, "_admin_api_key", _ADMIN_KEY_ROUTING)
+    monkeypatch.setattr(srv, "_lock", threading.Lock())
+    monkeypatch.setattr(srv, "_last_cleanup_time", 0.0)
+    # Local client stub.
+    mock_local = MagicMock()
+    mock_local.chat.completions.create = _fake_local_create
+    monkeypatch.setattr(srv, "_openai_client", mock_local)
+    # Real-tokenizer remote client with stubbed OpenRouter call.
+    from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+    remote_client = RemoteRolloutClient(
+        tokenizer=real_tokenizer,
+        chat_template_type="hf",
+        recompute_enabled=True,
+    )
+    fake_completion = _make_chat_completion(
+        completion_id="chatcmpl-e2e-remote",
+        content="The answer is 42.",
+        finish_reason="stop",
+    )
+    remote_client._call_openrouter = lambda *a, **kw: _async_return(fake_completion)
+    monkeypatch.setattr(srv, "_remote_client", remote_client)
+
+
+class TestEndToEndCacheExport:
+    @pytest.mark.asyncio
+    async def test_set_reward_by_remote_completion_id(self, _e2e_env, monkeypatch):
+        """Remote completion → /rl/set_reward by remote completion ID succeeds (spec test 15)."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+            session_id = start.json()["session_id"]
+
+            chat = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "What is the answer?"}],
+                },
+            )
+            assert chat.status_code == 200
+            completion_id = chat.json()["id"]
+            assert completion_id == "chatcmpl-e2e-remote"
+
+            reward = await client.post(
+                "/rl/set_reward",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"interaction_id": completion_id, "reward": 1.5},
+            )
+            assert reward.status_code == 200
+
+        # Verify the reward landed on the cached interaction.
+        interaction = srv._session_cache[session_id].completions[completion_id]
+        assert interaction.reward == 1.5
+
+    @pytest.mark.asyncio
+    async def test_export_returns_tensor_data(self, _e2e_env, monkeypatch):
+        """Export returns tensor data with local-tokenized prompt/output and reward (spec test 16)."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+            session_id = start.json()["session_id"]
+
+            await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "What is the answer?"}],
+                },
+            )
+            await client.post(
+                "/rl/set_reward",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"interaction_id": "chatcmpl-e2e-remote", "reward": 2.0},
+            )
+            await client.post(
+                "/rl/end_session",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={},
+            )
+
+            export = await client.post(
+                "/export_trajectories",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"session_id": session_id},
+            )
+            assert export.status_code == 200
+            data = export.json()
+            interactions = data["interactions"]
+            assert "chatcmpl-e2e-remote" in interactions
+            entry = interactions["chatcmpl-e2e-remote"]
+            assert "tensor_dict" in entry
+            assert entry["reward"] == 2.0
+
+    @pytest.mark.asyncio
+    async def test_remote_and_local_in_same_session(self, _e2e_env, monkeypatch):
+        """Remote + local completion in one session — both stored, both exportable (spec test 17)."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+            session_id = start.json()["session_id"]
+
+            remote_chat = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "remote q"}],
+                },
+            )
+            local_chat = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "default",
+                    "messages": [{"role": "user", "content": "local q"}],
+                },
+            )
+            assert remote_chat.status_code == 200
+            assert local_chat.status_code == 200
+
+            completions = srv._session_cache[session_id].completions
+            assert "chatcmpl-e2e-remote" in completions
+            assert "chatcmpl-local" in completions
+
+
+# ---------------------------------------------------------------------------
+# Tests: documentation example (spec test 23)
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentationExample:
+    @pytest.mark.asyncio
+    async def test_remote_request_shape_documented(self, _routing_env, monkeypatch):
+        """The documented request shape routes to the remote client (no real network call)."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "docs"},
+            )
+            api_key = start.json()["api_key"]
+
+            captured = {"request": None}
+
+            async def _capture(req, cache):
+                captured["request"] = req
+                return await _fake_remote_create(req, cache)
+
+            srv._remote_client.create_completion = _capture
+
+            # Documented request shape from the spec:
+            # {
+            #   "model": "remote:anthropic/claude-3.5-sonnet",
+            #   "messages": [{"role": "user", "content": "Solve this task."}]
+            # }
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:anthropic/claude-3.5-sonnet",
+                    "messages": [{"role": "user", "content": "Solve this task."}],
+                },
+            )
+        assert resp.status_code == 200
+        assert captured["request"]["model"] == "remote:anthropic/claude-3.5-sonnet"
