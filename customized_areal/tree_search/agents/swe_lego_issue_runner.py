@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from typing import Protocol
 
 from customized_areal.tree_search.agents.reward.swe_lego_types import (
     SweLegoIssue,
     SweLegoIssueResult,
+    SweLegoSetup,
 )
 from customized_areal.tree_search.agents.verifier import VerifierResult
 
@@ -30,7 +30,7 @@ class _MulticaClient(Protocol):
         group_size: int,
         agent_config_id: str,
         base_image: str | None = ...,
-    ) -> Any: ...
+    ) -> SweLegoSetup: ...
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None: ...
 
 
