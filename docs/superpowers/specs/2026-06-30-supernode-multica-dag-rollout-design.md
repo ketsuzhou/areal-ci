@@ -15,13 +15,52 @@ Two structural changes are required to support multi-agent rollout:
 
 A `SuperNode` is **not** "one agent run." It is a **contiguous segment of one agent's action sequence, bounded by communication events** (delegation, mention, completion). One agent run that performs multiple communications is split into multiple SuperNodes. This makes the DAG granularity match the credit-assignment granularity: credit is attributed to the specific segment that delegated/completed, not the whole run.
 
+### Multica orchestrates; AReal consumes
+
+The multi-agent topology is **not** decided by AReal. Multica orchestrates the entire multi-agent execution:
+
+1. AReal submits a root task to Multica.
+2. Multica configures the environment required for the task.
+3. Multica submits the task via user or agent role (this starts the root agent).
+4. For each agent session:
+   - AReal obtains a `session_id` from the proxy (`/rl/start_session`).
+   - AReal submits a task to Multica (with the `session_id` bound to this agent).
+   - Multica configures the environment for this agent's task.
+   - Multica submits via user or agent role; the agent runs.
+   - When the agent session ends, Multica notifies AReal.
+   - Multica saves the `session_id` for this agent.
+5. When the root task completes:
+   - Multica returns to AReal: **all `session_id`s + the DAG + all branching-point environment info**.
+6. AReal builds SuperNodes and Nodes from the `session_id`s + DAG + branching env info.
+
+Concretely, Multica hands AReal:
+- **`session_id`s**: one per agent run, each already bound to the proxy's interaction cache.
+- **DAG**: the segment-level structure (communication-bounded SuperNodes + typed edges `delegation`/`mention`/`completion`). Multica decides segment boundaries at communication events during execution — AReal does not infer them.
+- **Branching-point environment info**: for each SuperNode, the team-wide environment snapshot (`sandbox_ids`, `issue_snapshot_id`, `env_state`) captured at the moment that segment's closing communication event fired.
+
+AReal's role is therefore:
+- Submit the root task to Multica and wait for completion.
+- For each agent session (during execution): issue `session_id` from the proxy; submit the agent's task to Multica with `session_id` bound; receive session-end notification.
+- At completion: receive (session_ids + DAG + branching env) from Multica.
+- For each `session_id`: fetch the proxy's interactions (token-level turns) → `list[Node]` via the existing `interactions_dict_to_nodes` path.
+- Assemble SuperNodes from Multica's segment specs, mapping each agent's turns into the segment that owns them.
+- Stamp branching env info onto each SuperNode.
+- Establish the unified `parent_node_id` chain (causal flattening, see below).
+- Run the verifier per `session_id` → `outcome_reward`; finalize each RL session.
+- Back reward up along the unified `parent_node_id` chain.
+- Return the batched tensor dict.
+
+**Dynamic delegation is Multica's concern, not AReal's.** Multica decides at runtime which agents to spawn, on which sub-issues, with which edges. AReal is delegation-agnostic — it consumes whatever DAG Multica returns. The earlier "static team config, design for dynamic later" decision is therefore moot.
+
 ### Reward backup: causal flattening
 
-When the SegmentSplitter creates SuperNodes, it maintains **one unified `parent_node_id` chain across all agents and all segments**:
+When AReal assembles SuperNodes from Multica's segment specs, it maintains **one unified `parent_node_id` chain across all agents and all segments**:
 
 - Within one agent run: `n_{k+1}.parent_node_id = n_k.node_id` (sequential turns).
 - Across a delegation boundary: when agent A's turn `n3` delegates to agent B, B's first turn `n1'` has `parent_node_id = n3.node_id` (cross-agent link).
 - Across a completion boundary: when B completes and A continues, A's next turn `n4` has `parent_node_id = B's_terminal.node_id` (A's continuation depends on B's result).
+
+The cross-agent linkage is concrete: Multica's segment spec identifies, for each delegation/completion edge, the **source segment's terminal turn** (by `node_id` once AReal has built the Nodes) and the **destination segment's first turn**. AReal's assembler reads these from the spec and sets `parent_node_id` accordingly.
 
 This encodes the **full DAG causal order into the Node-level parent chain**. As a consequence, reward backup walks only this chain (`_backup_path`) — it transparently crosses SuperNode and agent boundaries. The DAG-edge backup function `distribute_reward_over_dag` is **not on the reward path**; it is retained in `agents/dag_backup.py` as a utility for future segment-level analysis, join-point explicit credit, and debugging.
 
@@ -42,7 +81,7 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 | D2 | Refactor `core/tree_store.py` so `Node` is torch-lazy; `SuperNode.nodes: list[Node]` literal; DAG layer stays import-clean without torch | Preserve the torch-free test surface that `agents/` relies on |
 | D3 | Collaborative agent team via DAG — full `agents/` wiring | Match the README's planner→workers→synthesizer scenario |
 | D4 | Spec scope = Phase 1 (SuperNode + DAG construction) + Phase 2 (verifier + Node-level backup). Critic/GAE/cloud-env branching/dynamic delegation are Phase 3+ | One cohesive, ship-able increment; tests stay green |
-| D5 | Static configured team (declarative roles + edges + role_to_issue); interfaces designed for dynamic delegation later | Ship v1 deterministically; do not paint into a corner |
+| D5 | Multica orchestrates the multi-agent topology; AReal submits the root task, binds session_ids during execution, and consumes (session_ids + DAG + branching env) at completion | Multica already manages agent spawning/communication; AReal should not duplicate topology decisions. Dynamic delegation is Multica's concern. |
 | D6 | `SuperNode.node_id` is a UUID4 | Globally unique without scheme coupling |
 | D7 | A segment = all turns since the previous communication event (exclusive), up to **and including** the turn that performs the next communication event (Option A) | The event-causing turn is the segment's terminal; causality for backup; every segment has a DAG edge |
 | D8 | `parent_node_id` links across SuperNode **and agent** boundaries (causal flattening) | Reward backup walks one unified chain; `distribute_reward_over_dag` becomes redundant on the reward path |
@@ -51,7 +90,7 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 | D11 | `sandbox_ids: list[str]` (one per team agent), `issue_snapshot_id: str | None`, `env_state: dict` on SuperNode | Team-wide environment checkpoint; SuperNode-level branching forks the full list |
 | D12 | MCTS statistics stay **per-Node** (visit counts, Q-values, judge scores, normalized advantages/returns) | The unified parent chain already covers cross-agent credit; segment-level stats have no current consumer |
 | D13 | Land in two phases: Phase 1a (data model + codec + tests, single-agent path unchanged) → Phase 1b/2 (coordinator + verifier + backup) | Each PR independently verifiable; intermediate green state |
-| D14 | Side-channel `_communication_events: list[CommunicationEvent]` key in `arun_episode` return dict; absent → run treated as one leaf SuperNode | Preserves today's `arun_episode` return contract; graceful fallback for legacy workflows |
+| D14 | Multica provides segment specs (boundaries + edges + branching env) at task completion; AReal's `SuperNodeAssembler` consumes them. No side-channel `_communication_events` key in `arun_episode` return | Multica is the orchestrator and already tracks communication events; AReal should not re-infer them |
 
 ## 3. Architecture (end state)
 
@@ -59,35 +98,116 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 ┌─────────────────────────────────────────────────────────────────────┐
 │  TreeSearchGroupedRolloutWorkflow.arun_episode(engine, data)         │
 │                                                                     │
-│  if team_config:   ──► TeamRolloutCoordinator.run(...)   ◄── NEW    │
-│  else:             ──► existing single-agent path (unchanged)       │
+│  if multica_dag_enabled: ──► TeamRolloutCoordinator.run(...) ◄── NEW │
+│  else:                  ──► existing single-agent path (unchanged)  │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  agents/team_rollout.py  ◄── NEW                                    │
 │                                                                     │
-│  TeamRolloutCoordinator(team_config, splitter, verifier, rl_writer)  │
+│  TeamRolloutCoordinator(multica_client, rl_bridge, verifier,         │
+│                         rl_writer, assembler)                        │
 │                                                                     │
 │  run(query, data, engine, tree_store) -> batched result | None:      │
-│    1. Build static DAG scaffold from team_config (roles + edges).    │
-│    2. Topological order over roles. For each role:                    │
-│         a. /rl/start_session -> session_id.                         │
-│         b. role.workflow.arun_episode(engine, sub_data)              │
-│            -> list[Node] + list[CommunicationEvent]                  │
-│         c. SegmentSplitter.split(...) -> list[SuperNode]             │
-│            (sets parent_node_id across agents per the causal rule;  │
-│            stamps sandbox_ids/issue_snapshot_id/env_state on each    │
-│            SuperNode from the team frontier at segment close time)   │
-│         d. tree_store.insert_super_batch(supers)                     │
-│         e. Bind session_id to each SuperNode of this run.           │
-│    3. For each leaf agent run:                                      │
+│                                                                     │
+│  ── Phase A: submit + orchestrate ──────────────────────────────── │
+│    1. multica_client.submit_root_task(task_spec) -> root_task_id    │
+│       (AReal submits the root task; Multica configures env +        │
+│        spawns agents via user/agent role)                           │
+│    2. For each agent session (driven by Multica notifications):     │
+│         a. rl_bridge.start_session(task_id) -> session_id           │
+│            (AReal issues session_id from proxy /rl/start_session)   │
+│         b. multica_client.bind_agent_session(agent_run_id,          │
+│                                              session_id)            │
+│            (AReal tells Multica the session_id for this agent)      │
+│         c. [Multica runs the agent: configures env, submits via     │
+│            user/agent role; agent produces interactions in proxy]  │
+│         d. multica_client notifies session_end(agent_run_id)        │
+│                                                                     │
+│  ── Phase B: at root task completion ───────────────────────────── │
+│    3. multica_client.collect_result(root_task_id) -> DagResult:     │
+│         - session_ids: list[str]          (one per agent run)       │
+│         - segments: list[SegmentSpec]    (Multica-defined          │
+│                                            communication-bounded   │
+│                                            segments)               │
+│         - edges: list[EdgeSpec]          (typed DAG edges between  │
+│                                            segments)               │
+│         - env_snapshots: dict[segment_id, TeamEnvSnapshot]          │
+│                                            (team-wide env at each  │
+│                                            branching point)        │
+│    4. For each session_id:                                          │
+│         rl_bridge.export_trajectories(session_id)                   │
+│           -> dict[str, InteractionWithTokenLogpReward]               │
+│         interactions_dict_to_nodes(...) -> list[Node]               │
+│           (existing path; one Node per turn)                       │
+│    5. SuperNodeAssembler.assemble(                                  │
+│         sessions_nodes: dict[session_id, list[Node]],              │
+│         segments, edges, env_snapshots, session_to_agent            │
+│       ) -> tuple[list[SuperNode], ExecutionDAG, root_node_id]       │
+│         (maps each agent's turns into the segments Multica defined; │
+│          sets the unified parent_node_id chain across agents and    │
+│          segments per the causal-flattening rule; stamps env        │
+│          snapshots on SuperNodes; binds session_id to each          │
+│          SuperNode of that run)                                     │
+│    6. tree_store.insert_super_batch(supers)                         │
+│    7. For each leaf agent run:                                      │
 │         verifier.verify(run) per session_id -> outcome_reward        │
-│         RLSessionRewardWriter.finalize(session_id, result)           │
-│    4. backup_episode_terminal(run_terminal_node_id, reward)          │
+│         rl_writer.finalize(session_id, result)                      │
+│    8. backup_episode_terminal(root_terminal_node_id, reward)        │
 │       (or backup_path_returns for dense per-node returns)            │
-│       —— walks the unified parent_node_id chain across all agents.   │
-│    5. Return batched tensor dict (same contract as single-agent).   │
+│       —— walks the unified parent_node_id chain across all agents.  │
+│    9. Return batched tensor dict (same contract as single-agent).   │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  agents/multica_dag_client.py  ◄── NEW                              │
+│                                                                     │
+│  MulticaDagClient (Protocol + HTTP impl)                            │
+│    - submit_root_task(task_spec) -> root_task_id                    │
+│    - bind_agent_session(agent_run_id, session_id) -> None           │
+│    - notify_session_end(agent_run_id) -> None                       │
+│    - collect_result(root_task_id) -> DagResult                      │
+│                                                                     │
+│  DagResult:                                                         │
+│    - session_ids: list[str]                                         │
+│    - segments: list[SegmentSpec]                                    │
+│    - edges: list[EdgeSpec]                                          │
+│    - env_snapshots: dict[str, TeamEnvSnapshot]                      │
+│    - session_to_agent: dict[str, str]                               │
+│                                                                     │
+│  Precedent: MulticaSweLegoClient (agents/swe_lego_client.py)         │
+│  already wraps POST /api/v1/swe-lego/issues — confirmed available. │
+│  The new client follows the same atomic-endpoint pattern but for    │
+│  general multi-agent DAG tasks.                                    │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  agents/supernode_assembler.py  ◄── NEW (replaces SegmentSplitter)   │
+│                                                                     │
+│  SuperNodeAssembler.assemble(                                       │
+│    sessions_nodes: dict[session_id, list[Node]],                    │
+│    segments: list[SegmentSpec],                                     │
+│    edges: list[EdgeSpec],                                           │
+│    env_snapshots: dict[str, TeamEnvSnapshot],                       │
+│    session_to_agent: dict[str, str],                                │
+│  ) -> tuple[list[SuperNode], ExecutionDAG, str]                     │
+│                                                                     │
+│  Consumes Multica's segment specs (already communication-bounded);  │
+│  does NOT infer segment boundaries. Maps each agent's list[Node]   │
+│  into the segments Multica defined (by turn_idx range per spec).    │
+│                                                                     │
+│  Sets the unified parent_node_id chain:                              │
+│    - Within run: n_{k+1}.parent = n_k                               │
+│    - Cross-agent delegation (A's n3 -> B's n1'): n1'.parent = n3    │
+│      (EdgeSpec identifies source segment's terminal turn + dest     │
+│      segment's first turn; assembler reads these and sets parent)   │
+│    - Cross-agent completion (B completes -> A continues@n4):         │
+│      n4.parent = B's terminal                                       │
+│                                                                     │
+│  Stamps env_snapshots on each SuperNode.                            │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -115,38 +235,11 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  agents/segment_splitter.py  ◄── NEW                                │
-│                                                                     │
-│  SegmentSplitter.split(agent_id, issue_id, task_id, nodes, events,  │
-│                        start_parent_node_id, team_frontier_snapshot)│
-│    -> SegmentSplitResult(super_nodes, edges)                        │
-│                                                                     │
-│  Rule: segment = turns since previous comm event, up to & including │
-│  the turn performing the next comm event. Event-causing turn is the │
-│  segment's terminal node.                                           │
-│                                                                     │
-│  Maintains the unified parent_node_id chain:                        │
-│    - Within run: n_{k+1}.parent = n_k                               │
-│    - Cross-agent (A delegates B@n3 -> B's n1'): n1'.parent = n3     │
-│    - Cross-agent (B completes -> A continues@n4): n4.parent =        │
-│      B's terminal                                                    │
-│                                                                     │
-│  Stamps team env snapshot (sandbox_ids, issue_snapshot_id, env_state)│
-│  on each SuperNode from team_frontier_snapshot at close time.        │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
 │  agents/event_codec.py  (simplified)                                │
 │                                                                     │
 │  dag_to_supernodes(dag, ordering?) -> list[SuperNode]                │
-│    (SuperNode already carries nodes + edges; mostly topological     │
-│     ordering + node_id assignment)                                  │
 │  supernodes_to_dag(supernodes) -> ExecutionDAG                       │
-│    (inverse; validates edge symmetry + topo invariant)              │
 │  replay_prefix_for(supernodes, branch_point) -> ReplayPrefix        │
-│    (unchanged shape; messages derived from nodes via                │
-│     message_timeline)                                               │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -315,122 +408,161 @@ class MCTSTreeStore:
 
 **Backward-compat**: the existing `insert_batch(list[Node])` API is replaced. Call sites in `customized_grouped_workflow.py` are updated in Phase 1a to wrap single-agent Nodes in a single leaf SuperNode (preserving today's behavior).
 
-## 5. SegmentSplitter (`agents/segment_splitter.py`, new module)
+## 5. SuperNodeAssembler (`agents/supernode_assembler.py`, new module)
 
-### 5.1 CommunicationEvent
+Replaces the originally-proposed `SegmentSplitter`. The splitter inferred segment boundaries from side-channel communication events; the assembler instead **consumes Multica's pre-defined segment specs** and maps each agent's `list[Node]` into them.
+
+### 5.1 Multica-provided data structures
 
 ```python
 @dataclass(frozen=True)
-class CommunicationEvent:
-    """One communication event emitted during an agent run."""
-    turn_idx: int                # 1-based turn position within the run
-    event_type: EdgeType         # DELEGATION | MENTION | COMPLETION
-    target_agent_id: str         # the other agent involved
-    target_issue_id: str | None  # sub-issue (DELEGATION) or None
+class SegmentSpec:
+    """One communication-bounded segment, as defined by Multica.
+
+    Multica decides segment boundaries at communication events during
+    execution; AReal does not infer them.
+    """
+    segment_id: str               # Multica's UUID for this segment
+    agent_run_id: str             # which agent run this segment belongs to
+    issue_id: str
+    task_id: str
+    closing_event: EdgeType | None     # None for leaf segments
+    closing_event_target_segment: str | None  # the other segment's UUID
+    # The turn range within this agent run that belongs to this segment.
+    # Multica tracks turn indices as the agent runs; AReal maps them to
+    # Node positions in the list[Node] built from the proxy interactions.
+    start_turn_idx: int           # 1-based, inclusive
+    end_turn_idx: int             # 1-based, inclusive (the closing-event turn)
+
+
+@dataclass(frozen=True)
+class EdgeSpec:
+    """One typed DAG edge between segments, as defined by Multica."""
+    src_segment_id: str
+    dst_segment_id: str
+    type: EdgeType                # DELEGATION | MENTION | COMPLETION
+
+
+@dataclass(frozen=True)
+class TeamEnvSnapshot:
+    """Team-wide environment state at a branching point, from Multica.
+
+    One per segment, captured at the moment that segment's closing
+    communication event fired. Multica owns the env state; AReal stamps
+    it onto the corresponding SuperNode without interpretation.
+    """
+    sandbox_ids: list[str]        # one per team agent, ordered by role
+    issue_snapshot_id: str | None
+    env_state: dict
+
+
+@dataclass(frozen=True)
+class DagResult:
+    """Multica's completion payload: the DAG of segments + env snapshots."""
+    session_ids: list[str]                              # one per agent run
+    session_to_agent_run: dict[str, str]                # session_id -> agent_run_id
+    segments: list[SegmentSpec]
+    edges: list[EdgeSpec]
+    env_snapshots: dict[str, TeamEnvSnapshot]          # segment_id -> snapshot
 ```
 
-### 5.2 SegmentSplitter
+### 5.2 SuperNodeAssembler
 
 ```python
-class SegmentSplitter:
-    """Split an agent run's flat list[Node] + comm events into SuperNodes.
+class SuperNodeAssembler:
+    """Assemble SuperNodes from Multica's segment specs + proxy interactions.
 
-    Rule (Option A): a segment = all turns since the previous comm event
-    (exclusive), up to AND INCLUDING the turn that performs the next comm
-    event. The event-causing turn is the segment's terminal node. Leaf
-    segments (no closing event) absorb the trailing turns.
+    Consumes Multica's pre-defined segments (does NOT infer boundaries).
+    Maps each agent's list[Node] into the segments Multica defined, by
+    the start_turn_idx / end_turn_idx range on each SegmentSpec.
 
-    Maintains the unified parent_node_id chain:
+    Maintains the unified parent_node_id chain (causal flattening):
       - Within one run: n_{k+1}.parent_node_id = n_k.node_id
       - Cross-agent delegation (A's n3 delegates -> B's n1'):
         n1'.parent_node_id = n3.node_id
+        (EdgeSpec with type=DELEGATION identifies src segment's terminal
+        turn + dst segment's first turn; assembler sets parent)
       - Cross-agent completion (B completes -> A continues@n4):
         n4.parent_node_id = B's terminal node_id
+        (EdgeSpec with type=COMPLETION; same mechanism)
 
-    Stamps team env snapshot on each SuperNode.
+    Stamps TeamEnvSnapshot onto each SuperNode.
+    Binds session_id to each SuperNode (from session_to_agent_run).
     """
 
-    def split(
+    def assemble(
         self,
         *,
-        agent_id: str,
-        issue_id: str,
-        task_id: str,
-        nodes: list[Node],
-        events: list[CommunicationEvent],
-        start_parent_node_id: str | None,
-        team_frontier_snapshot: TeamFrontierSnapshot,
-    ) -> SegmentSplitResult:
+        sessions_nodes: dict[str, list[Node]],   # session_id -> list[Node]
+        dag_result: DagResult,
+    ) -> tuple[list[SuperNode], ExecutionDAG, str]:
+        """Returns (super_nodes, dag, root_terminal_node_id).
+
+        root_terminal_node_id is the terminal node of the DAG's root leaf
+        — the starting point for backup_episode_terminal.
+        """
         ...
 ```
 
-### 5.3 SegmentSplitResult
+### 5.3 Why the assembler does not infer segments
+
+The earlier `SegmentSplitter` design had AReal infer segment boundaries by detecting communication events in the agent's turn stream. That approach:
+- Required a side-channel `_communication_events` key in `arun_episode` return, which has no producer today (no code detects delegate/mention/completion).
+- Or required post-hoc heuristic detection from `raw_messages` (brittle, error-prone).
+
+Multica is the orchestrator and already tracks communication events as it spawns agents and routes messages. The assembler consumes Multica's pre-defined segments — no inference, no side-channel, no heuristics. This is the clean separation of concerns: Multica owns topology + segmentation; AReal owns token-level interactions + SuperNode/Node data model + reward + backup.
+
+## 6. MulticaDagClient (`agents/multica_dag_client.py`, new module)
 
 ```python
-@dataclass
-class SegmentSplitResult:
-    super_nodes: list[SuperNode]
-    # Cross-run DAG edges (src_uuid, dst_uuid, type). Sequential within-run
-    # edges (SN_{k+1} parent = SN_k) are encoded via _super_parent, not here.
-    edges: list[tuple[str, str, EdgeType]]
-```
+class MulticaDagClient(Protocol):
+    """AReal's interface to Multica's multi-agent DAG orchestration.
 
-### 5.4 TeamFrontierSnapshot
-
-```python
-@dataclass
-class TeamFrontierSnapshot:
-    """Snapshot of the entire team's environment state at a moment.
-
-    Captured at each SuperNode close to populate sandbox_ids /
-    issue_snapshot_id / env_state. Built by the coordinator from the
-    per-agent sandbox trackers as each segment closes.
+    Precedent: MulticaSweLegoClient (agents/swe_lego_client.py) already
+    wraps POST /api/v1/swe-lego/issues (confirmed available). The new
+    client follows the same atomic-endpoint pattern but for general
+    multi-agent DAG tasks.
     """
-    sandbox_ids: list[str]           # one per team agent, ordered by role
-    issue_snapshot_id: str | None
-    env_state: dict
+
+    async def submit_root_task(
+        self, *, task_spec: TaskSpec
+    ) -> str:
+        """Submit the root task; returns root_task_id.
+
+        Multica configures the env and begins orchestrating (spawns agents
+        via user/agent role as the DAG requires).
+        """
+        ...
+
+    async def bind_agent_session(
+        self, *, agent_run_id: str, session_id: str
+    ) -> None:
+        """Tell Multica the session_id AReal issued for this agent run."""
+        ...
+
+    async def notify_session_end(self, *, agent_run_id: str) -> None:
+        """Notify Multica that an agent's session has ended."""
+        ...
+
+    async def collect_result(self, *, root_task_id: str) -> DagResult:
+        """Block until the root task completes; return the DAG + env snapshots."""
+        ...
 ```
 
-## 6. TeamRolloutCoordinator (`agents/team_rollout.py`, new module)
+The concrete HTTP implementation is a thin wrapper over Multica's endpoints (to be defined on the Multica side, following the `/api/v1/swe-lego/issues` precedent). AReal depends only on the Protocol; tests inject a fake.
 
-### 6.1 Static team config
-
-```python
-@dataclass(frozen=True)
-class AgentRoleSpec:
-    role: str                       # "planner" | "worker" | "synthesizer"
-    agent_id: str                   # the agent config to run
-    workflow: RolloutWorkflow       # the base workflow for this role
-
-
-@dataclass(frozen=True)
-class TeamEdgeSpec:
-    src_role: str
-    dst_role: str
-    type: EdgeType
-
-
-@dataclass(frozen=True)
-class TeamConfig:
-    """Static team topology (Phase 1 — declarative roles + edges)."""
-    roles: tuple[AgentRoleSpec, ...]
-    edges: tuple[TeamEdgeSpec, ...]
-    role_to_issue: dict[str, str]   # which role runs on which sub-issue
-```
-
-### 6.2 TeamRolloutCoordinator
+## 7. TeamRolloutCoordinator (`agents/team_rollout.py`, new module)
 
 ```python
 class TeamRolloutCoordinator:
-    """Runs a collaborative agent team on one query.
+    """Runs a collaborative agent team on one query, Multica-orchestrated.
 
     Phase 1+2 (this spec):
-      - Static team config (no runtime delegation decisions).
-      - DAG scaffold built from TeamConfig edges.
-      - Verifier per session_id; reward backup via Node-level parent_node_id.
+      - Multica orchestrates topology + segmentation + env snapshots.
+      - AReal issues session_ids, builds SuperNode/Node, runs verifier,
+        backs reward up along the unified parent_node_id chain.
 
     Designed-for-later (Phase 3+, not built here):
-      - Dynamic delegation (planner decides fan-out at runtime).
       - Critic + GAE advantages.
       - Cloud-env branching at segment boundaries.
       - SuperNode-level MCTS stats.
@@ -439,11 +571,11 @@ class TeamRolloutCoordinator:
     def __init__(
         self,
         *,
-        team_config: TeamConfig,
-        splitter: SegmentSplitter,
+        multica_client: MulticaDagClient,
+        rl_bridge: RLBridgeClient,
         verifier: Verifier,
         rl_writer: RLSessionRewardWriter,
-        rl_bridge: RLBridgeClient,
+        assembler: SuperNodeAssembler,
     ) -> None: ...
 
     async def run(
@@ -454,51 +586,67 @@ class TeamRolloutCoordinator:
         query_id: str,
         tree_store: MCTSTreeStore,
     ) -> dict[str, Any] | None:
-        # 1. Build static DAG scaffold from team_config (roles + edges).
-        # 2. Topological order over roles.
-        # 3. For each role in topo order:
-        #      a. /rl/start_session via rl_bridge -> session_id.
-        #      b. role.workflow.arun_episode(engine, sub_data)
-        #         -> dict with _backend_run_raw_messages etc.
-        #            AND _communication_events: list[CommunicationEvent]
-        #      c. Convert raw messages to list[Node] (existing helper).
-        #      d. SegmentSplitter.split(...) -> list[SuperNode] + edges.
-        #      e. tree_store.insert_super_batch(supers).
-        #      f. Bind session_id to each SuperNode of this run.
-        #      g. Update team_frontier_snapshot for the next role.
-        # 4. Resolve cross-run edges against the DAG scaffold; build
-        #    ExecutionDAG of SuperNodes.
-        # 5. For each leaf agent run:
+        # ── Phase A: submit + orchestrate ───────────────────────────
+        # 1. multica_client.submit_root_task(task_spec) -> root_task_id
+        # 2. For each agent session (driven by Multica notifications):
+        #      a. rl_bridge.start_session(task_id) -> session_id
+        #      b. multica_client.bind_agent_session(agent_run_id, session_id)
+        #      c. [Multica runs the agent; proxy caches interactions]
+        #      d. multica_client.notify_session_end(agent_run_id)
+        #
+        # ── Phase B: at root task completion ──────────────────────────
+        # 3. dag_result = multica_client.collect_result(root_task_id)
+        #    -> DagResult(session_ids, segments, edges, env_snapshots,
+        #                 session_to_agent_run)
+        # 4. For each session_id in dag_result.session_ids:
+        #      interactions = rl_bridge.export_trajectories(session_id)
+        #      nodes = interactions_dict_to_nodes(interactions)
+        #      sessions_nodes[session_id] = nodes
+        # 5. super_nodes, dag, root_terminal_node_id = assembler.assemble(
+        #      sessions_nodes=sessions_nodes, dag_result=dag_result)
+        # 6. tree_store.insert_super_batch(super_nodes)
+        # 7. For each leaf agent run:
         #      verifier.verify(run) per session_id -> VerifierResult
-        #      rl_writer.finalize(session_id, result)  # set_reward + end_session
-        # 6. backup_episode_terminal(run_terminal_node_id, reward)
+        #      rl_writer.finalize(session_id, result)
+        # 8. backup_episode_terminal(root_terminal_node_id, reward)
         #    (or backup_path_returns for dense per-node returns)
         #    —— walks the unified parent_node_id chain across all agents.
-        # 7. Return batched tensor dict (same contract as single-agent).
+        # 9. Return batched tensor dict (same contract as single-agent).
 ```
 
-### 6.3 Side-channel contract
-
-The base `RolloutWorkflow.arun_episode` returns a `dict[str, Any]` (today's contract). We extend the contract: the dict **may** carry a `_communication_events: list[CommunicationEvent]` key. The coordinator reads it; if absent (legacy workflow), the run is treated as **one leaf SuperNode containing all nodes** — graceful fallback.
-
-## 7. Workflow integration (`core/customized_grouped_workflow.py`)
+## 8. Workflow integration (`core/customized_grouped_workflow.py`)
 
 ```python
 class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     def __init__(
         self,
         ...,
-        team_config: TeamConfig | None = None,  # NEW; None = single-agent
+        multica_dag_enabled: bool = False,  # NEW; False = single-agent
+        multica_dag_client: MulticaDagClient | None = None,
     ) -> None:
         ...
-        self._team_config = team_config
-        if team_config is not None:
+        self._multica_dag_enabled = multica_dag_enabled
+        if multica_dag_enabled:
             self._coordinator = TeamRolloutCoordinator(
-                team_config=team_config,
-                splitter=SegmentSplitter(),
-                verifier=...,             # constructed from verifier deps
-                rl_writer=...,            # RLSessionRewardWriter
-                rl_bridge=...,            # RLBridgeClient adapter
+                multica_client=multica_dag_client,
+                rl_bridge=...,             # RLBridgeClient adapter
+                verifier=...,              # constructed from verifier deps
+                rl_writer=...,             # RLSessionRewardWriter
+                assembler=SuperNodeAssembler(),
+            )
+        else:
+            self._coordinator = None
+
+    async def arun_episode(self, engine, data):
+        if self._coordinator is not None:
+            return await self._coordinator.run(
+                engine=engine, data=data,
+                query_id=data.get("query_id", ""),
+                tree_store=self.tree_store,
+            )
+        # Existing single-agent path (unchanged)
+        ...
+```
             )
         else:
             self._coordinator = None
@@ -535,10 +683,10 @@ In this design:
 
 - Critic observations (`agents/critic_observation.py`), GAE (`agents/gae.py`), `assemble_node_advantages`.
 - `BranchMaterializer` cloud-env branching at segment boundaries (`agents/integration.py`).
-- Dynamic delegation (planner decides fan-out at runtime) — `TeamConfig` is static in v1.
 - SuperNode-level MCTS stats (segment visit counts, Q-values) — no current consumer.
 - SuperNode-level advantage computer (segment-level GRPO analog).
 - Per-segment judge scores (vs. today's per-Node judge scores).
+- The Multica-side endpoints that `MulticaDagClient` calls — those are implemented in the Multica repo, following the `/api/v1/swe-lego/issues` precedent. This spec defines only AReal's client Protocol and consumption.
 
 ## 10. Two-phase landing
 
@@ -547,32 +695,32 @@ In this design:
 - `agents/execution_dag.py`: `SuperNode` dataclass (replaces `AgentRunNode`); `ExecutionDAG` holds SuperNodes.
 - `agents/event_model.py`: shrink to `EdgeRef` + `message_timeline` (Event class removed).
 - `agents/event_codec.py`: simplify to `dag_to_supernodes` / `supernodes_to_dag` / `replay_prefix_for`.
-- `agents/segment_splitter.py`: new module (SegmentSplitter + CommunicationEvent + SegmentSplitResult + TeamFrontierSnapshot).
+- `agents/supernode_assembler.py`: new module (SuperNodeAssembler + SegmentSpec + EdgeSpec + TeamEnvSnapshot + DagResult).
 - `core/tree_store.py`: unified `MCTSTreeStore` (`trajectories: dict[str, list[SuperNode]]`, `insert_super_batch`, dual indices).
-- `agents/__init__.py`: update exports — remove `Event`, `AgentRunNode`, `dag_to_events`, `events_to_dag`; add `SuperNode`, `dag_to_supernodes`, `supernodes_to_dag`, `SegmentSplitter`, `CommunicationEvent`, `TeamFrontierSnapshot`.
+- `agents/__init__.py`: update exports — remove `Event`, `AgentRunNode`, `dag_to_events`, `events_to_dag`; add `SuperNode`, `dag_to_supernodes`, `supernodes_to_dag`, `SuperNodeAssembler`, `SegmentSpec`, `EdgeSpec`, `TeamEnvSnapshot`, `DagResult`.
 - `agents/gae.py` (Phase 3 module, out of scope but import-affected): update `events_from_nodes` to construct `SuperNode` instead of `Event`, and `GlobalEvent` to project from `SuperNode`. Logic unchanged; pure rename. (If this pulls in unwanted Phase 3 churn, alternative: leave `Event` as a thin deprecated alias for `SuperNode` until Phase 3 lands — but preferred path is the rename.)
 - Update single-agent path in `customized_grouped_workflow.py` to wrap Nodes in a leaf SuperNode (behavior unchanged).
 - Update existing tests (`tests/test_event_codec.py`, `tests/test_event_model.py`, `tests/test_execution_dag.py`, `tests/test_dag_backup.py`, `tests/test_session_map.py`, `tests/test_e2e_critic_gae.py`) to the new API.
-- New unit tests for SegmentSplitter.
+- New unit tests for SuperNodeAssembler (synthetic sessions_nodes + DagResult → verify segment mapping, parent_node_id chain, env snapshot stamping).
 
 ### Phase 1b/2 (second PR)
-- `agents/team_rollout.py`: new module (TeamRolloutCoordinator + TeamConfig + AgentRoleSpec + TeamEdgeSpec).
-- `RLBridgeClient` concrete adapter mapping `session_id` → `interaction_id`.
-- Wire `team_config` param into `TreeSearchGroupedRolloutWorkflow.__init__` and `arun_episode`.
+- `agents/multica_dag_client.py`: new module (`MulticaDagClient` Protocol + HTTP impl; follows `MulticaSweLegoClient` precedent).
+- `agents/team_rollout.py`: new module (`TeamRolloutCoordinator`).
+- `RLBridgeClient` concrete adapter mapping `session_id` → `interaction_id` (or extending the proxy to accept session-level reward).
+- Wire `multica_dag_enabled` + `multica_dag_client` params into `TreeSearchGroupedRolloutWorkflow.__init__` and `arun_episode`.
 - Verifier + `RLSessionRewardWriter` integration in the coordinator.
-- End-to-end multi-agent test with a 3-role config (planner→worker→synthesizer), verifying reward flows along the unified parent chain across agents.
+- End-to-end multi-agent test with a fake `MulticaDagClient` returning a synthetic `DagResult` (3-segment DAG: planner→worker→synthesizer), verifying reward flows along the unified parent chain across agents.
 
 ## 11. Test strategy
 
 - **Torch-free unit tests** (most of the new code):
-  - SegmentSplitter with synthetic Node lists + events; verify segment boundaries, parent_node_id chain (within-run, cross-agent delegation, cross-agent completion), team env snapshot stamping.
+  - SuperNodeAssembler with synthetic `sessions_nodes` + `DagResult`; verify segment mapping (turn ranges), parent_node_id chain (within-run, cross-agent delegation, cross-agent completion), env snapshot stamping, session_id binding.
   - `insert_super_batch` + dual-level lookup (`get_super_node`, `get_node`).
   - `backup_episode_terminal` across SuperNode and agent boundaries (causal flattening).
   - `dag_to_supernodes` / `supernodes_to_dag` round-trip + edge symmetry + topo invariant.
-  - Coordinator with mock role workflows + mock verifier + mock rl_bridge; verify DAG construction, session binding, verifier invocation, backup invocation, batched tensor dict output.
+  - Coordinator with a fake `MulticaDagClient` + mock verifier + mock rl_bridge; verify DAG construction, session binding, verifier invocation, backup invocation, batched tensor dict output.
 - **Integration tests** (`pytest.importorskip("torch")` for tensor paths):
-  - End-to-end team episode with a 3-role config (planner→worker→synthesizer); verify credit flows along the unified parent chain and per-turn `parent_node_id` walks cross SuperNode/agent boundaries.
-  - Leaf-SuperNode fallback when `_communication_events` is absent.
+  - End-to-end team episode with a fake `MulticaDagClient` returning a 3-segment DAG (planner→worker→synthesizer); verify credit flows along the unified parent chain and per-turn `parent_node_id` walks cross SuperNode/agent boundaries.
 - **Existing tests preserved**: today's `test_tree_store.py`, `test_advantage.py`, etc. run unchanged on the single-agent path.
 
 ## 12. Risks and mitigations
@@ -580,16 +728,22 @@ In this design:
 | Risk | Mitigation |
 |---|---|
 | `parent_node_id` semantic shift ("episode-internal predecessor" → "causal predecessor") surprises callers | Document on `Node.parent_node_id`; audit all readers (today: `_backup_path`, `_node_parent_id`, `_backup_inserted_episodes`); the `visited` guard in `_backup_path` already prevents cycles from malformed chains. |
-| Cross-agent `parent_node_id` link requires the SegmentSplitter to know the source agent's terminal `node_id` at split time | Coordinator passes `start_parent_node_id` to the splitter (the source run's terminal `node_id` for delegation, or the completion source's terminal for completion edges). |
+| Cross-agent `parent_node_id` link requires the assembler to know the source segment's terminal `node_id` at assembly time | Multica's `EdgeSpec` identifies source + destination segments; the assembler has already built those segments' Nodes (by turn range) before setting cross-agent parent links. The source segment's terminal `node_id` is `nodes[end_turn_idx - 1].node_id`. |
 | `session_id` → `interaction_id` mapping is unspecified in the proxy today | Phase 1b/2 implements the `RLBridgeClient` adapter; if the proxy lacks a clean session→terminal-interaction lookup, the adapter uses the session's last interaction (or requires the verifier to return interaction_ids). |
 | Node torch-lazy refactor breaks existing tensor-typed code paths | Field types become `Any`; `_node_to_tensor_dict` lazy-imports torch; existing tests with `pytest.importorskip("torch")` continue to cover the tensor paths. |
 | Two-phase landing leaves Phase 1a in a state where SuperNode exists but is unused by multi-agent path | Phase 1a wraps single-agent Nodes in a leaf SuperNode so the data model is exercised; Phase 1b/2 wires the coordinator. Intermediate state is green and useful. |
+| Multica-side endpoints for `MulticaDagClient` do not exist yet | AReal depends only on the `MulticaDagClient` Protocol; tests inject a fake. The Multica repo implements the endpoints (following `/api/v1/swe-lego/issues` precedent) on its own schedule. AReal's Phase 1b/2 can land against the Protocol and be activated once Multica's endpoints are live. |
+| Multica's segment turn-indices may not align with AReal's `list[Node]` positions (off-by-one, missed turns) | The assembler validates `start_turn_idx`/`end_turn_idx` against the actual `list[Node]` length and raises on mismatch; tests cover the boundary cases. |
 
 ## 13. Glossary
 
 - **SuperNode**: communication-bounded segment of one agent's action sequence; carries DAG topology, comm-event provenance, RL session binding, team env snapshot, and `list[Node]` turns.
 - **Node**: one assistant turn (`input_ids`, `loss_mask`, `logprobs`, etc.); torch-lazy after refactor.
-- **CommunicationEvent**: one delegation/mention/completion emitted by an agent run, tagged with the turn that performed it.
 - **Causal flattening**: encoding the full DAG causal order into the Node-level `parent_node_id` chain, so reward backup walks one unified chain.
-- **TeamFrontierSnapshot**: snapshot of the entire team's sandbox/issue state at a SuperNode close time.
+- **Multica**: the orchestration layer that spawns agents, tracks communication events, segments agent runs, and captures team env snapshots. AReal's `MulticaDagClient` talks to it.
+- **DagResult**: Multica's completion payload — `session_ids` + `segments` (SegmentSpec list) + `edges` (EdgeSpec list) + `env_snapshots` (per-segment `TeamEnvSnapshot`).
+- **SegmentSpec**: Multica's definition of one communication-bounded segment, including the turn-index range within the agent run.
+- **TeamEnvSnapshot**: team-wide environment state at a branching point (sandbox_ids per team agent + issue_snapshot_id + env_state), captured by Multica.
+- **SuperNodeAssembler**: AReal's module that consumes `DagResult` + proxy interactions and builds `list[SuperNode]` + `ExecutionDAG`, setting the unified `parent_node_id` chain.
 - **session_id**: proxy-layer identifier for one agent run; shared across all SuperNodes of that run.
+- **Precedent**: `MulticaSweLegoClient` (`agents/swe_lego_client.py`) already wraps `POST /api/v1/swe-lego/issues` — confirmed available. The new `MulticaDagClient` follows the same atomic-endpoint pattern.
