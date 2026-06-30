@@ -58,11 +58,11 @@ from customized_areal.tree_search.agents.event_model import (
     message_timeline,
 )
 from customized_areal.tree_search.agents.execution_dag import (
-    AgentRunNode,
     DAGError,
     Edge,
     EdgeType,
     ExecutionDAG,
+    SuperNode,
 )
 from customized_areal.tree_search.agents.gae import (
     GlobalEvent,
@@ -98,7 +98,7 @@ from customized_areal.tree_search.agents.verifier import (
 
 __all__ = [
     # execution_dag
-    "AgentRunNode",
+    "SuperNode",
     "DAGError",
     "Edge",
     "EdgeType",

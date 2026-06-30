@@ -13,17 +13,17 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.config import Config
 from customized_areal.tree_search.agents.dag_advantage import (
     AssembledAdvantages,
     assemble_node_advantages,
     explained_variance,
 )
-from customized_areal.tree_search.agents.execution_dag import AgentRunNode
+from customized_areal.tree_search.agents.execution_dag import SuperNode
+from customized_areal.tree_search.config import Config
 
 
 def _node(nid: str, *, value: float, process: float = 0.0, outcome: float = 0.0):
-    n = AgentRunNode(node_id=nid, agent_id="a", issue_id="i", task_id="t")
+    n = SuperNode(node_id=nid, agent_id="a", issue_id="i", task_id="t")
     n.value = value
     n.process_reward = process
     n.outcome_reward = outcome

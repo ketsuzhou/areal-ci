@@ -97,13 +97,13 @@ def test_empty_event_sequence_returns_empty() -> None:
 
 
 def test_events_from_nodes_reads_value_and_combines_rewards() -> None:
-    from customized_areal.tree_search.agents.execution_dag import AgentRunNode
+    from customized_areal.tree_search.agents.execution_dag import SuperNode
     from customized_areal.tree_search.agents.gae import events_from_nodes
 
-    n0 = AgentRunNode(node_id="n0", agent_id="a", issue_id="i", task_id="t")
+    n0 = SuperNode(node_id="n0", agent_id="a", issue_id="i", task_id="t")
     n0.value = 0.5
     n0.process_reward = 0.1
-    n1 = AgentRunNode(node_id="n1", agent_id="a", issue_id="i", task_id="t")
+    n1 = SuperNode(node_id="n1", agent_id="a", issue_id="i", task_id="t")
     n1.value = 0.0
     n1.process_reward = 0.0
     n1.outcome_reward = 1.0  # verifier terminal reward lands on the node
@@ -115,8 +115,7 @@ def test_events_from_nodes_reads_value_and_combines_rewards() -> None:
 
 
 def test_node_value_defaults_to_none() -> None:
-    from customized_areal.tree_search.agents.execution_dag import AgentRunNode
+    from customized_areal.tree_search.agents.execution_dag import SuperNode
 
-    n = AgentRunNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
+    n = SuperNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
     assert n.value is None
-

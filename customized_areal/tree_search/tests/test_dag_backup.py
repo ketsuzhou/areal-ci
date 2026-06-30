@@ -5,14 +5,14 @@ from customized_areal.tree_search.agents.dag_backup import (
     distribute_reward_over_dag,
 )
 from customized_areal.tree_search.agents.execution_dag import (
-    AgentRunNode,
     EdgeType,
     ExecutionDAG,
+    SuperNode,
 )
 
 
-def _node(node_id: str) -> AgentRunNode:
-    return AgentRunNode(
+def _node(node_id: str) -> SuperNode:
+    return SuperNode(
         node_id=node_id,
         agent_id="a",
         issue_id="i",
@@ -24,7 +24,7 @@ def _dag_linear() -> ExecutionDAG:
     # root -> child1 -> child2 (sequential delegation chain)
     dag = ExecutionDAG()
     for nid in ("root", "c1", "c2"):
-        dag.add_node(_node(nid))
+        dag.add_event(_node(nid))
     dag.add_edge("root", "c1", EdgeType.DELEGATION)
     dag.add_edge("c1", "c2", EdgeType.DELEGATION)
     return dag
@@ -52,7 +52,7 @@ def _dag_fan_in() -> ExecutionDAG:
     # root delegates to a and b; both report back to join (fan-in).
     dag = ExecutionDAG()
     for nid in ("root", "a", "b", "join"):
-        dag.add_node(_node(nid))
+        dag.add_event(_node(nid))
     dag.add_edge("root", "a", EdgeType.DELEGATION)
     dag.add_edge("root", "b", EdgeType.DELEGATION)
     dag.add_edge("a", "join", EdgeType.COMPLETION)

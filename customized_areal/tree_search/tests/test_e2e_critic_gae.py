@@ -24,9 +24,9 @@ import pytest
 from customized_areal.tree_search.agents.agentic_verifier import AgenticVerifier
 from customized_areal.tree_search.agents.dag_advantage import assemble_node_advantages
 from customized_areal.tree_search.agents.execution_dag import (
-    AgentRunNode,
     EdgeType,
     ExecutionDAG,
+    SuperNode,
 )
 from customized_areal.tree_search.agents.harvest import VerifierFinalizer
 
@@ -56,10 +56,10 @@ class _RecordingBridge:
 def _two_run_dag() -> ExecutionDAG:
     """planner A0 delegates to worker B0; B0 completes back to A0's terminal."""
     dag = ExecutionDAG()
-    a = AgentRunNode(node_id="A0", agent_id="planner", issue_id="i1", task_id="t")
-    b = AgentRunNode(node_id="B0", agent_id="worker", issue_id="i2", task_id="t")
-    dag.add_node(a)
-    dag.add_node(b)
+    a = SuperNode(node_id="A0", agent_id="planner", issue_id="i1", task_id="t")
+    b = SuperNode(node_id="B0", agent_id="worker", issue_id="i2", task_id="t")
+    dag.add_event(a)
+    dag.add_event(b)
     dag.add_edge("A0", "B0", EdgeType.DELEGATION)
     dag.set_session_id("A0", "sess-A0")
     dag.set_session_id("B0", "sess-B0")

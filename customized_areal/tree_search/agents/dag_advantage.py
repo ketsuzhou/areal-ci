@@ -45,7 +45,7 @@ def assemble_node_advantages(
 ) -> AssembledAdvantages:
     """Run global GAE over ``ordered_nodes`` (global completion order).
 
-    ``ordered_nodes`` are duck-typed ``AgentRunNode``-like objects with
+    ``ordered_nodes`` are duck-typed ``SuperNode``-like objects with
     ``node_id``, ``value`` (``V_{t+1}``), ``process_reward`` and
     ``outcome_reward``. Returns per-node advantages/returns/baselines.
     """

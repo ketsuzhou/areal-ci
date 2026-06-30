@@ -26,10 +26,10 @@ from customized_areal.tree_search.agents.event_codec import (
 )
 from customized_areal.tree_search.agents.event_model import Event, message_timeline
 from customized_areal.tree_search.agents.execution_dag import (
-    AgentRunNode,
     DAGError,
     EdgeType,
     ExecutionDAG,
+    SuperNode,
 )
 from customized_areal.tree_search.agents.gae import GlobalEvent, events_from_nodes
 
@@ -48,7 +48,7 @@ EDGES = [
 def _build_dag() -> ExecutionDAG:
     dag = ExecutionDAG()
     for i, nid in enumerate(ORDER):
-        node = AgentRunNode(
+        node = SuperNode(
             node_id=nid, agent_id=nid[0], issue_id=f"iss-{nid}", task_id=f"task-{nid}"
         )
         node.value = 0.1 * i
@@ -57,7 +57,7 @@ def _build_dag() -> ExecutionDAG:
             "messages": [{"role": "assistant", "content": f"{nid}-out"}],
             "completion_time": float(i),
         }
-        dag.add_node(node)
+        dag.add_event(node)
     for src, dst, t in EDGES:
         dag.add_edge(src, dst, t)
     dag.get("O1").outcome_reward = 1.0
@@ -134,7 +134,7 @@ def test_events_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
     dag = _build_dag()
     events = dag_to_events(dag, ordering=ORDER)
     rebuilt = events_to_dag(events)
-    assert sorted(rebuilt.node_ids()) == sorted(ORDER)
+    assert sorted(rebuilt.event_ids()) == sorted(ORDER)
     orig = {(e.src, e.dst, e.type) for e in dag.edges}
     back = {(e.src, e.dst, e.type) for e in rebuilt.edges}
     assert back == orig
@@ -190,7 +190,7 @@ def test_events_to_dag_rejects_non_topological_index() -> None:
 
 def test_events_to_dag_empty_returns_empty_dag() -> None:
     rebuilt = events_to_dag([])
-    assert rebuilt.node_ids() == []
+    assert rebuilt.event_ids() == []
 
 
 def test_full_dict_round_trip_identity() -> None:
@@ -203,7 +203,7 @@ def test_full_dict_round_trip_identity() -> None:
     assert {(e.src, e.dst, e.type) for e in dag_a.edges} == {
         (e.src, e.dst, e.type) for e in dag_b.edges
     }
-    assert sorted(dag_a.node_ids()) == sorted(dag_b.node_ids())
+    assert sorted(dag_a.event_ids()) == sorted(dag_b.event_ids())
 
 
 def _build_dag_with_branch() -> ExecutionDAG:
@@ -267,7 +267,7 @@ def test_events_from_nodes_parity_with_old_logic() -> None:
 
 
 def test_events_from_nodes_unscored_value_is_zero() -> None:
-    node = AgentRunNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
+    node = SuperNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
     node.process_reward = 0.25
     (ev,) = events_from_nodes([node])
     assert ev == GlobalEvent(node_id="n", value=0.0, reward=0.25)

@@ -113,13 +113,6 @@ class SuperNode:
         return t.node_id if t is not None else None
 
 
-# Backward-compat alias: ``AgentRunNode`` -> ``SuperNode``. Other modules
-# (``event_codec``, ``agents/__init__``) still import ``AgentRunNode``; they
-# will be updated in Tasks 3 and 10. Remove this alias once all callers use
-# ``SuperNode``.
-AgentRunNode = SuperNode
-
-
 @dataclass(frozen=True)
 class Edge:
     """A directed dependency from ``src`` run to ``dst`` run."""

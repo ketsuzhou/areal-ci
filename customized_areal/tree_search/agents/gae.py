@@ -111,7 +111,7 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     unscored) and a step reward of ``process_reward + outcome_reward`` -- so the
     verifier terminal reward (on ``outcome_reward``) flows in as ``r_t``.
 
-    Duck-typed against ``AgentRunNode``; identity fields are read defensively so
+    Duck-typed against ``SuperNode``; identity fields are read defensively so
     minimal node-likes still work (they do not affect the projection).
     """
     from customized_areal.tree_search.agents.event_model import Event

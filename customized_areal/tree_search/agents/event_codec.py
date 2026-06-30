@@ -15,10 +15,10 @@ from dataclasses import dataclass
 
 from customized_areal.tree_search.agents.event_model import Event, message_timeline
 from customized_areal.tree_search.agents.execution_dag import (
-    AgentRunNode,
     DAGError,
     EdgeType,
     ExecutionDAG,
+    SuperNode,
 )
 
 
@@ -28,8 +28,8 @@ def _adjacency(
     dict[str, list[tuple[str, EdgeType]]], dict[str, list[tuple[str, EdgeType]]]
 ]:
     """Build per-node incoming/outgoing typed-edge lists from ``dag.edges``."""
-    incoming: dict[str, list[tuple[str, EdgeType]]] = {n: [] for n in dag.node_ids()}
-    outgoing: dict[str, list[tuple[str, EdgeType]]] = {n: [] for n in dag.node_ids()}
+    incoming: dict[str, list[tuple[str, EdgeType]]] = {n: [] for n in dag.event_ids()}
+    outgoing: dict[str, list[tuple[str, EdgeType]]] = {n: [] for n in dag.event_ids()}
     for e in dag.edges:
         outgoing[e.src].append((e.dst, e.type))
         incoming[e.dst].append((e.src, e.type))
@@ -59,13 +59,13 @@ def dag_to_events(
     order is always a topological order). ``messages_by_node`` overrides the
     per-node transcript payload (else ``node.metadata['messages']``).
     """
-    node_ids = dag.node_ids()
+    event_ids = dag.event_ids()
     if ordering is None:
         order = [n.node_id for n in dag.topological_order()]
     else:
         order = list(ordering)
-        if sorted(order) != sorted(node_ids):
-            raise DAGError("ordering is not a permutation of the DAG node ids")
+        if sorted(order) != sorted(event_ids):
+            raise DAGError("ordering is not a permutation of the DAG event ids")
         _validate_topological(dag, order)
 
     incoming, outgoing = _adjacency(dag)
@@ -108,7 +108,7 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
       2. node_ids must be unique (no duplicate node_id across events).
       3. edge lists must be symmetric (every A.outgoing (A->B) has a matching
          B.incoming (A->B) with the same EdgeType).
-      4. add nodes (faithful AgentRunNode; messages/index stay in the log only).
+      4. add nodes (faithful SuperNode; messages/index stay in the log only).
       5. add edges (idempotent).
       6. enforce the topological-order invariant: for every edge src->dst,
          index(src) < index(dst).
@@ -141,8 +141,8 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
 
     dag = ExecutionDAG()
     for e in ordered:
-        dag.add_node(
-            AgentRunNode(
+        dag.add_event(
+            SuperNode(
                 node_id=e.node_id,
                 agent_id=e.agent_id,
                 issue_id=e.issue_id,
