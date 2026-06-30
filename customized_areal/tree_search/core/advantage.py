@@ -40,7 +40,17 @@ class TreeAdvantageComputer:
         GRPO normalization operates across episodes within each query group.
         The normalized return is broadcast to all response positions in
         every node of the episode.
+
+        When any node carries per-node ``credit`` (DAG reward backup, Phase 3),
+        normalization operates per-node across the query group instead.
         """
+        # Per-node credit path (DAG reward backup): normalize across all
+        # nodes in each query group, ignoring episode boundaries.
+        if any(getattr(traj, "credit", None) is not None for traj in trajectories):
+            self._compute_per_node_credit(trajectories)
+            return
+
+        # Existing flat-broadcast path (unchanged).
         # Build query_id → {episode_id → [node_ids]} and per-episode reward
         query_episodes: dict[str, dict[str, list[str]]] = {}
         episode_rewards: dict[str, float] = {}  # episode_id → reward
@@ -88,6 +98,49 @@ class TreeAdvantageComputer:
             if not isinstance(mask, torch.Tensor):
                 mask = torch.tensor(mask, dtype=torch.bool)
             norm_return = self.tree_store.get_normalized_return(node_id)
+            traj.advantages = mask.float() * norm_return
+            traj.returns = mask.float() * norm_return
+
+    def _compute_per_node_credit(self, trajectories: list[Node]) -> None:
+        """GRPO-normalize per-node credit across all nodes in each query group.
+
+        Each node's ``credit`` is its own reward; normalization operates across
+        all nodes sharing a ``query_id`` (ignoring episode boundaries, since
+        DAG credit is per-node, not per-episode). The normalized return is
+        per-node, broadcast over response positions via ``loss_mask``.
+        """
+        query_nodes: dict[str, list[Node]] = {}
+        for traj in trajectories:
+            query_id = self._get_query_id(traj)
+            if query_id is None:
+                continue
+            if not getattr(traj, "node_id", None):
+                continue
+            query_nodes.setdefault(query_id, []).append(traj)
+
+        for nodes in query_nodes.values():
+            credits = [float(getattr(n, "credit", None) or 0.0) for n in nodes]
+            if len(credits) < 2:
+                for n in nodes:
+                    self.tree_store.set_normalized_return(n.node_id, 0.0)
+                continue
+            mean_c = sum(credits) / len(credits)
+            var_c = sum((c - mean_c) ** 2 for c in credits) / max(len(credits), 1)
+            std_c = var_c**0.5
+            for n, c in zip(nodes, credits):
+                norm_val = (c - mean_c) / (std_c + self.grpo_eps)
+                self.tree_store.set_normalized_return(n.node_id, norm_val)
+
+        for traj in trajectories:
+            query_id = self._get_query_id(traj)
+            if query_id is None:
+                continue
+            if not getattr(traj, "node_id", None):
+                continue
+            mask = traj.loss_mask
+            if not isinstance(mask, torch.Tensor):
+                mask = torch.tensor(mask, dtype=torch.bool)
+            norm_return = self.tree_store.get_normalized_return(traj.node_id)
             traj.advantages = mask.float() * norm_return
             traj.returns = mask.float() * norm_return
 
