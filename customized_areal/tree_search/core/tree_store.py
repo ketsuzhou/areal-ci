@@ -17,7 +17,16 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import torch
+
+def _lazy_torch():
+    """Import and return torch on first use; None if unavailable.
+
+    tree_store stays importable without torch. Tensor-consuming code paths
+    (_node_to_tensor_dict, _optional_tensor_field) call this at first use.
+    """
+    import torch
+
+    return torch
 
 
 @dataclass
@@ -77,9 +86,11 @@ class Node:
     value_variance: float = 0.0
 
     # Tree-computed advantages/returns (set by TreeAdvantageComputer or
-    # GAEAdvantageComputer)
-    advantages: torch.Tensor | None = None
-    returns: torch.Tensor | None = None
+    # GAEAdvantageComputer). Typed Any (not torch.Tensor) so this module imports
+    # cleanly without torch; tensor construction is deferred to lazy import in
+    # _node_to_tensor_dict.
+    advantages: Any = None
+    returns: Any = None
 
     # Response-only (aligned to loss_mask==1 positions)
     topk_ids: list[list[int]] | None = None
@@ -123,7 +134,7 @@ def _optional_tensor_field(
     traj: dict[str, Any],
     key: str,
     values: list | None,
-    dtype: torch.dtype,
+    dtype: Any,
     start: int = 0,
     end: int | None = None,
     loss_mask: list[int] | None = None,
@@ -152,6 +163,7 @@ def _optional_tensor_field(
                     sliced = values[start:end]
             else:
                 sliced = values[start:end]
+        torch = _lazy_torch()
         traj[key] = torch.tensor(sliced, dtype=dtype).unsqueeze(0)
 
 
@@ -168,6 +180,8 @@ def _node_to_tensor_dict(
     tokens before conversion (full-sequence fields sliced, response-aligned
     fields trimmed to remaining output positions).
     """
+    torch = _lazy_torch()
+
     input_ids = node.input_ids
     logprobs = node.logprobs
     loss_mask = node.loss_mask
