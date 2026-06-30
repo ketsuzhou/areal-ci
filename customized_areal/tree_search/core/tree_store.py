@@ -19,10 +19,13 @@ from typing import Any
 
 
 def _lazy_torch():
-    """Import and return torch on first use; None if unavailable.
+    """Import and return torch on first use.
 
     tree_store stays importable without torch. Tensor-consuming code paths
-    (_node_to_tensor_dict, _optional_tensor_field) call this at first use.
+    (_node_to_tensor_dict, _optional_tensor_field) call this at first use;
+    a missing torch surfaces as ImportError at the call site, not at module
+    load — which is the desired behavior since torch is required for any
+    tensor path but not for importing the data model.
     """
     import torch
 
