@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from areal.api.cli_args import NameResolveConfig
 from areal.experimental.openai.client import ArealOpenAI
+from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
 from areal.infra.rpc.serialization import deserialize_value, serialize_value
 from areal.utils import name_resolve, names, seeding
 from areal.utils.dynamic_import import import_from_string
@@ -94,6 +95,8 @@ def _warn_once(msg: str) -> None:
 # Engine and client (created via /create_engine and /call with method "initialize")
 _engine: InferenceEngine | None = None
 _openai_client: ArealOpenAI | None = None
+# Remote rollout client (constructed in _setup_openai_client alongside _openai_client)
+_remote_client: RemoteRolloutClient | None = None
 
 # Session management
 _session_cache: dict[str, SessionData] = {}
@@ -260,7 +263,7 @@ async def alloc_ports(raw_request: Request):
 
 
 def _setup_openai_client():
-    global _openai_client, _session_timeout_seconds, _admin_api_key
+    global _openai_client, _remote_client, _session_timeout_seconds, _admin_api_key
     config = _engine.config
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
     agent_cfg = config.agent
@@ -271,6 +274,12 @@ def _setup_openai_client():
         reasoning_parser=agent_cfg.reasoning_parser,
         engine_max_tokens=agent_cfg.engine_max_tokens,
         chat_template_type=agent_cfg.chat_template_type,
+    )
+    _remote_client = RemoteRolloutClient(
+        tokenizer=tokenizer,
+        chat_template_type=agent_cfg.chat_template_type,
+        engine_max_tokens=agent_cfg.engine_max_tokens,
+        recompute_enabled=agent_cfg.should_compute_prox_logp(),
     )
     _session_timeout_seconds = agent_cfg.session_timeout_seconds
     with _lock:
@@ -615,6 +624,10 @@ async def chat_completions(
     Supports both streaming (stream=True) and non-streaming requests.
     For streaming requests, returns a StreamingResponse with Server-Sent Events
     in the OpenAI streaming format (data: {json}\\n\\n ... data: [DONE]\\n\\n).
+
+    Remote rollout: requests with model starting with "remote:" are routed
+    to OpenRouter via RemoteRolloutClient. model="default" uses the local
+    inference engine. Unknown models return 404.
     """
     if _openai_client is None:
         raise HTTPException(
@@ -622,6 +635,34 @@ async def chat_completions(
             detail='Proxy server not initialized. Send requests to /create_engine then /call "initialize" first.',
         )
 
+    # --- Model-prefix dispatch ---
+    model = request.get("model", "default")
+    if isinstance(model, str) and model.startswith("remote:"):
+        if _remote_client is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Remote rollout client not initialized.",
+            )
+        # Resolve session cache (same as _call_client_create does).
+        with _lock:
+            if session_id not in _session_cache:
+                raise HTTPException(
+                    status_code=410,
+                    detail=f"Session {session_id} already ended or expired",
+                )
+            session_data = _session_cache[session_id]
+        session_data.update_last_access()
+        return await _remote_client.create_completion(
+            dict(request), session_data.completions
+        )
+    if model != "default":
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown model {model!r}. Use 'default' for local inference "
+            "or 'remote:<provider/model>' for OpenRouter.",
+        )
+
+    # --- Existing local path ---
     # CompletionCreateParams is a TypedDict (dict subclass), so use dict access.
     is_streaming = request.get("stream") is True
 

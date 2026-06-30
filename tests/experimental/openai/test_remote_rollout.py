@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-06-29-openrouter-remote-rollout-proxy-design.m
 from __future__ import annotations
 
 import logging
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,6 +19,7 @@ from openai.types.chat.chat_completion import Choice
 from areal.api import cli_args as cli_args_module
 from areal.api.cli_args import PPOActorConfig
 from areal.experimental.openai.cache import InteractionCache
+from areal.experimental.openai.proxy import proxy_rollout_server as srv
 from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
 # ---------------------------------------------------------------------------
@@ -493,3 +495,288 @@ class TestCreateCompletionFailures:
         assert exc_info.value.status_code == 500
         assert "OPENROUTER_API_KEY" in exc_info.value.detail
         assert len(cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: routing dispatch in chat_completions (spec tests 1-6)
+# ---------------------------------------------------------------------------
+
+httpx = pytest.importorskip("httpx")
+
+_ADMIN_KEY_ROUTING = "test-admin-key-routing"
+
+
+@pytest.fixture
+def _routing_env(monkeypatch):
+    """Reset server globals and install a fake session for routing tests."""
+    monkeypatch.setattr(srv, "_session_cache", {})
+    monkeypatch.setattr(srv, "_api_key_to_session", {})
+    monkeypatch.setattr(srv, "_session_to_api_key", {})
+    monkeypatch.setattr(srv, "_capacity", 0)
+    monkeypatch.setattr(srv, "_admin_api_key", _ADMIN_KEY_ROUTING)
+    monkeypatch.setattr(srv, "_lock", threading.Lock())
+    monkeypatch.setattr(srv, "_last_cleanup_time", 0.0)
+    # Stub _openai_client so chat_completions doesn't 500 on "not initialized".
+    mock_local = MagicMock()
+    mock_local.chat.completions.create = _fake_local_create
+    monkeypatch.setattr(srv, "_openai_client", mock_local)
+    # Stub _remote_client so routing tests don't need a real tokenizer.
+    mock_remote = MagicMock()
+    mock_remote.create_completion = _fake_remote_create
+    monkeypatch.setattr(srv, "_remote_client", mock_remote)
+
+
+_transport_routing = None
+
+
+def _real_remote_client_for_validation(monkeypatch):
+    """Build a real RemoteRolloutClient with stubbed tokenizer + OpenRouter.
+
+    Used by routing tests that need create_completion's step-1 validation
+    (empty model, stream=True, n=2) to actually run. The MagicMock stub in
+    _routing_env bypasses that validation.
+    """
+    from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
+
+    tokenizer = MagicMock()
+    tokenizer.eos_token_id = 0
+    tokenizer.encode = lambda text, add_special_tokens=False: [1, 2, 3]
+    client = RemoteRolloutClient(
+        tokenizer=tokenizer,
+        chat_template_type="hf",
+        recompute_enabled=True,
+    )
+    fake = _make_chat_completion(
+        completion_id="chatcmpl-remote-routed",
+        content="remote response",
+    )
+    monkeypatch.setattr(
+        client, "_call_openrouter", lambda *a, **kw: _async_return(fake)
+    )
+    monkeypatch.setattr(
+        "areal.experimental.openai.proxy.remote_rollout.apply_chat_template",
+        lambda *a, **kw: [1, 2, 3],
+    )
+    return client
+
+
+def _routing_client():
+    global _transport_routing
+    if _transport_routing is None:
+        _transport_routing = httpx.ASGITransport(app=srv.app)
+    return httpx.AsyncClient(transport=_transport_routing, base_url="http://testserver")
+
+
+async def _fake_local_create(*, messages=None, stream=None, areal_cache=None, **kwargs):
+    return _make_chat_completion(
+        completion_id="chatcmpl-local",
+        content="local response",
+        finish_reason="stop",
+    )
+
+
+async def _fake_remote_create(request, session_cache):
+    return _make_chat_completion(
+        completion_id="chatcmpl-remote-routed",
+        content="remote response",
+        finish_reason="stop",
+    )
+
+
+class TestRoutingDispatch:
+    @pytest.mark.asyncio
+    async def test_default_model_calls_local_client(self, _routing_env, monkeypatch):
+        """model='default' → local client, never remote."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+
+            # Spy on which client got called.
+            local_called = {"v": False}
+            remote_called = {"v": False}
+
+            original_local = srv._openai_client.chat.completions.create
+
+            async def _spy_local(*a, **kw):
+                local_called["v"] = True
+                return await original_local(*a, **kw)
+
+            srv._openai_client.chat.completions.create = _spy_local
+
+            async def _spy_remote(req, cache):
+                remote_called["v"] = True
+                return await _fake_remote_create(req, cache)
+
+            srv._remote_client.create_completion = _spy_remote
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "default",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        assert resp.status_code == 200
+        assert local_called["v"] is True
+        assert remote_called["v"] is False
+
+    @pytest.mark.asyncio
+    async def test_remote_prefix_calls_remote_client(self, _routing_env, monkeypatch):
+        """model='remote:openai/gpt-4o-mini' → remote client with stripped model."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+
+            captured = {"request": None}
+
+            async def _capture_remote(req, cache):
+                captured["request"] = req
+                return await _fake_remote_create(req, cache)
+
+            srv._remote_client.create_completion = _capture_remote
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        assert resp.status_code == 200
+        assert captured["request"] is not None
+        assert captured["request"]["model"] == "remote:openai/gpt-4o-mini"
+
+    @pytest.mark.asyncio
+    async def test_empty_remote_model_returns_400(self, _routing_env, monkeypatch):
+        """model='remote:' → 400, no remote call, no cache entry."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        # Real client so create_completion's step-1 validation runs.
+        monkeypatch.setattr(
+            srv, "_remote_client", _real_remote_client_for_validation(monkeypatch)
+        )
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+            session_id = start.json()["session_id"]
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        assert resp.status_code == 400
+        # No interaction cached.
+        assert len(srv._session_cache[session_id].completions) == 0
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_returns_404(self, _routing_env, monkeypatch):
+        """model='unknown-local-model' → 404, no local/remote call, no cache."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+            session_id = start.json()["session_id"]
+
+            local_called = {"v": False}
+            remote_called = {"v": False}
+
+            async def _spy_local(*a, **kw):
+                local_called["v"] = True
+                return await _fake_local_create(**kw)
+
+            async def _spy_remote(req, cache):
+                remote_called["v"] = True
+                return await _fake_remote_create(req, cache)
+
+            srv._openai_client.chat.completions.create = _spy_local
+            srv._remote_client.create_completion = _spy_remote
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "unknown-local-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        assert resp.status_code == 404
+        assert local_called["v"] is False
+        assert remote_called["v"] is False
+        assert len(srv._session_cache[session_id].completions) == 0
+
+    @pytest.mark.asyncio
+    async def test_remote_stream_true_returns_400(self, _routing_env, monkeypatch):
+        """model='remote:...' + stream=True → 400."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        # Real client so create_completion's step-1 validation runs.
+        monkeypatch.setattr(
+            srv, "_remote_client", _real_remote_client_for_validation(monkeypatch)
+        )
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_remote_n_2_returns_400(self, _routing_env, monkeypatch):
+        """model='remote:...' + n=2 → 400."""
+        monkeypatch.setattr(srv, "_capacity", 1)
+        # Real client so create_completion's step-1 validation runs.
+        monkeypatch.setattr(
+            srv, "_remote_client", _real_remote_client_for_validation(monkeypatch)
+        )
+        async with _routing_client() as client:
+            start = await client.post(
+                "/rl/start_session",
+                headers={"Authorization": f"Bearer {_ADMIN_KEY_ROUTING}"},
+                json={"task_id": "t"},
+            )
+            api_key = start.json()["api_key"]
+
+            resp = await client.post(
+                "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "remote:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "n": 2,
+                },
+            )
+        assert resp.status_code == 400
