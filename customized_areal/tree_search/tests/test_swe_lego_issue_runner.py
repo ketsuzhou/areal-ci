@@ -139,13 +139,14 @@ def test_run_swe_lego_issue_logs_when_cleanup_itself_raises(caplog):
     driver = FakeBranchDriver()
 
     # The original verifier result should still return — cleanup failure is
-    # logged, not propagated.
-    with caplog.at_level(logging.ERROR, logger="SweLegoIssueRunner"):
-        result = asyncio.run(
-            run_swe_lego_issue(
-                issue=_issue(), group_size=2, agent_config_id="ag",
-                multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
-            )
+    # logged, not propagated. Capture at DEBUG on root to ensure the
+    # SweLegoIssueRunner logger's ERROR record reaches caplog's handler.
+    caplog.set_level(logging.DEBUG)
+    result = asyncio.run(
+        run_swe_lego_issue(
+            issue=_issue(), group_size=2, agent_config_id="ag",
+            multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
         )
+    )
     assert result.per_agent_rewards == [1.0, 1.0]
-    assert any("cleanup failed for project p1" in rec.message for rec in caplog.records)
+    assert any("cleanup failed for project p1" in rec.getMessage() for rec in caplog.records)
