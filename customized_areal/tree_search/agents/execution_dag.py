@@ -36,44 +36,88 @@ class EdgeType(StrEnum):
 
 
 @dataclass
-class AgentRunNode:
-    """A single agent run in the execution DAG.
+class SuperNode:
+    """One communication-bounded segment of one agent's action sequence.
 
-    A run is one Multica task executed by one agent on one issue, bounded by
-    the agent lifecycle (claim -> complete). ``branch_seq`` records the
-    ``task_message.seq`` step this run is allowed to branch at when selected as
-    a branch candidate; the ``branch_*`` provenance fields are populated once a
-    branch is actually materialized (forked issue + sandbox snapshot).
+    Bounded by communication events (delegation, mention, completion).
+    ``nodes`` is the contiguous run of turns within this segment; the LAST
+    node is the segment's terminal -- the turn that performed the closing
+    communication event (or the run's final turn for a leaf segment).
+
+    ``sandbox_ids`` is a snapshot of the entire team's sandbox state at the
+    moment the closing event fired (one sandbox_id per team agent). Phase 3
+    SuperNode-level branching forks this list + the Multica issue subtree.
     """
 
-    node_id: str  # globally unique id for this agent run (typically task_id)
+    # Identity (UUID4 once assembled; user-supplied in tests)
+    node_id: str
+
+    # Agent context
     agent_id: str
     issue_id: str
     task_id: str
 
-    # RL session assigned to this run at ``rl_start_session`` time. The verifier
-    # agent addresses rewards per ``session_id`` (design decision 3). ``None``
-    # until a session is started (or for replayed/historical nodes).
+    # Communication-event provenance (which event closed this segment)
+    closing_event: EdgeType | None = None  # None for leaf segments
+    closing_event_target: str | None = None  # the other SuperNode's node_id
+
+    # RL session assigned at /rl/start_session time. One session_id per agent
+    # run, shared across all SuperNodes of that run. None until bound.
     session_id: str | None = None
 
-    # Branch boundary: the (task_id, seq) step this run can be forked at.
+    # Branch boundary + fork provenance (filled when this node becomes a branch
+    # source; Phase 3).
     branch_seq: int | None = None
-
-    # Fork provenance (filled when this node becomes a branch source).
     branch_issue_id: str | None = None
     branch_env_snapshot_id: str | None = None
 
-    # Reward bookkeeping (set by the verifier / backup). Kept here as plain
-    # floats so the DAG stays torch-free; the training Node carries tensors.
+    # Reward bookkeeping (set by the verifier / backup). Plain floats so the
+    # DAG stays torch-free; the training Node carries tensors.
     process_reward: float = 0.0
     outcome_reward: float = 0.0
 
-    # Critic value V_{t+1}: the next-state value the generative critic produced
-    # when this run's turn completed (framework B global trajectory, Phase 3).
-    # ``None`` until the critic scores it.
+    # Critic value V_{t+1} (Phase 3, out of scope here). None until scored.
     value: float | None = None
 
+    # Team environment snapshot at close time.
+    sandbox_ids: list[str] = field(default_factory=list)
+    issue_snapshot_id: str | None = None
+    env_state: dict = field(default_factory=dict)
+
+    # The turns within this segment (Node is torch-lazy so this dataclass
+    # imports cleanly without torch).
+    nodes: list = field(default_factory=list)
+
+    # Free-form metadata
     metadata: dict = field(default_factory=dict)
+
+    # -- linear trajectory (filled by codec / assembler) ----------------
+
+    completion_index: int | None = None
+    completion_time: float | None = None
+
+    # -- DAG edges (typed, both directions; filled by assembler) --------
+
+    incoming_edges: tuple = ()
+    outgoing_edges: tuple = ()
+
+    @property
+    def terminal_node(self):
+        """The segment's last node -- the closing-event turn or run-final."""
+        return self.nodes[-1] if self.nodes else None
+
+    @property
+    def branch_node_id(self) -> str | None:
+        """node_id of the terminal node (for branching keys)."""
+        t = self.terminal_node
+        return t.node_id if t is not None else None
+
+
+# Backward-compat alias: ``AgentRunNode`` -> ``SuperNode``. Other modules
+# (``event_codec``, ``agents/__init__``) still import ``AgentRunNode``; they
+# will be updated in Tasks 3 and 10. Remove this alias once all callers use
+# ``SuperNode``.
+AgentRunNode = SuperNode
 
 
 @dataclass(frozen=True)
@@ -86,7 +130,7 @@ class Edge:
 
 
 class DAGError(ValueError):
-    """Raised when the DAG is malformed (unknown node, cycle, etc.)."""
+    """Raised when the DAG is malformed (unknown event, cycle, etc.)."""
 
 
 class ExecutionDAG:
@@ -94,30 +138,30 @@ class ExecutionDAG:
 
     Edges point from a *cause* run to an *effect* run (parent -> child for
     delegation, child -> parent for completion). The graph rejects edges that
-    reference unknown nodes and detects cycles on demand.
+    reference unknown events and detects cycles on demand.
     """
 
     def __init__(self) -> None:
-        self._nodes: dict[str, AgentRunNode] = {}
+        self._events: dict[str, SuperNode] = {}
         self._edges: list[Edge] = []
         self._out: dict[str, list[Edge]] = {}
         self._in: dict[str, list[Edge]] = {}
 
     # -- construction ----------------------------------------------------
 
-    def add_node(self, node: AgentRunNode) -> AgentRunNode:
-        if node.node_id in self._nodes:
-            raise DAGError(f"duplicate node_id: {node.node_id!r}")
-        self._nodes[node.node_id] = node
-        self._out.setdefault(node.node_id, [])
-        self._in.setdefault(node.node_id, [])
-        return node
+    def add_event(self, event: SuperNode) -> SuperNode:
+        if event.node_id in self._events:
+            raise DAGError(f"duplicate event_id: {event.node_id!r}")
+        self._events[event.node_id] = event
+        self._out.setdefault(event.node_id, [])
+        self._in.setdefault(event.node_id, [])
+        return event
 
     def add_edge(self, src: str, dst: str, type: EdgeType) -> Edge:
-        if src not in self._nodes:
-            raise DAGError(f"unknown src node: {src!r}")
-        if dst not in self._nodes:
-            raise DAGError(f"unknown dst node: {dst!r}")
+        if src not in self._events:
+            raise DAGError(f"unknown src event: {src!r}")
+        if dst not in self._events:
+            raise DAGError(f"unknown dst event: {dst!r}")
         if src == dst:
             raise DAGError(f"self-loop not allowed: {src!r}")
         edge = Edge(src=src, dst=dst, type=type)
@@ -131,52 +175,52 @@ class ExecutionDAG:
 
     # -- accessors -------------------------------------------------------
 
-    def __contains__(self, node_id: object) -> bool:
-        return node_id in self._nodes
+    def __contains__(self, event_id: object) -> bool:
+        return event_id in self._events
 
     def __len__(self) -> int:
-        return len(self._nodes)
+        return len(self._events)
 
-    def get(self, node_id: str) -> AgentRunNode:
+    def get(self, event_id: str) -> SuperNode:
         try:
-            return self._nodes[node_id]
+            return self._events[event_id]
         except KeyError as exc:
-            raise DAGError(f"unknown node: {node_id!r}") from exc
+            raise DAGError(f"unknown event: {event_id!r}") from exc
 
     @property
-    def nodes(self) -> list[AgentRunNode]:
-        return list(self._nodes.values())
+    def events(self) -> list[SuperNode]:
+        return list(self._events.values())
 
     @property
     def edges(self) -> list[Edge]:
         return list(self._edges)
 
-    def node_ids(self) -> list[str]:
-        return list(self._nodes.keys())
+    def event_ids(self) -> list[str]:
+        return list(self._events.keys())
 
-    def parents(self, node_id: str) -> list[AgentRunNode]:
+    def parents(self, event_id: str) -> list[SuperNode]:
         """Runs this run causally depends on (incoming edges)."""
-        if node_id not in self._nodes:
-            raise DAGError(f"unknown node: {node_id!r}")
-        return [self._nodes[e.src] for e in self._in[node_id]]
+        if event_id not in self._events:
+            raise DAGError(f"unknown event: {event_id!r}")
+        return [self._events[e.src] for e in self._in[event_id]]
 
-    def children(self, node_id: str) -> list[AgentRunNode]:
+    def children(self, event_id: str) -> list[SuperNode]:
         """Runs that causally depend on this run (outgoing edges)."""
-        if node_id not in self._nodes:
-            raise DAGError(f"unknown node: {node_id!r}")
-        return [self._nodes[e.dst] for e in self._out[node_id]]
+        if event_id not in self._events:
+            raise DAGError(f"unknown event: {event_id!r}")
+        return [self._events[e.dst] for e in self._out[event_id]]
 
-    def in_degree(self, node_id: str) -> int:
-        return len(self._in[node_id])
+    def in_degree(self, event_id: str) -> int:
+        return len(self._in[event_id])
 
-    def out_degree(self, node_id: str) -> int:
-        return len(self._out[node_id])
+    def out_degree(self, event_id: str) -> int:
+        return len(self._out[event_id])
 
     # -- RL session mapping ----------------------------------------------
 
-    def set_session_id(self, node_id: str, session_id: str) -> None:
+    def set_session_id(self, event_id: str, session_id: str) -> None:
         """Bind an RL ``session_id`` to a run (called at ``rl_start_session``)."""
-        self.get(node_id).session_id = session_id
+        self.get(event_id).session_id = session_id
 
     def session_map(self) -> dict[str, str | None]:
         """Return ``{node_id: session_id}`` for every run in the DAG.
@@ -184,7 +228,7 @@ class ExecutionDAG:
         Session-less runs (no ``rl_start_session`` yet) map to ``None``. The
         verifier agent uses this to address per-agent rewards by ``session_id``.
         """
-        return {nid: node.session_id for nid, node in self._nodes.items()}
+        return {eid: ev.session_id for eid, ev in self._events.items()}
 
     # -- serialization ---------------------------------------------------
 
@@ -192,12 +236,12 @@ class ExecutionDAG:
         """Serialize to ``(runs, edges)`` records for a checkpoint round-trip.
 
         The inverse of :meth:`from_records` with explicit edges. Every
-        ``AgentRunNode`` field (including ``session_id`` and the ``branch_*``
+        ``SuperNode`` field (including ``session_id`` and the ``branch_*``
         provenance) is emitted so the DAG can be reconstructed verbatim.
         """
         from dataclasses import asdict
 
-        runs = [asdict(node) for node in self._nodes.values()]
+        runs = [asdict(ev) for ev in self._events.values()]
         edges = [
             {"src": e.src, "dst": e.dst, "type": e.type.value} for e in self._edges
         ]
@@ -205,40 +249,40 @@ class ExecutionDAG:
 
     # -- structural queries ---------------------------------------------
 
-    def roots(self) -> list[AgentRunNode]:
-        """Nodes with no incoming edges (entry points of the DAG)."""
-        return [n for nid, n in self._nodes.items() if not self._in[nid]]
+    def roots(self) -> list[SuperNode]:
+        """Events with no incoming edges (entry points of the DAG)."""
+        return [ev for eid, ev in self._events.items() if not self._in[eid]]
 
-    def leaves(self) -> list[AgentRunNode]:
-        """Nodes with no outgoing edges (terminal runs)."""
-        return [n for nid, n in self._nodes.items() if not self._out[nid]]
+    def leaves(self) -> list[SuperNode]:
+        """Events with no outgoing edges (terminal runs)."""
+        return [ev for eid, ev in self._events.items() if not self._out[eid]]
 
-    def fork_nodes(self) -> list[AgentRunNode]:
+    def fork_events(self) -> list[SuperNode]:
         """Fan-out points: a run that spawns/triggers >= 2 downstream runs."""
-        return [n for nid, n in self._nodes.items() if len(self._out[nid]) >= 2]
+        return [ev for eid, ev in self._events.items() if len(self._out[eid]) >= 2]
 
-    def join_nodes(self) -> list[AgentRunNode]:
+    def join_events(self) -> list[SuperNode]:
         """Fan-in points: a run fed by >= 2 upstream runs.
 
-        These are exactly the nodes where the verifier must assign per-agent
+        These are exactly the events where the verifier must assign per-agent
         credit explicitly (decision 8), since there is no fixed aggregation
         rule across the contributing runs.
         """
-        return [n for nid, n in self._nodes.items() if len(self._in[nid]) >= 2]
+        return [ev for eid, ev in self._events.items() if len(self._in[eid]) >= 2]
 
-    def topological_order(self) -> list[AgentRunNode]:
+    def topological_order(self) -> list[SuperNode]:
         """Kahn's algorithm. Raises ``DAGError`` if the graph has a cycle."""
-        indeg = {nid: len(self._in[nid]) for nid in self._nodes}
-        queue: deque[str] = deque(sorted(nid for nid, d in indeg.items() if d == 0))
-        order: list[AgentRunNode] = []
+        indeg = {eid: len(self._in[eid]) for eid in self._events}
+        queue: deque[str] = deque(sorted(eid for eid, d in indeg.items() if d == 0))
+        order: list[SuperNode] = []
         while queue:
-            nid = queue.popleft()
-            order.append(self._nodes[nid])
-            for edge in self._out[nid]:
+            eid = queue.popleft()
+            order.append(self._events[eid])
+            for edge in self._out[eid]:
                 indeg[edge.dst] -= 1
                 if indeg[edge.dst] == 0:
                     queue.append(edge.dst)
-        if len(order) != len(self._nodes):
+        if len(order) != len(self._events):
             raise DAGError("execution DAG contains a cycle")
         return order
 
@@ -249,12 +293,12 @@ class ExecutionDAG:
         except DAGError:
             return False
 
-    def ancestors(self, node_id: str) -> set[str]:
-        """All node_ids that transitively precede ``node_id``."""
-        if node_id not in self._nodes:
-            raise DAGError(f"unknown node: {node_id!r}")
+    def ancestors(self, event_id: str) -> set[str]:
+        """All event_ids that transitively precede ``event_id``."""
+        if event_id not in self._events:
+            raise DAGError(f"unknown event: {event_id!r}")
         seen: set[str] = set()
-        stack = [e.src for e in self._in[node_id]]
+        stack = [e.src for e in self._in[event_id]]
         while stack:
             cur = stack.pop()
             if cur in seen:
@@ -263,12 +307,12 @@ class ExecutionDAG:
             stack.extend(e.src for e in self._in[cur])
         return seen
 
-    def descendants(self, node_id: str) -> set[str]:
-        """All node_ids that transitively follow ``node_id``."""
-        if node_id not in self._nodes:
-            raise DAGError(f"unknown node: {node_id!r}")
+    def descendants(self, event_id: str) -> set[str]:
+        """All event_ids that transitively follow ``event_id``."""
+        if event_id not in self._events:
+            raise DAGError(f"unknown event: {event_id!r}")
         seen: set[str] = set()
-        stack = [e.dst for e in self._out[node_id]]
+        stack = [e.dst for e in self._out[event_id]]
         while stack:
             cur = stack.pop()
             if cur in seen:
@@ -277,7 +321,7 @@ class ExecutionDAG:
             stack.extend(e.dst for e in self._out[cur])
         return seen
 
-    def iter_topo(self) -> Iterator[AgentRunNode]:
+    def iter_topo(self) -> Iterator[SuperNode]:
         yield from self.topological_order()
 
     # -- builders --------------------------------------------------------
@@ -291,21 +335,17 @@ class ExecutionDAG:
         """Build a DAG from plain run/edge records.
 
         ``runs`` items require ``node_id``/``agent_id``/``issue_id``/``task_id``;
-        any other ``AgentRunNode`` field is optional. ``edges`` items require
+        any other ``SuperNode`` field is optional. ``edges`` items require
         ``src``, ``dst``, and ``type`` (an ``EdgeType`` or its string value).
-
-        If ``edges`` is omitted, delegation edges are inferred from a
-        ``parent_issue_id`` field on the run records (a run on a sub-issue
-        depends on the run that owns the parent issue).
         """
         dag = cls()
-        known_fields = AgentRunNode.__dataclass_fields__.keys()
+        known_fields = SuperNode.__dataclass_fields__.keys()
         issue_to_node: dict[str, str] = {}
         for rec in runs:
             kwargs = {k: rec[k] for k in known_fields if k in rec}
-            node = AgentRunNode(**kwargs)
-            dag.add_node(node)
-            issue_to_node.setdefault(node.issue_id, node.node_id)
+            event = SuperNode(**kwargs)
+            dag.add_event(event)
+            issue_to_node.setdefault(event.issue_id, event.node_id)
 
         if edges is not None:
             for e in edges:
