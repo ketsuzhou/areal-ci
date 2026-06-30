@@ -15,34 +15,41 @@ Two structural changes are required to support multi-agent rollout:
 
 A `SuperNode` is **not** "one agent run." It is a **contiguous segment of one agent's action sequence, bounded by communication events** (delegation, mention, completion). One agent run that performs multiple communications is split into multiple SuperNodes. This makes the DAG granularity match the credit-assignment granularity: credit is attributed to the specific segment that delegated/completed, not the whole run.
 
-### Multica orchestrates; AReal consumes
+### Multica orchestrates; AReal hosts the proxy and consumes
 
-The multi-agent topology is **not** decided by AReal. Multica orchestrates the entire multi-agent execution:
+The multi-agent topology is **not** decided by AReal. Multica orchestrates the entire multi-agent execution. AReal's role is to **host the RL proxy** (which issues `session_id`s and caches interactions) and to **consume** Multica's completion payload.
 
 1. AReal submits a root task to Multica.
 2. Multica configures the environment required for the task.
 3. Multica submits the task via user or agent role (this starts the root agent).
 4. For each agent session:
-   - AReal obtains a `session_id` from the proxy (`/rl/start_session`).
-   - AReal submits a task to Multica (with the `session_id` bound to this agent).
-   - Multica configures the environment for this agent's task.
-   - Multica submits via user or agent role; the agent runs.
-   - When the agent session ends, Multica notifies AReal.
-   - Multica saves the `session_id` for this agent.
+   - **Multica** obtains a `session_id` from AReal's proxy (`POST /rl/start_session` on AReal's proxy gateway). AReal's proxy issues the `session_id` + `api_key`; the gateway assigns a ready `OpenAIProxyWorkflow(mode="online")` worker to this session.
+   - Multica drives the agent externally (the agent's `chat/completions` calls route through AReal's proxy with the session `api_key`).
+   - Multica calls `POST /rl/end_session` when the agent session ends; the proxy worker unblocks, exports interactions.
 5. When the root task completes:
    - Multica returns to AReal: **all `session_id`s + the DAG + all branching-point environment info**.
 6. AReal builds SuperNodes and Nodes from the `session_id`s + DAG + branching env info.
 
-Concretely, Multica hands AReal:
-- **`session_id`s**: one per agent run, each already bound to the proxy's interaction cache.
+### `OpenAIProxyWorkflow(mode="online")` — one instance per agent session
+
+The base workflow wrapped by `TreeSearchGroupedRolloutWorkflow` is `OpenAIProxyWorkflow` (`areal/experimental/openai/proxy/workflow.py`). In multi-agent mode it **must** use `mode="online"`:
+
+- **Online mode** (`workflow.py:146-213`): `arun_episode` grants capacity, then calls `_OnlineAgent.run()` which **registers the proxy worker as "ready" on the gateway and blocks until an external user (Multica) completes a full session lifecycle** (`start_session` → interact → `set_reward` → `end_session`) on that worker (`online_agent.py:24-29`). When the session ends, the worker exports interactions and `arun_episode` returns.
+- **One instance = one session**: each `OpenAIProxyWorkflow(mode="online")` instance serves **exactly one** agent session. It is a passive waiter — Multica drives the session externally.
+- **N × M instances**: for a team of N agents with `group_size = M`, AReal runs **N × M** `OpenAIProxyWorkflow(mode="online")` instances in parallel (via `asyncio.gather`). Each instance's `arun_episode` blocks until Multica drives one session through it. For example: 4 agents × group_size 8 = **32 instances**, each serving one session.
+
+The coordinator launches all N × M `arun_episode` calls up front (each blocks on its respective external session), then `await`s the gather. Multica, during orchestration, calls `/rl/start_session` once per agent session; the gateway matches each incoming session to a ready worker. When all N × M sessions complete, the gather returns and the coordinator proceeds to assemble SuperNodes.
+
+Concretely, Multica hands AReal at completion:
+- **`session_id`s**: one per agent run, each already bound to the proxy's interaction cache (interactions were exported by each proxy worker when its session ended).
 - **DAG**: the segment-level structure (communication-bounded SuperNodes + typed edges `delegation`/`mention`/`completion`). Multica decides segment boundaries at communication events during execution — AReal does not infer them.
 - **Branching-point environment info**: for each SuperNode, the team-wide environment snapshot (`sandbox_ids`, `issue_snapshot_id`, `env_state`) captured at the moment that segment's closing communication event fired.
 
 AReal's role is therefore:
-- Submit the root task to Multica and wait for completion.
-- For each agent session (during execution): issue `session_id` from the proxy; submit the agent's task to Multica with `session_id` bound; receive session-end notification.
+- Create N × M `OpenAIProxyWorkflow(mode="online")` instances and launch their `arun_episode` calls in parallel (each blocks on its external session).
+- Submit the root task to Multica (Multica then orchestrates: for each agent session, calls `/rl/start_session` on AReal's proxy, drives the agent, calls `/rl/end_session`).
 - At completion: receive (session_ids + DAG + branching env) from Multica.
-- For each `session_id`: fetch the proxy's interactions (token-level turns) → `list[Node]` via the existing `interactions_dict_to_nodes` path.
+- Each `OpenAIProxyWorkflow` instance has already exported its session's interactions when its `arun_episode` returned.
 - Assemble SuperNodes from Multica's segment specs, mapping each agent's turns into the segment that owns them.
 - Stamp branching env info onto each SuperNode.
 - Establish the unified `parent_node_id` chain (causal flattening, see below).
@@ -81,7 +88,7 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 | D2 | Refactor `core/tree_store.py` so `Node` is torch-lazy; `SuperNode.nodes: list[Node]` literal; DAG layer stays import-clean without torch | Preserve the torch-free test surface that `agents/` relies on |
 | D3 | Collaborative agent team via DAG — full `agents/` wiring | Match the README's planner→workers→synthesizer scenario |
 | D4 | Spec scope = Phase 1 (SuperNode + DAG construction) + Phase 2 (verifier + Node-level backup). Critic/GAE/cloud-env branching/dynamic delegation are Phase 3+ | One cohesive, ship-able increment; tests stay green |
-| D5 | Multica orchestrates the multi-agent topology; AReal submits the root task, binds session_ids during execution, and consumes (session_ids + DAG + branching env) at completion | Multica already manages agent spawning/communication; AReal should not duplicate topology decisions. Dynamic delegation is Multica's concern. |
+| D5 | Multica orchestrates the multi-agent topology; AReal hosts the RL proxy (Multica drives `/rl/start_session` + `/rl/end_session` per agent session directly on the proxy gateway) and consumes (session_ids + DAG + branching env) at completion | Multica already manages agent spawning/communication; AReal should not duplicate topology decisions. Dynamic delegation is Multica's concern. |
 | D6 | `SuperNode.node_id` is a UUID4 | Globally unique without scheme coupling |
 | D7 | A segment = all turns since the previous communication event (exclusive), up to **and including** the turn that performs the next communication event (Option A) | The event-causing turn is the segment's terminal; causality for backup; every segment has a DAG edge |
 | D8 | `parent_node_id` links across SuperNode **and agent** boundaries (causal flattening) | Reward backup walks one unified chain; `distribute_reward_over_dag` becomes redundant on the reward path |
@@ -106,27 +113,26 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 ┌─────────────────────────────────────────────────────────────────────┐
 │  agents/team_rollout.py  ◄── NEW                                    │
 │                                                                     │
-│  TeamRolloutCoordinator(multica_client, rl_bridge, verifier,         │
-│                         rl_writer, assembler)                        │
+│  TeamRolloutCoordinator(multica_client, proxy_workflow_factory,      │
+│                         verifier, rl_writer, assembler)             │
 │                                                                     │
 │  run(query, data, engine, tree_store) -> batched result | None:      │
 │                                                                     │
-│  ── Phase A: submit + orchestrate ──────────────────────────────── │
-│    1. multica_client.submit_root_task(task_spec) -> root_task_id    │
-│       (AReal submits the root task; Multica configures env +        │
-│        spawns agents via user/agent role)                           │
-│    2. For each agent session (driven by Multica notifications):     │
-│         a. rl_bridge.start_session(task_id) -> session_id           │
-│            (AReal issues session_id from proxy /rl/start_session)   │
-│         b. multica_client.bind_agent_session(agent_run_id,          │
-│                                              session_id)            │
-│            (AReal tells Multica the session_id for this agent)      │
-│         c. [Multica runs the agent: configures env, submits via     │
-│            user/agent role; agent produces interactions in proxy]  │
-│         d. multica_client notifies session_end(agent_run_id)        │
+│  ── Phase A: launch N×M proxy workers + submit root task ──────── │
+│    1. Create N × M OpenAIProxyWorkflow(mode="online") instances    │
+│       (N = team agent count, M = group_size; e.g. 4 × 8 = 32)      │
+│    2. Launch all N × M arun_episode calls via asyncio.gather       │
+│       — each blocks on its external session (registered as         │
+│         "ready" on the proxy gateway, waiting for Multica to       │
+│         drive a session through it)                                │
+│    3. multica_client.submit_root_task(task_spec) -> root_task_id  │
+│       (Multica orchestrates: for each agent session, calls         │
+│        /rl/start_session on AReal's proxy → gateway assigns a     │
+│        ready worker; Multica drives the agent; calls              │
+│        /rl/end_session → worker unblocks, exports interactions)    │
 │                                                                     │
 │  ── Phase B: at root task completion ───────────────────────────── │
-│    3. multica_client.collect_result(root_task_id) -> DagResult:     │
+│    4. multica_client.collect_result(root_task_id) -> DagResult:     │
 │         - session_ids: list[str]          (one per agent run)       │
 │         - segments: list[SegmentSpec]    (Multica-defined          │
 │                                            communication-bounded   │
@@ -136,28 +142,28 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 │         - env_snapshots: dict[segment_id, TeamEnvSnapshot]          │
 │                                            (team-wide env at each  │
 │                                            branching point)        │
-│    4. For each session_id:                                          │
-│         rl_bridge.export_trajectories(session_id)                   │
-│           -> dict[str, InteractionWithTokenLogpReward]               │
-│         interactions_dict_to_nodes(...) -> list[Node]               │
-│           (existing path; one Node per turn)                       │
-│    5. SuperNodeAssembler.assemble(                                  │
-│         sessions_nodes: dict[session_id, list[Node]],              │
-│         segments, edges, env_snapshots, session_to_agent            │
+│    5. await asyncio.gather → all N × M arun_episode calls return   │
+│       with their session interactions (each proxy worker exported   │
+│       its interactions when /rl/end_session fired)                 │
+│    6. Build sessions_nodes: dict[session_id, list[Node]] from the  │
+│       gather results (interactions_dict_to_nodes converts each      │
+│       session's interactions to list[Node])                        │
+│    7. SuperNodeAssembler.assemble(                                  │
+│         sessions_nodes, dag_result                                  │
 │       ) -> tuple[list[SuperNode], ExecutionDAG, root_node_id]       │
 │         (maps each agent's turns into the segments Multica defined; │
 │          sets the unified parent_node_id chain across agents and    │
 │          segments per the causal-flattening rule; stamps env        │
 │          snapshots on SuperNodes; binds session_id to each          │
 │          SuperNode of that run)                                     │
-│    6. tree_store.insert_super_batch(supers)                         │
-│    7. For each leaf agent run:                                      │
+│    8. tree_store.insert_super_batch(supers)                         │
+│    9. For each leaf agent run:                                      │
 │         verifier.verify(run) per session_id -> outcome_reward        │
-│         rl_writer.finalize(session_id, result)                      │
-│    8. backup_episode_terminal(root_terminal_node_id, reward)        │
+│         rl_writer.set_reward(session_id, outcome_reward)            │
+│    10. backup_episode_terminal(root_terminal_node_id, reward)       │
 │       (or backup_path_returns for dense per-node returns)            │
 │       —— walks the unified parent_node_id chain across all agents.  │
-│    9. Return batched tensor dict (same contract as single-agent).   │
+│    11. Return batched tensor dict (same contract as single-agent).  │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -166,8 +172,6 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 │                                                                     │
 │  MulticaDagClient (Protocol + HTTP impl)                            │
 │    - submit_root_task(task_spec) -> root_task_id                    │
-│    - bind_agent_session(agent_run_id, session_id) -> None           │
-│    - notify_session_end(agent_run_id) -> None                       │
 │    - collect_result(root_task_id) -> DagResult                      │
 │                                                                     │
 │  DagResult:                                                         │
@@ -529,19 +533,14 @@ class MulticaDagClient(Protocol):
     ) -> str:
         """Submit the root task; returns root_task_id.
 
-        Multica configures the env and begins orchestrating (spawns agents
-        via user/agent role as the DAG requires).
+        Multica configures the env and begins orchestrating. For each agent
+        session it drives, Multica calls ``/rl/start_session`` on AReal's
+        proxy gateway directly (the gateway assigns a ready
+        ``OpenAIProxyWorkflow(mode="online")`` worker), drives the agent,
+        then calls ``/rl/end_session`` (the worker unblocks and exports
+        interactions). AReal does **not** issue session_ids to Multica
+        through this client — Multica obtains them from the proxy.
         """
-        ...
-
-    async def bind_agent_session(
-        self, *, agent_run_id: str, session_id: str
-    ) -> None:
-        """Tell Multica the session_id AReal issued for this agent run."""
-        ...
-
-    async def notify_session_end(self, *, agent_run_id: str) -> None:
-        """Notify Multica that an agent's session has ended."""
         ...
 
     async def collect_result(self, *, root_task_id: str) -> DagResult:
@@ -558,9 +557,13 @@ class TeamRolloutCoordinator:
     """Runs a collaborative agent team on one query, Multica-orchestrated.
 
     Phase 1+2 (this spec):
-      - Multica orchestrates topology + segmentation + env snapshots.
-      - AReal issues session_ids, builds SuperNode/Node, runs verifier,
-        backs reward up along the unified parent_node_id chain.
+      - Multica orchestrates topology + segmentation + env snapshots, and
+        drives each agent session through AReal's proxy gateway directly
+        (``/rl/start_session`` → interact → ``/rl/end_session``).
+      - AReal runs N × M ``OpenAIProxyWorkflow(mode="online")`` instances
+        (one per agent session), awaits their gather, then builds
+        SuperNode/Node, runs the verifier per session_id, and backs reward
+        up along the unified parent_node_id chain.
 
     Designed-for-later (Phase 3+, not built here):
       - Critic + GAE advantages.
@@ -572,7 +575,9 @@ class TeamRolloutCoordinator:
         self,
         *,
         multica_client: MulticaDagClient,
-        rl_bridge: RLBridgeClient,
+        proxy_workflow_factory: Callable[[], OpenAIProxyWorkflow],
+        team_size: int,               # N = number of agents Multica will spawn
+        group_size: int,              # M = rollouts per query
         verifier: Verifier,
         rl_writer: RLSessionRewardWriter,
         assembler: SuperNodeAssembler,
@@ -586,32 +591,39 @@ class TeamRolloutCoordinator:
         query_id: str,
         tree_store: MCTSTreeStore,
     ) -> dict[str, Any] | None:
-        # ── Phase A: submit + orchestrate ───────────────────────────
-        # 1. multica_client.submit_root_task(task_spec) -> root_task_id
-        # 2. For each agent session (driven by Multica notifications):
-        #      a. rl_bridge.start_session(task_id) -> session_id
-        #      b. multica_client.bind_agent_session(agent_run_id, session_id)
-        #      c. [Multica runs the agent; proxy caches interactions]
-        #      d. multica_client.notify_session_end(agent_run_id)
+        # ── Phase A: launch N×M proxy workers + submit root task ────
+        # 1. Create N × M OpenAIProxyWorkflow(mode="online") instances
+        #    via proxy_workflow_factory() (N=team_size, M=group_size).
+        # 2. Launch all N × M arun_episode calls via asyncio.gather.
+        #    Each blocks on its external session: _OnlineAgent registers
+        #    the worker as "ready" on the proxy gateway and waits until
+        #    Multica drives a full session through it.
+        # 3. multica_client.submit_root_task(task_spec) -> root_task_id.
+        #    Multica orchestrates: for each agent session, calls
+        #    /rl/start_session on the proxy → gateway assigns a ready
+        #    worker; Multica drives the agent; calls /rl/end_session →
+        #    the worker unblocks and exports its interactions.
         #
         # ── Phase B: at root task completion ──────────────────────────
-        # 3. dag_result = multica_client.collect_result(root_task_id)
+        # 4. dag_result = multica_client.collect_result(root_task_id)
         #    -> DagResult(session_ids, segments, edges, env_snapshots,
         #                 session_to_agent_run)
-        # 4. For each session_id in dag_result.session_ids:
-        #      interactions = rl_bridge.export_trajectories(session_id)
-        #      nodes = interactions_dict_to_nodes(interactions)
-        #      sessions_nodes[session_id] = nodes
-        # 5. super_nodes, dag, root_terminal_node_id = assembler.assemble(
+        # 5. await asyncio.gather → list[CompletedSessionInfo], one per
+        #    proxy worker. Each carries its session_id + cached
+        #    interactions (exported when /rl/end_session fired).
+        # 6. Build sessions_nodes: dict[session_id, list[Node]] from the
+        #    gather results (interactions_dict_to_nodes converts each
+        #    session's interactions to list[Node]).
+        # 7. super_nodes, dag, root_terminal_node_id = assembler.assemble(
         #      sessions_nodes=sessions_nodes, dag_result=dag_result)
-        # 6. tree_store.insert_super_batch(super_nodes)
-        # 7. For each leaf agent run:
-        #      verifier.verify(run) per session_id -> VerifierResult
-        #      rl_writer.finalize(session_id, result)
-        # 8. backup_episode_terminal(root_terminal_node_id, reward)
+        # 8. tree_store.insert_super_batch(super_nodes)
+        # 9. For each leaf agent run:
+        #      verifier.verify(run) per session_id -> outcome_reward
+        #      rl_writer.set_reward(session_id, outcome_reward)
+        # 10. backup_episode_terminal(root_terminal_node_id, reward)
         #    (or backup_path_returns for dense per-node returns)
         #    —— walks the unified parent_node_id chain across all agents.
-        # 9. Return batched tensor dict (same contract as single-agent).
+        # 11. Return batched tensor dict (same contract as single-agent).
 ```
 
 ## 8. Workflow integration (`core/customized_grouped_workflow.py`)
@@ -629,9 +641,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if multica_dag_enabled:
             self._coordinator = TeamRolloutCoordinator(
                 multica_client=multica_dag_client,
-                rl_bridge=...,             # RLBridgeClient adapter
-                verifier=...,              # constructed from verifier deps
-                rl_writer=...,             # RLSessionRewardWriter
+                proxy_workflow_factory=...,  # builds OpenAIProxyWorkflow(mode="online")
+                team_size=...,               # N agents Multica will spawn
+                group_size=self.group_size,  # M rollouts per query
+                verifier=...,                # constructed from verifier deps
+                rl_writer=...,               # RLSessionRewardWriter
                 assembler=SuperNodeAssembler(),
             )
         else:
@@ -647,22 +661,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         # Existing single-agent path (unchanged)
         ...
 ```
-            )
-        else:
-            self._coordinator = None
 
-    async def arun_episode(self, engine, data):
-        if self._coordinator is not None:
-            return await self._coordinator.run(
-                engine=engine, data=data,
-                query_id=data.get("query_id", ""),
-                tree_store=self.tree_store,
-            )
-        # Existing single-agent path (unchanged)
-        ...
-```
-
-## 8. `session_id` source and flow
+## 9. `session_id` source and flow
 
 `session_id` originates from the areal RL proxy layer (`areal/experimental/openai/proxy/`):
 
@@ -671,15 +671,17 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 - `POST /rl/set_reward` (`proxy_gateway.py:623`) takes `{interaction_id?, reward}`.
 - `POST /rl/end_session` (`proxy_gateway.py:637`) ends the session and triggers trajectory export.
 
-The `RLBridgeClient` protocol (`agents/rl_session.py:23`) abstracts this: `set_reward(*, session_id, reward)` and `end_session(*, session_id)`. A concrete adapter (to be implemented in Phase 1b/2) maps `session_id` to the proxy's `interaction_id` (e.g., the session's terminal interaction or a session-level aggregation) and forwards the HTTP calls.
+**Who calls what:**
+- **Multica** calls `/rl/start_session` and `/rl/end_session` directly on AReal's proxy gateway during orchestration (one start/end pair per agent session). The proxy gateway assigns each incoming `start_session` to a ready `OpenAIProxyWorkflow(mode="online")` worker; `end_session` unblocks that worker and triggers interaction export.
+- **AReal** calls only `/rl/set_reward` — after the verifier scores an `outcome_reward` per `session_id`, the `RLSessionRewardWriter` forwards it to the proxy. The concrete writer (Phase 1b/2) maps `session_id` → `interaction_id` (e.g., the session's terminal interaction, or a session-level aggregation if the proxy grows one). No `RLBridgeClient` abstraction is needed on the coordinator; the writer is the only post-session HTTP call AReal makes.
 
 In this design:
-- One agent run = one `session_id` (one `/rl/start_session` call per run).
+- One agent run = one `session_id` (one `/rl/start_session` call per run, issued by Multica).
 - All SuperNodes of that run share the `session_id`.
 - The verifier assigns one `outcome_reward` per `session_id`.
 - Reward backup walks the unified `parent_node_id` chain from the run's terminal node.
 
-## 9. Out of scope (Phase 3+)
+## 10. Out of scope (Phase 3+)
 
 - Critic observations (`agents/critic_observation.py`), GAE (`agents/gae.py`), `assemble_node_advantages`.
 - `BranchMaterializer` cloud-env branching at segment boundaries (`agents/integration.py`).
@@ -688,7 +690,7 @@ In this design:
 - Per-segment judge scores (vs. today's per-Node judge scores).
 - The Multica-side endpoints that `MulticaDagClient` calls — those are implemented in the Multica repo, following the `/api/v1/swe-lego/issues` precedent. This spec defines only AReal's client Protocol and consumption.
 
-## 10. Two-phase landing
+## 11. Two-phase landing
 
 ### Phase 1a (independent PR)
 - `core/tree_store.py`: Node torch-lazy refactor.
@@ -706,36 +708,36 @@ In this design:
 ### Phase 1b/2 (second PR)
 - `agents/multica_dag_client.py`: new module (`MulticaDagClient` Protocol + HTTP impl; follows `MulticaSweLegoClient` precedent).
 - `agents/team_rollout.py`: new module (`TeamRolloutCoordinator`).
-- `RLBridgeClient` concrete adapter mapping `session_id` → `interaction_id` (or extending the proxy to accept session-level reward).
+- `RLSessionRewardWriter` concrete adapter mapping `session_id` → `interaction_id` and forwarding `/rl/set_reward` (or extending the proxy to accept session-level reward). Multica drives `/rl/start_session` + `/rl/end_session` directly, so AReal only needs the reward-write path.
 - Wire `multica_dag_enabled` + `multica_dag_client` params into `TreeSearchGroupedRolloutWorkflow.__init__` and `arun_episode`.
 - Verifier + `RLSessionRewardWriter` integration in the coordinator.
 - End-to-end multi-agent test with a fake `MulticaDagClient` returning a synthetic `DagResult` (3-segment DAG: planner→worker→synthesizer), verifying reward flows along the unified parent chain across agents.
 
-## 11. Test strategy
+## 12. Test strategy
 
 - **Torch-free unit tests** (most of the new code):
   - SuperNodeAssembler with synthetic `sessions_nodes` + `DagResult`; verify segment mapping (turn ranges), parent_node_id chain (within-run, cross-agent delegation, cross-agent completion), env snapshot stamping, session_id binding.
   - `insert_super_batch` + dual-level lookup (`get_super_node`, `get_node`).
   - `backup_episode_terminal` across SuperNode and agent boundaries (causal flattening).
   - `dag_to_supernodes` / `supernodes_to_dag` round-trip + edge symmetry + topo invariant.
-  - Coordinator with a fake `MulticaDagClient` + mock verifier + mock rl_bridge; verify DAG construction, session binding, verifier invocation, backup invocation, batched tensor dict output.
+  - Coordinator with a fake `MulticaDagClient` + mock verifier + mock rl_writer + fake `proxy_workflow_factory`; verify N×M worker launch, DAG construction from gather results, verifier invocation, reward-write invocation, backup invocation, batched tensor dict output.
 - **Integration tests** (`pytest.importorskip("torch")` for tensor paths):
   - End-to-end team episode with a fake `MulticaDagClient` returning a 3-segment DAG (planner→worker→synthesizer); verify credit flows along the unified parent chain and per-turn `parent_node_id` walks cross SuperNode/agent boundaries.
 - **Existing tests preserved**: today's `test_tree_store.py`, `test_advantage.py`, etc. run unchanged on the single-agent path.
 
-## 12. Risks and mitigations
+## 13. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
 | `parent_node_id` semantic shift ("episode-internal predecessor" → "causal predecessor") surprises callers | Document on `Node.parent_node_id`; audit all readers (today: `_backup_path`, `_node_parent_id`, `_backup_inserted_episodes`); the `visited` guard in `_backup_path` already prevents cycles from malformed chains. |
 | Cross-agent `parent_node_id` link requires the assembler to know the source segment's terminal `node_id` at assembly time | Multica's `EdgeSpec` identifies source + destination segments; the assembler has already built those segments' Nodes (by turn range) before setting cross-agent parent links. The source segment's terminal `node_id` is `nodes[end_turn_idx - 1].node_id`. |
-| `session_id` → `interaction_id` mapping is unspecified in the proxy today | Phase 1b/2 implements the `RLBridgeClient` adapter; if the proxy lacks a clean session→terminal-interaction lookup, the adapter uses the session's last interaction (or requires the verifier to return interaction_ids). |
+| `session_id` → `interaction_id` mapping is unspecified in the proxy today | Phase 1b/2 implements the `RLSessionRewardWriter` adapter (AReal only writes rewards; Multica drives start/end_session); if the proxy lacks a clean session→terminal-interaction lookup, the writer uses the session's last interaction (or requires the verifier to return interaction_ids). |
 | Node torch-lazy refactor breaks existing tensor-typed code paths | Field types become `Any`; `_node_to_tensor_dict` lazy-imports torch; existing tests with `pytest.importorskip("torch")` continue to cover the tensor paths. |
 | Two-phase landing leaves Phase 1a in a state where SuperNode exists but is unused by multi-agent path | Phase 1a wraps single-agent Nodes in a leaf SuperNode so the data model is exercised; Phase 1b/2 wires the coordinator. Intermediate state is green and useful. |
 | Multica-side endpoints for `MulticaDagClient` do not exist yet | AReal depends only on the `MulticaDagClient` Protocol; tests inject a fake. The Multica repo implements the endpoints (following `/api/v1/swe-lego/issues` precedent) on its own schedule. AReal's Phase 1b/2 can land against the Protocol and be activated once Multica's endpoints are live. |
 | Multica's segment turn-indices may not align with AReal's `list[Node]` positions (off-by-one, missed turns) | The assembler validates `start_turn_idx`/`end_turn_idx` against the actual `list[Node]` length and raises on mismatch; tests cover the boundary cases. |
 
-## 13. Glossary
+## 14. Glossary
 
 - **SuperNode**: communication-bounded segment of one agent's action sequence; carries DAG topology, comm-event provenance, RL session binding, team env snapshot, and `list[Node]` turns.
 - **Node**: one assistant turn (`input_ids`, `loss_mask`, `logprobs`, etc.); torch-lazy after refactor.
