@@ -1,5 +1,6 @@
 import asyncio
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -14,12 +15,9 @@ from customized_areal.tree_search.agents.verifier import VerifierResult
 @dataclass
 class FakeMulticaClient:
     setup: SweLegoSetup
-    create_calls: list = None
-    cleanup_calls: list = None
-
-    def __post_init__(self):
-        self.create_calls = []
-        self.cleanup_calls = []
+    create_calls: list = field(default_factory=list)
+    cleanup_calls: list = field(default_factory=list)
+    cleanup_raises: bool = False
 
     async def create_swe_lego_issue(self, *, issue, group_size, agent_config_id, base_image=None):
         self.create_calls.append((issue, group_size))
@@ -27,14 +25,13 @@ class FakeMulticaClient:
 
     async def cleanup_swe_lego_issue(self, *, project_id):
         self.cleanup_calls.append(project_id)
+        if self.cleanup_raises:
+            raise RuntimeError("cleanup crashed")
 
 
 @dataclass
 class FakeRlSession:
-    sessions: list = None
-
-    def __post_init__(self):
-        self.sessions = []
+    sessions: list = field(default_factory=list)
 
     async def start(self, *, agent_run_id, issue_id):
         self.sessions.append(agent_run_id)
@@ -48,14 +45,20 @@ class FakeVerifier:
 
 
 @dataclass
+class RaisingVerifier:
+    async def verify_and_reward(self, **kwargs):
+        raise RuntimeError("verifier crashed")
+
+
+@dataclass
 class FakeBranchDriver:
     """Stands in for select_branch_candidate + BranchMaterializer.materialize."""
-    ran_lanes: list = None
-
-    def __post_init__(self):
-        self.ran_lanes = []
+    ran_lanes: list = field(default_factory=list)
+    raises: bool = False
 
     async def drive_lane(self, *, agent_run_id, sandbox_id, session_id):
+        if self.raises:
+            raise RuntimeError("branch driver crashed")
         self.ran_lanes.append(agent_run_id)
         return sandbox_id  # the terminal sandbox id
 
@@ -88,23 +91,18 @@ def test_run_swe_lego_issue_happy_path():
         )
     )
     assert isinstance(result, SweLegoIssueResult)
-    assert multica.create_calls == [(_issue(), 2)] or multica.create_calls[0][1] == 2
+    assert multica.create_calls[0][1] == 2
     assert len(rl.sessions) == 2
     assert len(driver.ran_lanes) == 2
     assert result.per_agent_rewards == [1.0, 1.0]
     assert multica.cleanup_calls == ["p1"]
 
 
-def test_run_swe_lego_issue_does_not_cleanup_on_verifier_failure():
+def test_run_swe_lego_issue_cleans_up_on_verifier_failure():
     # If the verifier raises, the runner must still cleanup the multica
     # resources (otherwise we leak sandboxes), but should propagate the error.
     multica = FakeMulticaClient(setup=_setup())
     rl = FakeRlSession()
-
-    @dataclass
-    class RaisingVerifier:
-        async def verify_and_reward(self, **kwargs):
-            raise RuntimeError("verifier crashed")
 
     with pytest.raises(RuntimeError, match="verifier crashed"):
         asyncio.run(
@@ -116,3 +114,38 @@ def test_run_swe_lego_issue_does_not_cleanup_on_verifier_failure():
         )
     # Cleanup happened despite the verifier error.
     assert multica.cleanup_calls == ["p1"]
+
+
+def test_run_swe_lego_issue_cleans_up_when_branch_driver_raises():
+    multica = FakeMulticaClient(setup=_setup())
+    rl = FakeRlSession()
+
+    with pytest.raises(RuntimeError, match="branch driver crashed"):
+        asyncio.run(
+            run_swe_lego_issue(
+                issue=_issue(), group_size=2, agent_config_id="ag",
+                multica=multica, rl_session=rl, verifier=FakeVerifier(),
+                branch_driver=FakeBranchDriver(raises=True),
+            )
+        )
+    # Cleanup happened despite the branch driver error.
+    assert multica.cleanup_calls == ["p1"]
+
+
+def test_run_swe_lego_issue_logs_when_cleanup_itself_raises(caplog):
+    multica = FakeMulticaClient(setup=_setup(), cleanup_raises=True)
+    rl = FakeRlSession()
+    verifier = FakeVerifier()
+    driver = FakeBranchDriver()
+
+    # The original verifier result should still return — cleanup failure is
+    # logged, not propagated.
+    with caplog.at_level(logging.ERROR, logger="SweLegoIssueRunner"):
+        result = asyncio.run(
+            run_swe_lego_issue(
+                issue=_issue(), group_size=2, agent_config_id="ag",
+                multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
+            )
+        )
+    assert result.per_agent_rewards == [1.0, 1.0]
+    assert any("cleanup failed for project p1" in rec.message for rec in caplog.records)
