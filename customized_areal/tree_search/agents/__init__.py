@@ -43,6 +43,7 @@ from customized_areal.tree_search.agents.environment import (
     ForkableEnvironment,
     ForkError,
     ForkResult,
+    MulticaSweLegoProvider,
     SnapshotError,
     SnapshotResult,
 )
@@ -108,6 +109,7 @@ __all__ = [
     "ForkableEnvironment",
     "ForkError",
     "ForkResult",
+    "MulticaSweLegoProvider",
     "SnapshotError",
     "SnapshotResult",
     # verifier (Phase 2 slice)

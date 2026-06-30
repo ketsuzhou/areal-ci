@@ -61,6 +61,11 @@ class Node:
     # Reward
     outcome_reward: float = 0.0
 
+    # Per-node credit from DAG reward backup (Phase 3). When set (not None),
+    # TreeAdvantageComputer uses this for per-node GRPO normalization instead
+    # of the flat episode-level outcome_reward broadcast.
+    credit: float | None = None
+
     # Generative-critic state value v_phi(s_t) for the partial solution through
     # this turn. Written by the critic value client; consumed by
     # GAEAdvantageComputer. 0.0 when the critic is disabled.

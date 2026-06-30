@@ -159,23 +159,39 @@ Append to `swe_lego_image_test.go`:
 
 ```go
 func TestSweLegoBuildScript_ContainsFilterRepoCutoff(t *testing.T) {
-	script := SweLegoBuildScript("https://github.com/psf/requests.git", "abc123", "2025-03-14T09:30:00Z", "swe-lego/python:3.11", "deadbeef")
+	issueDate := "2025-03-14T09:30:00Z"
+	script, err := SweLegoBuildScript("https://github.com/psf/requests.git", "abc123", issueDate, "swe-lego/python:3.11", "deadbeef")
+	if err != nil {
+		t.Fatalf("SweLegoBuildScript returned error: %v", err)
+	}
 	// clone + checkout base_commit
-	assertContains(t, script, "git clone --filter=blob:none https://github.com/psf/requests.git")
-	assertContains(t, script, "git fetch origin abc123")
-	assertContains(t, script, "git checkout abc123")
-	// SWE-Lego anti-hacking: filter-repo with cutoff computed from issue_date
-	assertContains(t, script, "git rev-list -1 --before='2025-03-14T09:30:00Z' HEAD")
-	assertContains(t, script, "git filter-repo --replace-ref refs/heads/main:")
-	assertContains(t, script, "--commit-cutoff")
+	assertContains(t, script, "git clone --filter=blob:none 'https://github.com/psf/requests.git'")
+	assertContains(t, script, "git fetch origin 'abc123'")
+	assertContains(t, script, "git checkout 'abc123'")
+	// SWE-Lego anti-hacking: filter-repo drops commits after issue_date.
+	// The issue_date is parsed to a Unix timestamp and embedded in the callback.
+	expectedTs := mustParseRFC3339(t, issueDate).Unix()
+	assertContains(t, script, "git filter-repo --force --commit-callback")
+	assertContains(t, script, "commit.skip()")
+	assertContains(t, script, fmt.Sprintf("int(commit.committer_date.split()[0]) > %d", expectedTs))
 	// docker build tagged with the cache key
-	assertContains(t, script, "docker build -t swe-lego:deadbeef")
+	assertContains(t, script, "docker build -t 'swe-lego:deadbeef'")
 }
 
 func TestSweLegoBuildScript_PipInstallBestEffort(t *testing.T) {
-	script := SweLegoBuildScript("r", "c", "d", "swe-lego/python:3.11", "k")
+	script, err := SweLegoBuildScript("r", "c", "2025-03-14T09:30:00Z", "swe-lego/python:3.11", "k")
+	if err != nil {
+		t.Fatalf("SweLegoBuildScript returned error: %v", err)
+	}
 	// Skywork-SWE pattern: best-effort pip install, never fail the build on it
 	assertContains(t, script, "pip install -e . 2>/dev/null || true")
+}
+
+func TestSweLegoBuildScript_InvalidIssueDate(t *testing.T) {
+	_, err := SweLegoBuildScript("r", "c", "not-a-date", "swe-lego/python:3.11", "k")
+	if err == nil {
+		t.Fatalf("expected error for invalid issue_date, got nil")
+	}
 }
 
 func assertContains(t *testing.T, s, want string) {
@@ -184,9 +200,18 @@ func assertContains(t *testing.T, s, want string) {
 		t.Fatalf("build script missing %q\n--- script ---\n%s", want, s)
 	}
 }
+
+func mustParseRFC3339(t *testing.T, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("invalid test date %q: %v", s, err)
+	}
+	return ts
+}
 ```
 
-Add `"strings"` to the test file's imports.
+Add `"fmt"`, `"strings"`, and `"time"` to the test file's imports.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -203,20 +228,28 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // SweLegoBuildScript returns the shell script run on a Fleet build-node to
 // produce a SWE-Lego docker image. The script:
 //  1. Clones the repo shallow-extended to base_commit.
-//  2. SWE-Lego anti-hacking: deletes git history after issue_date via
-//     `git filter-repo --commit-cutoff`, so an agent cannot git log or
-//     git blame its way to the future fix (spec §2 decision 5, §4.3).
+//  2. SWE-Lego anti-hacking: runs git filter-repo with a commit-callback
+//     that drops every commit whose committer date is after issue_date,
+//     so an agent inside the container cannot git log or git blame its
+//     way to the future fix (spec §2 decision 5, §4.3).
 //  3. docker builds the image tagged with the cache key.
 //
 // The script is shipped to the node via /api/v1/nodes/exec and run there; the
 // multica server never shells out to docker locally (spec §2 decision 8).
-func SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey string) string {
+//
+// Returns an error if issueDate is not valid RFC3339.
+func SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey string) (string, error) {
 	imageRef := sweLegoImageRef(cacheKey)
+	issueTime, err := time.Parse(time.RFC3339, issueDate)
+	if err != nil {
+		return "", fmt.Errorf("parse issue_date %q as RFC3339: %w", issueDate, err)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -euo pipefail\n")
 	fmt.Fprintf(&b, "rm -rf /tmp/swe-lego-build && mkdir -p /tmp/swe-lego-build\n")
@@ -225,13 +258,23 @@ func SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey stri
 	fmt.Fprintf(&b, "cd repo\n")
 	fmt.Fprintf(&b, "git fetch origin %s\n", shellQuote(baseCommit))
 	fmt.Fprintf(&b, "git checkout %s\n", shellQuote(baseCommit))
-	// SWE-Lego anti-hacking: find the last commit at or before issue_date,
-	// then physically delete everything after it.
-	fmt.Fprintf(&b, "cutoff_commit=$(git rev-list -1 --before=%s HEAD)\n", shellQuote(issueDate))
-	fmt.Fprintf(&b, "git filter-repo --replace-ref refs/heads/main:${cutoff_commit} --commit-cutoff ${cutoff_commit}\n")
+	// SWE-Lego anti-hacking: drop every commit whose committer date is after
+	// issue_date. git-filter-repo rewrites all refs, expires the reflog, and
+	// runs `git gc --prune=now` at the end, so the orphaned commits are
+	// physically removed from the object database — an agent inside the
+	// container cannot git log or git blame its way to the future fix
+	// (spec §2 decision 5, §4.3).
+	//
+	// commit.committer_date is the raw git bytes b'<unix_ts> <tz>', so we
+	// parse issueDate to a Unix timestamp in Go and compare as integers in
+	// the callback. Lexicographic byte comparison would not work because
+	// b'<unix_ts> ...' starts with '1' (current era) and ISO 8601 starts
+	// with '2', so the predicate would always be false.
+	callback := fmt.Sprintf("if int(commit.committer_date.split()[0]) > %d: commit.skip()", issueTime.Unix())
+	fmt.Fprintf(&b, "git filter-repo --force --commit-callback %s\n", shellQuote(callback))
 	fmt.Fprintf(&b, "pip install -e . 2>/dev/null || true\n")
 	fmt.Fprintf(&b, "docker build -t %s -f /tmp/swe-lego-build/Dockerfile .\n", shellQuote(imageRef))
-	return b.String()
+	return b.String(), nil
 }
 
 // shellQuote single-quotes a string for safe inclusion in a shell script.
@@ -323,7 +366,7 @@ func TestBuildOrReuse_CacheHitShortCircuits(t *testing.T) {
 func TestBuildOrReuse_CacheMissRunsBuild(t *testing.T) {
 	ctx := context.Background()
 	fe := &fakeNodeExec{inspectOK: false, buildExitOK: true}
-	ref, nodeID, err := BuildOrReuse(ctx, fe, "r", "c", "d", "b")
+	ref, nodeID, err := BuildOrReuse(ctx, fe, "r", "c", "2025-03-14T09:30:00Z", "b")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -345,14 +388,14 @@ func TestBuildOrReuse_CacheMissRunsBuild(t *testing.T) {
 func TestBuildOrReuse_BuildFailureReturnsError(t *testing.T) {
 	ctx := context.Background()
 	fe := &fakeNodeExec{inspectOK: false, buildExitOK: false}
-	_, _, err := BuildOrReuse(ctx, fe, "r", "c", "d", "b")
+	_, _, err := BuildOrReuse(ctx, fe, "r", "c", "2025-03-14T09:30:00Z", "b")
 	if err == nil {
 		t.Fatal("expected error on build failure")
 	}
 }
 ```
 
-Add `"context"` and `"fmt"` to the test file's imports.
+Add `"context"` and `"fmt"` to the test file's imports. The cache-miss tests pass a valid RFC3339 `issueDate` (`"2025-03-14T09:30:00Z"`) because Task 2's `SweLegoBuildScript` parses `issueDate` and returns an error on invalid input; using `"d"` would short-circuit the build path at script generation rather than exercising the actual build execution.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -385,13 +428,9 @@ type NodeExec interface {
 
 Append to `swe_lego_image.go`:
 
-```go
-import (
-	"context"
-	"errors"
-	"strings"
-)
+Merge `"context"` and `"errors"` into the existing import block in `swe_lego_image.go` (alphabetical order: `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`). Do NOT add a second `import (...)` block — Go does not allow multiple import blocks in the same file, and the existing block from Tasks 1 and 2 already contains `crypto/sha256`, `encoding/hex`, `fmt`, `strings`, and `time`.
 
+```go
 // ErrSweLegoBuildFailed is returned when the build script exits non-zero.
 var ErrSweLegoBuildFailed = errors.New("swe-lego image build failed")
 
@@ -418,7 +457,10 @@ func BuildOrReuse(ctx context.Context, exec NodeExec, repoURL, baseCommit, issue
 	}
 
 	// 2. Cache miss: ship the build script and run it on the node.
-	script := SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey)
+	script, err := SweLegoBuildScript(repoURL, baseCommit, issueDate, baseImage, cacheKey)
+	if err != nil {
+		return "", "", fmt.Errorf("build script: %w", err)
+	}
 	_, exitCode, err = exec.Exec(ctx, node, []string{"sh", "-c", script})
 	if err != nil {
 		return "", "", fmt.Errorf("build transport error: %w", err)
@@ -428,9 +470,6 @@ func BuildOrReuse(ctx context.Context, exec NodeExec, repoURL, baseCommit, issue
 	}
 	return ref, node, nil
 }
-
-// ensure strings is used (build-script generation references it via shellQuote)
-var _ = strings.Contains
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -483,9 +522,9 @@ Expected: FAIL with "undefined: SweLegoDockerfile".
 
 The build script from Task 2 writes a `Dockerfile` at `/tmp/swe-lego-build/Dockerfile` before `docker build`. Append to `swe_lego_image.go`:
 
-```go
-import "text/template"
+> **Merge `"text/template"` into the existing import block** — Go does not allow multiple import blocks in the same file. The existing `swe_lego_image.go` already has `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`; add `"text/template"` in alphabetical order (after `"strings"`, before `"time"`).
 
+```go
 // sweLegoDockerfileTmpl is the Dockerfile baked into each SWE-Lego image.
 // The daemon binary is built from the existing multica daemon source and
 // copied in at image-build time — it is the same binary that runs locally
@@ -519,10 +558,15 @@ Also update `SweLegoBuildScript` to write the Dockerfile before `docker build`. 
 
 ```go
 	// Write the Dockerfile, then build.
-	dockerfile, _ := SweLegoDockerfile(baseImage)
+	dockerfile, err := SweLegoDockerfile(baseImage)
+	if err != nil {
+		return "", fmt.Errorf("render dockerfile: %w", err)
+	}
 	fmt.Fprintf(&b, "cat > /tmp/swe-lego-build/Dockerfile <<'EOF'\n%s\nEOF\n", dockerfile)
 	fmt.Fprintf(&b, "docker build -t %s -f /tmp/swe-lego-build/Dockerfile .\n", shellQuote(imageRef))
 ```
+
+> Propagate the `SweLegoDockerfile` error instead of swallowing it with `dockerfile, _ :=`. `SweLegoBuildScript` already returns `(string, error)`, so a template parse/render failure should bubble up as `render dockerfile: %w`. The `:=` reuses the existing `err` variable in scope (from `issueTime, err := time.Parse(...)` at the top of the function) since `dockerfile` is new on the left-hand side — valid Go.
 
 And create the template file on disk for documentation/reference (Go embeds it via the const above, but committing the `.tmpl` makes the asset discoverable):
 
@@ -559,15 +603,10 @@ git commit -m "feat(swe-lego): add Dockerfile template for daemon-in-docker imag
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests, but pointing at the multica cloud-runtime proxy paths and `MULTICA_BASE_URL`/`MULTICA_API_KEY` env):
+Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests, but pointing at the multica cloud-runtime proxy paths and `MULTICA_BASE_URL`/`MULTICA_API_KEY` env). The existing test file already imports `FleetSandboxProvider`, `ForkableEnvironment`, `ForkResult`, `SnapshotResult` at the top and aliases the environment module as `env_mod` — **add `MulticaSweLegoProvider` to that existing import (alphabetical order, between `ForkResult` and `SnapshotResult`) and use the `env_mod.` prefix for the error types** (`env_mod.SnapshotError`, `env_mod.ForkError`) instead of introducing a separate mid-file import block. Match the existing test file's `@pytest.mark.asyncio` + `async def` + `await` style rather than `asyncio.run(...)`:
 
 ```python
-from customized_areal.tree_search.agents.environment import (
-    EnvironmentError,
-    ForkError,
-    MulticaSweLegoProvider,
-    SnapshotError,
-)
+# -- MulticaSweLegoProvider -------------------------------------------------
 
 
 def test_multica_provider_requires_base_url(monkeypatch):
@@ -576,10 +615,11 @@ def test_multica_provider_requires_base_url(monkeypatch):
         MulticaSweLegoProvider()
 
 
-def test_multica_provider_snapshot_hits_cloud_runtime_path():
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_hits_cloud_runtime_path():
     seen: list[str] = []
 
-    def handler(request: httpx.Request):
+    def handler(request: httpx.Request) -> httpx.Response:
         seen.append(f"{request.method} {request.url.path}")
         assert request.headers["Authorization"] == "Bearer secret"
         return httpx.Response(200, json={"snapshot_id": "snap-1"})
@@ -588,15 +628,16 @@ def test_multica_provider_snapshot_hits_cloud_runtime_path():
     prov = MulticaSweLegoProvider(
         base_url="https://multica.example", api_key="secret", transport=transport
     )
-    result = asyncio.run(prov.snapshot("sbx-1"))
+    result = await prov.snapshot("sbx-1")
     assert result == SnapshotResult(snapshot_id="snap-1", source_sandbox_id="sbx-1")
     assert seen == ["POST /api/v1/sandboxes/sbx-1/snapshot"]
 
 
-def test_multica_provider_fork_sends_source_sandbox_id():
+@pytest.mark.asyncio
+async def test_multica_provider_fork_sends_source_sandbox_id():
     captured: dict = {}
 
-    def handler(request: httpx.Request):
+    def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"sandbox_id": "forked-1"})
 
@@ -604,35 +645,52 @@ def test_multica_provider_fork_sends_source_sandbox_id():
     prov = MulticaSweLegoProvider(
         base_url="https://multica.example", transport=transport, max_concurrent_forks=2
     )
-    result = asyncio.run(prov.fork(source_sandbox_id="sbx-1"))
+    result = await prov.fork(source_sandbox_id="sbx-1")
     assert result == ForkResult(sandbox_id="forked-1")
     assert captured["body"] == {"source_sandbox_id": "sbx-1"}
 
 
-def test_multica_provider_cleanup_treats_404_as_success():
+@pytest.mark.asyncio
+async def test_multica_provider_cleanup_treats_404_as_success():
     transport = _router(
         {("DELETE", "/api/v1/sandboxes/gone*"): lambda r: httpx.Response(404, json={})}
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    asyncio.run(prov.cleanup("gone"))  # must not raise
-
-
-def test_multica_provider_snapshot_error_on_500():
-    transport = _router(
-        {("POST", "/api/v1/sandboxes/sbx-1/snapshot*"): lambda r: httpx.Response(500, text="boom")}
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    with pytest.raises(SnapshotError):
-        asyncio.run(prov.snapshot("sbx-1"))
+    await prov.cleanup("gone")  # must not raise
 
 
-def test_multica_provider_fork_error_on_500():
+@pytest.mark.asyncio
+async def test_multica_provider_snapshot_error_on_500():
     transport = _router(
-        {("POST", "/api/v1/sandboxes/fork*"): lambda r: httpx.Response(500, text="boom")}
+        {
+            ("POST", "/api/v1/sandboxes/sbx-1/snapshot*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
     )
-    prov = MulticaSweLegoProvider(base_url="https://multica.example", transport=transport)
-    with pytest.raises(ForkError):
-        asyncio.run(prov.fork(source_sandbox_id="sbx-1"))
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.SnapshotError):
+        await prov.snapshot("sbx-1")
+
+
+@pytest.mark.asyncio
+async def test_multica_provider_fork_error_on_500():
+    transport = _router(
+        {
+            ("POST", "/api/v1/sandboxes/fork*"): lambda r: httpx.Response(
+                500, text="boom"
+            )
+        }
+    )
+    prov = MulticaSweLegoProvider(
+        base_url="https://multica.example", transport=transport
+    )
+    with pytest.raises(env_mod.ForkError):
+        await prov.fork(source_sandbox_id="sbx-1")
 
 
 def test_multica_provider_satisfies_forkable_environment_protocol():

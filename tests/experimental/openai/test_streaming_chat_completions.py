@@ -153,7 +153,7 @@ class TestChatCompletionsEndpoint:
                 headers=_session_headers(api_key),
                 json={
                     "messages": [{"role": "user", "content": "hi"}],
-                    "model": "test",
+                    "model": "default",
                     "stream": True,
                 },
             )
@@ -194,7 +194,7 @@ class TestChatCompletionsEndpoint:
                 headers=_session_headers(api_key),
                 json={
                     "messages": [{"role": "user", "content": "hi"}],
-                    "model": "test",
+                    "model": "default",
                 },
             )
 

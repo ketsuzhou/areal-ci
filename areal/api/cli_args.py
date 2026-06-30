@@ -1515,6 +1515,14 @@ class PPOActorConfig(TrainEngineConfig):
             "choices": PROX_LOGP_METHODS_ALL,
         },
     )
+    enable_remote_rollout: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable OpenRouter remote rollout via model='remote:<provider/model>'. "
+            "Requires actor.recompute_logprob=true or actor.use_decoupled_loss=true, "
+            "because remote completions carry placeholder logprobs that must be recomputed."
+        },
+    )
 
     # Logging Agent Trajectories
     log_agent_stats: bool = field(
@@ -1581,6 +1589,18 @@ class PPOActorConfig(TrainEngineConfig):
                     "SAPO is not compatible with `use_decoupled_loss=True`. "
                     "Please set `actor.use_decoupled_loss=false` in your configuration."
                 )
+
+        # Warn if remote rollout is enabled but no recompute path is active.
+        # Remote completions carry placeholder logprobs that would corrupt
+        # PPO ratios without recompute; see the OpenRouter remote rollout
+        # design spec for the full rationale.
+        if self.enable_remote_rollout and not self.should_compute_prox_logp():
+            logger.warning(
+                "enable_remote_rollout=True but neither recompute_logprob nor "
+                "use_decoupled_loss is active. Remote completions carry placeholder "
+                "logprobs; set actor.recompute_logprob=true or "
+                "actor.use_decoupled_loss=true to avoid corrupting PPO ratios."
+            )
 
         super().__post_init__()
 
