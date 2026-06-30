@@ -2,7 +2,7 @@
 
 Date: 2026-06-29
 Status: Approved (design); implementation pending
-Area: `customized_areal/tree_search/dag/`
+Area: `customized_areal/tree_search/agents/`
 
 ## 1. Summary
 
@@ -19,12 +19,12 @@ not replace the existing token-level `Node`-based selector; it coexists with it.
 ## 2. Goals / Non-Goals
 
 ### Goals
-- A new module `dag/branch_selection.py`, torch-free and I/O-free, consuming an
+- A new module `agents/branch_selection.py`, torch-free and I/O-free, consuming an
   `Event` log and returning `list[BranchPoint]`.
 - Faithfully reproduce the existing selection criterion (TD-error gate + entropy
   ranking) so behavior is preserved, only the representation changes.
 - Emit one branch point per `task_id`, keyed for `replay_prefix_for`.
-- Small, independently-testable pure functions (matching the `dag/` package style).
+- Small, independently-testable pure functions (matching the `agents/` package style).
 
 ### Non-Goals
 - No new branch generation, scoring, or MCTS expansion (selection only).
@@ -42,14 +42,14 @@ not replace the existing token-level `Node`-based selector; it coexists with it.
 | Q1 | Branch-point **selection** policy only (no generation/scoring). |
 | Q2 | Port the existing criterion **as-is**: critic TD-error gate `|r_t + γ·v(s_{t+1}) − v(s_t)| ≥ td_threshold`, survivors ranked by max entropy. |
 | Q3 | **One branch point per `task_id`** (lane). |
-| Q4 | **Coexist**: new function in `dag/`; leave `Node`-based `select_branch_candidate` untouched; live-workflow wiring is a separate follow-up. |
+| Q4 | **Coexist**: new function in `agents/`; leave `Node`-based `select_branch_candidate` untouched; live-workflow wiring is a separate follow-up. |
 | Q5 | Field mapping confirmed (see §6). |
 | Structure | **Approach 2**: composable pure functions + orchestrator. |
 
 ## 4. Architecture & Placement
 
-New module: `customized_areal/tree_search/dag/branch_selection.py`. Sits beside
-`gae.py` and `event_codec.py` in the canonical `dag/` layer. Depends only on
+New module: `customized_areal/tree_search/agents/branch_selection.py`. Sits beside
+`gae.py` and `event_codec.py` in the canonical `agents/` layer. Depends only on
 `event_model`, `event_codec`, and `execution_dag`. No torch, no I/O.
 
 Data flow:
@@ -64,8 +64,8 @@ Event log ──> branch_selection.select_branch_points(events, td_threshold, ga
    event_codec.replay_prefix_for(events, branch_point=(task_id, seq)) ──> ReplayPrefix
 ```
 
-New exports added to `dag/__init__.py` (`BranchPoint`, `select_branch_points`, and the
-three helpers). The `dag/__init__.py` must stay torch-free, which this module preserves.
+New exports added to `agents/__init__.py` (`BranchPoint`, `select_branch_points`, and the
+three helpers). The `agents/__init__.py` must stay torch-free, which this module preserves.
 
 ## 5. Public API & Data Types
 
@@ -183,8 +183,8 @@ No mutation of input events; no I/O; deterministic output for identical input.
 ## 9. Testing
 
 Strict TDD (failing tests first). Torch-free; run via `.venv-test/bin/python -m pytest`;
-lint with the project ruff. New file `dag/tests/test_branch_selection.py` (alongside
-the dag tests, matching where `test_gae.py` lives).
+lint with the project ruff. New file `tests/test_branch_selection.py` (alongside
+the tests, matching where `test_gae.py` lives).
 
 **Helper-level (unit):**
 - `lane_successor_value`: in-lane child → `(0.0, child.value)`; terminal →

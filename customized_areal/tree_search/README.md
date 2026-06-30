@@ -501,9 +501,9 @@ flowchart TD
         BOOT --> DT --> DTM1 --> D1
     end
 
-    TT -.->. DT
-    TDOTS -.->. DTM1
-    T1 -.->. D1
+    TT -.-> DT
+    TDOTS -.-> DTM1
+    T1 -.-> D1
 
     subgraph assign["Per-node assignment"]
         A1["Node_1: A_1, ret_1 = A_1 + v(s_1)<br/>broadcast over loss_mask==1 positions"]

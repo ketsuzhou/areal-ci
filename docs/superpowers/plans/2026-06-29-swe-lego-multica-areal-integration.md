@@ -1791,9 +1791,22 @@ git commit -m "feat(swe-lego): wire orchestration service into handler with stat
 
 ## Task 10: Wire the service deps to real queries + cloud runtime (multica, Go)
 
-**Files:**
-- Modify: `multica/server/internal/handler/swe_lego_issue.go`
-- Test: `multica/server/internal/handler/swe_lego_issue_test.go`
+> **STATUS: Deferred to Task 17 (e2e).** Investigation during execution found that the plan's pseudo-code can't be implemented cleanly in the dev environment:
+>
+> 1. **WorkspaceID threading**: `CreateProjectParams` requires `WorkspaceID` (`pkg/db/generated/project.sql.go:36`), but the stub adapter has no request context. The handler has `resolveWorkspaceID(r)` (`internal/handler/handler.go:440`) but the adapter is constructed inside the handler without it.
+> 2. **Agent runtime binding**: `TaskService.EnqueueTaskForIssue` (`internal/service/task.go:432`) requires the issue to have `AssigneeID` (agent) and the agent to have `RuntimeID`. Forking a sandbox doesn't bind it to an agent's runtime — that requires a daemon self-registration step that needs a running cloud runtime.
+> 3. **No "boot sandbox" endpoint**: The cloud-runtime proxy (`internal/cloudruntime/client.go`) has fork/snapshot/restore/delete but no "create sandbox from image on node" endpoint. Booting requires either a new server-side endpoint or `docker run` via NodeExec against a real node.
+> 4. **Handler test breaks**: `newTestHandler(Config{})` (`internal/handler/auth_signup_test.go:13`) produces nil `Queries` and nil `CloudRuntime`. Replacing stubs with real queries panics on nil pointer.
+> 5. **Plan's test is `t.Skip(...)`** — acknowledges no unit-test verification; real verification is e2e in Task 17.
+>
+> The stubs from Task 9 are retained. Tasks 11–16 (areal Python side) proceed against the stub endpoint contract. Task 17 (e2e) requires a real multica deployment with cloud runtime + DB, at which point the stub adapter methods are replaced with real implementations informed by actual e2e testing. The real DB query signatures are documented below for the Task 17 implementer:
+>
+> - `CreateProject(ctx, CreateProjectParams{WorkspaceID, Title, Status, Priority, ...}) (Project, error)` — `project.sql.go:46`
+> - `DeleteProject(ctx, DeleteProjectParams{ID, WorkspaceID}) error` — `project.sql.go:84` (tenant guard)
+> - `CreateIssue(ctx, CreateIssueParams{WorkspaceID, Title, ProjectID, CreatorType, CreatorID, ...}) (Issue, error)` — `issue.sql.go:201`
+> - `SetIssueMetadataKey(ctx, SetIssueMetadataKeyParams{Key, Value []byte, ID, WorkspaceID}) (Issue, error)` — `issue.sql.go:1115`
+> - `TaskService.EnqueueTaskForIssue(ctx, issue db.Issue, triggerCommentID ...pgtype.UUID) (AgentTaskQueue, error)` — `task.go:432` (requires `issue.AssigneeID.Valid` + `agent.RuntimeID.Valid`)
+> - `cloudruntime.Request{Method, Path, Query, Body, UserID, RequestID, Op, Headers}` → `Response{StatusCode, Header, Body}` — `internal/cloudruntime/client.go:42,69`
 
 - [ ] **Step 1: Write the failing test**
 

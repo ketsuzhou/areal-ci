@@ -4,7 +4,7 @@
 
 **Goal:** Add a torch-free branch-point selection policy over the canonical `Event` sequence that ports the existing TD-error-gate + max-entropy criterion and emits one `(task_id, seq)` branch point per task lane.
 
-**Architecture:** A new pure module `dag/branch_selection.py` composed of three small helpers (`lane_successor_value`, `td_error`, `passes_gate`) plus an orchestrator `select_branch_points`. It reconstructs/validates the DAG once via `events_to_dag` (single source of validation), groups eligible Events by `task_id`, applies the ported gate, and returns the highest-entropy survivor per lane as a `BranchPoint`. It coexists with the legacy `Node`-based `select_branch_candidate` (left untouched); live-workflow wiring is an out-of-scope follow-up.
+**Architecture:** A new pure module `agents/branch_selection.py` composed of three small helpers (`lane_successor_value`, `td_error`, `passes_gate`) plus an orchestrator `select_branch_points`. It reconstructs/validates the DAG once via `events_to_dag` (single source of validation), groups eligible Events by `task_id`, applies the ported gate, and returns the highest-entropy survivor per lane as a `BranchPoint`. It coexists with the legacy `Node`-based `select_branch_candidate` (left untouched); live-workflow wiring is an out-of-scope follow-up.
 
 **Tech Stack:** Python 3.12, dataclasses, torch-free. Tests via `.venv-test/bin/python -m pytest`. Lint/format via project ruff at `/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff`.
 
@@ -14,22 +14,22 @@
 
 ## File Structure
 
-- **Create** `customized_areal/tree_search/dag/branch_selection.py` — the entire feature: `BranchPoint` dataclass, three pure helpers, `select_branch_points` orchestrator, `__all__`. One clear responsibility (branch-point selection over Events). Depends only on `event_model`, `event_codec`. Torch-free.
+- **Create** `customized_areal/tree_search/agents/branch_selection.py` — the entire feature: `BranchPoint` dataclass, three pure helpers, `select_branch_points` orchestrator, `__all__`. One clear responsibility (branch-point selection over Events). Depends only on `event_model`, `event_codec`. Torch-free.
 - **Create** `customized_areal/tree_search/tests/test_branch_selection.py` — all tests (helper-level + orchestrator + lane/integration).
-- **Modify** `customized_areal/tree_search/dag/__init__.py` — export the new public symbols (must stay torch-free).
+- **Modify** `customized_areal/tree_search/agents/__init__.py` — export the new public symbols (must stay torch-free).
 
 ### Reference conventions (read before starting)
-- Imports use the full path: `from customized_areal.tree_search.dag.branch_selection import ...`.
-- `Event` fields (see `dag/event_model.py`): `node_id, agent_id, issue_id, task_id, completion_index, incoming_edges, outgoing_edges, branch_seq, value, process_reward, outcome_reward, messages, metadata`. Edges are tuples `(dst_node_id, EdgeType)`.
-- `EdgeType` (see `dag/execution_dag.py`): `DELEGATION`, `MENTION`, `COMPLETION` (a `StrEnum`). The selection logic ignores edge *type*; it only matches on the child's `task_id`.
-- `events_to_dag(events)` (see `dag/event_codec.py`) validates: dense `completion_index` `0..n-1`, unique `node_id`, **edge symmetry** (every `outgoing` `A->B` needs a matching `incoming` `A->B` of the same `EdgeType`), and topological order (`index(src) < index(dst)`). It raises `DAGError` on violation.
+- Imports use the full path: `from customized_areal.tree_search.agents.branch_selection import ...`.
+- `Event` fields (see `agents/event_model.py`): `node_id, agent_id, issue_id, task_id, completion_index, incoming_edges, outgoing_edges, branch_seq, value, process_reward, outcome_reward, messages, metadata`. Edges are tuples `(dst_node_id, EdgeType)`.
+- `EdgeType` (see `agents/execution_dag.py`): `DELEGATION`, `MENTION`, `COMPLETION` (a `StrEnum`). The selection logic ignores edge *type*; it only matches on the child's `task_id`.
+- `events_to_dag(events)` (see `agents/event_codec.py`) validates: dense `completion_index` `0..n-1`, unique `node_id`, **edge symmetry** (every `outgoing` `A->B` needs a matching `incoming` `A->B` of the same `EdgeType`), and topological order (`index(src) < index(dst)`). It raises `DAGError` on violation.
 
 ---
 
 ## Task 1: BranchPoint dataclass + pure helpers
 
 **Files:**
-- Create: `customized_areal/tree_search/dag/branch_selection.py`
+- Create: `customized_areal/tree_search/agents/branch_selection.py`
 - Test: `customized_areal/tree_search/tests/test_branch_selection.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -49,14 +49,14 @@ from __future__ import annotations
 
 import pytest
 
-from customized_areal.tree_search.dag.branch_selection import (
+from customized_areal.tree_search.agents.branch_selection import (
     BranchPoint,
     lane_successor_value,
     passes_gate,
     select_branch_points,
     td_error,
 )
-from customized_areal.tree_search.dag.event_model import Event
+from customized_areal.tree_search.agents.event_model import Event
 
 
 def _ev(
@@ -144,11 +144,11 @@ def test_branchpoint_is_frozen():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'customized_areal.tree_search.dag.branch_selection'`.
+Expected: FAIL — `ModuleNotFoundError: No module named 'customized_areal.tree_search.agents.branch_selection'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `customized_areal/tree_search/dag/branch_selection.py`:
+Create `customized_areal/tree_search/agents/branch_selection.py`:
 
 ```python
 """Branch-point selection over the canonical Event sequence (ported criterion).
@@ -168,8 +168,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from customized_areal.tree_search.dag.event_codec import events_to_dag
-from customized_areal.tree_search.dag.event_model import Event
+from customized_areal.tree_search.agents.event_codec import events_to_dag
+from customized_areal.tree_search.agents.event_model import Event
 
 
 @dataclass(frozen=True)
@@ -252,7 +252,7 @@ Expected: these PASS. (The module-level `select_branch_points` import fails coll
 - [ ] **Step 5: Commit**
 
 ```bash
-git add customized_areal/tree_search/dag/branch_selection.py customized_areal/tree_search/tests/test_branch_selection.py
+git add customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/tests/test_branch_selection.py
 git commit -m "feat: add Event branch-selection helpers (BranchPoint, gate, td_error)"
 ```
 
@@ -261,7 +261,7 @@ git commit -m "feat: add Event branch-selection helpers (BranchPoint, gate, td_e
 ## Task 2: select_branch_points orchestrator (single lane, ported scenarios)
 
 **Files:**
-- Modify: `customized_areal/tree_search/dag/branch_selection.py`
+- Modify: `customized_areal/tree_search/agents/branch_selection.py`
 - Test: `customized_areal/tree_search/tests/test_branch_selection.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -278,7 +278,7 @@ class TestSelectSingleLane:
     """
 
     def _linked_pair(self, *, v1, v2, e1, e2, seq1=1, seq2=2, out1=0.0, out2=0.0):
-        from customized_areal.tree_search.dag.execution_dag import EdgeType
+        from customized_areal.tree_search.agents.execution_dag import EdgeType
 
         n1 = _ev(
             "n1",
@@ -367,7 +367,7 @@ Expected: FAIL — `ImportError: cannot import name 'select_branch_points'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `customized_areal/tree_search/dag/branch_selection.py`, add the lane-children builder and orchestrator above `__all__`, then update `__all__`:
+In `customized_areal/tree_search/agents/branch_selection.py`, add the lane-children builder and orchestrator above `__all__`, then update `__all__`:
 
 ```python
 def _lane_children(events: Sequence[Event]) -> dict[str, Event]:
@@ -465,7 +465,7 @@ Expected: PASS (all Task 1 + Task 2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add customized_areal/tree_search/dag/branch_selection.py customized_areal/tree_search/tests/test_branch_selection.py
+git add customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/tests/test_branch_selection.py
 git commit -m "feat: add select_branch_points orchestrator (one per task_id lane)"
 ```
 
@@ -507,7 +507,7 @@ class TestMultiLaneAndIntegration:
         assert select_branch_points([]) == []
 
     def test_emitted_point_round_trips_through_replay_prefix(self):
-        from customized_areal.tree_search.dag.event_codec import replay_prefix_for
+        from customized_areal.tree_search.agents.event_codec import replay_prefix_for
 
         # Single eligible terminal event whose (task_id, branch_seq) is the key.
         a = _ev("a", task_id="t1", completion_index=0, branch_seq=4,
@@ -520,7 +520,7 @@ class TestMultiLaneAndIntegration:
         assert prefix.seq == 4
 
     def test_malformed_log_propagates_dag_error(self):
-        from customized_areal.tree_search.dag.execution_dag import DAGError
+        from customized_areal.tree_search.agents.execution_dag import DAGError
 
         # Non-dense completion_index (0 then 2) -> events_to_dag raises DAGError.
         a = _ev("a", task_id="t1", completion_index=0, branch_seq=1)
@@ -551,10 +551,10 @@ git commit -m "test: multi-lane, determinism, replay round-trip, DAGError propag
 
 ---
 
-## Task 4: Export from package + lint + full dag suite
+## Task 4: Export from package + lint + full agents suite
 
 **Files:**
-- Modify: `customized_areal/tree_search/dag/__init__.py`
+- Modify: `customized_areal/tree_search/agents/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -562,25 +562,25 @@ Append to `customized_areal/tree_search/tests/test_branch_selection.py`:
 
 ```python
 def test_public_symbols_exported_from_dag_package():
-    import customized_areal.tree_search.dag as d
+    import customized_areal.tree_search.agents as d
 
     for name in ("BranchPoint", "select_branch_points", "lane_successor_value",
                  "td_error", "passes_gate"):
-        assert name in d.__all__, f"{name} missing from dag.__all__"
-        assert hasattr(d, name), f"{name} not importable from dag"
+        assert name in d.__all__, f"{name} missing from agents.__all__"
+        assert hasattr(d, name), f"{name} not importable from agents"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
-Expected: FAIL — `BranchPoint missing from dag.__all__`.
+Expected: FAIL — `BranchPoint missing from agents.__all__`.
 
 - [ ] **Step 3: Add the exports**
 
-In `customized_areal/tree_search/dag/__init__.py`, add the import block (after the `gae` import block, keeping alphabetical-ish grouping consistent with the file):
+In `customized_areal/tree_search/agents/__init__.py`, add the import block (after the `gae` import block, keeping alphabetical-ish grouping consistent with the file):
 
 ```python
-from customized_areal.tree_search.dag.branch_selection import (
+from customized_areal.tree_search.agents.branch_selection import (
     BranchPoint,
     lane_successor_value,
     passes_gate,
@@ -605,23 +605,23 @@ And add to the `__all__` list (a new grouped section near the `gae` / `dag advan
 Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full dag test suite + lint/format**
+- [ ] **Step 5: Run the full agents test suite + lint/format**
 
 ```bash
 .venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py customized_areal/tree_search/tests/test_gae.py customized_areal/tree_search/tests/test_session_map.py -q
 RUFF=/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff
-$RUFF check customized_areal/tree_search/dag/branch_selection.py customized_areal/tree_search/dag/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
-$RUFF format --check customized_areal/tree_search/dag/branch_selection.py customized_areal/tree_search/dag/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
+$RUFF check customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/agents/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
+$RUFF format --check customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/agents/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
 ```
-Expected: all tests PASS; ruff reports no errors and "would reformat 0 files" (run `$RUFF format` without `--check` to apply if needed, then re-verify). Confirm `import customized_areal.tree_search.dag` still succeeds (proves the package stayed torch-free):
-`.venv-test/bin/python -c "import customized_areal.tree_search.dag as d; print('ok', 'select_branch_points' in d.__all__)"`
+Expected: all tests PASS; ruff reports no errors and "would reformat 0 files" (run `$RUFF format` without `--check` to apply if needed, then re-verify). Confirm `import customized_areal.tree_search.agents` still succeeds (proves the package stayed torch-free):
+`.venv-test/bin/python -c "import customized_areal.tree_search.agents as d; print('ok', 'select_branch_points' in d.__all__)"`
 Expected: `ok True`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add customized_areal/tree_search/dag/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
-git commit -m "feat: export branch-selection API from dag package"
+git add customized_areal/tree_search/agents/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
+git commit -m "feat: export branch-selection API from agents package"
 ```
 
 ---
@@ -629,7 +629,7 @@ git commit -m "feat: export branch-selection API from dag package"
 ## Self-Review
 
 **1. Spec coverage:**
-- §4 placement (`dag/branch_selection.py`, torch-free, deps on event_model/codec) → Tasks 1–2.
+- §4 placement (`agents/branch_selection.py`, torch-free, deps on event_model/codec) → Tasks 1–2.
 - §5 API (`BranchPoint` + 3 helpers + orchestrator, list output, default gamma=1.0/td_threshold=0.0) → Tasks 1–2.
 - §6 field mapping (eligibility `branch_seq is not None`; successor = in-lane DAG child; value = `Event.value`; entropy = `metadata['max_entropy']`) → Tasks 1–2 (`_lane_children`, `lane_successor_value`, `_entropy`).
 - §7 algorithm (validate via `events_to_dag`, group by task_id, gate, rank, tiebreak on completion_index, sort by task_id) → Task 2.
