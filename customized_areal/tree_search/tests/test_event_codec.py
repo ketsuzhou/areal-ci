@@ -149,9 +149,7 @@ def test_dag_to_supernodes_nodes_by_segment_overrides_metadata() -> None:
     assert _flat_messages(events["O0"]) == (
         {"role": "assistant", "content": "override"},
     )
-    assert _flat_messages(events["R0"]) == (
-        {"role": "assistant", "content": "R0-out"},
-    )
+    assert _flat_messages(events["R0"]) == ({"role": "assistant", "content": "R0-out"},)
 
 
 def test_supernodes_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:

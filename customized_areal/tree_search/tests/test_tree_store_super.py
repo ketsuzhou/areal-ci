@@ -81,7 +81,9 @@ def test_single_agent_leaf_super_preserves_backup_behavior():
     # Simulate what the workflow does: build a leaf SuperNode wrapping the
     # episode's Nodes, then insert_super_batch with backup=True.
     n1 = _node("n1", episode_id="ep", turn_idx=1, outcome_reward=1.0)
-    n2 = _node("n2", episode_id="ep", turn_idx=2, outcome_reward=1.0, parent_node_id="n1")
+    n2 = _node(
+        "n2", episode_id="ep", turn_idx=2, outcome_reward=1.0, parent_node_id="n1"
+    )
     leaf = _super("s-ep", nodes=[n1, n2])
     store.insert_super_batch([leaf], query_id="q", backup=True)
     # n2 is the episode terminal (highest turn_idx); backup walks n2 -> n1.
