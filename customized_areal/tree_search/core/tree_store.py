@@ -17,6 +17,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from customized_areal.tree_search.agents.execution_dag import SuperNode
+
 
 def _lazy_torch():
     """Import and return torch on first use.
@@ -272,11 +274,15 @@ class MCTSTreeStore:
 
     Reward backup: Node-level only (parent_node_id encodes the full DAG
     causal order across agents and segments).
+
+    Node payloads may be either ``Node`` objects (local pipeline) or dicts
+    (remote-engine wire format). Methods that read node fields branch on
+    ``isinstance(node, dict)`` for this reason.
     """
 
     def __init__(self) -> None:
         # Primary storage: query_id -> SuperNodes in insertion order.
-        self.trajectories: dict[str, list] = {}
+        self.trajectories: dict[str, list[SuperNode]] = {}
         # SuperNode-level index: SuperNode UUID -> (query_id, idx_in_trajectories)
         self._super_id_to_key: dict[str, tuple[str, int]] = {}
         # Node-level index: node_id -> (super_node_id, idx_in_super_node.nodes)
@@ -347,7 +353,9 @@ class MCTSTreeStore:
 
         Walks parent_node_id across SuperNode and agent boundaries (the
         unified causal chain set by SuperNodeAssembler). A ``visited`` guard
-        makes the walk robust to malformed cycles.
+        makes the walk robust to malformed cycles: if a cycle is detected,
+        the walk silently stops (no raise) and the nodes already visited keep
+        their accumulated reward.
         """
         visited: set[str] = set()
         current: str | None = terminal_node_id
@@ -380,7 +388,7 @@ class MCTSTreeStore:
     # -- Insertion -------------------------------------------------------
 
     def insert_super_batch(
-        self, supers: list, backup: bool = True, query_id: str = ""
+        self, supers: list[SuperNode], backup: bool = True, query_id: str = ""
     ) -> None:
         """Insert a batch of SuperNodes under ``query_id``.
 
@@ -507,7 +515,16 @@ class MCTSTreeStore:
     def get_loo_value_and_variance(
         self, node_id: str, excluded_reward: float
     ) -> tuple[float, float, int]:
-        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size."""
+        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size.
+
+        Returns (loo_mean, var_of_mean, n_loo). var_of_mean is the larger of:
+          - the sample-variance-of-the-mean after removing ``excluded_reward``
+            (clamped to >= 0; divided by n_loo for the mean's variance), and
+          - a Beta(a, b) prior floor where a = s' + 1, b = (n_loo - s') + 1,
+            s' = sum of rewards excluding the LOO sample (clamped to [0, n_loo]).
+            This floor prevents zero-variance estimates when all LOO samples agree.
+        n_loo < 2 returns (0.0, -1.0, max(n_loo, 0)) -- not enough samples.
+        """
         n = self._visit_counts.get(node_id, 0)
         n_loo = n - 1
         if n_loo < 2:
