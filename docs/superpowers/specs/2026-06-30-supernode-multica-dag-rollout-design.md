@@ -820,7 +820,7 @@ In this design:
 
 | Risk | Mitigation |
 |---|---|
-| `parent_node_id` semantic shift ("episode-internal predecessor" → "causal predecessor") surprises callers | Document on `Node.parent_node_id`; audit all readers (today: `_backup_path`, `_node_parent_id`, `_backup_inserted_episodes`); the `visited` guard in `_backup_path` already prevents cycles from malformed chains. |
+| `parent_node_id` semantic shift ("episode-internal predecessor" → "causal predecessor"), plus the new `extra_parent_node_ids` at joins, surprises callers | Document on `Node.parent_node_id` / `Node.extra_parent_node_ids`; audit all readers, which resolve parents through the single `_node_parent_ids` accessor (primary + extras): `_backup_path`, `backup_path_returns`, `_backup_inserted_episodes` (leaf detection), and checkpoint (de)serialization. The `visited` guard in the root-ward DFS prevents cycles from malformed chains and double-counting a shared ancestor across join branches. |
 | Cross-agent `parent_node_id` link requires the assembler to know the source segment's terminal `node_id` at assembly time | Multica's `EdgeSpec` identifies source + destination segments; the assembler has already built those segments' Nodes (by turn range) before setting cross-agent parent links. The source segment's terminal `node_id` is `nodes[end_turn_idx - 1].node_id`. |
 | `session_id` → `interaction_id` mapping is unspecified in the proxy today | Phase 1b/2 implements the `RLSessionRewardWriter` adapter (AReal only writes rewards; Multica drives start/end_session); if the proxy lacks a clean session→terminal-interaction lookup, the writer uses the session's last interaction (or requires the verifier to return interaction_ids). |
 | Node torch-lazy refactor breaks existing tensor-typed code paths | Field types become `Any`; `_node_to_tensor_dict` lazy-imports torch; existing tests with `pytest.importorskip("torch")` continue to cover the tensor paths. |
@@ -832,7 +832,7 @@ In this design:
 
 - **SuperNode**: communication-bounded segment of one agent's action sequence; carries DAG topology, comm-event provenance, RL session binding, team env snapshot, and `list[Node]` turns.
 - **Node**: one assistant turn (`input_ids`, `loss_mask`, `logprobs`, etc.); torch-lazy after refactor.
-- **Causal flattening**: encoding the full DAG causal order into the Node-level `parent_node_id` chain, so reward backup walks one unified chain.
+- **Causal flattening**: encoding the full DAG causal order into the Node-level parent structure (`parent_node_id` + `extra_parent_node_ids`), so reward backup is a single root-ward DFS over that structure. The structure is a chain when every node has one causal parent (single-agent, chains, trees) and a DAG when fan-in joins give a node multiple causal parents.
 - **Multica**: the orchestration layer that spawns agents, tracks communication events, segments agent runs, and captures team env snapshots. AReal's `MulticaDagClient` talks to it.
 - **DagResult**: Multica's completion payload — `session_ids` + `segments` (SegmentSpec list) + `edges` (EdgeSpec list) + `env_snapshots` (per-segment `TeamEnvSnapshot`).
 - **SegmentSpec**: Multica's definition of one communication-bounded segment, including the turn-index range within the agent run.
