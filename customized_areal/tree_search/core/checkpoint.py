@@ -1,8 +1,13 @@
-"""Checkpoint save/load for the flat Node store.
+"""Checkpoint save/load for the SuperNode store.
 
 MCTS stats are keyed by node_id (string interaction IDs) and serialize
 directly — no rebuild_mcts_stats() needed after loading.
-Old TrieNode-based checkpoints are incompatible and must be discarded.
+Trajectories hold ``SuperNode`` objects; each SuperNode's ``nodes`` list
+holds the ``Node`` records that carry MCTS stats and tensors. Indices
+(``_super_id_to_key``, ``_node_id_to_super``) are rebuilt on load from
+the deserialized SuperNodes rather than persisted in the metadata.
+Old TrieNode-based and flat-Node checkpoints are incompatible and must
+be discarded.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 
@@ -64,11 +70,6 @@ class TreeCheckpointManager:
         node_ids = list(tree_store._query_node_ids.get(query_id, []))
         node_id_set = set(node_ids)
         return {
-            "node_id_to_key": {
-                k: [v[0], v[1]]
-                for k, v in tree_store._node_id_to_key.items()
-                if v[0] == query_id
-            },
             "query_node_ids": node_ids,
             "visit_counts": {
                 k: v for k, v in tree_store._visit_counts.items() if k in node_id_set
@@ -109,7 +110,7 @@ class TreeCheckpointManager:
             return
         data = {
             "query_id": query_id,
-            "records": [self._serialize_record(r) for r in records],
+            "records": [self._serialize_super_node(r) for r in records],
             "metadata": self._query_metadata(tree_store, query_id),
         }
         filepath = self._query_path(query_id)
@@ -148,16 +149,9 @@ class TreeCheckpointManager:
                 data = json.load(f)
             query_id = data.get("query_id", file_key)
             store.trajectories[query_id] = [
-                self._deserialize_record(r) for r in data["records"]
+                self._deserialize_super_node(r) for r in data["records"]
             ]
             query_metadata = data.get("metadata", {})
-            node_id_to_key_raw = query_metadata.get("node_id_to_key", {})
-            store._node_id_to_key.update(
-                {k: (v[0], v[1]) for k, v in node_id_to_key_raw.items()}
-            )
-            query_node_ids = query_metadata.get("query_node_ids")
-            if query_node_ids is not None:
-                store._query_node_ids[query_id] = query_node_ids
             store._visit_counts.update(query_metadata.get("visit_counts", {}))
             store._total_values.update(query_metadata.get("total_values", {}))
             store._q_values.update(query_metadata.get("q_values", {}))
@@ -172,21 +166,35 @@ class TreeCheckpointManager:
             )
             store._turn_nodes.update(query_metadata.get("turn_nodes", {}))
 
-        # Rebuild indices from loaded trajectories if a query file is missing
-        # per-query metadata.
-        for query_id, records in store.trajectories.items():
-            for idx, node in enumerate(records):
-                node_id = node.node_id
-                if not node_id:
+        # Rebuild SuperNode/Node indices from the loaded trajectories. The
+        # per-query metadata no longer persists these indices (the index shape
+        # changed when the store switched from list[Node] to list[SuperNode]);
+        # rebuilding from trajectories is the single source of truth on load.
+        # _query_node_ids is also rebuilt here (not restored from metadata) so
+        # the index and the trajectory list stay consistent and duplicate-free.
+        for query_id, supers in store.trajectories.items():
+            for idx, super_node in enumerate(supers):
+                super_id = super_node.node_id
+                if not super_id:
                     continue
-                if node_id not in store._node_id_to_key:
-                    store._node_id_to_key[node_id] = (query_id, idx)
-                    store._query_node_ids.setdefault(query_id, []).append(node_id)
+                if super_id not in store._super_id_to_key:
+                    store._super_id_to_key[super_id] = (query_id, idx)
+                for node_idx, node in enumerate(super_node.nodes):
+                    node_id = (
+                        node.get("node_id", "")
+                        if isinstance(node, dict)
+                        else node.node_id
+                    )
+                    if not node_id:
+                        continue
+                    if node_id not in store._node_id_to_super:
+                        store._node_id_to_super[node_id] = (super_id, node_idx)
+                        store._query_node_ids.setdefault(query_id, []).append(node_id)
 
         return store
 
     @staticmethod
-    def _serialize_record(node: Node) -> dict:
+    def _serialize_node(node) -> dict:
         data = {
             "input_ids": node.input_ids,
             "loss_mask": node.loss_mask,
@@ -219,7 +227,7 @@ class TreeCheckpointManager:
         return data
 
     @staticmethod
-    def _deserialize_record(data: dict) -> Node:
+    def _deserialize_node(data: dict) -> Node:
         return Node(
             input_ids=data["input_ids"],
             loss_mask=data["loss_mask"],
@@ -249,6 +257,33 @@ class TreeCheckpointManager:
         )
 
     @staticmethod
+    def _serialize_super_node(super_node: SuperNode) -> dict:
+        return {
+            "node_id": super_node.node_id,
+            "agent_id": super_node.agent_id,
+            "issue_id": super_node.issue_id,
+            "task_id": super_node.task_id,
+            "session_id": super_node.session_id,
+            "nodes": [
+                TreeCheckpointManager._serialize_node(n) for n in super_node.nodes
+            ],
+        }
+
+    @staticmethod
+    def _deserialize_super_node(data: dict) -> SuperNode:
+        return SuperNode(
+            node_id=data["node_id"],
+            agent_id=data.get("agent_id", ""),
+            issue_id=data.get("issue_id", ""),
+            task_id=data.get("task_id", ""),
+            session_id=data.get("session_id"),
+            nodes=[
+                TreeCheckpointManager._deserialize_node(n)
+                for n in data.get("nodes", [])
+            ],
+        )
+
+    @staticmethod
     def save_trained_episodes(
         recover_checkpoint_dir: str, tree_store: MCTSTreeStore
     ) -> None:
@@ -256,14 +291,15 @@ class TreeCheckpointManager:
         if not tree_store.current_train_id:
             return
         trained_ids: set[str] = set()
-        for query_id, records in tree_store.trajectories.items():
-            for node in records:
-                if isinstance(node, dict):
-                    if node.get("train_id", "") == tree_store.current_train_id:
-                        trained_ids.add(node.get("episode_id", ""))
-                else:
-                    if node.train_id == tree_store.current_train_id:
-                        trained_ids.add(node.episode_id)
+        for supers in tree_store.trajectories.values():
+            for super_node in supers:
+                for node in super_node.nodes:
+                    if isinstance(node, dict):
+                        if node.get("train_id", "") == tree_store.current_train_id:
+                            trained_ids.add(node.get("episode_id", ""))
+                    else:
+                        if node.train_id == tree_store.current_train_id:
+                            trained_ids.add(node.episode_id)
         data = {"trained_episode_ids": sorted(trained_ids)}
         os.makedirs(recover_checkpoint_dir, exist_ok=True)
         filepath = os.path.join(recover_checkpoint_dir, "trained_episodes.json")
