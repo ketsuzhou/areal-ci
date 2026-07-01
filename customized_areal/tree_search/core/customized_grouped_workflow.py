@@ -80,6 +80,7 @@ from customized_areal.db_service import (
     truncate_messages_before_turn,
 )
 from customized_areal.tpfc.backend_run import _get_raw_messages_with_client
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
@@ -95,6 +96,23 @@ from areal.utils import logging
 logger = logging.getLogger("TreeSearchGroupedWorkflow")
 
 _FRESH_QUERY_SELECT_LIMIT = 100
+
+
+def _wrap_leaf_super(nodes: list[Node], *, super_id: str = "") -> SuperNode:
+    """Wrap a single-agent episode's Nodes in one leaf SuperNode.
+
+    Used by the single-agent path to keep the unified data model exercised
+    while the multi-agent coordinator (Phase 1b/2) is not yet wired. The leaf
+    SuperNode has no DAG edges and no comm events; backup walks parent_node_id
+    inside it exactly as before.
+    """
+    return SuperNode(
+        node_id=super_id or str(uuid.uuid4()),
+        agent_id="",
+        issue_id="",
+        task_id=nodes[0].task_id if nodes else "",
+        nodes=list(nodes),
+    )
 
 
 @dataclass(frozen=True)
@@ -708,6 +726,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         judge_process_reward_beta: float = 0.2,
         judge_model_name: str = "",
         judge_max_concurrency: int = 4,
+        multica_dag_enabled: bool = False,
+        multica_dag_client=None,
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -874,6 +894,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
         # Lazily constructed on first use (needs the tokenizer).
         self._critic_value_client = None
+        # Multica DAG rollout (Phase 1b/2). Declared now so callers can pass
+        # them, but the single-agent path runs unchanged until the coordinator
+        # dispatch is wired.
+        self._multica_dag_enabled = multica_dag_enabled
+        self._multica_dag_client = multica_dag_client
+        self._coordinator = None  # Phase 1b/2 wires TeamRolloutCoordinator
 
     async def _load_fresh_query_data(
         self,
@@ -1887,7 +1913,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 seen_episodes.add(node.episode_id)
         if should_discard_query(episode_rewards):
             if fresh_nodes:
-                self.tree_store.insert_batch(fresh_nodes)
+                self.tree_store.insert_super_batch(
+                    [_wrap_leaf_super(fresh_nodes)], query_id=query_id
+                )
             for node in all_nodes:
                 if node.node_id:
                     self.tree_store.set_discarded(node.node_id, True)
@@ -1913,7 +1941,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         try:
             # Insert fresh nodes into tree
             if fresh_nodes:
-                self.tree_store.insert_batch(fresh_nodes, backup=not defer_backup)
+                self.tree_store.insert_super_batch(
+                    [_wrap_leaf_super(fresh_nodes)],
+                    query_id=query_id,
+                    backup=not defer_backup,
+                )
 
             if self.loss_mode != LossMode.GRPO:
                 tokenizer = await self._get_tokenizer()
