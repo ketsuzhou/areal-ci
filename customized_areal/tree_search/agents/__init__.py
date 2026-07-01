@@ -54,6 +54,7 @@ from customized_areal.tree_search.agents.event_codec import (
     supernodes_to_dag,
 )
 from customized_areal.tree_search.agents.event_model import (
+    EdgeRef,
     message_timeline,
 )
 from customized_areal.tree_search.agents.execution_dag import (
@@ -88,6 +89,13 @@ from customized_areal.tree_search.agents.integration import (
 from customized_areal.tree_search.agents.rl_session import (
     RLBridgeClient,
     RLSessionRewardWriter,
+)
+from customized_areal.tree_search.agents.supernode_assembler import (
+    DagResult,
+    EdgeSpec,
+    SegmentSpec,
+    SuperNodeAssembler,
+    TeamEnvSnapshot,
 )
 from customized_areal.tree_search.agents.verifier import (
     ObjectiveVerifier,
@@ -133,11 +141,18 @@ __all__ = [
     "build_critic_observations",
     "build_observation_after_turn",
     # event codec (DAG <-> linear trajectory)
+    "EdgeRef",
     "message_timeline",
     "dag_to_supernodes",
     "supernodes_to_dag",
     "replay_prefix_for",
     "ReplayPrefix",
+    # supernode assembler (Phase 1a -- Multica segment specs -> SuperNodes)
+    "SuperNodeAssembler",
+    "SegmentSpec",
+    "EdgeSpec",
+    "TeamEnvSnapshot",
+    "DagResult",
     # gae (Phase 3 -- global joint-state GAE)
     "GlobalEvent",
     "NodeGAEResult",
