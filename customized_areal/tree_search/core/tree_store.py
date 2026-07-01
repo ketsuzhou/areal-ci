@@ -266,53 +266,70 @@ def _node_to_tensor_dict(
 
 
 class MCTSTreeStore:
-    """Flat trajectory store with MCTS statistics.
+    """Unified store: SuperNodes (segments) hold DAG topology, comm-event
+    provenance, and team env snapshots; Nodes hold all MCTS stats and the
+    unified causal parent_node_id chain.
 
-    Manages multiple trajectories per query, tracks MCTS statistics
-    (visit counts, Q-values) per trajectory (keyed by node_id, a string
-    interaction ID), and provides cache-aware loading of untrained
-    trajectories.
+    Reward backup: Node-level only (parent_node_id encodes the full DAG
+    causal order across agents and segments).
     """
 
     def __init__(self) -> None:
-        self.trajectories: dict[str, list[Node]] = {}
-        self._node_id_to_key: dict[str, tuple[str, int]] = {}
+        # Primary storage: query_id -> SuperNodes in insertion order.
+        self.trajectories: dict[str, list] = {}
+        # SuperNode-level index: SuperNode UUID -> (query_id, idx_in_trajectories)
+        self._super_id_to_key: dict[str, tuple[str, int]] = {}
+        # Node-level index: node_id -> (super_node_id, idx_in_super_node.nodes)
+        self._node_id_to_super: dict[str, tuple[str, int]] = {}
         self._query_node_ids: dict[str, list[str]] = {}
 
+        # Per-Node MCTS stats (unchanged).
         self._visit_counts: dict[str, int] = {}
         self._total_values: dict[str, float] = {}
         self._q_values: dict[str, float] = {}
-        # Running sum of squared backed-up returns, keyed by node_id. Tracked
-        # alongside _total_values so the per-node MC variance (and its
-        # leave-one-out form) can be recovered without storing every sample.
         self._sum_sq_values: dict[str, float] = {}
 
         self.current_train_id: str = os.environ.get("TRAIN_ID", "")
         self._rewards: dict[str, float] = {}
 
-        # Tree-search episode metadata
-        self._turn_nodes: dict[str, str] = {}  # turn_id → node_id
+        self._turn_nodes: dict[str, str] = {}
         self._normalized_advantages: dict[str, float] = {}
         self._normalized_returns: dict[str, float] = {}
-        # Generative-critic state values v_phi(s_t), keyed by node_id.
         self._values: dict[str, float] = {}
-        # Critic categorical variance var_theta(s_t), keyed by node_id.
         self._value_variances: dict[str, float] = {}
-        # LLM-judge raw integer credit scores, keyed by node_id. A shared prefix
-        # node accumulates one score per episode that traverses it; the dense
-        # process reward uses the mean. Empty/missing -> no judge signal.
         self._judge_scores: dict[str, list[float]] = {}
 
-    def _node_parent_id(self, node_id: str) -> str | None:
-        """Return the parent_node_id of an indexed node, or None."""
-        key = self._node_id_to_key.get(node_id)
+    # -- SuperNode / Node lookup -----------------------------------------
+
+    def get_super_node(self, super_node_id: str):
+        """Return the indexed SuperNode (or None if absent)."""
+        key = self._super_id_to_key.get(super_node_id)
         if key is None:
             return None
         query_id, idx = key
-        node = self.trajectories[query_id][idx]
+        return self.trajectories[query_id][idx]
+
+    def get_node(self, node_id: str):
+        """Return the indexed Node (or None) by walking into its SuperNode."""
+        key = self._node_id_to_super.get(node_id)
+        if key is None:
+            return None
+        super_node_id, idx_in_nodes = key
+        super_node = self.get_super_node(super_node_id)
+        if super_node is None:
+            return None
+        return super_node.nodes[idx_in_nodes]
+
+    def _node_parent_id(self, node_id: str) -> str | None:
+        """Return the parent_node_id of an indexed node, or None."""
+        node = self.get_node(node_id)
+        if node is None:
+            return None
         if isinstance(node, dict):
             return node.get("parent_node_id")
         return node.parent_node_id
+
+    # -- MCTS backup (unchanged algorithm; walks parent_node_id) ---------
 
     def _backup_node(self, node_id: str, reward: float) -> None:
         """Add one Monte-Carlo sample (``reward``) to a single node's stats."""
@@ -328,36 +345,91 @@ class MCTSTreeStore:
     def _backup_path(self, terminal_node_id: str, reward: float) -> None:
         """Propagate one episode's return root-ward along the parent chain.
 
-        Starting from ``terminal_node_id`` (the episode's last turn) the reward
-        is added once to every ancestor reachable via ``parent_node_id`` -- the
-        episode's own turns and, when a branch episode links its first turn to
-        its branch-point node, the shared prefix above that branch point. Each
-        traversing episode therefore contributes exactly one MC sample per node
-        on its path, so ``_visit_counts[node_id]`` is the number of episodes
-        that passed through state ``s_t`` and ``get_q_value`` is their mean
-        return. A ``visited`` guard makes the walk robust to malformed cycles.
+        Walks parent_node_id across SuperNode and agent boundaries (the
+        unified causal chain set by SuperNodeAssembler). A ``visited`` guard
+        makes the walk robust to malformed cycles.
         """
         visited: set[str] = set()
         current: str | None = terminal_node_id
-        while current and current not in visited and current in self._node_id_to_key:
+        while current and current not in visited and current in self._node_id_to_super:
             visited.add(current)
             self._backup_node(current, reward)
             current = self._node_parent_id(current)
 
-    def _backup_inserted_episodes(self, node_ids: list[str]) -> None:
-        """Run a root-ward backup once per episode among freshly inserted nodes.
+    def backup_episode_terminal(self, terminal_node_id: str, reward: float) -> None:
+        """Public entry: root-ward backup of one episode's terminal return.
 
-        Nodes are grouped by ``episode_id``; the highest-``turn_idx`` node of
-        each episode is the terminal from which the backup walks. Nodes without
-        an ``episode_id`` are backed up individually.
+        Walks parent_node_id from terminal_node_id across SuperNode/agent
+        boundaries (causal flattening).
         """
+        self._backup_path(terminal_node_id, float(reward))
+
+    def backup_path_returns(
+        self, terminal_node_id: str, returns_by_node_id: dict[str, float]
+    ) -> None:
+        """Root-ward backup assigning each node on the path its own return-to-go."""
+        visited: set[str] = set()
+        current: str | None = terminal_node_id
+        while current and current not in visited and current in self._node_id_to_super:
+            visited.add(current)
+            g = returns_by_node_id.get(current)
+            if g is not None:
+                self._backup_node(current, float(g))
+            current = self._node_parent_id(current)
+
+    # -- Insertion -------------------------------------------------------
+
+    def insert_super_batch(
+        self, supers: list, backup: bool = True, query_id: str = ""
+    ) -> None:
+        """Insert a batch of SuperNodes under ``query_id``.
+
+        Indexes each SuperNode and each Node inside it. When ``backup`` is
+        True, runs a root-ward backup per episode among freshly inserted nodes
+        (same algorithm as the old insert_batch, but walking into SuperNodes).
+        """
+        inserted_node_ids: list[str] = []
+        for super_node in supers:
+            # Index the SuperNode.
+            super_id = super_node.node_id
+            if not super_id:
+                raise ValueError(
+                    "SuperNode must have a non-empty node_id before insert"
+                )
+            if super_id in self._super_id_to_key:
+                continue  # idempotent
+            qid = query_id or getattr(super_node, "query_id", "") or ""
+            idx = len(self.trajectories.setdefault(qid, []))
+            self.trajectories[qid].append(super_node)
+            self._super_id_to_key[super_id] = (qid, idx)
+            # Index each Node inside the SuperNode.
+            for node_idx, node in enumerate(super_node.nodes):
+                node_id = (
+                    node.get("node_id", "") if isinstance(node, dict) else node.node_id
+                )
+                if not node_id:
+                    continue
+                if node_id in self._node_id_to_super:
+                    continue  # idempotent across supers
+                self._node_id_to_super[node_id] = (super_id, node_idx)
+                self._query_node_ids.setdefault(qid, []).append(node_id)
+                inserted_node_ids.append(node_id)
+                # Record the node's own reward.
+                if isinstance(node, dict):
+                    outcome_reward = node.get("outcome_reward", node.get("reward", 0.0))
+                else:
+                    outcome_reward = node.outcome_reward
+                self._rewards[node_id] = outcome_reward
+        if backup:
+            self._backup_inserted_episodes(inserted_node_ids)
+
+    def _backup_inserted_episodes(self, node_ids: list[str]) -> None:
+        """Run a root-ward backup once per episode among freshly inserted nodes."""
         episode_terminal: dict[str, tuple[int, str, float]] = {}
         for node_id in node_ids:
-            key = self._node_id_to_key.get(node_id)
-            if key is None:
+            node = self.get_node(node_id)
+            if node is None:
                 continue
-            query_id, idx = key
-            node = self.trajectories[query_id][idx]
             if isinstance(node, dict):
                 ep_id = node.get("episode_id", "") or ""
                 turn_idx = int(node.get("turn_idx", 0) or 0)
@@ -369,7 +441,6 @@ class MCTSTreeStore:
                 turn_idx = int(node.turn_idx or 0)
                 reward = float(node.outcome_reward or 0.0)
             if not ep_id:
-                # Standalone node: back up just itself (its own path).
                 self._backup_path(node_id, reward)
                 continue
             prev = episode_terminal.get(ep_id)
@@ -378,183 +449,40 @@ class MCTSTreeStore:
         for _turn_idx, terminal_id, reward in episode_terminal.values():
             self._backup_path(terminal_id, reward)
 
-    def _insert_single(self, query_id: str, node: Node) -> str:
-        """Insert a single Node, reading node_id from the node itself.
-
-        Supports both Node dataclass instances and plain dicts (the
-        latter arriving when tree search patches aren't active on the
-        remote engine and _convert_trajs_to_nodes hasn't converted yet).
-        """
-        node_id = node.node_id if isinstance(node, Node) else node.get("node_id", "")
-        if not node_id:
-            raise ValueError(
-                "Node must have a non-empty node_id (interaction_id) before insert"
-            )
-
-        idx = len(self.trajectories.setdefault(query_id, []))
-        self.trajectories[query_id].append(node)
-        self._node_id_to_key[node_id] = (query_id, idx)
-        self._query_node_ids.setdefault(query_id, []).append(node_id)
-
-        if isinstance(node, dict):
-            node["node_id"] = node_id
-            node["query_id"] = query_id
-            outcome_reward = node.get("outcome_reward", node.get("reward", 0.0))
-        else:
-            node.node_id = node_id
-            node.query_id = query_id
-            outcome_reward = node.outcome_reward
-
-        # MCTS stats are accumulated per-episode via a root-ward backup in
-        # insert_batch (see _backup_inserted_episodes); _insert_single only
-        # indexes the node and records its own reward.
-        self._rewards[node_id] = outcome_reward
-
-        return node_id
-
-    def insert_batch(self, trajectories: list[Node], backup: bool = True) -> None:
-        """Insert Node trajectories into the store.
-
-        Each Node is inserted directly. Nodes that already have a
-        node_id assigned (loaded from cache) are skipped. After indexing,
-        Monte-Carlo stats are accumulated with one root-ward backup per newly
-        inserted episode so shared prefix nodes aggregate returns across all
-        episodes that traverse them.
-
-        When ``backup`` is ``False`` the MC backup is *deferred*: only indexing
-        runs, and the caller is responsible for accumulating MC statistics later
-        (e.g. ``backup_episode_returns`` after dense process rewards are known).
-        This is used when ``judge_beta > 0`` so the backup can propagate the
-        per-node return-to-go of the dense shaped reward instead of the bare
-        terminal ``outcome_reward`` -- the judge scores do not exist yet at
-        insert time.
-        """
-        inserted_node_ids: list[str] = []
-        for node in trajectories:
-            existing_id = getattr(node, "node_id", "")
-            if existing_id != "" and existing_id in self._node_id_to_key:
-                continue
-            query_id = (
-                node.get("query_id", "")
-                if isinstance(node, dict)
-                else (node.query_id or "")
-            )
-            inserted_node_ids.append(self._insert_single(query_id, node))
-        if backup:
-            self._backup_inserted_episodes(inserted_node_ids)
-
-    def backup_episode_terminal(self, terminal_node_id: str, reward: float) -> None:
-        """Public entry: root-ward backup of one episode's terminal return.
-
-        Adds ``reward`` once to ``terminal_node_id`` and every ancestor reachable
-        via ``parent_node_id`` (the same walk used by the default insert-time
-        backup). Used for *branched* episodes, whose path crosses into a shared
-        prefix owned by another episode, where a per-node return-to-go cannot be
-        attributed cleanly.
-        """
-        self._backup_path(terminal_node_id, float(reward))
-
-    def backup_episode_returns(
-        self, ordered_nodes: list[Node], returns: list[float]
-    ) -> None:
-        """Back up a private (non-branched) episode with per-node return-to-go.
-
-        Unlike the terminal-return path walk, this assigns a distinct sample
-        ``g_t`` (the discounted return-to-go) to each turn, so ``q_value(s_t)``
-        estimates ``E[return-to-go]`` rather than ``E[outcome]``. This is only
-        correct for episodes whose node chain is private (not shared with other
-        episodes); branched episodes must use ``backup_episode_terminal``.
-        """
-        for node, g in zip(ordered_nodes, returns):
-            node_id = (
-                node.node_id if isinstance(node, Node) else node.get("node_id", "")
-            )
-            if node_id and node_id in self._node_id_to_key:
-                self._backup_node(node_id, float(g))
-
-    def get_node(self, node_id: str) -> Node | None:
-        """Return the indexed ``Node`` for ``node_id`` (or ``None`` if absent)."""
-        key = self._node_id_to_key.get(node_id)
-        if key is None:
-            return None
-        query_id, idx = key
-        return self.trajectories[query_id][idx]
-
-    def backup_path_returns(
-        self, terminal_node_id: str, returns_by_node_id: dict[str, float]
-    ) -> None:
-        """Root-ward backup assigning each node on the path its own return-to-go.
-
-        Walks ``parent_node_id`` from ``terminal_node_id`` to the root (the same
-        cycle-guarded traversal as ``_backup_path``) and adds, to each node, the
-        return-to-go sample supplied in ``returns_by_node_id`` for *this*
-        episode. Unlike ``backup_episode_terminal`` (which adds one shared
-        terminal outcome to every node), every sample here is a return-to-go
-        value, so a shared prefix node accumulates a *homogeneous* set of
-        return-to-go samples across all episodes that traverse it and its LOO
-        mean converges to ``V(s_t)`` -- not ``P(success | s_t)``. This is the
-        unified backup used for both scratch and branch episodes when
-        ``judge_beta > 0``.
-
-        Nodes on the path missing from ``returns_by_node_id`` are skipped (no
-        sample added), keeping visit counts consistent with the reward path.
-        """
-        visited: set[str] = set()
-        current: str | None = terminal_node_id
-        while current and current not in visited and current in self._node_id_to_key:
-            visited.add(current)
-            g = returns_by_node_id.get(current)
-            if g is not None:
-                self._backup_node(current, float(g))
-            current = self._node_parent_id(current)
+    # -- Per-Node accessors (unchanged signatures) -----------------------
 
     def set_trained(self, node_id: str, trained: bool = True) -> None:
-        """Stamp the node with current_train_id to mark it as trained."""
         if not trained:
             return
-        key = self._node_id_to_key.get(node_id)
-        if key is None:
+        node = self.get_node(node_id)
+        if node is None:
             return
-        query_id, idx = key
-        node = self.trajectories[query_id][idx]
         if isinstance(node, dict):
             node["train_id"] = self.current_train_id
         else:
             node.train_id = self.current_train_id
 
     def set_discarded(self, node_id: str, discarded: bool = True) -> None:
-        """Mark a node as discarded so it will not be reused from cache."""
-        key = self._node_id_to_key.get(node_id)
-        if key is None:
+        node = self.get_node(node_id)
+        if node is None:
             return
-        query_id, idx = key
-        node = self.trajectories[query_id][idx]
         if isinstance(node, dict):
             node["discarded"] = discarded
         else:
             node.discarded = discarded
 
     def is_discarded(self, node_id: str) -> bool:
-        key = self._node_id_to_key.get(node_id)
-        if key is None:
+        node = self.get_node(node_id)
+        if node is None:
             return False
-        query_id, idx = key
-        node = self.trajectories[query_id][idx]
         if isinstance(node, dict):
             return bool(node.get("discarded", False))
         return node.discarded
 
     def is_trained(self, node_id: str) -> bool:
-        """A node is trained if its train_id matches the current run's train_id.
-
-        An empty train_id means the node has never been trained, so it
-        is always considered untrained regardless of current_train_id.
-        """
-        key = self._node_id_to_key.get(node_id)
-        if key is None:
+        node = self.get_node(node_id)
+        if node is None:
             return False
-        query_id, idx = key
-        node = self.trajectories[query_id][idx]
         if isinstance(node, dict):
             train_id = node.get("train_id", "")
         else:
@@ -568,58 +496,18 @@ class MCTSTreeStore:
         return self._q_values.get(node_id, 0.0)
 
     def get_visit_count(self, node_id: str) -> int:
-        """Number of episodes whose root-ward backup passed through this node.
-
-        This is the MC sample size of ``get_q_value(node_id)``.
-        """
         return self._visit_counts.get(node_id, 0)
 
     def get_total_value(self, node_id: str) -> float:
-        """Sum of backed-up returns for this node (numerator of get_q_value)."""
         return self._total_values.get(node_id, 0.0)
 
     def get_sum_sq_value(self, node_id: str) -> float:
-        """Sum of squared backed-up returns for this node."""
         return self._sum_sq_values.get(node_id, 0.0)
 
     def get_loo_value_and_variance(
         self, node_id: str, excluded_reward: float
     ) -> tuple[float, float, int]:
-        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size.
-
-        Removes a single sample equal to ``excluded_reward`` (the current
-        episode's own backed-up return) from this node's aggregates, then
-        returns ``(loo_mean, var_mc, n_loo)`` where::
-
-            n'      = n - 1
-            S'      = S - r_i
-            Q'      = Q - r_i^2
-            loo_mean = S' / n'
-            loo_var  = (Q' - S'^2 / n') / (n' - 1)      # unbiased sample var
-            var_mc   = max(loo_var / n', var_floor)      # variance of the mean
-
-        When fewer than two LOO samples remain (``n' < 2``) the variance is not
-        defined; a sentinel ``var_mc = -1.0`` is returned and the caller should
-        fall back to the critic.
-
-        **Bayesian variance floor.** All backed-up returns are bounded in
-        ``[0, 1]`` (``outcome_reward in {0, 1}`` and the shaped return
-        ``G = β + (1 − β)·outcome ∈ [0, 1]``), so the per-sample variance is at
-        most the Bernoulli variance ``p(1 − p)``. With a ``Beta(1, 1)`` prior
-        (add-one smoothing) the posterior variance of the *mean* is::
-
-            a        = S' + 1
-            b        = (n' − S') + 1
-            var_floor = a·b / ((n'+2)^2 · (n'+3))
-
-        which is **strictly positive even when every remaining sample is
-        identical**. Flooring ``var_mc`` with it prevents the inverse-variance
-        blend from treating a small all-equal sample (e.g. four ``1.0`` binary
-        outcomes that happen to agree by chance) as infinitely confident and
-        discarding the critic. The floor only binds when the empirical
-        variance-of-the-mean is smaller; with genuine spread the empirical value
-        dominates and the floor is inert.
-        """
+        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size."""
         n = self._visit_counts.get(node_id, 0)
         n_loo = n - 1
         if n_loo < 2:
@@ -630,17 +518,13 @@ class MCTSTreeStore:
         q_prime = sum_sq - excluded_reward * excluded_reward
         loo_mean = s_prime / n_loo
         loo_var = (q_prime - s_prime * s_prime / n_loo) / (n_loo - 1)
-        # Numerical guard: clamp tiny negative variance from float error to 0.
         if loo_var < 0.0:
             loo_var = 0.0
         var_mc = loo_var / n_loo
-        # Beta(1, 1) posterior variance of the mean as a strictly-positive floor
-        # (returns are bounded in [0, 1]; see docstring). ``s_prime`` is the sum
-        # of [0, 1] samples, clamped defensively to [0, n'].
         s_clamped = min(max(s_prime, 0.0), float(n_loo))
         a = s_clamped + 1.0
         b = (n_loo - s_clamped) + 1.0
-        nn = a + b  # == n' + 2
+        nn = a + b
         var_floor = (a * b) / (nn * nn * (nn + 1.0))
         if var_floor > var_mc:
             var_mc = var_floor
@@ -662,7 +546,6 @@ class MCTSTreeStore:
         return self._normalized_returns.get(node_id, default)
 
     def set_value(self, node_id: str, value: float) -> None:
-        """Store the generative-critic state value v_phi(s_t) for a node."""
         self._values[node_id] = value
 
     def get_value(self, node_id: str, default: float = 0.0) -> float:
@@ -672,32 +555,18 @@ class MCTSTreeStore:
         return node_id in self._values
 
     def set_value_variance(self, node_id: str, variance: float) -> None:
-        """Store the critic's categorical variance var_theta(s_t) for a node."""
         self._value_variances[node_id] = variance
 
     def get_value_variance(self, node_id: str, default: float = 0.0) -> float:
         return self._value_variances.get(node_id, default)
 
     def add_judge_score(self, node_id: str, score: float) -> None:
-        """Append a raw LLM-judge credit score for a node.
-
-        A node may be scored multiple times -- once per episode that traverses
-        it (branching shares prefix nodes). Scores accumulate so the downstream
-        process reward can use their mean.
-        """
         self._judge_scores.setdefault(node_id, []).append(float(score))
 
     def get_judge_scores(self, node_id: str) -> list[float]:
-        """Return the list of raw judge scores accumulated for a node."""
         return list(self._judge_scores.get(node_id, []))
 
     def get_mean_judge_score(self, node_id: str) -> float | None:
-        """Mean of the raw judge scores, or None when the node was never judged.
-
-        ``None`` (rather than ``0.0``) lets the reward builder distinguish an
-        unjudged node from a node judged with score 0, driving the sparse
-        fallback when no judge signal exists.
-        """
         scores = self._judge_scores.get(node_id)
         if not scores:
             return None
@@ -713,20 +582,13 @@ class MCTSTreeStore:
         )
 
     def get_untrained_episode_count(self, query_id: str) -> int:
-        """Count untrained episodes for a query.
-
-        An episode is untrained if any of its nodes is untrained
-        (train_id != current_train_id).
-        """
         if query_id not in self._query_node_ids:
             return 0
         episode_has_untrained: dict[str, bool] = {}
         for node_id in self._query_node_ids[query_id]:
-            key = self._node_id_to_key.get(node_id)
-            if key is None:
+            node = self.get_node(node_id)
+            if node is None:
                 continue
-            qid, idx = key
-            node = self.trajectories[qid][idx]
             if isinstance(node, dict):
                 ep_id = node.get("episode_id", "")
             else:
@@ -739,24 +601,15 @@ class MCTSTreeStore:
                 episode_has_untrained[ep_id] = True
         return sum(1 for v in episode_has_untrained.values() if v)
 
-    def load_untrained_episodes(self, query_id: str, n_episodes: int) -> list[Node]:
-        """Load nodes from up to n_episodes untrained episodes.
-
-        Returns all nodes belonging to the first n_episodes untrained
-        episodes (in insertion order). An episode is untrained if any
-        of its nodes is untrained.
-        """
+    def load_untrained_episodes(self, query_id: str, n_episodes: int) -> list:
         if query_id not in self._query_node_ids:
             return []
-        # Build episode_id → list of (node_id, query_id, idx) in insertion order
-        episode_nodes: dict[str, list[tuple[str, str, int]]] = {}
+        episode_nodes: dict[str, list[str]] = {}
         episode_order: list[str] = []
         for node_id in self._query_node_ids[query_id]:
-            key = self._node_id_to_key.get(node_id)
-            if key is None:
+            node = self.get_node(node_id)
+            if node is None:
                 continue
-            qid, idx = key
-            node = self.trajectories[qid][idx]
             if isinstance(node, dict):
                 ep_id = node.get("episode_id", "")
             else:
@@ -766,24 +619,24 @@ class MCTSTreeStore:
             if ep_id not in episode_nodes:
                 episode_nodes[ep_id] = []
                 episode_order.append(ep_id)
-            episode_nodes[ep_id].append((node_id, qid, idx))
-        # Select up to n_episodes untrained episodes
-        selected: list[Node] = []
+            episode_nodes[ep_id].append(node_id)
+        selected: list = []
         count = 0
         for ep_id in episode_order:
             if count >= n_episodes:
                 break
-            # Check if any node in this episode is untrained
             is_untrained = False
-            for node_id, qid, idx in episode_nodes[ep_id]:
+            for node_id in episode_nodes[ep_id]:
                 if not self.is_trained(node_id) and not self.is_discarded(node_id):
                     is_untrained = True
                     break
             if not is_untrained:
                 continue
             count += 1
-            for node_id, qid, idx in episode_nodes[ep_id]:
-                selected.append(self.trajectories[qid][idx])
+            for node_id in episode_nodes[ep_id]:
+                node = self.get_node(node_id)
+                if node is not None:
+                    selected.append(node)
         return selected
 
     def get_untrained_node_ids(self, query_id: str, n_samples: int) -> list[str]:
@@ -797,55 +650,41 @@ class MCTSTreeStore:
                     break
         return result
 
-    def load_trajectories(self, query_id: str, n_samples: int) -> list[Node]:
-        """Load untrained trajectories as Node objects.
-
-        Returns per-turn Node objects. Callers can:
-        - Read Node attributes directly for advantage computation
-        - Convert to tensor dicts via _node_to_tensor_dict() for training
-
-        Each Node carries query_id and node_id set during
-            insertion (accessible as regular attributes).
-        """
+    def load_trajectories(self, query_id: str, n_samples: int) -> list:
         if query_id not in self.trajectories:
             return []
-
         untrained_ids = self.get_untrained_node_ids(query_id, n_samples)
-        result: list[Node] = []
+        result: list = []
         for node_id in untrained_ids:
-            qid, idx = self._node_id_to_key[node_id]
-            node = self.trajectories[qid][idx]
-            result.append(node)
+            node = self.get_node(node_id)
+            if node is not None:
+                result.append(node)
         return result
 
     def mark_episodes_trained(self, episode_ids: set[str]) -> None:
-        """Set train_id based on episode IDs.
-
-        Nodes whose episode_id is in the given set are stamped with
-        current_train_id. All other nodes have train_id cleared.
-        Episode IDs not present in the store are silently ignored.
-        """
-        for query_id, records in self.trajectories.items():
-            for node in records:
-                if isinstance(node, dict):
-                    nid_val = node.get("episode_id", "")
-                else:
-                    nid_val = node.episode_id
-                if nid_val in episode_ids:
+        for query_id, supers in self.trajectories.items():
+            for super_node in supers:
+                for node in super_node.nodes:
                     if isinstance(node, dict):
-                        node["train_id"] = self.current_train_id
+                        ep_id = node.get("episode_id", "")
                     else:
-                        node.train_id = self.current_train_id
-                else:
-                    if isinstance(node, dict):
-                        node["train_id"] = ""
+                        ep_id = node.episode_id
+                    if ep_id in episode_ids:
+                        if isinstance(node, dict):
+                            node["train_id"] = self.current_train_id
+                        else:
+                            node.train_id = self.current_train_id
                     else:
-                        node.train_id = ""
+                        if isinstance(node, dict):
+                            node["train_id"] = ""
+                        else:
+                            node.train_id = ""
 
     def clear(self) -> None:
         """Reset all trajectories, stats, and indices."""
         self.trajectories.clear()
-        self._node_id_to_key.clear()
+        self._super_id_to_key.clear()
+        self._node_id_to_super.clear()
         self._query_node_ids.clear()
         self._visit_counts.clear()
         self._total_values.clear()
