@@ -1,7 +1,7 @@
-"""Tests for the Event branch-point selection policy.
+"""Tests for the SuperNode branch-point selection policy.
 
 Ports core/customized_grouped_workflow.py::select_branch_candidate (TD-error
-gate + max-entropy ranking) onto the Event/DAG representation. Torch-free.
+gate + max-entropy ranking) onto the SuperNode/DAG representation. Torch-free.
 
 Spec: docs/superpowers/specs/2026-06-29-event-branch-selection-design.md
 """
@@ -17,7 +17,7 @@ from customized_areal.tree_search.agents.branch_selection import (
     select_branch_points,
     td_error,
 )
-from customized_areal.tree_search.agents.event_model import Event
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 
 
 def _ev(
@@ -32,9 +32,9 @@ def _ev(
     incoming=(),
     outgoing=(),
 ):
-    """Build a minimal Event for selection tests."""
+    """Build a minimal SuperNode for selection tests."""
     metadata = {} if max_entropy is None else {"max_entropy": max_entropy}
-    return Event(
+    return SuperNode(
         node_id=node_id,
         agent_id="ag",
         issue_id="iss",
@@ -103,11 +103,11 @@ def test_branchpoint_is_frozen():
 
 
 class TestSelectSingleLane:
-    """Ported from tests/test_branch_td_gate.py onto the Event representation.
+    """Ported from tests/test_branch_td_gate.py onto the SuperNode representation.
 
     Lane "t1" has candidate turns linked n1 -> n2 by a same-task edge so n1 has
     an in-lane successor; n2 is terminal. Edge type is irrelevant to selection
-    but must be symmetric for events_to_dag.
+    but must be symmetric for supernodes_to_dag.
     """
 
     def _linked_pair(self, *, v1, v2, e1, e2, seq1=1, seq2=2, out1=0.0, out2=0.0):
@@ -290,7 +290,7 @@ class TestMultiLaneAndIntegration:
     def test_malformed_log_propagates_dag_error(self):
         from customized_areal.tree_search.agents.execution_dag import DAGError
 
-        # Non-dense completion_index (0 then 2) -> events_to_dag raises DAGError.
+        # Non-dense completion_index (0 then 2) -> supernodes_to_dag raises DAGError.
         a = _ev("a", task_id="t1", completion_index=0, branch_seq=1)
         b = _ev("b", task_id="t1", completion_index=2, branch_seq=2)
         with pytest.raises(DAGError):

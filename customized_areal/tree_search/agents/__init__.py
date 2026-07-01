@@ -49,12 +49,11 @@ from customized_areal.tree_search.agents.environment import (
 )
 from customized_areal.tree_search.agents.event_codec import (
     ReplayPrefix,
-    dag_to_events,
-    events_to_dag,
+    dag_to_supernodes,
     replay_prefix_for,
+    supernodes_to_dag,
 )
 from customized_areal.tree_search.agents.event_model import (
-    Event,
     message_timeline,
 )
 from customized_areal.tree_search.agents.execution_dag import (
@@ -134,10 +133,9 @@ __all__ = [
     "build_critic_observations",
     "build_observation_after_turn",
     # event codec (DAG <-> linear trajectory)
-    "Event",
     "message_timeline",
-    "dag_to_events",
-    "events_to_dag",
+    "dag_to_supernodes",
+    "supernodes_to_dag",
     "replay_prefix_for",
     "ReplayPrefix",
     # gae (Phase 3 -- global joint-state GAE)
@@ -145,7 +143,7 @@ __all__ = [
     "NodeGAEResult",
     "compute_global_gae",
     "events_from_nodes",
-    # branch selection (branch-point selection policy over the Event sequence)
+    # branch selection (branch-point selection policy over the SuperNode sequence)
     "BranchPoint",
     "lane_successor_value",
     "passes_gate",

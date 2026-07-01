@@ -1,4 +1,4 @@
-"""Tests for the bidirectional DAG <-> linear Event codec.
+"""Tests for the bidirectional DAG <-> linear SuperNode codec.
 
 The multi-lane fixture mirrors the worked example in CRITIC_GAE_INTEGRATION.md:
     O0 --delegation--> R0 ; O0 --delegation--> C0 ; R0 --mention--> C0 ;
@@ -12,6 +12,7 @@ Torch-free.
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,11 +21,11 @@ from customized_areal.tree_search.agents.critic_observation import (
 )
 from customized_areal.tree_search.agents.event_codec import (
     ReplayPrefix,
-    dag_to_events,
-    events_to_dag,
+    dag_to_supernodes,
     replay_prefix_for,
+    supernodes_to_dag,
 )
-from customized_areal.tree_search.agents.event_model import Event, message_timeline
+from customized_areal.tree_search.agents.event_model import message_timeline
 from customized_areal.tree_search.agents.execution_dag import (
     DAGError,
     EdgeType,
@@ -54,7 +55,11 @@ def _build_dag() -> ExecutionDAG:
         node.value = 0.1 * i
         node.process_reward = 0.0
         node.metadata = {
-            "messages": [{"role": "assistant", "content": f"{nid}-out"}],
+            "nodes": [
+                SimpleNamespace(
+                    messages=[{"role": "assistant", "content": f"{nid}-out"}]
+                )
+            ],
             "completion_time": float(i),
         }
         dag.add_event(node)
@@ -64,16 +69,16 @@ def _build_dag() -> ExecutionDAG:
     return dag
 
 
-def test_dag_to_events_uses_explicit_ordering_and_dense_index() -> None:
+def test_dag_to_supernodes_uses_explicit_ordering_and_dense_index() -> None:
     dag = _build_dag()
-    events = dag_to_events(dag, ordering=ORDER)
+    events = dag_to_supernodes(dag, ordering=ORDER)
     assert [e.node_id for e in events] == ORDER
     assert [e.completion_index for e in events] == [0, 1, 2, 3, 4, 5]
 
 
-def test_dag_to_events_fills_both_edge_directions() -> None:
+def test_dag_to_supernodes_fills_both_edge_directions() -> None:
     dag = _build_dag()
-    events = {e.node_id: e for e in dag_to_events(dag, ordering=ORDER)}
+    events = {e.node_id: e for e in dag_to_supernodes(dag, ordering=ORDER)}
     assert set(events["C0"].incoming_edges) == {
         ("O0", EdgeType.DELEGATION),
         ("R0", EdgeType.MENTION),
@@ -86,9 +91,9 @@ def test_dag_to_events_fills_both_edge_directions() -> None:
     }
 
 
-def test_dag_to_events_copies_node_fields_and_messages() -> None:
+def test_dag_to_supernodes_copies_node_fields_and_messages() -> None:
     dag = _build_dag()
-    events = {e.node_id: e for e in dag_to_events(dag, ordering=ORDER)}
+    events = {e.node_id: e for e in dag_to_supernodes(dag, ordering=ORDER)}
     o1 = events["O1"]
     assert o1.outcome_reward == 1.0
     assert o1.value == pytest.approx(0.5)
@@ -97,43 +102,45 @@ def test_dag_to_events_copies_node_fields_and_messages() -> None:
     assert o1.completion_time == 5.0
 
 
-def test_dag_to_events_falls_back_to_topological_order() -> None:
+def test_dag_to_supernodes_falls_back_to_topological_order() -> None:
     dag = _build_dag()
-    events = dag_to_events(dag)
+    events = dag_to_supernodes(dag)
     order = [e.node_id for e in events]
     pos = {nid: i for i, nid in enumerate(order)}
     for src, dst, _ in EDGES:
         assert pos[src] < pos[dst]
 
 
-def test_dag_to_events_rejects_non_permutation_ordering() -> None:
+def test_dag_to_supernodes_rejects_non_permutation_ordering() -> None:
     dag = _build_dag()
     with pytest.raises(DAGError):
-        dag_to_events(dag, ordering=["O0", "R0"])
+        dag_to_supernodes(dag, ordering=["O0", "R0"])
 
 
-def test_dag_to_events_rejects_non_topological_ordering() -> None:
+def test_dag_to_supernodes_rejects_non_topological_ordering() -> None:
     dag = _build_dag()
     bad = ["R0", "O0", "C0", "T0", "C1", "O1"]
     with pytest.raises(DAGError):
-        dag_to_events(dag, ordering=bad)
+        dag_to_supernodes(dag, ordering=bad)
 
 
-def test_dag_to_events_messages_by_node_overrides_metadata() -> None:
+def test_dag_to_supernodes_nodes_by_segment_overrides_metadata() -> None:
     dag = _build_dag()
-    override = {"O0": [{"role": "assistant", "content": "override"}]}
+    override = {
+        "O0": [SimpleNamespace(messages=[{"role": "assistant", "content": "override"}])]
+    }
     events = {
         e.node_id: e
-        for e in dag_to_events(dag, ordering=ORDER, messages_by_node=override)
+        for e in dag_to_supernodes(dag, ordering=ORDER, nodes_by_segment=override)
     }
     assert events["O0"].messages == ({"role": "assistant", "content": "override"},)
     assert events["R0"].messages == ({"role": "assistant", "content": "R0-out"},)
 
 
-def test_events_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
+def test_supernodes_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
     dag = _build_dag()
-    events = dag_to_events(dag, ordering=ORDER)
-    rebuilt = events_to_dag(events)
+    events = dag_to_supernodes(dag, ordering=ORDER)
+    rebuilt = supernodes_to_dag(events)
     assert sorted(rebuilt.event_ids()) == sorted(ORDER)
     orig = {(e.src, e.dst, e.type) for e in dag.edges}
     back = {(e.src, e.dst, e.type) for e in rebuilt.edges}
@@ -142,27 +149,27 @@ def test_events_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
     assert rebuilt.get("C0").value == pytest.approx(0.2)
 
 
-def test_events_to_dag_rejects_non_dense_index() -> None:
+def test_supernodes_to_dag_rejects_non_dense_index() -> None:
     dag = _build_dag()
-    events = list(dag_to_events(dag, ordering=ORDER))
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
     events[2] = replace(events[2], completion_index=0)
     with pytest.raises(DAGError, match="dense"):
-        events_to_dag(events)
+        supernodes_to_dag(events)
 
 
-def test_events_to_dag_rejects_duplicate_node_id() -> None:
+def test_supernodes_to_dag_rejects_duplicate_node_id() -> None:
     dag = _build_dag()
-    events = list(dag_to_events(dag, ordering=ORDER))
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
     # Reuse O0's node_id for R0 while keeping completion_index dense and unique
     # so the duplicate-node_id branch fires (not the density check).
     events[1] = replace(events[1], node_id=events[0].node_id)
     with pytest.raises(DAGError, match="duplicate node_id"):
-        events_to_dag(events)
+        supernodes_to_dag(events)
 
 
-def test_events_to_dag_rejects_asymmetric_edges() -> None:
+def test_supernodes_to_dag_rejects_asymmetric_edges() -> None:
     dag = _build_dag()
-    events = list(dag_to_events(dag, ordering=ORDER))
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
     events = [
         replace(e, incoming_edges=(("R0", EdgeType.MENTION),))
         if e.node_id == "C0"
@@ -170,12 +177,12 @@ def test_events_to_dag_rejects_asymmetric_edges() -> None:
         for e in events
     ]
     with pytest.raises(DAGError, match="symmetry mismatch"):
-        events_to_dag(events)
+        supernodes_to_dag(events)
 
 
-def test_events_to_dag_rejects_non_topological_index() -> None:
+def test_supernodes_to_dag_rejects_non_topological_index() -> None:
     dag = _build_dag()
-    events = list(dag_to_events(dag, ordering=ORDER))
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
     swapped = []
     for e in events:
         if e.node_id == "O0":
@@ -185,21 +192,21 @@ def test_events_to_dag_rejects_non_topological_index() -> None:
         else:
             swapped.append(e)
     with pytest.raises(DAGError, match="not topological"):
-        events_to_dag(swapped)
+        supernodes_to_dag(swapped)
 
 
-def test_events_to_dag_empty_returns_empty_dag() -> None:
-    rebuilt = events_to_dag([])
+def test_supernodes_to_dag_empty_returns_empty_dag() -> None:
+    rebuilt = supernodes_to_dag([])
     assert rebuilt.event_ids() == []
 
 
-def test_full_dict_round_trip_identity() -> None:
+def test_supernode_dict_round_trip_identity() -> None:
     dag = _build_dag()
-    events = dag_to_events(dag, ordering=ORDER)
-    redecoded = [Event.from_dict(e.to_dict()) for e in events]
-    assert redecoded == events
-    dag_a = events_to_dag(events)
-    dag_b = events_to_dag(redecoded)
+    supers = dag_to_supernodes(dag, ordering=ORDER)
+    redecoded = [SuperNode.from_dict(s.to_dict()) for s in supers]
+    assert redecoded == supers
+    dag_a = supernodes_to_dag(supers)
+    dag_b = supernodes_to_dag(redecoded)
     assert {(e.src, e.dst, e.type) for e in dag_a.edges} == {
         (e.src, e.dst, e.type) for e in dag_b.edges
     }
@@ -216,7 +223,7 @@ def _build_dag_with_branch() -> ExecutionDAG:
 
 def test_replay_prefix_for_returns_ancestor_slice() -> None:
     dag = _build_dag_with_branch()
-    events = dag_to_events(dag, ordering=ORDER)
+    events = dag_to_supernodes(dag, ordering=ORDER)
     prefix = replay_prefix_for(events, branch_point=("task-C1", 7))
     assert isinstance(prefix, ReplayPrefix)
     assert prefix.task_id == "task-C1"
@@ -229,7 +236,7 @@ def test_replay_prefix_for_returns_ancestor_slice() -> None:
 
 def test_replay_prefix_for_unknown_branch_point_raises() -> None:
     dag = _build_dag_with_branch()
-    events = dag_to_events(dag, ordering=ORDER)
+    events = dag_to_supernodes(dag, ordering=ORDER)
     with pytest.raises(DAGError):
         replay_prefix_for(events, branch_point=("task-C1", 999))
 
@@ -240,7 +247,7 @@ def test_replay_prefix_for_ambiguous_branch_point_raises() -> None:
     dag.get("C0").branch_seq = 42
     dag.get("T0").task_id = "task-dup"
     dag.get("T0").branch_seq = 42
-    events = dag_to_events(dag, ordering=ORDER)
+    events = dag_to_supernodes(dag, ordering=ORDER)
     with pytest.raises(DAGError):
         replay_prefix_for(events, branch_point=("task-dup", 42))
 
@@ -273,9 +280,21 @@ def test_events_from_nodes_unscored_value_is_zero() -> None:
     assert ev == GlobalEvent(node_id="n", value=0.0, reward=0.25)
 
 
+def test_events_from_nodes_projects_supernode_to_global_event():
+    """gae.events_from_nodes must accept SuperNode (not Event) after the rename."""
+    from customized_areal.tree_search.agents.gae import events_from_nodes
+
+    dag = _build_dag()
+    nodes = [dag.get(nid) for nid in ORDER]
+    events = events_from_nodes(nodes)
+    assert [e.node_id for e in events] == ORDER
+    # O1 has outcome_reward=1.0; its reward field = process + outcome = 1.0
+    assert events[-1].reward == pytest.approx(1.0)
+
+
 def test_critic_observations_match_message_timeline_of_events() -> None:
     dag = _build_dag()
-    events = dag_to_events(dag, ordering=ORDER)
+    events = dag_to_supernodes(dag, ordering=ORDER)
     timeline_from_events = message_timeline(events)
     obs_from_events = build_critic_observations(timeline_from_events)
     hand_built = [
@@ -292,10 +311,10 @@ def test_public_exports_available_from_package() -> None:
     import customized_areal.tree_search.agents as d
 
     for name in (
-        "Event",
+        "SuperNode",
         "message_timeline",
-        "dag_to_events",
-        "events_to_dag",
+        "dag_to_supernodes",
+        "supernodes_to_dag",
         "replay_prefix_for",
         "ReplayPrefix",
     ):

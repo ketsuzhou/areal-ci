@@ -1,9 +1,10 @@
-"""Bidirectional codec between an ExecutionDAG and its linear Event log.
+"""Bidirectional codec between an ExecutionDAG and its linear SuperNode log.
 
-Forward (``dag_to_events``): linearize the DAG into completion-ordered Events
-for reward backup. Reverse (``events_to_dag``): losslessly rebuild the DAG from
-a persisted Event log, then (``replay_prefix_for``) derive a branch replay
-prefix shaped to ``BranchMaterializer.materialize``'s inputs.
+Forward (``dag_to_supernodes``): linearize the DAG into completion-ordered
+SuperNodes for reward backup. Reverse (``supernodes_to_dag``): losslessly
+rebuild the DAG from a persisted SuperNode log, then
+(``replay_prefix_for``) derive a branch replay prefix shaped to
+``BranchMaterializer.materialize``'s inputs.
 
 Pure: no mutation of inputs, no I/O, torch-free. All failures raise ``DAGError``.
 """
@@ -13,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from customized_areal.tree_search.agents.event_model import Event, message_timeline
+from customized_areal.tree_search.agents.event_model import message_timeline
 from customized_areal.tree_search.agents.execution_dag import (
     DAGError,
     EdgeType,
@@ -46,18 +47,18 @@ def _validate_topological(dag: ExecutionDAG, order: Sequence[str]) -> None:
             )
 
 
-def dag_to_events(
+def dag_to_supernodes(
     dag: ExecutionDAG,
     *,
     ordering: Sequence[str] | None = None,
-    messages_by_node: dict | None = None,
-) -> list[Event]:
-    """Linearize ``dag`` into completion-ordered Events.
+    nodes_by_segment: dict | None = None,
+) -> list[SuperNode]:
+    """Linearize ``dag`` into completion-ordered SuperNodes.
 
     ``ordering`` is an explicit completion order (list of node_id). If omitted,
     ``dag.topological_order()`` is used (deterministic; valid because completion
-    order is always a topological order). ``messages_by_node`` overrides the
-    per-node transcript payload (else ``node.metadata['messages']``).
+    order is always a topological order). ``nodes_by_segment`` overrides the
+    per-segment ``nodes`` payload (else ``segment.metadata['nodes']``).
     """
     event_ids = dag.event_ids()
     if ordering is None:
@@ -69,69 +70,73 @@ def dag_to_events(
         _validate_topological(dag, order)
 
     incoming, outgoing = _adjacency(dag)
-    msgs_map = messages_by_node or {}
-    events: list[Event] = []
+    nodes_map = nodes_by_segment or {}
+    supers: list[SuperNode] = []
     for idx, nid in enumerate(order):
         node = dag.get(nid)
-        payload = msgs_map.get(nid)
+        payload = nodes_map.get(nid)
         if payload is None:
-            payload = node.metadata.get("messages", ())
-        events.append(
-            Event(
-                node_id=node.node_id,
-                agent_id=node.agent_id,
-                issue_id=node.issue_id,
-                task_id=node.task_id,
-                completion_index=idx,
-                incoming_edges=tuple(incoming[nid]),
-                outgoing_edges=tuple(outgoing[nid]),
-                session_id=node.session_id,
-                completion_time=node.metadata.get("completion_time"),
-                branch_seq=node.branch_seq,
-                branch_issue_id=node.branch_issue_id,
-                branch_env_snapshot_id=node.branch_env_snapshot_id,
-                value=node.value,
-                process_reward=node.process_reward,
-                outcome_reward=node.outcome_reward,
-                messages=tuple(dict(m) for m in payload),
-                metadata=dict(node.metadata),
-            )
+            payload = node.metadata.get("nodes", [])
+        super_node = SuperNode(
+            node_id=node.node_id,
+            agent_id=node.agent_id,
+            issue_id=node.issue_id,
+            task_id=node.task_id,
+            closing_event=node.closing_event,
+            closing_event_target=node.closing_event_target,
+            session_id=node.session_id,
+            completion_index=idx,
+            completion_time=node.metadata.get("completion_time"),
+            incoming_edges=tuple(incoming[nid]),
+            outgoing_edges=tuple(outgoing[nid]),
+            branch_seq=node.branch_seq,
+            branch_issue_id=node.branch_issue_id,
+            branch_env_snapshot_id=node.branch_env_snapshot_id,
+            value=node.value,
+            process_reward=node.process_reward,
+            outcome_reward=node.outcome_reward,
+            sandbox_ids=list(node.sandbox_ids),
+            issue_snapshot_id=node.issue_snapshot_id,
+            env_state=dict(node.env_state),
+            nodes=list(payload),
+            metadata=dict(node.metadata),
         )
-    return events
+        supers.append(super_node)
+    return supers
 
 
-def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
-    """Losslessly rebuild an ExecutionDAG from a linear Event log.
+def supernodes_to_dag(supers: Sequence[SuperNode]) -> ExecutionDAG:
+    """Losslessly rebuild an ExecutionDAG from a linear SuperNode log.
 
     Steps (each failure raises ``DAGError``):
       1. completion_index must be dense 0..n-1, unique, non-negative.
-      2. node_ids must be unique (no duplicate node_id across events).
+      2. node_ids must be unique (no duplicate node_id across SuperNodes).
       3. edge lists must be symmetric (every A.outgoing (A->B) has a matching
          B.incoming (A->B) with the same EdgeType).
-      4. add nodes (faithful SuperNode; messages/index stay in the log only).
+      4. add SuperNodes (faithful; nodes/completion_index stay in the log only).
       5. add edges (idempotent).
       6. enforce the topological-order invariant: for every edge src->dst,
          index(src) < index(dst).
     """
-    events = list(events)
-    if not events:
+    supers = list(supers)
+    if not supers:
         return ExecutionDAG()
 
-    indices = sorted(e.completion_index for e in events)
-    if indices != list(range(len(events))):
+    indices = sorted(s.completion_index for s in supers)
+    if indices != list(range(len(supers))):
         raise DAGError(
-            f"completion_index must be dense 0..{len(events) - 1}, got {indices}"
+            f"completion_index must be dense 0..{len(supers) - 1}, got {indices}"
         )
-    ordered = sorted(events, key=lambda e: e.completion_index)
-    index_of = {e.node_id: e.completion_index for e in ordered}
+    ordered = sorted(supers, key=lambda s: s.completion_index)
+    index_of = {s.node_id: s.completion_index for s in ordered}
     if len(index_of) != len(ordered):
-        raise DAGError("duplicate node_id across events")
+        raise DAGError("duplicate node_id across SuperNodes")
 
     incoming_set = {
-        (src, e.node_id, t) for e in ordered for (src, t) in e.incoming_edges
+        (src, s.node_id, t) for s in ordered for (src, t) in s.incoming_edges
     }
     outgoing_set = {
-        (e.node_id, dst, t) for e in ordered for (dst, t) in e.outgoing_edges
+        (s.node_id, dst, t) for s in ordered for (dst, t) in s.outgoing_edges
     }
     if incoming_set != outgoing_set:
         diff = incoming_set ^ outgoing_set
@@ -140,21 +145,27 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
         )
 
     dag = ExecutionDAG()
-    for e in ordered:
+    for s in ordered:
         dag.add_event(
             SuperNode(
-                node_id=e.node_id,
-                agent_id=e.agent_id,
-                issue_id=e.issue_id,
-                task_id=e.task_id,
-                session_id=e.session_id,
-                branch_seq=e.branch_seq,
-                branch_issue_id=e.branch_issue_id,
-                branch_env_snapshot_id=e.branch_env_snapshot_id,
-                process_reward=e.process_reward,
-                outcome_reward=e.outcome_reward,
-                value=e.value,
-                metadata=dict(e.metadata),
+                node_id=s.node_id,
+                agent_id=s.agent_id,
+                issue_id=s.issue_id,
+                task_id=s.task_id,
+                closing_event=s.closing_event,
+                closing_event_target=s.closing_event_target,
+                session_id=s.session_id,
+                branch_seq=s.branch_seq,
+                branch_issue_id=s.branch_issue_id,
+                branch_env_snapshot_id=s.branch_env_snapshot_id,
+                process_reward=s.process_reward,
+                outcome_reward=s.outcome_reward,
+                value=s.value,
+                sandbox_ids=list(s.sandbox_ids),
+                issue_snapshot_id=s.issue_snapshot_id,
+                env_state=dict(s.env_state),
+                nodes=list(s.nodes),
+                metadata=dict(s.metadata),
             )
         )
 
@@ -170,9 +181,6 @@ def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
     return dag
 
 
-__all__ = ["ReplayPrefix", "dag_to_events", "events_to_dag", "replay_prefix_for"]
-
-
 @dataclass(frozen=True)
 class ReplayPrefix:
     """Branch replay data, shaped to ``BranchMaterializer.materialize`` inputs."""
@@ -185,36 +193,44 @@ class ReplayPrefix:
 
 
 def replay_prefix_for(
-    events: Sequence[Event],
+    supers: Sequence[SuperNode],
     *,
     branch_point: tuple[str, int],
 ) -> ReplayPrefix:
-    """Derive the replay prefix for a branch point from a linear Event log.
+    """Derive the replay prefix for a branch point from a linear SuperNode log.
 
     ``branch_point = (task_id, seq)`` where ``seq`` is the ``task_message.seq``
-    the run is allowed to branch at. Locates the unique Event with matching
+    the run is allowed to branch at. Locates the unique SuperNode with matching
     ``task_id`` and ``branch_seq == seq`` (zero or multiple matches -> DAGError),
     collects that node's ancestors (plus the node itself) in completion order,
     and flattens their message payloads via ``message_timeline``.
     """
     task_id, seq = branch_point
-    dag = events_to_dag(events)
-    matches = [e for e in events if e.task_id == task_id and e.branch_seq == seq]
+    dag = supernodes_to_dag(supers)
+    matches = [s for s in supers if s.task_id == task_id and s.branch_seq == seq]
     if len(matches) != 1:
         raise DAGError(
             f"branch point (task_id={task_id!r}, seq={seq}) matched {len(matches)} "
             f"nodes; expected exactly 1"
         )
-    branch_ev = matches[0]
-    ancestor_ids = dag.ancestors(branch_ev.node_id) | {branch_ev.node_id}
-    prefix_events = sorted(
-        (e for e in events if e.node_id in ancestor_ids),
-        key=lambda e: e.completion_index,
+    branch_super = matches[0]
+    ancestor_ids = dag.ancestors(branch_super.node_id) | {branch_super.node_id}
+    prefix_supers = sorted(
+        (s for s in supers if s.node_id in ancestor_ids),
+        key=lambda s: s.completion_index,
     )
     return ReplayPrefix(
-        replay_messages=message_timeline(prefix_events),
+        replay_messages=message_timeline(prefix_supers),
         task_id=task_id,
         seq=seq,
-        source_issue_id=branch_ev.issue_id,
-        branch_env_snapshot_id=branch_ev.branch_env_snapshot_id,
+        source_issue_id=branch_super.issue_id,
+        branch_env_snapshot_id=branch_super.branch_env_snapshot_id,
     )
+
+
+__all__ = [
+    "ReplayPrefix",
+    "dag_to_supernodes",
+    "replay_prefix_for",
+    "supernodes_to_dag",
+]

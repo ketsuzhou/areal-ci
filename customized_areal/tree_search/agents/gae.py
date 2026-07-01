@@ -105,8 +105,8 @@ def compute_global_gae(
 def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     """Build the global event sequence from DAG nodes in completion order.
 
-    Thin projection over the canonical :class:`Event`: each node becomes an
-    ``Event`` (edges/messages irrelevant to GAE are left empty), then is
+    Thin projection over the canonical :class:`SuperNode`: each node becomes a
+    ``SuperNode`` (edges/messages irrelevant to GAE are left empty), then is
     projected to a :class:`GlobalEvent` with ``value`` (``V_{t+1}``; 0.0 if
     unscored) and a step reward of ``process_reward + outcome_reward`` -- so the
     verifier terminal reward (on ``outcome_reward``) flows in as ``r_t``.
@@ -114,11 +114,11 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     Duck-typed against ``SuperNode``; identity fields are read defensively so
     minimal node-likes still work (they do not affect the projection).
     """
-    from customized_areal.tree_search.agents.event_model import Event
+    from customized_areal.tree_search.agents.execution_dag import SuperNode
 
     events: list[GlobalEvent] = []
     for idx, node in enumerate(ordered_nodes):
-        ev = Event(
+        super_node = SuperNode(
             node_id=node.node_id,
             agent_id=getattr(node, "agent_id", ""),
             issue_id=getattr(node, "issue_id", ""),
@@ -130,9 +130,10 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
         )
         events.append(
             GlobalEvent(
-                node_id=ev.node_id,
-                value=float(ev.value) if ev.value is not None else 0.0,
-                reward=float(ev.process_reward) + float(ev.outcome_reward),
+                node_id=super_node.node_id,
+                value=float(super_node.value) if super_node.value is not None else 0.0,
+                reward=float(super_node.process_reward)
+                + float(super_node.outcome_reward),
             )
         )
     return events

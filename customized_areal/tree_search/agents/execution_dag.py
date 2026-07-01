@@ -112,6 +112,109 @@ class SuperNode:
         t = self.terminal_node
         return t.node_id if t is not None else None
 
+    @property
+    def messages(self) -> tuple[dict, ...]:
+        """Flatten messages across all nodes in this segment.
+
+        Convenience for callers that consumed the old Event.messages field.
+        Each inner node's .messages list is concatenated in order.
+        """
+        out: list[dict] = []
+        for n in self.nodes:
+            node_msgs = getattr(n, "messages", None)
+            if node_msgs:
+                out.extend(node_msgs)
+        return tuple(out)
+
+    def to_dict(self) -> dict:
+        """Emit a plain JSON-safe dict (EdgeType -> str, tuples -> lists).
+
+        ``nodes`` is serialized via each node's own ``to_dict()`` if present,
+        else the raw object (caller's responsibility). Edge tuples become
+        ``[[node_id, edge_type_str], ...]``.
+        """
+        return {
+            "node_id": self.node_id,
+            "agent_id": self.agent_id,
+            "issue_id": self.issue_id,
+            "task_id": self.task_id,
+            "closing_event": self.closing_event.value if self.closing_event else None,
+            "closing_event_target": self.closing_event_target,
+            "session_id": self.session_id,
+            "completion_index": self.completion_index,
+            "completion_time": self.completion_time,
+            "incoming_edges": [[s, t.value] for s, t in self.incoming_edges],
+            "outgoing_edges": [[d, t.value] for d, t in self.outgoing_edges],
+            "branch_seq": self.branch_seq,
+            "branch_issue_id": self.branch_issue_id,
+            "branch_env_snapshot_id": self.branch_env_snapshot_id,
+            "value": self.value,
+            "process_reward": self.process_reward,
+            "outcome_reward": self.outcome_reward,
+            "sandbox_ids": list(self.sandbox_ids),
+            "issue_snapshot_id": self.issue_snapshot_id,
+            "env_state": dict(self.env_state),
+            "nodes": [n.to_dict() if hasattr(n, "to_dict") else n for n in self.nodes],
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> SuperNode:
+        """Exact inverse of :meth:`to_dict`. Raises ``DAGError`` on bad input."""
+        try:
+            return cls(
+                node_id=d["node_id"],
+                agent_id=d["agent_id"],
+                issue_id=d["issue_id"],
+                task_id=d["task_id"],
+                closing_event=cls._coerce_edge_type(d.get("closing_event")),
+                closing_event_target=d.get("closing_event_target"),
+                session_id=d.get("session_id"),
+                completion_index=d.get("completion_index"),
+                completion_time=d.get("completion_time"),
+                incoming_edges=cls._coerce_edges(d.get("incoming_edges", ())),
+                outgoing_edges=cls._coerce_edges(d.get("outgoing_edges", ())),
+                branch_seq=d.get("branch_seq"),
+                branch_issue_id=d.get("branch_issue_id"),
+                branch_env_snapshot_id=d.get("branch_env_snapshot_id"),
+                value=d.get("value"),
+                process_reward=d.get("process_reward", 0.0),
+                outcome_reward=d.get("outcome_reward", 0.0),
+                sandbox_ids=list(d.get("sandbox_ids", [])),
+                issue_snapshot_id=d.get("issue_snapshot_id"),
+                env_state=dict(d.get("env_state", {})),
+                nodes=list(d.get("nodes", [])),
+                metadata=dict(d.get("metadata", {})),
+            )
+        except KeyError as exc:
+            raise DAGError(
+                f"SuperNode.from_dict missing required field: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _coerce_edge_type(raw) -> EdgeType | None:
+        if raw is None:
+            return None
+        if isinstance(raw, EdgeType):
+            return raw
+        try:
+            return EdgeType(raw)
+        except ValueError as exc:
+            raise DAGError(f"unknown EdgeType: {raw!r}") from exc
+
+    @staticmethod
+    def _coerce_edges(raw) -> tuple:
+        out = []
+        for item in raw:
+            nid, etype = item[0], item[1]
+            if not isinstance(etype, EdgeType):
+                try:
+                    etype = EdgeType(etype)
+                except ValueError as exc:
+                    raise DAGError(f"unknown EdgeType: {etype!r}") from exc
+            out.append((nid, etype))
+        return tuple(out)
+
 
 @dataclass(frozen=True)
 class Edge:
