@@ -8,9 +8,11 @@ from the pure-critic GAE result.
 """
 
 import asyncio
+import uuid
 
 import torch
 
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.core.advantage import (
     GAEAdvantageComputer,
     HybridGAEAdvantageComputer,
@@ -19,8 +21,23 @@ from customized_areal.tree_search.core.critic_value_client import CriticValueCli
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
 
 
+def _wrap_leaf(nodes):
+    return SuperNode(
+        node_id=str(uuid.uuid4()),
+        agent_id="",
+        issue_id="",
+        task_id=nodes[0].query_id if nodes else "",
+        nodes=list(nodes),
+    )
+
+
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 class _FakeTokenizer:
@@ -57,20 +74,18 @@ def test_hybrid_end_to_end():
     store = MCTSTreeStore()
 
     # Parent episode: p0 (branch point, need_branch) -> p1 terminal, reward 1.0.
-    store.insert_batch(
-        [
-            _node("p0", "epP", 1, 1.0, parent=None, need_branch=True),
-            _node("p1", "epP", 2, 1.0, parent="p0"),
-        ]
-    )
+    parent_nodes = [
+        _node("p0", "epP", 1, 1.0, parent=None, need_branch=True),
+        _node("p1", "epP", 2, 1.0, parent="p0"),
+    ]
+    store.insert_super_batch([_wrap_leaf(parent_nodes)], query_id="q1")
     # Five branch episodes through p0 with reward 0.0 -> p0 visit_count = 6 >= 5.
     for k in range(5):
-        store.insert_batch(
-            [
-                _node(f"b{k}_0", f"epB{k}", 2, 0.0, parent="p0"),
-                _node(f"b{k}_1", f"epB{k}", 3, 0.0, parent=f"b{k}_0"),
-            ]
-        )
+        branch_nodes = [
+            _node(f"b{k}_0", f"epB{k}", 2, 0.0, parent="p0"),
+            _node(f"b{k}_1", f"epB{k}", 3, 0.0, parent=f"b{k}_0"),
+        ]
+        store.insert_super_batch([_wrap_leaf(branch_nodes)], query_id="q1")
     assert store.get_visit_count("p0") == 6
 
     # Critic annotation (soft): equal mass on labels 4 and 6 -> value 0.5,
@@ -79,7 +94,6 @@ def test_hybrid_end_to_end():
         return {4: 0.0, 6: 0.0}
 
     client = CriticValueClient(_FakeTokenizer(), score_max=10, logprob_query_fn=soft_fn)
-    parent_nodes = store.trajectories["q1"][:2]
     _run(client.annotate_episode(None, parent_nodes, store))
     assert store.get_value("p0") == 0.5
     assert store.get_value_variance("p0") > 0.0
