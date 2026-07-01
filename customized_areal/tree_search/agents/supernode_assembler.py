@@ -15,11 +15,13 @@ Maintains the unified parent_node_id chain (causal flattening):
 Stamps TeamEnvSnapshot onto each SuperNode. Binds session_id to each SuperNode
 (from session_to_agent_run).
 
-Pure: no I/O, no mutation of inputs, torch-free. All failures raise DAGError.
+Torch-free, no I/O. Container structures (lists, dicts, DAG) are not mutated;
+Node.parent_node_id IS set in place (Step 5's contract). All failures raise DAGError.
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -141,15 +143,34 @@ class SuperNodeAssembler:
         # Validate dense, non-overlapping coverage per run.
         for agent_run_id, ranges in run_coverage.items():
             ranges_sorted = sorted(ranges, key=lambda r: r[0])
+            session_id = agent_run_to_session[agent_run_id]
+            node_count = len(sessions_nodes[session_id])
+            # First segment must start at turn 1.
+            if ranges_sorted[0][0] != 1:
+                raise DAGError(
+                    f"agent_run {agent_run_id!r}: segments do not start at "
+                    f"turn 1 (first start_turn_idx={ranges_sorted[0][0]}); "
+                    f"dense coverage required"
+                )
+            # No gaps and no overlap between consecutive segments.
             for i in range(1, len(ranges_sorted)):
                 prev_end = ranges_sorted[i - 1][1]
                 cur_start = ranges_sorted[i][0]
-                if cur_start <= prev_end:
+                if cur_start != prev_end + 1:
                     raise DAGError(
                         f"agent_run {agent_run_id!r}: segments "
                         f"{ranges_sorted[i - 1][2]!r} and "
-                        f"{ranges_sorted[i][2]!r} overlap or are not dense"
+                        f"{ranges_sorted[i][2]!r} do not form dense coverage "
+                        f"(gap or overlap: prev_end={prev_end}, "
+                        f"cur_start={cur_start})"
                     )
+            # Last segment must end at the last turn.
+            if ranges_sorted[-1][1] != node_count:
+                raise DAGError(
+                    f"agent_run {agent_run_id!r}: segments do not cover "
+                    f"through turn {node_count} (last end_turn_idx="
+                    f"{ranges_sorted[-1][1]}); dense coverage required"
+                )
 
         # ── Step 3: construct each SuperNode ──────────────────────────
         segment_id_to_super: dict[str, SuperNode] = {}
@@ -163,7 +184,7 @@ class SuperNodeAssembler:
             session_id = agent_run_to_session[spec.agent_run_id]
             super_node = SuperNode(
                 node_id=self._fresh_uuid(),
-                agent_id=spec.agent_run_id,  # use run id as agent_id stand-in
+                agent_id=spec.agent_run_id,  # Multica identifies runs; agent_id resolution is deferred to a later phase.
                 issue_id=spec.issue_id,
                 task_id=spec.task_id,
                 closing_event=spec.closing_event,
@@ -278,8 +299,6 @@ class SuperNodeAssembler:
 
     @staticmethod
     def _fresh_uuid() -> str:
-        import uuid
-
         return str(uuid.uuid4())
 
 

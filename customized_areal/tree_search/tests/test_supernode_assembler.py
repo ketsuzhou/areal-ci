@@ -163,6 +163,38 @@ def test_assemble_rejects_overlapping_segments_within_run():
         )
 
 
+def test_assemble_rejects_non_dense_segments_within_run():
+    sessions_nodes, dag_result = _planner_worker_synthesizer()
+    # Replace planner's single [1,3] segment with [1,1] and [3,3]; turn 2
+    # is uncovered, so coverage is not dense.
+    dag_result.segments[0] = SegmentSpec(
+        segment_id="seg-planner",
+        agent_run_id="run-planner",
+        issue_id="iss-planner",
+        task_id="task-root",
+        closing_event=EdgeType.DELEGATION,
+        closing_event_target_segment="seg-worker",
+        start_turn_idx=1,
+        end_turn_idx=1,
+    )
+    dag_result.segments.append(
+        SegmentSpec(
+            segment_id="seg-planner-2",
+            agent_run_id="run-planner",
+            issue_id="iss-planner",
+            task_id="task-root",
+            closing_event=None,
+            closing_event_target_segment=None,
+            start_turn_idx=3,
+            end_turn_idx=3,
+        )
+    )
+    with pytest.raises(DAGError, match="dense coverage"):
+        SuperNodeAssembler().assemble(
+            sessions_nodes=sessions_nodes, dag_result=dag_result
+        )
+
+
 # -- Step 3: SuperNode construction --------------------------------------
 
 
@@ -315,31 +347,20 @@ def test_assemble_mention_edge_does_not_set_parent():
 
 def test_assemble_returns_unique_sink_terminal_node_id():
     sessions_nodes, dag_result = _planner_worker_synthesizer()
-    _, _, root_terminal = SuperNodeAssembler().assemble(
+    supers, _, root_terminal = SuperNodeAssembler().assemble(
         sessions_nodes=sessions_nodes, dag_result=dag_result
     )
-    # Synthesizer is the unique sink (no outgoing edges).
-    by_seg = {
-        s.metadata["_segment_id"]: s
-        for s in _supers_from_assemble(sessions_nodes, dag_result)
-    }
+    by_seg = {s.metadata["_segment_id"]: s for s in supers}
     assert root_terminal == by_seg["seg-synth"].terminal_node.node_id
-
-
-def _supers_from_assemble(sessions_nodes, dag_result):
-    supers, _, _ = SuperNodeAssembler().assemble(
-        sessions_nodes=sessions_nodes, dag_result=dag_result
-    )
-    return supers
 
 
 def test_assemble_rejects_multiple_sinks():
     sessions_nodes, dag_result = _planner_worker_synthesizer()
-    # Add a second leaf segment with no outgoing edges.
+    # Add a second sink segment: its own run/session, no edges in or out.
     dag_result.segments.append(
         SegmentSpec(
             segment_id="seg-orphan",
-            agent_run_id="run-synth",  # reuse an existing run's session
+            agent_run_id="run-orphan",
             issue_id="iss-orphan",
             task_id="task-root",
             closing_event=None,
@@ -347,20 +368,6 @@ def test_assemble_rejects_multiple_sinks():
             start_turn_idx=1,
             end_turn_idx=1,
         )
-    )
-    # The orphan segment needs a session; reuse sess-synth's nodes (1 node).
-    sessions_nodes["sess-synth"].append(_node("s1-orphan"))
-    # Actually we need a 4th segment that's a sink. Easiest: make seg-orphan
-    # its own run with its own session, no edges in or out.
-    dag_result.segments[-1] = SegmentSpec(
-        segment_id="seg-orphan",
-        agent_run_id="run-orphan",
-        issue_id="iss-orphan",
-        task_id="task-root",
-        closing_event=None,
-        closing_event_target_segment=None,
-        start_turn_idx=1,
-        end_turn_idx=1,
     )
     sessions_nodes["sess-orphan"] = _nodes("o1")
     dag_result.session_ids.append("sess-orphan")
