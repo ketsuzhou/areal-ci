@@ -1,7 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for MCTS root-ward backup and branch-point aggregation (Task 0)."""
 
+import uuid
+
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+
+
+def _wrap_leaf(nodes, *, super_id=None):
+    """Wrap a list[Node] in a single leaf SuperNode for the single-agent path."""
+    return SuperNode(
+        node_id=super_id or str(uuid.uuid4()),
+        agent_id="a",
+        issue_id="i",
+        task_id="t",
+        nodes=list(nodes),
+    )
 
 
 def _make_node(node_id, episode_id, turn_idx, outcome_reward, parent_node_id=None):
@@ -28,7 +42,7 @@ class TestRootWardBackup:
             _make_node("n1", "ep", 2, 1.0, parent_node_id="n0"),
             _make_node("n2", "ep", 3, 1.0, parent_node_id="n1"),
         ]
-        store.insert_batch(nodes)
+        store.insert_super_batch([_wrap_leaf(nodes)], query_id="q")
         for nid in ("n0", "n1", "n2"):
             assert store.get_visit_count(nid) == 1
             assert store.get_q_value(nid) == 1.0
@@ -44,12 +58,12 @@ class TestRootWardBackup:
             _make_node("p0", "epP", 1, 1.0, parent_node_id=None),
             _make_node("p1", "epP", 2, 1.0, parent_node_id="p0"),
         ]
-        store.insert_batch(parent)
+        store.insert_super_batch([_wrap_leaf(parent)], query_id="q")
         branch = [
             _make_node("b0", "epB", 2, 0.0, parent_node_id="p0"),
             _make_node("b1", "epB", 3, 0.0, parent_node_id="b0"),
         ]
-        store.insert_batch(branch)
+        store.insert_super_batch([_wrap_leaf(branch)], query_id="q")
 
         # Branch point p0 saw both episodes: returns {1.0, 0.0}.
         assert store.get_visit_count("p0") == 2
@@ -71,14 +85,18 @@ class TestRootWardBackup:
             _make_node("n0", "ep", 1, 1.0, parent_node_id=None),
             _make_node("n1", "ep", 2, 1.0, parent_node_id="n0"),
         ]
-        store.insert_batch(nodes)
-        store.insert_batch(nodes)  # all node_ids already present -> skipped
+        store.insert_super_batch([_wrap_leaf(nodes)], query_id="q")
+        store.insert_super_batch(
+            [_wrap_leaf(nodes)], query_id="q"
+        )  # node_ids already present -> skipped
         assert store.get_visit_count("n0") == 1
         assert store.get_visit_count("n1") == 1
 
     def test_clear_resets_sum_sq(self):
         store = MCTSTreeStore()
-        store.insert_batch([_make_node("n0", "ep", 1, 1.0)])
+        store.insert_super_batch(
+            [_wrap_leaf([_make_node("n0", "ep", 1, 1.0)])], query_id="q"
+        )
         assert store.get_sum_sq_value("n0") == 1.0
         store.clear()
         assert store.get_sum_sq_value("n0") == 0.0
@@ -86,6 +104,8 @@ class TestRootWardBackup:
 
     def test_standalone_node_without_episode_id(self):
         store = MCTSTreeStore()
-        store.insert_batch([_make_node("solo", "", 0, 0.7)])
+        store.insert_super_batch(
+            [_wrap_leaf([_make_node("solo", "", 0, 0.7)])], query_id="q"
+        )
         assert store.get_visit_count("solo") == 1
         assert store.get_q_value("solo") == 0.7

@@ -3,21 +3,35 @@
 
 Covers:
 - ``episode_returns_to_go`` discounted reverse cumsum (sparse reduces to outcome).
-- ``MCTSTreeStore.insert_batch(backup=False)`` defers the MC backup.
-- ``backup_episode_returns`` accumulates per-node return-to-go.
+- ``MCTSTreeStore.insert_super_batch(backup=False)`` defers the MC backup.
+- ``backup_path_returns`` accumulates per-node return-to-go.
 - ``HybridGAEAdvantageComputer`` with ``judge_beta == 0`` is byte-for-byte
   unchanged, and with ``judge_beta > 0`` the leave-one-out excludes the node's
   own ``g_t`` (not the terminal outcome).
 """
 
+import uuid
+
 import torch
 
+from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.core.advantage import (
     GAEAdvantageComputer,
     HybridGAEAdvantageComputer,
 )
 from customized_areal.tree_search.core.process_reward import episode_returns_to_go
 from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+
+
+def _wrap_leaf(nodes, *, super_id=None):
+    """Wrap a list[Node] in a single leaf SuperNode for the single-agent path."""
+    return SuperNode(
+        node_id=super_id or str(uuid.uuid4()),
+        agent_id="a",
+        issue_id="i",
+        task_id="t",
+        nodes=list(nodes),
+    )
 
 
 def _make_node(
@@ -71,7 +85,7 @@ class TestDeferredBackup:
             _make_node("n0", "ep", 1, [1], outcome_reward=1.0),
             _make_node("n1", "ep", 2, [1], outcome_reward=1.0, parent_node_id="n0"),
         ]
-        store.insert_batch(nodes, backup=False)
+        store.insert_super_batch([_wrap_leaf(nodes)], backup=False, query_id="q")
         # No MC samples accumulated yet.
         assert store.get_visit_count("n0") == 0
         assert store.get_visit_count("n1") == 0
@@ -82,7 +96,9 @@ class TestDeferredBackup:
             _make_node("n0", "ep", 1, [1], outcome_reward=1.0),
             _make_node("n1", "ep", 2, [1], outcome_reward=1.0, parent_node_id="n0"),
         ]
-        store.insert_batch(nodes)  # default backup=True
+        store.insert_super_batch(
+            [_wrap_leaf(nodes)], query_id="q"
+        )  # default backup=True
         # Legacy path walk adds terminal outcome to every node on the chain.
         assert store.get_visit_count("n0") == 1
         assert store.get_visit_count("n1") == 1
@@ -96,9 +112,10 @@ class TestDeferredBackup:
             _make_node("n1", "ep", 2, [1], outcome_reward=1.0, parent_node_id="n0"),
             _make_node("n2", "ep", 3, [1], outcome_reward=1.0, parent_node_id="n1"),
         ]
-        store.insert_batch(nodes, backup=False)
+        store.insert_super_batch([_wrap_leaf(nodes)], backup=False, query_id="q")
         returns = [1.0, 0.96, 0.9]
-        store.backup_episode_returns(nodes, returns)
+        returns_by_node_id = dict(zip([n.node_id for n in nodes], returns))
+        store.backup_path_returns("n2", returns_by_node_id)
         for nid, g in zip(["n0", "n1", "n2"], returns):
             assert store.get_visit_count(nid) == 1
             assert abs(store.get_q_value(nid) - g) < 1e-12
@@ -109,7 +126,7 @@ class TestDeferredBackup:
             _make_node("n0", "ep", 1, [1], outcome_reward=1.0),
             _make_node("n1", "ep", 2, [1], outcome_reward=1.0, parent_node_id="n0"),
         ]
-        store.insert_batch(nodes, backup=False)
+        store.insert_super_batch([_wrap_leaf(nodes)], backup=False, query_id="q")
         store.backup_episode_terminal("n1", 1.0)
         # Terminal return propagated root-ward to both nodes.
         assert store.get_q_value("n0") == 1.0
@@ -218,7 +235,7 @@ class TestUnifiedPathBackup:
             _make_node("b1", "B", 1, [1], outcome_reward=0.0, parent_node_id="x"),
             _make_node("b2", "B", 2, [1], outcome_reward=0.0, parent_node_id="b1"),
         ]
-        store.insert_batch(nodes, backup=False)
+        store.insert_super_batch([_wrap_leaf(nodes)], backup=False, query_id="q")
 
         # Back up each episode with its own per-node return-to-go.
         store.backup_path_returns("x3", {"r": 1.0, "x": 0.96, "x3": 0.90})
