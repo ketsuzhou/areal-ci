@@ -27,7 +27,7 @@ def _run(node_id: str, *, session_id: str | None = None) -> SuperNode:
     )
 
 
-def test_agent_run_node_session_id_defaults_to_none() -> None:
+def test_supernode_session_id_defaults_to_none() -> None:
     node = SuperNode(node_id="A", agent_id="ag", issue_id="i", task_id="t")
     assert node.session_id is None
 

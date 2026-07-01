@@ -330,6 +330,10 @@ class ExecutionDAG:
         ``runs`` items require ``node_id``/``agent_id``/``issue_id``/``task_id``;
         any other ``SuperNode`` field is optional. ``edges`` items require
         ``src``, ``dst``, and ``type`` (an ``EdgeType`` or its string value).
+
+        If ``edges`` is omitted, delegation edges are inferred from a
+        ``parent_issue_id`` field on the run records (a run on a sub-issue
+        depends on the run that owns the parent issue).
         """
         dag = cls()
         known_fields = SuperNode.__dataclass_fields__.keys()

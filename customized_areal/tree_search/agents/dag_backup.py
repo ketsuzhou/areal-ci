@@ -50,7 +50,7 @@ def distribute_reward_over_dag(
     if terminal_node_id not in dag:
         raise KeyError(f"terminal node {terminal_node_id!r} not in DAG")
 
-    credit: dict[str, float] = {nid: 0.0 for nid in dag.node_ids()}
+    credit: dict[str, float] = {nid: 0.0 for nid in dag.event_ids()}
     credit[terminal_node_id] = terminal_reward
 
     # Walk backward from the terminal node. For each node, find its parents
