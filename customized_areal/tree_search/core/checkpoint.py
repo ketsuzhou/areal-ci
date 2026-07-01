@@ -204,6 +204,7 @@ class TreeCheckpointManager:
             "value": node.value,
             "node_id": node.node_id,
             "parent_node_id": node.parent_node_id,
+            "extra_parent_node_ids": node.extra_parent_node_ids,
             "episode_id": node.episode_id,
             "turn_idx": node.turn_idx,
             "query_id": node.query_id,
@@ -237,6 +238,7 @@ class TreeCheckpointManager:
             value=data.get("value", 0.0),
             node_id=data.get("node_id", ""),
             parent_node_id=data.get("parent_node_id"),
+            extra_parent_node_ids=data.get("extra_parent_node_ids"),
             episode_id=data.get("episode_id", ""),
             turn_idx=data.get("turn_idx", 0),
             query_id=data.get("query_id", ""),
@@ -258,30 +260,33 @@ class TreeCheckpointManager:
 
     @staticmethod
     def _serialize_super_node(super_node: SuperNode) -> dict:
-        return {
-            "node_id": super_node.node_id,
-            "agent_id": super_node.agent_id,
-            "issue_id": super_node.issue_id,
-            "task_id": super_node.task_id,
-            "session_id": super_node.session_id,
-            "nodes": [
-                TreeCheckpointManager._serialize_node(n) for n in super_node.nodes
-            ],
-        }
+        """Serialize a SuperNode losslessly (DAG topology + env + reward + turns).
+
+        The SuperNode-level envelope is produced by ``SuperNode.to_dict()`` (the
+        single source of truth for SuperNode field serialization, in
+        ``execution_dag.py``); only ``nodes`` is overridden here. ``Node`` has no
+        ``to_dict``, so ``to_dict()`` would pass raw Node objects through — the
+        checkpoint replaces them with :meth:`_serialize_node`, which persists the
+        MCTS-relevant Node fields (tensors, ``extra_parent_node_ids``, etc.).
+        Reusing ``to_dict``/``from_dict`` avoids field drift between the two
+        serializers when a SuperNode field is added.
+        """
+        data = super_node.to_dict()
+        data["nodes"] = [
+            TreeCheckpointManager._serialize_node(n) for n in super_node.nodes
+        ]
+        return data
 
     @staticmethod
     def _deserialize_super_node(data: dict) -> SuperNode:
-        return SuperNode(
-            node_id=data["node_id"],
-            agent_id=data.get("agent_id", ""),
-            issue_id=data.get("issue_id", ""),
-            task_id=data.get("task_id", ""),
-            session_id=data.get("session_id"),
-            nodes=[
-                TreeCheckpointManager._deserialize_node(n)
-                for n in data.get("nodes", [])
-            ],
-        )
+        # SuperNode.from_dict rebuilds the envelope (edges/enum coercion,
+        # required-field validation); we then swap in fully deserialized Nodes
+        # (from_dict leaves the raw node dicts in place).
+        super_node = SuperNode.from_dict(data)
+        super_node.nodes = [
+            TreeCheckpointManager._deserialize_node(n) for n in data.get("nodes", [])
+        ]
+        return super_node
 
     @staticmethod
     def save_trained_episodes(

@@ -398,3 +398,126 @@ def test_assemble_rejects_dangling_agent_run_id():
         SuperNodeAssembler().assemble(
             sessions_nodes=sessions_nodes, dag_result=dag_result
         )
+
+
+# -- fork + fan-in join fixture ------------------------------------------
+
+
+def _fork_join() -> tuple[dict, DagResult]:
+    """A DAG exercising within-run split (rule b) AND a fan-in join.
+
+    planner (2 segments): seg-p1 (turns 1-2) --delegation--> workerA
+                          seg-p2 (turn 3)   --delegation--> workerB
+    workerA (turns 1-2) --completion--> synth
+    workerB (turn 1)    --completion--> synth
+    synth (turn 1) is the unique sink.
+
+    seg-p2 continues the planner run with NO incoming delegation/completion
+    edge, so rule (b) links it to seg-p1's terminal. synth has TWO incoming
+    completion edges, so it is a fan-in join.
+    """
+    sessions_nodes = {
+        "sess-planner": _nodes("p1", "p2", "p3"),
+        "sess-a": _nodes("a1", "a2"),
+        "sess-b": _nodes("b1"),
+        "sess-s": _nodes("s1"),
+    }
+    env = TeamEnvSnapshot(sandbox_ids=[], issue_snapshot_id=None, env_state={})
+    dag_result = DagResult(
+        session_ids=["sess-planner", "sess-a", "sess-b", "sess-s"],
+        session_to_agent_run={
+            "sess-planner": "run-planner",
+            "sess-a": "run-a",
+            "sess-b": "run-b",
+            "sess-s": "run-s",
+        },
+        segments=[
+            SegmentSpec(
+                segment_id="seg-p1",
+                agent_run_id="run-planner",
+                issue_id="iss-p",
+                task_id="task-root",
+                closing_event=EdgeType.DELEGATION,
+                closing_event_target_segment="seg-a",
+                start_turn_idx=1,
+                end_turn_idx=2,
+            ),
+            SegmentSpec(
+                segment_id="seg-p2",
+                agent_run_id="run-planner",
+                issue_id="iss-p",
+                task_id="task-root",
+                closing_event=EdgeType.DELEGATION,
+                closing_event_target_segment="seg-b",
+                start_turn_idx=3,
+                end_turn_idx=3,
+            ),
+            SegmentSpec(
+                segment_id="seg-a",
+                agent_run_id="run-a",
+                issue_id="iss-a",
+                task_id="task-root",
+                closing_event=EdgeType.COMPLETION,
+                closing_event_target_segment="seg-s",
+                start_turn_idx=1,
+                end_turn_idx=2,
+            ),
+            SegmentSpec(
+                segment_id="seg-b",
+                agent_run_id="run-b",
+                issue_id="iss-b",
+                task_id="task-root",
+                closing_event=EdgeType.COMPLETION,
+                closing_event_target_segment="seg-s",
+                start_turn_idx=1,
+                end_turn_idx=1,
+            ),
+            SegmentSpec(
+                segment_id="seg-s",
+                agent_run_id="run-s",
+                issue_id="iss-s",
+                task_id="task-root",
+                closing_event=None,
+                closing_event_target_segment=None,
+                start_turn_idx=1,
+                end_turn_idx=1,
+            ),
+        ],
+        edges=[
+            EdgeSpec("seg-p1", "seg-a", EdgeType.DELEGATION),
+            EdgeSpec("seg-p2", "seg-b", EdgeType.DELEGATION),
+            EdgeSpec("seg-a", "seg-s", EdgeType.COMPLETION),
+            EdgeSpec("seg-b", "seg-s", EdgeType.COMPLETION),
+        ],
+        env_snapshots={s: env for s in ("seg-p1", "seg-p2", "seg-a", "seg-b", "seg-s")},
+    )
+    return sessions_nodes, dag_result
+
+
+def test_assemble_sets_within_run_cross_segment_parent():
+    """Rule (b): a later segment of the same run with no blocking incoming edge
+    links its first node to the previous segment's terminal."""
+    sessions_nodes, dag_result = _fork_join()
+    supers, _, _ = SuperNodeAssembler().assemble(
+        sessions_nodes=sessions_nodes, dag_result=dag_result
+    )
+    by_seg = {s.metadata["_segment_id"]: s for s in supers}
+    seg_p1_terminal = by_seg["seg-p1"].terminal_node  # p2
+    seg_p2_first = by_seg["seg-p2"].nodes[0]  # p3
+    assert seg_p2_first.parent_node_id == seg_p1_terminal.node_id
+
+
+def test_assemble_fan_in_join_records_all_incoming_parents():
+    """A join with two completion edges records both source terminals: the
+    first as parent_node_id and the rest as extra_parent_node_ids."""
+    sessions_nodes, dag_result = _fork_join()
+    supers, _, root_terminal = SuperNodeAssembler().assemble(
+        sessions_nodes=sessions_nodes, dag_result=dag_result
+    )
+    by_seg = {s.metadata["_segment_id"]: s for s in supers}
+    synth_first = by_seg["seg-s"].nodes[0]  # s1 (== root_terminal)
+    worker_a_terminal = by_seg["seg-a"].terminal_node.node_id  # a2
+    worker_b_terminal = by_seg["seg-b"].terminal_node.node_id  # b1
+    assert synth_first.node_id == root_terminal
+    parents = {synth_first.parent_node_id, *(synth_first.extra_parent_node_ids or [])}
+    assert parents == {worker_a_terminal, worker_b_terminal}

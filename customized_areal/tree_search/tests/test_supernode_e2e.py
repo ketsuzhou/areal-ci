@@ -124,3 +124,76 @@ def test_e2e_assemble_insert_backup_flows_across_segments():
     sinks = [s for s in supers if not s.outgoing_edges]
     assert len(sinks) == 1
     assert sinks[0].terminal_node.node_id == root_terminal
+
+
+def test_e2e_fan_in_join_credits_all_incoming_branches():
+    """Two workers complete into one synthesizer (a fan-in join). Backup from
+    the sink terminal must credit BOTH worker branches -- the multi-parent walk
+    follows parent_node_id AND extra_parent_node_ids, so no branch is orphaned
+    (this would fail under single-parent causal flattening)."""
+    sessions_nodes = {
+        "sess-a": [_node("a1"), _node("a2")],
+        "sess-b": [_node("b1")],
+        "sess-s": [_node("s1")],
+    }
+    env = TeamEnvSnapshot(sandbox_ids=[], issue_snapshot_id=None, env_state={})
+    dag_result = DagResult(
+        session_ids=["sess-a", "sess-b", "sess-s"],
+        session_to_agent_run={
+            "sess-a": "run-a",
+            "sess-b": "run-b",
+            "sess-s": "run-s",
+        },
+        segments=[
+            SegmentSpec(
+                segment_id="seg-a",
+                agent_run_id="run-a",
+                issue_id="iss-a",
+                task_id="task-root",
+                closing_event=EdgeType.COMPLETION,
+                closing_event_target_segment="seg-s",
+                start_turn_idx=1,
+                end_turn_idx=2,
+            ),
+            SegmentSpec(
+                segment_id="seg-b",
+                agent_run_id="run-b",
+                issue_id="iss-b",
+                task_id="task-root",
+                closing_event=EdgeType.COMPLETION,
+                closing_event_target_segment="seg-s",
+                start_turn_idx=1,
+                end_turn_idx=1,
+            ),
+            SegmentSpec(
+                segment_id="seg-s",
+                agent_run_id="run-s",
+                issue_id="iss-s",
+                task_id="task-root",
+                closing_event=None,
+                closing_event_target_segment=None,
+                start_turn_idx=1,
+                end_turn_idx=1,
+            ),
+        ],
+        edges=[
+            EdgeSpec("seg-a", "seg-s", EdgeType.COMPLETION),
+            EdgeSpec("seg-b", "seg-s", EdgeType.COMPLETION),
+        ],
+        env_snapshots={s: env for s in ("seg-a", "seg-b", "seg-s")},
+    )
+
+    supers, _, root_terminal = SuperNodeAssembler().assemble(
+        sessions_nodes=sessions_nodes, dag_result=dag_result
+    )
+    assert root_terminal == "s1"
+
+    store = MCTSTreeStore()
+    store.insert_super_batch(supers, query_id="q", backup=False)
+    store.backup_episode_terminal(root_terminal, 1.0)
+
+    # Both worker branches (a1<-a2 and b1) plus the sink are credited exactly
+    # once -- the second completion branch is not lost.
+    for node_id in ("s1", "a2", "a1", "b1"):
+        assert store.get_visit_count(node_id) == 1, f"{node_id!r} not credited"
+        assert store.get_q_value(node_id) == 1.0

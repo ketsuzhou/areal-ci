@@ -42,7 +42,6 @@ def __getattr__(name):
         from .core.advantage import TreeAdvantageComputer
 
         return TreeAdvantageComputer
-<<<<<<< HEAD
     if name == "GAEAdvantageComputer":
         from .core.advantage import GAEAdvantageComputer
 
@@ -51,8 +50,6 @@ def __getattr__(name):
         from .core.advantage import HybridGAEAdvantageComputer
 
         return HybridGAEAdvantageComputer
-=======
->>>>>>> feat/dag-rl-phase4-integration
     if name == "TreeCheckpointManager":
         from .core.checkpoint import TreeCheckpointManager
 

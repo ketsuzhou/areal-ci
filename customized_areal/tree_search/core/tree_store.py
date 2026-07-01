@@ -56,7 +56,13 @@ class Node:
 
     # Tree structure
     node_id: str = ""  # globally unique interaction ID (UUID from inference engine)
-    parent_node_id: str | None = None  # parent interaction ID (None for root)
+    parent_node_id: str | None = None  # primary causal parent (None for root)
+    # Additional causal parents at DAG join points (fan-in). None/empty for the
+    # common single-parent case; set by SuperNodeAssembler when a segment's
+    # first turn has multiple incoming DELEGATION/COMPLETION edges. Reward
+    # backup follows the primary parent AND these, so every incoming branch of
+    # a join receives credit (no fan-in credit loss).
+    extra_parent_node_ids: list[str] | None = None
     episode_id: str = ""  # groups turns into a trajectory path
     turn_idx: int = 0  # 1-based turn position within episode
     query_id: str = ""  # dataset query identifier
@@ -326,14 +332,29 @@ class MCTSTreeStore:
             return None
         return super_node.nodes[idx_in_nodes]
 
-    def _node_parent_id(self, node_id: str) -> str | None:
-        """Return the parent_node_id of an indexed node, or None."""
+    def _node_parent_ids(self, node_id: str) -> list[str]:
+        """Return all causal parents of an indexed node (primary + extras).
+
+        The primary ``parent_node_id`` plus any ``extra_parent_node_ids`` set by
+        the assembler at DAG join points. Empty list for the root / unknown
+        node. Backup follows every parent, so fan-in joins credit all incoming
+        branches (the ``visited`` guard prevents double-counting a shared
+        ancestor within a single backup walk).
+        """
         node = self.get_node(node_id)
         if node is None:
-            return None
+            return []
         if isinstance(node, dict):
-            return node.get("parent_node_id")
-        return node.parent_node_id
+            primary = node.get("parent_node_id")
+            extras = node.get("extra_parent_node_ids") or ()
+        else:
+            primary = getattr(node, "parent_node_id", None)
+            extras = getattr(node, "extra_parent_node_ids", None) or ()
+        parents: list[str] = []
+        if primary:
+            parents.append(primary)
+        parents.extend(p for p in extras if p)
+        return parents
 
     # -- MCTS backup (unchanged algorithm; walks parent_node_id) ---------
 
@@ -349,20 +370,26 @@ class MCTSTreeStore:
         )
 
     def _backup_path(self, terminal_node_id: str, reward: float) -> None:
-        """Propagate one episode's return root-ward along the parent chain.
+        """Propagate one episode's return root-ward along the parent DAG.
 
-        Walks parent_node_id across SuperNode and agent boundaries (the
-        unified causal chain set by SuperNodeAssembler). A ``visited`` guard
-        makes the walk robust to malformed cycles: if a cycle is detected,
-        the walk silently stops (no raise) and the nodes already visited keep
-        their accumulated reward.
+        Walks ``parent_node_id`` plus ``extra_parent_node_ids`` across SuperNode
+        and agent boundaries (the unified causal chain, generalized to a DAG at
+        fan-in joins). A ``visited`` guard makes the walk robust to malformed
+        cycles and ensures each ancestor is credited exactly once per episode
+        even when several branches share it: on a cycle the walk silently stops
+        (no raise) and already-visited nodes keep their accumulated reward.
         """
         visited: set[str] = set()
-        current: str | None = terminal_node_id
-        while current and current not in visited and current in self._node_id_to_super:
+        stack: list[str] = [terminal_node_id]
+        while stack:
+            current = stack.pop()
+            if current in visited or current not in self._node_id_to_super:
+                continue
             visited.add(current)
             self._backup_node(current, reward)
-            current = self._node_parent_id(current)
+            for parent_id in self._node_parent_ids(current):
+                if parent_id not in visited:
+                    stack.append(parent_id)
 
     def backup_episode_terminal(self, terminal_node_id: str, reward: float) -> None:
         """Public entry: root-ward backup of one episode's terminal return.
@@ -375,15 +402,24 @@ class MCTSTreeStore:
     def backup_path_returns(
         self, terminal_node_id: str, returns_by_node_id: dict[str, float]
     ) -> None:
-        """Root-ward backup assigning each node on the path its own return-to-go."""
+        """Root-ward backup assigning each node on the path its own return-to-go.
+
+        Walks the parent DAG (``parent_node_id`` + ``extra_parent_node_ids``);
+        the ``visited`` guard credits each node once per call.
+        """
         visited: set[str] = set()
-        current: str | None = terminal_node_id
-        while current and current not in visited and current in self._node_id_to_super:
+        stack: list[str] = [terminal_node_id]
+        while stack:
+            current = stack.pop()
+            if current in visited or current not in self._node_id_to_super:
+                continue
             visited.add(current)
             g = returns_by_node_id.get(current)
             if g is not None:
                 self._backup_node(current, float(g))
-            current = self._node_parent_id(current)
+            for parent_id in self._node_parent_ids(current):
+                if parent_id not in visited:
+                    stack.append(parent_id)
 
     # -- Insertion -------------------------------------------------------
 
@@ -432,8 +468,19 @@ class MCTSTreeStore:
             self._backup_inserted_episodes(inserted_node_ids)
 
     def _backup_inserted_episodes(self, node_ids: list[str]) -> None:
-        """Run a root-ward backup once per episode among freshly inserted nodes."""
+        """Run a root-ward backup once per episode among freshly inserted nodes.
+
+        Nodes that carry an ``episode_id`` are grouped by episode and backed up
+        from the highest-turn node (the episode terminal). Nodes WITHOUT an
+        ``episode_id`` (e.g. multi-agent SuperNodes assembled from Multica
+        segments, where credit flows along the cross-agent parent DAG rather
+        than a single episode chain) are backed up once per *leaf* -- a node
+        that is not a parent of any other freshly-inserted node. This avoids
+        the previous per-node backup, which walked the full parent chain from
+        every node and inflated shared ancestors' visit counts.
+        """
         episode_terminal: dict[str, tuple[int, str, float]] = {}
+        no_episode_ids: list[str] = []
         for node_id in node_ids:
             node = self.get_node(node_id)
             if node is None:
@@ -449,13 +496,26 @@ class MCTSTreeStore:
                 turn_idx = int(node.turn_idx or 0)
                 reward = float(node.outcome_reward or 0.0)
             if not ep_id:
-                self._backup_path(node_id, reward)
+                no_episode_ids.append(node_id)
                 continue
             prev = episode_terminal.get(ep_id)
             if prev is None or turn_idx >= prev[0]:
                 episode_terminal[ep_id] = (turn_idx, node_id, reward)
         for _turn_idx, terminal_id, reward in episode_terminal.values():
             self._backup_path(terminal_id, reward)
+        if no_episode_ids:
+            # A leaf is a node that no other empty-episode node points to as a
+            # parent; back up once from each leaf so shared ancestors get one
+            # sample per distinct terminal (not one per node on the path).
+            no_ep_set = set(no_episode_ids)
+            has_child = set()
+            for node_id in no_episode_ids:
+                for parent_id in self._node_parent_ids(node_id):
+                    if parent_id in no_ep_set:
+                        has_child.add(parent_id)
+            for node_id in no_episode_ids:
+                if node_id not in has_child:
+                    self._backup_path(node_id, self._rewards.get(node_id, 0.0))
 
     # -- Per-Node accessors (unchanged signatures) -----------------------
 

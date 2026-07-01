@@ -10,6 +10,9 @@ Maintains the unified parent_node_id chain (causal flattening):
     n1'.parent_node_id = n3.node_id
   - Cross-agent completion (B completes -> A continues@n4):
     n4.parent_node_id = B's terminal node_id
+  - Fan-in join (multiple DELEGATION/COMPLETION edges into one segment):
+    the first source terminal becomes parent_node_id, the rest become
+    extra_parent_node_ids, so reward backup credits every incoming branch.
   - MENTION edges record topology only; they do NOT set parent_node_id.
 
 Stamps TeamEnvSnapshot onto each SuperNode. Binds session_id to each SuperNode
@@ -272,17 +275,28 @@ class SuperNodeAssembler:
                     prev_terminal = prev_super.terminal_node
                     if prev_terminal is not None:
                         cur_super.nodes[0].parent_node_id = prev_terminal.node_id
-        # (c) + (d): for each blocking incoming edge, set dst's first node
-        # parent to src's terminal node_id.
-        for edge_spec in dag_result.edges:
-            if edge_spec.type not in (EdgeType.DELEGATION, EdgeType.COMPLETION):
+        # (c) + (d): a segment's first node depends on the terminal(s) of the
+        # source segment(s) of its incoming DELEGATION/COMPLETION edge(s). A
+        # join (fan-in) has multiple such edges: the first source terminal
+        # (ordered deterministically by src_segment_id) becomes parent_node_id;
+        # the rest become extra_parent_node_ids. Reward backup follows every
+        # parent, so all incoming branches of a join receive credit.
+        for dst_segment_id, blocking_edges in blocking_incoming.items():
+            dst_super = segment_id_to_super[dst_segment_id]
+            if not dst_super.nodes:
                 continue
-            src_super = segment_id_to_super[edge_spec.src_segment_id]
-            dst_super = segment_id_to_super[edge_spec.dst_segment_id]
-            src_terminal = src_super.terminal_node
-            if src_terminal is None or not dst_super.nodes:
+            parent_terminals: list[str] = []
+            for edge_spec in sorted(blocking_edges, key=lambda e: e.src_segment_id):
+                src_terminal = segment_id_to_super[
+                    edge_spec.src_segment_id
+                ].terminal_node
+                if src_terminal is not None:
+                    parent_terminals.append(src_terminal.node_id)
+            if not parent_terminals:
                 continue
-            dst_super.nodes[0].parent_node_id = src_terminal.node_id
+            dst_super.nodes[0].parent_node_id = parent_terminals[0]
+            if len(parent_terminals) > 1:
+                dst_super.nodes[0].extra_parent_node_ids = parent_terminals[1:]
         # MENTION edges: no parent_node_id set (topology-only), by omission.
 
         # ── Step 6: identify unique sink ──────────────────────────────

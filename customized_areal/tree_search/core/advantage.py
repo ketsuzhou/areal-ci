@@ -387,7 +387,7 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
                 )
                 # The sample this episode contributed to each node's MC aggregate
                 # is the per-node discounted return-to-go (see
-                # MCTSTreeStore.backup_episode_returns), so the leave-one-out must
+                # MCTSTreeStore.backup_path_returns), so the leave-one-out must
                 # exclude g_t -- not the terminal outcome -- to stay consistent
                 # with what was backed up.
                 excluded = episode_returns_to_go(rewards, gamma=self.gamma)

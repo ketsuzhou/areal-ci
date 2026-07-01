@@ -61,15 +61,16 @@ AReal's role is therefore:
 
 ### Reward backup: causal flattening
 
-When AReal assembles SuperNodes from Multica's segment specs, it maintains **one unified `parent_node_id` chain across all agents and all segments**:
+When AReal assembles SuperNodes from Multica's segment specs, it maintains **one unified causal parent structure across all agents and all segments**, expressed on each Node via `parent_node_id` (the primary causal predecessor) plus `extra_parent_node_ids` (additional causal predecessors at fan-in joins):
 
 - Within one agent run: `n_{k+1}.parent_node_id = n_k.node_id` (sequential turns).
 - Across a delegation boundary: when agent A's turn `n3` delegates to agent B, B's first turn `n1'` has `parent_node_id = n3.node_id` (cross-agent link).
 - Across a completion boundary: when B completes and A continues, A's next turn `n4` has `parent_node_id = B's_terminal.node_id` (A's continuation depends on B's result).
+- At a **fan-in join** (a segment with ≥2 incoming delegation/completion edges — e.g. a synthesizer that combines two workers): the destination's first turn records the first source terminal as `parent_node_id` (ordered deterministically by `src_segment_id`) and the remaining source terminals in `extra_parent_node_ids`.
 
-The cross-agent linkage is concrete: Multica's segment spec identifies, for each delegation/completion edge, the **source segment's terminal turn** (by `node_id` once AReal has built the Nodes) and the **destination segment's first turn**. AReal's assembler reads these from the spec and sets `parent_node_id` accordingly.
+The cross-agent linkage is concrete: Multica's segment spec identifies, for each delegation/completion edge, the **source segment's terminal turn** (by `node_id` once AReal has built the Nodes) and the **destination segment's first turn**. AReal's assembler reads these from the spec and sets `parent_node_id`/`extra_parent_node_ids` accordingly.
 
-This encodes the **full DAG causal order into the Node-level parent chain**. As a consequence, reward backup walks only this chain (`_backup_path`) — it transparently crosses SuperNode and agent boundaries. The DAG-edge backup function `distribute_reward_over_dag` is **not on the reward path**; it is retained in `agents/dag_backup.py` as a utility for future segment-level analysis, join-point explicit credit, and debugging.
+This encodes the **full DAG causal order into the Node-level parent structure**. As a consequence, reward backup walks only this structure (`_backup_path`) — a root-ward DFS over `parent_node_id` + `extra_parent_node_ids`, with a `visited` guard so each ancestor is credited exactly once per episode. It transparently crosses SuperNode and agent boundaries and, at joins, credits every incoming branch (a single-parent chain would silently drop all but one branch). The parent structure is single-valued (a chain) in the in-degree≤1 cases — single-agent runs, pure chains, and trees — which is why the single-agent path is behaviorally unchanged. The DAG-edge backup function `distribute_reward_over_dag` is **not on the reward path**; it is retained in `agents/dag_backup.py` as a utility for future segment-level analysis, join-point explicit credit, and debugging.
 
 ### What SuperNode carries that Node does not
 
@@ -91,7 +92,7 @@ After flattening, SuperNode is no longer a unit of MCTS statistics (those stay p
 | D5 | Multica orchestrates the multi-agent topology; AReal hosts the RL proxy (Multica drives `/rl/start_session` + `/rl/end_session` per agent session directly on the proxy gateway) and consumes (session_ids + DAG + branching env) at completion | Multica already manages agent spawning/communication; AReal should not duplicate topology decisions. Dynamic delegation is Multica's concern. |
 | D6 | `SuperNode.node_id` is a UUID4 | Globally unique without scheme coupling |
 | D7 | A segment = all turns since the previous communication event (exclusive), up to **and including** the turn that performs the next communication event (Option A) | The event-causing turn is the segment's terminal; causality for backup; every segment has a DAG edge |
-| D8 | `parent_node_id` links across SuperNode **and agent** boundaries (causal flattening) | Reward backup walks one unified chain; `distribute_reward_over_dag` becomes redundant on the reward path |
+| D8 | `parent_node_id` (+ `extra_parent_node_ids`) links across SuperNode **and agent** boundaries (causal flattening). Backup walks the resulting parent **DAG**, not a single chain: at a fan-in join the destination records all incoming causal parents, and a `visited` guard credits each ancestor once. Single-parent is the in-degree≤1 special case (single-agent, chains, trees). | Reward backup walks one unified parent DAG that transparently crosses SuperNode/agent boundaries and credits every branch of a join; `distribute_reward_over_dag` stays redundant on the reward path |
 | D9 | `distribute_reward_over_dag` retained as a utility function; not called on the reward path | Future use (segment analysis, join-point credit, debugging) at zero runtime cost |
 | D10 | `session_id` bound to **agent run**, shared across that run's SuperNodes | Matches `/rl/start_session` semantics (one session per agent run); verifier assigns one `outcome_reward` per run |
 | D11 | `sandbox_ids: list[str]` (one per team agent), `issue_snapshot_id: str | None`, `env_state: dict` on SuperNode | Team-wide environment checkpoint; SuperNode-level branching forks the full list |
@@ -579,13 +580,16 @@ Apply the following rules **in this precedence order**. Each Node's `parent_node
 
 **(b) Within-run cross-segment (default).** For each agent run, sort its segments by `start_turn_idx`. For `segment[k]` where `k > 0`: if **no** `EdgeSpec` with `type ∈ {DELEGATION, COMPLETION}` has `dst_segment_id == segment[k].segment_id`, set `segment[k].nodes[0].parent_node_id = segment[k-1].terminal_node.node_id`.
 
-**(c) Cross-agent DELEGATION edge.** For each `EdgeSpec(src, dst, DELEGATION)`: set `dst.nodes[0].parent_node_id = src.terminal_node.node_id`. This is B's first turn, so it has no within-run predecessor; (b) does not apply to `dst`.
+**(c) + (d) Cross-agent DELEGATION / COMPLETION edges (incl. fan-in joins).** Both edge types link the destination's first turn to the source segment's terminal, so they are handled together over the set of *blocking* incoming edges (`type ∈ {DELEGATION, COMPLETION}`) per destination segment:
 
-**(d) Cross-agent COMPLETION edge.** For each `EdgeSpec(src, dst, COMPLETION)`: set `dst.nodes[0].parent_node_id = src.terminal_node.node_id`. This **overrides** (b) for `dst` — A's continuation depends on B's result, not on A's own previous segment. Concretely: (b) is gated on "no incoming DELEGATION/COMPLETION edge," so when (d) applies, (b) skips `dst` and (d) is the only writer.
+- For a destination with exactly **one** blocking incoming edge `EdgeSpec(src, dst, DELEGATION|COMPLETION)`: set `dst.nodes[0].parent_node_id = src.terminal_node.node_id`. For DELEGATION, `dst` is B's first turn and has no within-run predecessor. For COMPLETION, this **overrides** (b) — A's continuation depends on B's result, not on A's own previous segment.
+- For a destination with **≥2** blocking incoming edges (a **fan-in join**, e.g. a synthesizer that combines two workers): collect all source terminals, order them deterministically by `src_segment_id`, set `dst.nodes[0].parent_node_id = terminals[0]` and `dst.nodes[0].extra_parent_node_ids = terminals[1:]`. Every incoming branch is thus a causal parent, so backup credits all of them.
+
+In both cases (b) is gated on "no incoming DELEGATION/COMPLETION edge," so it skips any `dst` handled here and this rule is the sole writer of `dst.nodes[0]`'s parents.
 
 **MENTION edges** record DAG topology only. They do **not** set `parent_node_id` — the source agent continues its own turn sequence without waiting for the mentioned agent. MENTION is visible in `incoming_edges`/`outgoing_edges` for verifier queries and DAG introspection.
 
-After (a)–(d), every Node except the root has a `parent_node_id` that encodes its causal predecessor, whether that's within the same segment, across segments of the same run, or across agents. The chain is acyclic by construction (it follows the DAG's topological order).
+After (a)–(d), every Node except the root has a `parent_node_id` (and, at fan-in joins, `extra_parent_node_ids`) that encodes its causal predecessor(s), whether that's within the same segment, across segments of the same run, or across agents. The resulting parent structure is a DAG that is acyclic by construction (it follows the DAG's topological order); it is a simple chain in the in-degree≤1 cases (single-agent, chains, trees).
 
 **Step 6 — Identify `root_terminal_node_id`.**
 

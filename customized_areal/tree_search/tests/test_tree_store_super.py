@@ -91,3 +91,23 @@ def test_single_agent_leaf_super_preserves_backup_behavior():
     assert store.get_q_value("n2") == 1.0
     assert store.get_visit_count("n1") == 1
     assert store.get_q_value("n1") == 1.0
+
+
+def test_insert_backup_empty_episode_id_backs_up_once_per_leaf():
+    """Nodes without an episode_id are backed up once per leaf (not once per
+    node). A shared ancestor of a linear chain must be visited exactly once,
+    not N times -- the previous per-node backup over-counted ancestors."""
+    store = MCTSTreeStore()
+    # Linear chain n1 <- n2 <- n3, all with empty episode_id, one leaf (n3).
+    n1 = _node("n1", episode_id="", outcome_reward=0.0)
+    n2 = _node("n2", episode_id="", parent_node_id="n1", outcome_reward=0.0)
+    n3 = _node("n3", episode_id="", parent_node_id="n2", outcome_reward=1.0)
+    store.insert_super_batch(
+        [_super("s", nodes=[n1, n2, n3])], query_id="q", backup=True
+    )
+    # Exactly one backup walk from the single leaf n3 (reward 1.0): each node
+    # visited once. Under the old per-node backup, n1 would be visited 3x.
+    assert store.get_visit_count("n1") == 1
+    assert store.get_visit_count("n2") == 1
+    assert store.get_visit_count("n3") == 1
+    assert store.get_q_value("n1") == 1.0
