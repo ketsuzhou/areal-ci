@@ -26,14 +26,16 @@ def test_edgeref_is_alias_for_tuple():
 
 
 def _super(node_id, completion_index, messages):
-    """Build a SuperNode-like object with the fields message_timeline reads."""
+    """Build a SuperNode-like object with the fields message_timeline reads.
+
+    ``message_timeline`` reads ``nodes[i].messages`` (the SuperNode shape);
+    the ``.messages`` attribute is NOT set, so the fallback path is the only
+    path exercised.
+    """
     return SimpleNamespace(
         node_id=node_id,
         completion_index=completion_index,
         nodes=[SimpleNamespace(messages=[m]) for m in messages],
-        # message_timeline reads .messages if present (legacy); we put the
-        # actual message dicts directly on .messages to exercise the new path.
-        messages=tuple(messages),
     )
 
 

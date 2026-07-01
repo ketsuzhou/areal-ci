@@ -1,4 +1,4 @@
-"""Edge ref type + message-timeline helper for the linear Event-log view.
+"""Edge ref type + message-timeline helper for the linear SuperNode log.
 
 After the SuperNode unification, this module no longer defines ``Event``;
 the linear-log role is absorbed by :class:`SuperNode` (which carries
@@ -14,37 +14,19 @@ Torch-free and I/O-free.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
 
 from customized_areal.tree_search.agents.execution_dag import EdgeType
 
 EdgeRef = tuple[str, EdgeType]
 
 
-class _HasCompletionIndex(Protocol):
-    """Structural type for objects message_timeline can consume.
-
-    SuperNode satisfies this: ``completion_index`` is its linear position and
-    ``node_id`` identifies the segment. Messages come from the ``nodes`` field
-    (each node's serialized messages) or a legacy ``messages`` tuple on the
-    object itself.
-    """
-
-    node_id: str
-    completion_index: int
-
-
 def _extract_messages(obj: object) -> list[dict]:
     """Return the message payload for one SuperNode-like object.
 
-    Prefers ``obj.messages`` (the legacy Event shape: a tuple of message dicts);
-    falls back to flattening ``obj.nodes[i].messages`` (the SuperNode shape).
-    Each node's own output is the LAST message of its payload.
+    Flattens ``obj.nodes[i].messages`` -- the SuperNode shape where each inner
+    node carries its own message dict(s). Each returned dict is a shallow copy
+    so callers can tag entries without mutating the source payload.
     """
-    messages = getattr(obj, "messages", None)
-    if messages is not None:
-        return [dict(m) for m in messages]
-    # SuperNode path: each inner node carries its own message dict(s).
     out: list[dict] = []
     nodes = getattr(obj, "nodes", None) or ()
     for n in nodes:

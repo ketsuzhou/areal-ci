@@ -113,7 +113,9 @@ def supernodes_to_dag(supers: Sequence[SuperNode]) -> ExecutionDAG:
       2. node_ids must be unique (no duplicate node_id across SuperNodes).
       3. edge lists must be symmetric (every A.outgoing (A->B) has a matching
          B.incoming (A->B) with the same EdgeType).
-      4. add SuperNodes (faithful; nodes/completion_index stay in the log only).
+      4. add SuperNodes (faithful copy of all fields; ``completion_index`` and
+         ``completion_time`` stay in the log only -- the latter is preserved
+         via ``metadata['completion_time']`` by ``dag_to_supernodes``).
       5. add edges (idempotent).
       6. enforce the topological-order invariant: for every edge src->dst,
          index(src) < index(dst).

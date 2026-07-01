@@ -46,6 +46,19 @@ EDGES = [
 ]
 
 
+def _flat_messages(super_node) -> tuple[dict, ...]:
+    """Flatten a SuperNode's nodes[i].messages into a single tuple.
+
+    Mirrors ``event_model._extract_messages`` but returns a tuple for easy
+    equality comparison in tests.
+    """
+    out: list[dict] = []
+    for n in super_node.nodes:
+        for m in getattr(n, "messages", None) or ():
+            out.append(m)
+    return tuple(out)
+
+
 def _build_dag() -> ExecutionDAG:
     dag = ExecutionDAG()
     for i, nid in enumerate(ORDER):
@@ -98,7 +111,7 @@ def test_dag_to_supernodes_copies_node_fields_and_messages() -> None:
     assert o1.outcome_reward == 1.0
     assert o1.value == pytest.approx(0.5)
     assert o1.task_id == "task-O1"
-    assert o1.messages == ({"role": "assistant", "content": "O1-out"},)
+    assert _flat_messages(o1) == ({"role": "assistant", "content": "O1-out"},)
     assert o1.completion_time == 5.0
 
 
@@ -133,8 +146,12 @@ def test_dag_to_supernodes_nodes_by_segment_overrides_metadata() -> None:
         e.node_id: e
         for e in dag_to_supernodes(dag, ordering=ORDER, nodes_by_segment=override)
     }
-    assert events["O0"].messages == ({"role": "assistant", "content": "override"},)
-    assert events["R0"].messages == ({"role": "assistant", "content": "R0-out"},)
+    assert _flat_messages(events["O0"]) == (
+        {"role": "assistant", "content": "override"},
+    )
+    assert _flat_messages(events["R0"]) == (
+        {"role": "assistant", "content": "R0-out"},
+    )
 
 
 def test_supernodes_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:

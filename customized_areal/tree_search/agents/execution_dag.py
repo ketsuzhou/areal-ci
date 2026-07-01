@@ -112,26 +112,12 @@ class SuperNode:
         t = self.terminal_node
         return t.node_id if t is not None else None
 
-    @property
-    def messages(self) -> tuple[dict, ...]:
-        """Flatten messages across all nodes in this segment.
-
-        Convenience for callers that consumed the old Event.messages field.
-        Each inner node's .messages list is concatenated in order.
-        """
-        out: list[dict] = []
-        for n in self.nodes:
-            node_msgs = getattr(n, "messages", None)
-            if node_msgs:
-                out.extend(node_msgs)
-        return tuple(out)
-
     def to_dict(self) -> dict:
-        """Emit a plain JSON-safe dict (EdgeType -> str, tuples -> lists).
+        """Emit a plain dict with EdgeType values stringified and tuples as lists.
 
-        ``nodes`` is serialized via each node's own ``to_dict()`` if present,
-        else the raw object (caller's responsibility). Edge tuples become
-        ``[[node_id, edge_type_str], ...]``.
+        ``nodes`` items are serialized via their own ``to_dict()`` when present;
+        otherwise the raw object is passed through (caller's responsibility
+        for JSON-safety). Edge tuples become ``[[node_id, edge_type_str], ...]``.
         """
         return {
             "node_id": self.node_id,
