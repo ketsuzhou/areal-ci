@@ -23,13 +23,10 @@ logger = logging.getLogger("SweLegoIssueRunner")
 
 
 class _MulticaClient(Protocol):
-    async def create_swe_lego_issue(
-        self,
-        *,
-        issue: SweLegoIssue,
-        group_size: int,
-        agent_config_id: str,
-        base_image: str | None = ...,
+    async def create_env_dispatch(
+        self, *, mode: str, env_id: str, dispatch_type: str,
+        agent_id: str, group_size: int = ..., domain: str | None = ...,
+        issue: SweLegoIssue | None = ..., message: str | None = ...,
     ) -> SweLegoSetup: ...
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None: ...
 
@@ -60,51 +57,58 @@ async def run_swe_lego_issue(
     *,
     issue: SweLegoIssue,
     group_size: int,
-    agent_config_id: str,
+    agent_id: str,
     multica: _MulticaClient,
     rl_session: _RlSession,
     verifier: _Verifier,
     branch_driver: _BranchDriver,
-    base_image: str | None = None,
+    base_env_id: str,
 ) -> SweLegoIssueResult:
-    # 1. Atomic setup.
-    setup = await multica.create_swe_lego_issue(
-        issue=issue, group_size=group_size, agent_config_id=agent_config_id, base_image=base_image
+    # 1. Atomic dispatch.
+    setup = await multica.create_env_dispatch(
+        mode="scratch", env_id=base_env_id, dispatch_type="issue",
+        agent_id=agent_id, group_size=group_size,
+        domain="swe_lego", issue=issue,
     )
 
     try:
-        # 2. Open one RL session per agent run.
+        # 2. Open one RL session per rollout.
         sessions = list(await asyncio.gather(*[
-            rl_session.start(agent_run_id=rid, issue_id=setup.issue_id)
-            for rid in setup.agent_run_ids
+            rl_session.start(agent_run_id=r.agent_run_id, issue_id=r.issue_id)
+            for r in setup.rollouts
         ]))
 
         # 3. Drive branching within each lane. The driver returns the
-        #    terminal sandbox id for each lane (the leaf of its branch tree).
-        terminal_sandboxes = await asyncio.gather(*[
+        #    terminal sandbox id for each lane.
+        #    NOTE: multica owns sandbox_id; areal passes env_id to branch.
+        #    The branch driver receives env_id (not sandbox_id) and asks
+        #    multica to fork internally when it branches.
+        terminal_env_ids = await asyncio.gather(*[
             branch_driver.drive_lane(
-                agent_run_id=rid, sandbox_id=setup.base_sandbox_id, session_id=sid
+                agent_run_id=r.agent_run_id, sandbox_id=r.env_id, session_id=sid
             )
-            for rid, sid in zip(setup.agent_run_ids, sessions)
+            for r, sid in zip(setup.rollouts, sessions)
         ])
 
         # 4. Verify + reward each terminal run.
         # TODO(task-17): wire real transcript from the branch driver.
         results = await asyncio.gather(*[
             verifier.verify_and_reward(
-                agent_run_id=rid, sandbox_id=sbx, session_id=sid,
+                agent_run_id=r.agent_run_id, sandbox_id=eid, session_id=sid,
                 fail_to_pass=issue.fail_to_pass, pass_to_pass=issue.pass_to_pass,
                 transcript="...", acceptance_criteria=issue.acceptance_criteria,
             )
-            for rid, sbx, sid in zip(setup.agent_run_ids, terminal_sandboxes, sessions)
+            for r, eid, sid in zip(setup.rollouts, terminal_env_ids, sessions)
         ])
         return SweLegoIssueResult(
             per_agent_rewards=[r.reward for r in results],
             per_agent_success=[r.success for r in results],
         )
     finally:
-        # 5. Cleanup always, even on failure (no sandbox leaks).
-        try:
-            await multica.cleanup_swe_lego_issue(project_id=setup.project_id)
-        except Exception:
-            logger.exception("cleanup failed for project %s", setup.project_id)
+        # 5. Cleanup always, even on failure (no sandbox leaks). One DELETE
+        #    per rollout's project_id.
+        for r in setup.rollouts:
+            try:
+                await multica.cleanup_swe_lego_issue(project_id=r.project_id)
+            except Exception:
+                logger.exception("cleanup failed for project %s", r.project_id)

@@ -3,7 +3,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue, SweLegoSetup
+from customized_areal.tree_search.agents.reward.swe_lego_types import (
+    SweLegoIssue,
+    SweLegoRollout,
+    SweLegoSetup,
+)
 from customized_areal.tree_search.agents.swe_lego_issue_runner import (
     run_swe_lego_issue,
     SweLegoIssueResult,
@@ -13,14 +17,19 @@ from customized_areal.tree_search.agents.verifier import VerifierResult
 
 @dataclass
 class FakeMulticaClient:
-    setup: SweLegoSetup
-    create_calls: list = field(default_factory=list)
+    rollouts: list = field(default_factory=list)
     cleanup_calls: list = field(default_factory=list)
     cleanup_raises: bool = False
 
-    async def create_swe_lego_issue(self, *, issue, group_size, agent_config_id, base_image=None):
-        self.create_calls.append((issue, group_size))
-        return self.setup
+    async def create_env_dispatch(self, *, mode, env_id, dispatch_type, agent_id,
+                                  group_size, domain=None, issue=None, message=None):
+        rollouts = [
+            SweLegoRollout(env_id=f"env-{i}", project_id=f"proj-{i}",
+                           issue_id="issue-1", agent_run_id=f"r{i+1}")
+            for i in range(group_size)
+        ]
+        self.rollouts = rollouts
+        return SweLegoSetup(rollouts=rollouts)
 
     async def cleanup_swe_lego_issue(self, *, project_id):
         self.cleanup_calls.append(project_id)
@@ -70,69 +79,59 @@ def _issue() -> SweLegoIssue:
     )
 
 
-def _setup() -> SweLegoSetup:
-    return SweLegoSetup(
-        project_id="p1", issue_id="i1", image_id="img1", build_node_id="n1",
-        base_sandbox_id="sbx-base", base_sandbox_runtime_id="rt-base",
-        agent_run_ids=["r1", "r2"],
-    )
-
-
 def test_run_swe_lego_issue_happy_path():
-    multica = FakeMulticaClient(setup=_setup())
+    multica = FakeMulticaClient()
     rl = FakeRlSession()
     verifier = FakeVerifier()
     driver = FakeBranchDriver()
     result = asyncio.run(
         run_swe_lego_issue(
-            issue=_issue(), group_size=2, agent_config_id="ag",
+            issue=_issue(), group_size=2, agent_id="ag", base_env_id="base-env-1",
             multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
         )
     )
     assert isinstance(result, SweLegoIssueResult)
-    assert multica.create_calls[0][1] == 2
+    assert len(multica.rollouts) == 2
     assert len(rl.sessions) == 2
     assert len(driver.ran_lanes) == 2
     assert result.per_agent_rewards == [1.0, 1.0]
-    assert multica.cleanup_calls == ["p1"]
+    assert multica.cleanup_calls == ["proj-0", "proj-1"]
 
 
 def test_run_swe_lego_issue_cleans_up_on_verifier_failure():
     # If the verifier raises, the runner must still cleanup the multica
     # resources (otherwise we leak sandboxes), but should propagate the error.
-    multica = FakeMulticaClient(setup=_setup())
-    rl = FakeRlSession()
+    multica = FakeMulticaClient()
 
     with pytest.raises(RuntimeError, match="verifier crashed"):
         asyncio.run(
             run_swe_lego_issue(
-                issue=_issue(), group_size=2, agent_config_id="ag",
-                multica=multica, rl_session=rl, verifier=RaisingVerifier(),
+                issue=_issue(), group_size=2, agent_id="ag", base_env_id="base-env-1",
+                multica=multica, rl_session=FakeRlSession(), verifier=RaisingVerifier(),
                 branch_driver=FakeBranchDriver(),
             )
         )
     # Cleanup happened despite the verifier error.
-    assert multica.cleanup_calls == ["p1"]
+    assert multica.cleanup_calls == ["proj-0", "proj-1"]
 
 
 def test_run_swe_lego_issue_cleans_up_when_branch_driver_raises():
-    multica = FakeMulticaClient(setup=_setup())
-    rl = FakeRlSession()
+    multica = FakeMulticaClient()
 
     with pytest.raises(RuntimeError, match="branch driver crashed"):
         asyncio.run(
             run_swe_lego_issue(
-                issue=_issue(), group_size=2, agent_config_id="ag",
-                multica=multica, rl_session=rl, verifier=FakeVerifier(),
+                issue=_issue(), group_size=2, agent_id="ag", base_env_id="base-env-1",
+                multica=multica, rl_session=FakeRlSession(), verifier=FakeVerifier(),
                 branch_driver=FakeBranchDriver(raises=True),
             )
         )
     # Cleanup happened despite the branch driver error.
-    assert multica.cleanup_calls == ["p1"]
+    assert multica.cleanup_calls == ["proj-0", "proj-1"]
 
 
 def test_run_swe_lego_issue_logs_when_cleanup_itself_raises():
-    multica = FakeMulticaClient(setup=_setup(), cleanup_raises=True)
+    multica = FakeMulticaClient(cleanup_raises=True)
     rl = FakeRlSession()
     verifier = FakeVerifier()
     driver = FakeBranchDriver()
@@ -143,10 +142,10 @@ def test_run_swe_lego_issue_logs_when_cleanup_itself_raises():
     # the log record, which is fragile across pytest caplog configurations.
     result = asyncio.run(
         run_swe_lego_issue(
-            issue=_issue(), group_size=2, agent_config_id="ag",
+            issue=_issue(), group_size=2, agent_id="ag", base_env_id="base-env-1",
             multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
         )
     )
     assert result.per_agent_rewards == [1.0, 1.0]
     # Cleanup was attempted despite the exception (swallowed + logged).
-    assert multica.cleanup_calls == ["p1"]
+    assert multica.cleanup_calls == ["proj-0", "proj-1"]
