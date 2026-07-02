@@ -96,7 +96,6 @@ def _warn_once(msg: str) -> None:
 # Engine and client (created via /create_engine and /call with method "initialize")
 _engine: InferenceEngine | None = None
 _openai_client: ArealOpenAI | None = None
-# Remote rollout client (constructed in _setup_openai_client alongside _openai_client)
 _remote_client: RemoteRolloutClient | None = None
 
 # Session management
@@ -272,15 +271,8 @@ async def alloc_ports(raw_request: Request):
 
 
 def _setup_openai_client():
-<<<<<<< /tmp/tmp86uuqr1j/ours
     global _openai_client, _remote_client, _session_timeout_seconds, _admin_api_key
-=======
-    global _openai_client, _session_timeout_seconds, _admin_api_key
     global _message_preprocessors, _prefix_matcher
-<<<<<<< /tmp/tmp86uuqr1j/ours
->>>>>>> /tmp/tmp86uuqr1j/theirs
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
     config = _engine.config
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
     agent_cfg = config.agent
@@ -291,8 +283,7 @@ def _setup_openai_client():
         reasoning_parser=agent_cfg.reasoning_parser,
         engine_max_tokens=agent_cfg.engine_max_tokens,
         chat_template_type=agent_cfg.chat_template_type,
-<<<<<<< /tmp/tmp86uuqr1j/ours
-<<<<<<< /tmp/tmp86uuqr1j/ours
+        lora_name=config.lora_name,
     )
     _remote_client = RemoteRolloutClient(
         tokenizer=tokenizer,
@@ -300,17 +291,6 @@ def _setup_openai_client():
         engine_max_tokens=agent_cfg.engine_max_tokens,
         recompute_enabled=agent_cfg.should_compute_prox_logp(),
     )
-    _session_timeout_seconds = agent_cfg.session_timeout_seconds
-    with _lock:
-        _admin_api_key = agent_cfg.admin_api_key
-        if _admin_api_key == DEFAULT_ADMIN_API_KEY:
-            logger.warning(
-                "Using default admin API key. Change 'admin_api_key' in "
-                "AgentConfig for non-local deployments."
-            )
-=======
-        lora_name=config.lora_name,
-    )
     # Set session timeout from config
     _session_timeout_seconds = agent_cfg.session_timeout_seconds
     # Validate admin API key BEFORE assigning it to the global, so a
@@ -328,27 +308,6 @@ def _setup_openai_client():
     # Only commit the key to the global after validation has passed.
     with _lock:
         _admin_api_key = agent_cfg.admin_api_key
-=======
-        lora_name=config.lora_name,
-    )
-    # Set session timeout from config
-    _session_timeout_seconds = agent_cfg.session_timeout_seconds
-    # Validate admin API key BEFORE assigning it to the global, so a
-    # failed validation cannot leave the default key live on the server.
-    # The default admin key is publicly known; refuse to use it when the
-    # server is reachable from outside the local host (otherwise anyone
-    # who can reach this port can call admin endpoints such as
-    # grant_capacity, start_session, export_trajectories, ...).
-    validate_admin_api_key(
-        _server_host,
-        agent_cfg.admin_api_key,
-        default_key=DEFAULT_ADMIN_API_KEY,
-        config_field="AgentConfig.admin_api_key",
-    )
-    # Only commit the key to the global after validation has passed.
-    with _lock:
-        _admin_api_key = agent_cfg.admin_api_key
->>>>>>> /tmp/tmp86uuqr1j/theirs
 
     _message_preprocessors = []
     for path in agent_cfg.message_preprocessors:
@@ -361,10 +320,6 @@ def _setup_openai_client():
         logger.info("Loaded prefix matcher: %s", agent_cfg.prefix_matcher)
     else:
         _prefix_matcher = None
-<<<<<<< /tmp/tmp86uuqr1j/ours
->>>>>>> /tmp/tmp86uuqr1j/theirs
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
 
 
 @app.post("/configure")
@@ -703,16 +658,10 @@ async def chat_completions(
     Supports both streaming (stream=True) and non-streaming requests.
     For streaming requests, returns a StreamingResponse with Server-Sent Events
     in the OpenAI streaming format (data: {json}\\n\\n ... data: [DONE]\\n\\n).
-<<<<<<< /tmp/tmp86uuqr1j/ours
-<<<<<<< /tmp/tmp86uuqr1j/ours
 
     Remote rollout: requests with model starting with "remote:" are routed
     to OpenRouter via RemoteRolloutClient. model="default" uses the local
     inference engine. Unknown models return 404.
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
     """
     if _openai_client is None:
         raise HTTPException(
@@ -720,9 +669,6 @@ async def chat_completions(
             detail='Proxy server not initialized. Send requests to /create_engine then /call "initialize" first.',
         )
 
-<<<<<<< /tmp/tmp86uuqr1j/ours
-<<<<<<< /tmp/tmp86uuqr1j/ours
-    # --- Model-prefix dispatch ---
     model = request.get("model", "default")
     if isinstance(model, str) and model.startswith("remote:"):
         if _remote_client is None:
@@ -730,7 +676,6 @@ async def chat_completions(
                 status_code=500,
                 detail="Remote rollout client not initialized.",
             )
-        # Resolve session cache (same as _call_client_create does).
         with _lock:
             if session_id not in _session_cache:
                 raise HTTPException(
@@ -749,11 +694,6 @@ async def chat_completions(
             "or 'remote:<provider/model>' for OpenRouter.",
         )
 
-    # --- Existing local path ---
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
-=======
->>>>>>> /tmp/tmp86uuqr1j/theirs
     # CompletionCreateParams is a TypedDict (dict subclass), so use dict access.
     is_streaming = request.get("stream") is True
 

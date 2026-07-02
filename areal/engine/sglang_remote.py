@@ -29,7 +29,6 @@ from areal.api.io_struct import (
     HttpGenerationResult,
     HttpRequest,
     WeightUpdateRequests,
-    detect_image_mime,
     get_versioned_lora_name,
 )
 from areal.infra import RemoteInfEngine, RolloutController, WorkflowExecutor
@@ -68,21 +67,9 @@ class SGLangBackend:
         if stop:
             sample_params["stop"] = stop
 
-        # SGLang /generate expects data URIs or file paths for image_data,
-        # but req.image_data contains raw base64 strings (without data URI prefix).
-        # Wrap raw base64 with the correct MIME type, matching what vLLM does.
-        image_data = None
-        if req.image_data:
-            image_data = [
-                img
-                if img.startswith(("data:", "http://", "https://"))
-                else f"data:{detect_image_mime(img)};base64,{img}"
-                for img in req.image_data
-            ]
-
         payload = {
             "input_ids": req.input_ids.copy(),
-            "image_data": image_data,
+            "image_data": req.image_data,  # ImageObject or str
             "sampling_params": sample_params,
             "return_logprob": True,
             "stream": False,
@@ -133,11 +120,24 @@ class SGLangBackend:
         output_tokens = [x[1] for x in meta_info["output_token_logprobs"]]
         output_logprobs = [x[0] for x in meta_info["output_token_logprobs"]]
 
+        output_top_logprobs = None
+        if "output_top_logprobs" in meta_info:
+            raw_top_logprobs = meta_info["output_top_logprobs"]
+            output_top_logprobs = []
+            for pos_top_logprobs in raw_top_logprobs:
+                position_logprobs = []
+                if pos_top_logprobs is not None:
+                    for token_key, logprob in pos_top_logprobs.items():
+                        if isinstance(token_key, int):
+                            position_logprobs.append((token_key, logprob))
+                output_top_logprobs.append(position_logprobs)
+
         return HttpGenerationResult(
             output_tokens=output_tokens,
             output_logprobs=output_logprobs,
             stop_reason=stop_reason,
             routed_experts=routed_experts,
+            output_top_logprobs=output_top_logprobs,
         )
 
     def build_score_request(
@@ -254,27 +254,6 @@ class SGLangBackend:
     def build_init_weights_group_request(
         self, addr: str, server_idx: int, meta: WeightUpdateMeta
     ) -> HttpRequest:
-<<<<<<< /tmp/tmpduvhpih1/ours
-<<<<<<< /tmp/tmpduvhpih1/ours
-        """Build SGLang init weights group request."""
-        assert meta.gen_allocation is not None
-        gen_parallel = meta.gen_allocation.parallel
-        if gen_parallel.pp_size != 1:
-            raise NotImplementedError(
-                "NCCL weight update with PP size > 1 is not implemented yet."
-            )
-        rank_offset = 1 + server_idx * gen_parallel.tp_size
-        payload = {
-            "master_address": format_host_for_url(meta.nccl_master_address),
-            "master_port": str(meta.nccl_master_port),
-            "rank_offset": rank_offset,
-            "world_size": gen_parallel.world_size + 1,
-            "backend": current_platform.communication_backend,
-            "group_name": meta.nccl_group_name,
-        }
-=======
-=======
->>>>>>> /tmp/tmpduvhpih1/theirs
         """Build SGLang init weights group request.
 
         Supports two scenarios:
@@ -354,10 +333,6 @@ class SGLangBackend:
                 "group_name": group_name,
             }
 
-<<<<<<< /tmp/tmpduvhpih1/ours
->>>>>>> /tmp/tmpduvhpih1/theirs
-=======
->>>>>>> /tmp/tmpduvhpih1/theirs
         return HttpRequest(endpoint="/init_weights_update_group", payload=payload)
 
     def get_pause_request(self) -> HttpRequest:
@@ -632,30 +607,11 @@ class RemoteSGLangEngine(InferenceEngine):
             return RolloutControllerV2(config=config, scheduler=scheduler)
         return RolloutController(cls, config=config, scheduler=scheduler)
 
-<<<<<<< /tmp/tmpduvhpih1/ours
-<<<<<<< /tmp/tmpduvhpih1/ours
-    def clear_batches(self, shard_ids: list[str]) -> None:
-=======
     def clear_batches(self, shard_ids: list[str] | None = None) -> None:
->>>>>>> /tmp/tmpduvhpih1/theirs
-=======
-    def clear_batches(self, shard_ids: list[str] | None = None) -> None:
->>>>>>> /tmp/tmpduvhpih1/theirs
         """Drain this worker's client-side RTensor fetch buffer.
 
         Called via RPC by ``TrainController.clear_batches`` at step end so
         cross-node consumer DP heads release cached tensors. See #1209.
-<<<<<<< /tmp/tmpduvhpih1/ours
-<<<<<<< /tmp/tmpduvhpih1/ours
-        Upstream ``TrainController.clear_batches`` guards against empty
-        input, so ``shard_ids`` is always a non-empty ``list[str]``.
-        """
-        from areal.infra.rpc.rtensor import clear_fetch_buffer
-
-        clear_fetch_buffer(shard_ids)
-=======
-=======
->>>>>>> /tmp/tmpduvhpih1/theirs
         Non-DP-head ranks receive no positional args via
         ``_call_workers`` (see train_controller.py:575-577) — accept the
         no-args call and noop, since their ``_fetch_buffer`` is empty.
@@ -664,10 +620,6 @@ class RemoteSGLangEngine(InferenceEngine):
 
         if shard_ids:
             clear_fetch_buffer(shard_ids)
-<<<<<<< /tmp/tmpduvhpih1/ours
->>>>>>> /tmp/tmpduvhpih1/theirs
-=======
->>>>>>> /tmp/tmpduvhpih1/theirs
 
     def fetch_buffer_stats(self) -> dict[str, int]:
         """Expose local fetch-buffer stats for post-step drain verification."""

@@ -980,11 +980,6 @@ class MegatronEngineConfig:
         },
     )
 
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
     use_bridge_for_update_weights: bool = field(
         default=False,
         metadata={
@@ -1013,10 +1008,6 @@ class MegatronEngineConfig:
         },
     )
 
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
 
 class SchedulingStrategyType(str, Enum):
     separation = "separation"
@@ -1300,21 +1291,12 @@ class TrainEngineConfig:
         default=3600.0,
         metadata={"help": "Gateway setup timeout in seconds for controller v2."},
     )
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
     workers_ready_timeout: float = field(
         default=30.0,
         metadata={
             "help": "Timeout (seconds) for initialize() to wait for guards to be ready."
         },
     )
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
     scheduling_strategy: SchedulingStrategy = field(
         default_factory=SchedulingStrategy,
         metadata={
@@ -1343,11 +1325,6 @@ class TrainEngineConfig:
                 f"_version must be either 'v1' or 'v2', got '{self._version}'"
             )
 
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         # Canonicalize common aliases so getattr(torch, ...) works at runtime.
         # Storage map omits fp16 since float16 is not a valid optimizer_dtype;
         # leaving "fp16" un-canonicalized makes the validation error below
@@ -1369,10 +1346,6 @@ class TrainEngineConfig:
                 f"dtype must be one of float32/bfloat16/float16, got {self.dtype!r}"
             )
 
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
 
 @dataclass
 class RejectionSamplingConfig:
@@ -1432,21 +1405,10 @@ class RejectionSamplingConfig:
             "'ratio': direct importance ratio π_proximal/π_behave. "
             "'kl_k1': KL estimator k1 = log(r), forward KL unbiased estimator (can be negative). "
             "'kl_k2': KL estimator k2 = 0.5 * (log r)^2, non-negative quadratic approximation. "
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-            "'kl_k3': KL estimator k3 = r - log(r) - 1, non-negative exact forward KL estimator.",
-            "choices": ["ratio", "kl_k1", "kl_k2", "kl_k3"],
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
             "'kl_k3': KL estimator k3 = r - log(r) - 1, non-negative exact forward KL estimator. "
             "'binary_kl': KPop (symmetric binary KL divergence) — masks tokens where either "
             "KL(proximal||behave) or KL(behave||proximal) exceeds the upper bound.",
             "choices": ["ratio", "kl_k1", "kl_k2", "kl_k3", "binary_kl"],
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         },
     )
     agg: str = field(
@@ -1735,11 +1697,6 @@ class PPOActorConfig(TrainEngineConfig):
 
     def __post_init__(self):
         """Validate PPO actor configuration."""
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         from areal.utils.constants import ProxLogpMethod
 
         if (
@@ -1755,10 +1712,6 @@ class PPOActorConfig(TrainEngineConfig):
                 "to a single optimizer step per PPO update."
             )
             self.ppo_n_minibatches = 1
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         # Warn if rejection_sampling is configured but use_decoupled_loss is False
         if not self.use_decoupled_loss and self.rejection_sampling is not None:
             logger.warning(
@@ -1795,22 +1748,6 @@ class PPOActorConfig(TrainEngineConfig):
                     "Please set `actor.use_decoupled_loss=false` in your configuration."
                 )
 
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-        # Warn if remote rollout is enabled but no recompute path is active.
-        # Remote completions carry placeholder logprobs that would corrupt
-        # PPO ratios without recompute; see the OpenRouter remote rollout
-        # design spec for the full rationale.
-        if self.enable_remote_rollout and not self.should_compute_prox_logp():
-            logger.warning(
-                "enable_remote_rollout=True but neither recompute_logprob nor "
-                "use_decoupled_loss is active. Remote completions carry placeholder "
-                "logprobs; set actor.recompute_logprob=true or "
-                "actor.use_decoupled_loss=true to avoid corrupting PPO ratios."
-            )
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         # Validate CISPO configuration
         if self.use_cispo_loss:
             if self.use_sapo_loss:
@@ -1829,16 +1766,16 @@ class PPOActorConfig(TrainEngineConfig):
                     "CISPO only supports importance_sampling_level='token'. "
                     "Sequence-level (GSPO-style) CISPO has no published surrogate."
                 )
-<<<<<<< /tmp/tmp_733yfmk/ours
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
+
+        if self.enable_remote_rollout and not self.should_compute_prox_logp():
+            logger.warning(
+                "enable_remote_rollout=True but neither recompute_logprob nor "
+                "use_decoupled_loss is active. Remote completions carry placeholder "
+                "logprobs; set actor.recompute_logprob=true or "
+                "actor.use_decoupled_loss=true to avoid corrupting PPO ratios."
+            )
 
         super().__post_init__()
-
-
-@dataclass
-class PPOCriticConfig(TrainEngineConfig):
     """Configuration for PPO critic model, a subclass of a TrainEngine."""
 
     ppo_n_minibatches: int = field(
@@ -2096,17 +2033,7 @@ class SGLangConfig:
 
     @staticmethod
     def build_cmd_from_args(args: dict[str, Any]):
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-        return get_py_cmd(
-            "areal.experimental.inference_service.sglang.launch_server", args
-        )
-=======
         return get_py_cmd("areal.v2.inference_service.sglang.launch_server", args)
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
-        return get_py_cmd("areal.v2.inference_service.sglang.launch_server", args)
->>>>>>> /tmp/tmp_733yfmk/theirs
 
     @staticmethod
     def build_args(
@@ -2162,16 +2089,6 @@ class SGLangConfig:
 @dataclass
 class AgentConfig:
     """Configuration for agent workflows and the experimental agent service controller.
-<<<<<<< /tmp/tmp_733yfmk/ours
-
-    Consolidates proxy settings (mode, parsers, export) with agent-service
-    orchestration (scheduling, auth) into a single flat dataclass.
-    """
-<<<<<<< /tmp/tmp_733yfmk/ours
-
-    agent_cls_path: str = field(
-        default="",
-=======
 
     Consolidates proxy settings (mode, parsers, export) with agent-service
     orchestration (scheduling, auth) into a single flat dataclass.
@@ -2207,71 +2124,6 @@ class AgentConfig:
         },
     )
 
-    # -- Proxy / workflow settings (formerly OpenAIProxyConfig) ----------------
-    mode: str = field(
-        default="inline",
->>>>>>> /tmp/tmp_733yfmk/theirs
-        metadata={
-            "help": "Fully-qualified import path for the AgentRunnable implementation."
-        },
-    )
-    admin_api_key: str = field(
-        default="areal-admin-key",
-        metadata={
-            "help": (
-                "Admin API key for the proxy server and agent-service inter-service auth. "
-                "Used to authenticate management operations (grant_capacity, start_session). "
-                "Cannot be used for chat completions. Each session gets a unique "
-                "API key allocated via start_session. "
-                "WARNING: Change this from the default for non-local deployments."
-            ),
-        },
-    )
-    scheduling_spec: tuple[SchedulingSpec, ...] = field(
-        default_factory=lambda: (
-            SchedulingSpec(
-                gpu=0,
-                cmd="python -m areal.experimental.agent_service.guard",
-            ),
-        ),
-        metadata={
-            "help": "Scheduling spec for agent-service guard workers. Must contain exactly one SchedulingSpec. Use scheduling_spec[0].env_vars for child-process environment variables."
-        },
-    )
-
-=======
-
-    agent_cls_path: str = field(
-        default="",
-        metadata={
-            "help": "Fully-qualified import path for the AgentRunnable implementation."
-        },
-    )
-    admin_api_key: str = field(
-        default="areal-admin-key",
-        metadata={
-            "help": (
-                "Admin API key for the proxy server and agent-service inter-service auth. "
-                "Used to authenticate management operations (grant_capacity, start_session). "
-                "Cannot be used for chat completions. Each session gets a unique "
-                "API key allocated via start_session. "
-                "WARNING: Change this from the default for non-local deployments."
-            ),
-        },
-    )
-    scheduling_spec: tuple[SchedulingSpec, ...] = field(
-        default_factory=lambda: (
-            SchedulingSpec(
-                gpu=0,
-                cmd="python -m areal.v2.agent_service.guard",
-            ),
-        ),
-        metadata={
-            "help": "Scheduling spec for agent-service guard workers. Must contain exactly one SchedulingSpec. Use scheduling_spec[0].env_vars for child-process environment variables."
-        },
-    )
-
->>>>>>> /tmp/tmp_733yfmk/theirs
     # -- Proxy / workflow settings (formerly OpenAIProxyConfig) ----------------
     mode: str = field(
         default="inline",
@@ -2487,25 +2339,6 @@ class InferenceEngineConfig:
         default=False,
         metadata={"help": "Whether to use LoRA. Should be same as actors LORA option."},
     )
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-    lora_name: str = field(
-        default="",
-        metadata={
-            "help": "LoRA adapter name the rollout backend serves. Generation "
-            "requests select the adapter by this name (plus the weight version). "
-            "Usually left empty and auto-filled from gconfig.lora_name by "
-            "PPOConfig.__post_init__ so load and request sides stay in sync."
-        },
-    )
->>>>>>> /tmp/tmp_733yfmk/theirs
-    agent: AgentConfig = field(
-        default_factory=lambda: AgentConfig(
-            agent_cls_path="areal.experimental.openai.proxy.online_agent._OnlineAgent"
-        ),
-        metadata={
-=======
     lora_name: str = field(
         default="",
         metadata={
@@ -2520,7 +2353,6 @@ class InferenceEngineConfig:
             agent_cls_path="areal.experimental.openai.proxy.online_agent._OnlineAgent"
         ),
         metadata={
->>>>>>> /tmp/tmp_733yfmk/theirs
             "help": "Agent workflow configuration used by inference-service rollouts."
         },
     )
@@ -2745,24 +2577,6 @@ class SwanlabConfig:
             "choices": ["cloud", "local", "disabled", "offline"],
         },
     )
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-    resume: str | None = field(
-        default=None,
-        metadata={
-            "help": "Resume mode for SwanLab run: 'must', 'allow', or 'never'. Must be used with 'id'.",
-        },
-    )
-    id: str | None = field(
-        default=None,
-        metadata={
-            "help": "SwanLab run ID to resume. Required when resume='must'.",
-        },
-    )
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
     # set None to prevent info-leak in docs
     api_key: str | None = None
 
@@ -2773,20 +2587,6 @@ class SwanlabConfig:
             raise ValueError(
                 f"Invalid swanlab mode: '{self.mode}'. Must be one of: {', '.join(valid_modes)}."
             )
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-        if self.resume is not None:
-            valid_resume = ("must", "allow", "never")
-            if self.resume not in valid_resume:
-                raise ValueError(
-                    f"Invalid swanlab resume: '{self.resume}'. Must be one of: {', '.join(valid_resume)}."
-                )
-            if self.resume == "must" and self.id is None:
-                raise ValueError("swanlab.id is required when swanlab.resume='must'.")
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
         if self.api_key is None:
             self.api_key = os.getenv("SWANLAB_API_KEY")
 
@@ -3238,11 +3038,6 @@ class DPOEngineConfig(TrainEngineConfig):
             "'ipo': Identity Preference Optimization with per-token length normalization (Azar et al. 2023).",
             "choices": ["sigmoid", "ipo"],
         },
-<<<<<<< /tmp/tmp_733yfmk/ours
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
-=======
->>>>>>> /tmp/tmp_733yfmk/theirs
     )
 
     def __post_init__(self):
@@ -3294,49 +3089,11 @@ class TeacherConfig:
         metadata={
             "help": "Teacher model path. If set, overrides shared rollout backend model path."
         },
-<<<<<<< /tmp/tmp_733yfmk/ours
-=======
     )
     offload: bool = field(
         default=False,
         metadata={"help": "Whether to offload teacher rollout model between steps"},
->>>>>>> /tmp/tmp_733yfmk/theirs
     )
-    offload: bool = field(
-        default=False,
-        metadata={"help": "Whether to offload teacher rollout model between steps"},
->>>>>>> /tmp/tmp_733yfmk/theirs
-    )
-
-    def __post_init__(self):
-        super().__post_init__()
-        _valid = {"sigmoid", "ipo"}
-        if self.loss_type not in _valid:
-            raise ValueError(
-                f"Unsupported DPO loss_type '{self.loss_type}'. "
-                f"Must be one of {sorted(_valid)}."
-            )
-
-
-@dataclass
-class DPOConfig(BaseExperimentConfig):
-    """Configuration for Direct Preference Optimization (DPO) experiments."""
-
-    actor: DPOEngineConfig = field(default_factory=DPOEngineConfig)
-
-    ref: DPOEngineConfig = field(default_factory=DPOEngineConfig)
-
-    def __post_init__(self):
-        super().__post_init__()
-        if getattr(self.actor, "is_critic", False):
-            raise ValueError(
-                "DPOConfig requires a language model (is_critic=False). "
-                "Remove 'actor.is_critic: true' from your YAML config."
-            )
-
-
-@dataclass
-class TeacherConfig(PPOActorConfig):
     rl_loss_weight: float = field(
         default=1.0,
         metadata={"help": "RL loss weight"},
