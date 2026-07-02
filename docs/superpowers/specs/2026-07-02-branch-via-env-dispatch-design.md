@@ -124,11 +124,19 @@ Keep the `need_branch`, `entropy_stats`, and `topk_ids` reads unchanged.
 - tests: `test_leagent_channels.py` (START_BRANCH cases), schema tests, and the
   `agent_start_branch` reference in `test_integration_e2e.py`.
 
-**multica server:**
+**multica server (Go, `multica/server`):**
 
-- Remove handlers + route registrations for `POST /api/agent/start-branch` and
-  `POST/DELETE /api/issues/{id}/fork`; remove now-orphaned service code and
-  their tests.
+- Remove handlers + route registrations for `POST /api/issues/{id}/fork` and
+  `DELETE /api/issues/{id}/fork` (`internal/handler/issue_fork.go`,
+  `internal/service/issue_fork.go`, `cmd/server/router.go` lines ~755-756),
+  plus `internal/handler/issue_fork_test.go`,
+  `internal/service/issue_fork_test.go`, and the fork rows in
+  `cmd/server/router_fork_routes_test.go`.
+- **NOTE:** `/api/agent/start-branch` is **not** served by `multica/server`; it
+  lives in the external **le-agent** backend (the `leagent_api` executor host,
+  not in this repo). Removing that server endpoint is therefore an **external**
+  change tracked separately (like the backend `env_id` emission, §3). C removes
+  its client (`backend_run.py`) and its db_bridge channel here.
 
 ## 8. Checkpoint & serialization (D5 — clean break)
 
@@ -145,7 +153,10 @@ Keep the `need_branch`, `entropy_stats`, and `topk_ids` reads unchanged.
   (new), `agents/swe_lego_issue_runner.py`, `agents/self_play_runner.py`,
   `tpfc/backend_run.py`, plus their tests.
 - **db_bridge:** `channels.py`, `schema.sql`, tests.
-- **multica server:** branch + issue-fork handlers, routes, service code, tests.
+- **multica server (Go):** `internal/handler/issue_fork.go`,
+  `internal/service/issue_fork.go`, `cmd/server/router.go`, and the fork tests.
+  (`/api/agent/start-branch` server endpoint is external — le-agent backend —
+  and out of this repo's scope; see §7.)
 
 ## 10. Risks
 
@@ -177,4 +188,6 @@ Keep the `need_branch`, `entropy_stats`, and `topk_ids` reads unchanged.
 ## 12. Out of scope
 
 Training-entrypoint migration to the runner model; env-dispatch server branch
-semantics; backend per-turn `env_id` emission.
+semantics; backend per-turn `env_id` emission; removal of the
+`/api/agent/start-branch` server endpoint in the external le-agent backend
+(C removes only its client + db_bridge channel).
