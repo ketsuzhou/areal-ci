@@ -51,8 +51,8 @@ flowchart TD
     save_query["Save per-query checkpoint<br/>CROSS_TRAINING mode"]
     tensor["Convert to batched tensor dict"]
 
-    store["MCTSTreeStore<br/>flat trajectory store with MCTS statistics"]
-    store_insert["insert_batch<br/>store trajectories"]
+    store["MCTSTreeStore<br/>SuperNode store with Node-level MCTS statistics"]
+    store_insert["insert_super_batch<br/>store SuperNodes and nested Nodes"]
     store_load["load_untrained_episodes<br/>retrieve untrained Nodes"]
     store_count["get_untrained_episode_count<br/>check cache availability"]
     store_trained["set_trained / is_trained<br/>track usage"]
@@ -181,8 +181,11 @@ Dataclasses controlling tree backup, caching, and advantage computation.
 
 ### 2. MCTS Tree Store (`core/tree_store.py`)
 
-The central data structure. Manages a flat per-query list of `Node` objects, tracks MCTS
-statistics per trajectory, and provides cached trajectory loading.
+The central data structure. Stores per-query `SuperNode` records, indexes the `Node`
+objects inside each `SuperNode`, tracks MCTS statistics at the `Node` level, and provides
+cached trajectory loading. The single-agent workflow wraps each episode's `list[Node]` in
+a leaf `SuperNode`; multi-agent DAG runs can insert real communication-bounded
+`SuperNode` segments assembled from Multica output.
 
 #### Node Dataclass
 
@@ -197,7 +200,8 @@ tokens from the beginning through this turn's response). Nodes are linked via `n
 | `logprobs`          | `list[float]`               | Per-token log probabilities                          |
 | `versions`          | `list[int]`                 | Policy version per token (-1 on prompt)              |
 | `node_id`           | `str`                       | Globally unique interaction ID (UUID)                |
-| `parent_node_id`    | `str \| None`               | Parent interaction ID (None for root)                |
+| `parent_node_id`    | `str \| None`               | Primary causal parent interaction ID (None for root) |
+| `extra_parent_node_ids` | `list[str] \| None`     | Extra causal parents at DAG fan-in joins             |
 | `episode_id`        | `str`                       | Groups turns into a trajectory path                  |
 | `turn_idx`          | `int`                       | 1-based turn position within episode                 |
 | `query_id`          | `str`                       | Dataset query identifier                             |
@@ -206,8 +210,11 @@ tokens from the beginning through this turn's response). Nodes are linked via `n
 | `task_id`           | `str`                       | TPFC backend task that produced this node            |
 | `entropy_stats`     | `dict \| None`              | Entropy statistics from TPFC assistant metadata      |
 | `need_branch`       | `bool`                      | Whether this node is a candidate for branch sampling |
-| `branch_sandbox_id` | `str \| None`               | Sandbox ID for branch task creation                  |
+| `branch_sandbox_id` | `str \| None`               | Sandbox ID for legacy branch task creation           |
+| `branch_issue_id`   | `str \| None`               | Forked Multica issue ID for cloud branch cleanup     |
+| `branch_env_snapshot_id` | `str \| None`         | Cloud environment snapshot marker for branch candidates |
 | `outcome_reward`    | `float`                     | Trajectory-level reward                              |
+| `credit`            | `float \| None`             | Optional per-node DAG credit from reward backup      |
 | `value`             | `float`                     | Generative-critic state value `v_phi(s_t)` (0.0 if disabled) |
 | `value_variance`    | `float`                     | Critic categorical variance `var_theta(s_t)` (0.0 if one-hot/disabled) |
 | `advantages`        | `torch.Tensor \| None`      | Tree-computed per-token advantages                   |
@@ -226,7 +233,10 @@ assistant markers.
 
 | Method                                          | Description                                                                |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
-| `insert_batch(trajectories)`                    | Insert trajectories (Node objects) from rollout; skip already-cached nodes |
+| `insert_super_batch(supers, backup=True, query_id="")` | Insert `SuperNode` records, index nested Nodes, and optionally run backup |
+| `get_super_node(super_node_id)` / `get_node(node_id)` | Lookup indexed `SuperNode` or nested `Node` records                   |
+| `backup_episode_terminal(node_id, reward)`      | Public root-ward backup from a terminal node                               |
+| `backup_path_returns(node_id, returns_by_node_id)` | Root-ward backup with per-node return-to-go values                      |
 | `get_q_value(node_id)`                          | Raw Q-value (mean reward) for a trajectory                                 |
 | `get_visit_count(node_id)`                      | Number of episodes whose root-ward backup passed through this node         |
 | `get_total_value(node_id)` / `get_sum_sq_value(node_id)` | Sum / sum-of-squares of backed-up returns (numerator + variance feedstock) |
@@ -247,17 +257,21 @@ assistant markers.
 | `set/get_normalized_advantage(node_id)`         | Store/retrieve GRPO-normalized advantage                                   |
 | `set/get_normalized_return(node_id)`            | Store/retrieve GRPO-normalized return                                      |
 
-**MCTS backup** (`_backup_path` → `_backup_node`): One root-ward walk per freshly
-inserted episode, starting at the terminal node and following `parent_node_id` up to the
-root. Each node on the path receives one Monte-Carlo sample (the episode's return), so
-`_visit_counts[node_id]` is the number of episodes that traversed state `s_t` and
-`_q_values[node_id]` is their mean return. `_sum_sq_values` is tracked alongside so the
-LOO variance is recoverable without storing every sample. Branch episodes link their
-first turn's `parent_node_id` to the branch-point node, so shared prefix nodes aggregate
-returns across all episodes that traverse them.
+**MCTS backup** (`_backup_path` -> `_backup_node`): One root-ward walk per freshly
+inserted episode, starting at the terminal node and following `parent_node_id` plus
+`extra_parent_node_ids` up to the root. Each node on the path receives one Monte-Carlo
+sample (the episode's return), so `_visit_counts[node_id]` is the number of episodes
+that traversed state `s_t` and `_q_values[node_id]` is their mean return.
+`_sum_sq_values` is tracked alongside so the LOO variance is recoverable without storing
+every sample. Branch episodes link their first turn's `parent_node_id` to the
+branch-point node, so shared prefix nodes aggregate returns across all episodes that
+traverse them. DAG join nodes carry additional parents so fan-in credit reaches every
+incoming branch without double-counting shared ancestors in one backup walk.
 
-**Node ID assignment** (`_insert_single`): Each Node receives its `node_id` from the
-inference engine (a UUID string). The Node's `query_id` is set during insertion.
+**Node ID assignment and indexing** (`insert_super_batch`): Each Node receives its
+`node_id` from the inference engine (a UUID string). During insertion the store indexes
+both the enclosing `SuperNode` and each nested `Node`, and tracks node IDs per query for
+cache lookup.
 
 ### 3. Advantage Computer (`core/advantage.py`)
 
@@ -467,7 +481,7 @@ with the hybrid values.
 >   under-credits a failed episode by ≈ `β·(1−P)` at the start). When `judge_beta = 0`
 >   (sparse, `γ = 1`) the return-to-go from every turn *is* `outcome`, so
 >   `v_mc = V(s_t)` exactly and HybridGAE is fully consistent.
-> - *Mitigation.* The backup runs inside `insert_batch` **before** judge scores exist, so
+> - *Mitigation.* The backup runs inside `insert_super_batch` **before** judge scores exist, so
 >   `G` cannot be backed up at insert time. Either (a) re-run the backup after judging
 >   using per-turn return-to-go `Σ_{k≥t} r_k`, or (b) correct `v_mc` analytically in
 >   `_blended_value` via `v_mc_consistent = (1−β)·v_mc + β·credit_to_go_t` (and scale
@@ -657,7 +671,8 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
    (dict or list of `InteractionWithTokenLogpReward`) to `list[Node]`, assigning
    `episode_id`, `query_id`, and `turn_idx`
 1. **Load cached nodes**: `tree_store.load_untrained_episodes(query_id, cached_count)`
-1. **Insert fresh nodes**: `tree_store.insert_batch(fresh_nodes)`
+1. **Insert fresh nodes**: wrap single-agent episodes in a leaf `SuperNode` via
+   `_wrap_leaf_super()` and call `tree_store.insert_super_batch(...)`
 1. **Combine**: Merge fresh and cached nodes (total = group_size)
 1. **Teacher model reward computation** (if `loss_mode != GRPO`):
    - Load tokenizer from `tokenizer_path`
@@ -692,6 +707,7 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 | `EpisodeRunResult`                      | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                                                  |
 | `choose_sample_source()`                | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                                           |
 | `select_branch_candidate()`             | Select the best node for branching: highest max-entropy among `need_branch` nodes with a sandbox, optionally gated by critic TD-error (`branch_td_threshold`) |
+| `_wrap_leaf_super()`                    | Wrap a single-agent episode's Nodes in one leaf `SuperNode` so the unified store path is always exercised                                                     |
 | `build_branch_task()`                   | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                                        |
 | `annotate_nodes_from_run()`             | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                                          |
 | `_with_episode_metadata()`              | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                                                 |
@@ -715,7 +731,16 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 | `_prepare_branch_task()`    | Create a TPFC branch task from a branch candidate node                               |
 | `_cleanup_branch()`         | Delete branch sandbox and mark node as branched to prevent re-use                    |
 | `_get_tokenizer()`          | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)      |
-| `_setup_distill_provider()` | Build `ExternalTeacherProvider` with auto-detected engine addresses and backend type |
+| `_get_tokenizer_unconditional()` | Lazy-load tokenizer for critic paths even when `loss_mode=GRPO`                |
+| `_annotate_judge_process_rewards()` | Score each episode with the judge and store per-node process credit          |
+| `_annotate_critic_values()` | Compute rollout-time generative-critic values and variances on Nodes                 |
+| `_attach_critic_train_data()` | Attach critic soft-regression samples consumed by the patched actor update         |
+| `_setup_distill_provider()` | Build `ExternalDiagnoseProvider` + `TeacherClient` with external or engine provider settings |
+
+`multica_dag_enabled` and `multica_dag_client` are accepted and stored, but the live
+coordinator dispatch is not wired in this workflow yet. Today the live rollout path is
+single-agent-compatible and uses `_wrap_leaf_super()` to exercise the same `SuperNode`
+store/backup/checkpoint path that the multi-agent package uses.
 
 ### 6. Trainer (`training/trainer.py`)
 
@@ -828,7 +853,6 @@ computation:
 | `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training                 |
 | `distilling/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison             |
 | `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference               |
-| `distilling/teacher_provider.py`      | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider` |
 | `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                   |
 
 #### `engine/` — Multi-Candidate Engine
@@ -1127,6 +1151,101 @@ export TRAIN_ID="run-2026-06-16-abc123"
 export FRESH_QUERY_TABLE=query_bank   # optional if set in config
 ```
 
+## Multi-Agent DAG Components (`agents/`)
+
+The `agents/` package contains the torch-free Multica DAG RL layer that sits next to the
+single-agent tree-search workflow. It models collaborative agent runs as a DAG of
+communication-bounded `SuperNode` segments, provides branch materialization helpers for
+cloud environments, and defines the verifier/critic/GAE seams needed to train multi-agent
+rollouts. These modules are importable without torch so they can be unit-tested without
+the full FSDP/Megatron training stack.
+
+The live `TreeSearchGroupedRolloutWorkflow` does not yet dispatch through a multi-agent
+coordinator: `multica_dag_enabled` and `multica_dag_client` are stored as future wiring
+points. The shared data model is active today because single-agent rollouts are wrapped
+as leaf `SuperNode`s before insertion into `MCTSTreeStore`.
+
+### Core DAG Model
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `agents/execution_dag.py` | Defines `SuperNode`, `ExecutionDAG`, typed `EdgeType`s (`delegation`, `mention`, `completion`), DAG validation, roots/leaves/fork/join queries, session mapping, and serialization. |
+| `agents/supernode_assembler.py` | Converts Multica `SegmentSpec` + `EdgeSpec` + team environment snapshots into `SuperNode`s and an `ExecutionDAG`; also sets the unified `parent_node_id` / `extra_parent_node_ids` chain across agents and joins. |
+| `agents/event_codec.py` | Round-trips between `ExecutionDAG` and a completion-ordered `SuperNode` log, and derives branch replay prefixes for selected branch points. |
+| `agents/event_model.py` | Builds a message-level timeline from completion-ordered `SuperNode`s for critic observations. |
+
+### Branching and Environment Forking
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `agents/branch_selection.py` | Selects one branch point per agent lane using the same entropy ranking and optional TD-error gate as the single-agent branch selector. |
+| `agents/environment.py` | Defines `ForkableEnvironment` and cloud providers (`FleetSandboxProvider`, `MulticaSweLegoProvider`) for snapshot/fork/restore/cleanup operations. |
+| `agents/integration.py` | Implements `BranchMaterializer`: snapshot sandbox, fork sandbox, fork Multica issue subtree, start the branch run, and rollback on partial failure. Also exposes helper functions for verifier finalization and cloud branch cleanup. |
+
+### Verifier, Rewards, and Harvest
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `agents/agentic_verifier.py` | Builds verifier-agent prompts, parses per-session reward XML, and drives a pi verifier launcher through `AgenticVerifier`. |
+| `agents/verifier.py` | Legacy/objective verifier seam with `VerifierResult`, `Verifier`, and `ObjectiveVerifier`. |
+| `agents/rl_session.py` | Writes verifier-driven rewards to RL sessions through an `RLBridgeClient` seam. |
+| `agents/harvest.py` | Runs the verifier, writes rewards, and harvests reward-stamped trajectories through pluggable protocols. |
+| `agents/reward/swe_lego_types.py` | SWE-Lego issue, rollout, setup, and result dataclasses. |
+| `agents/reward/swe_lego_verifier.py` | Hybrid SWE-Lego verifier that blends objective tests, generative critic judgment, and semi-resolved weighting. |
+
+### Critic and Advantage Assembly
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `agents/critic_observation.py` | Builds global joint-state frontier observations: `V_0` plus one observation after each completed `SuperNode`. |
+| `agents/critic_score.py` | Renders critic prompts, parses `<score>N</score>`, and computes differentiable expected score values from bucket logits. |
+| `agents/gae.py` | Computes global GAE over the completion-ordered DAG event sequence. |
+| `agents/dag_advantage.py` | Assembles per-node advantages/returns and computes explained variance. |
+| `agents/critic_advantage.py` | Broadcasts node advantages to actor tokens and defines critic Huber + combined actor/critic loss helpers. |
+| `agents/dag_backup.py` | Provides an explicit DAG-edge reward-distribution helper for structural credit assignment experiments. |
+
+### Orchestration Helpers
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `agents/swe_lego_client.py` | Thin HTTP client for Multica's unified `env-dispatch` API. |
+| `agents/swe_lego_issue_runner.py` | Per-SWE-Lego-issue loop: create env-dispatch, open RL sessions, drive lanes, verify/reward terminal runs, and clean up projects. |
+| `agents/self_play_runner.py` | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue. |
+| `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration. |
+
+### DAG Rollout Data Flow
+
+```mermaid
+flowchart TD
+    DISPATCH["Multica env-dispatch<br/>SWE-Lego issue or self-play message"]
+    SESS["Open one RL session per rollout lane"]
+    RUN["Drive each lane / agent run"]
+    SEG["Multica returns segment specs,<br/>edges, proxy interactions, env snapshots"]
+    ASM["SuperNodeAssembler.assemble()"]
+    DAG["ExecutionDAG + completion-ordered SuperNodes"]
+    STORE["MCTSTreeStore.insert_super_batch()"]
+    VER["Agentic/Object verifier assigns<br/>per-session rewards"]
+    GAE["critic observations + global GAE"]
+    BRANCH["select_branch_points()<br/>BranchMaterializer.materialize()"]
+
+    DISPATCH --> SESS --> RUN --> SEG --> ASM --> DAG --> STORE
+    DAG --> VER --> GAE
+    DAG --> BRANCH --> RUN
+```
+
+Key invariants:
+
+- `SuperNode` is the canonical linear-log unit; the old separate `Event` concept was
+  absorbed into `SuperNode`.
+- `DELEGATION` and `COMPLETION` edges create causal parents in the nested `Node` chain;
+  `MENTION` edges preserve topology but do not set `parent_node_id`.
+- Fan-in joins set one primary `parent_node_id` and the rest as `extra_parent_node_ids`,
+  so backup credits all incoming branches.
+- Critic state is the global frontier prefix across all agent lanes, ordered by real
+  completion order when available.
+- The cloud branch path is implemented as helpers, but the live single-agent workflow
+  still uses the legacy TPFC `build_branch_task()` path until the coordinator is wired.
+
 ## Data Flow
 
 ### Cache-Aware Training
@@ -1172,7 +1291,7 @@ flowchart TD
 
     FINAL --> ZVD{"Zero-variance<br/>discard?"}
     ZVD -- Yes --> NONE["Return None"]
-    ZVD -- No --> INS["insert_batch(fresh_nodes)"]
+    ZVD -- No --> INS["_wrap_leaf_super(fresh_nodes)<br/>insert_super_batch(...)"]
 
     INS --> DIST{"loss_mode != GRPO?"}
     DIST -- Yes --> DIST_RUN["Run distillation<br/>(see Distillation Pipeline diagram)"]
@@ -1214,7 +1333,7 @@ Key metadata fields attached to trajectory dicts throughout the pipeline:
 | Field                 | Attached by                         | Type                       | Used by                                         |
 | --------------------- | ----------------------------------- | -------------------------- | ----------------------------------------------- |
 | `query_id`            | `TreeSearchGroupedRolloutWorkflow`  | `str`                      | Tree lookup, cache splitting, advantage compute |
-| `node_id`             | `insert_batch()` / inference engine | `str`                      | Advantage lookup, mark trained                  |
+| `node_id`             | `insert_super_batch()` / inference engine | `str`                 | Advantage lookup, mark trained                  |
 | `position_rewards`    | `TreeSearchGroupedRolloutWorkflow`  | `list[PositionRewardInfo]` | Multi-candidate logprob computation             |
 | `distill_loss_weight` | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for teacher KL loss                      |
 | `rl_loss_weight`      | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for GRPO loss                            |
@@ -1358,7 +1477,6 @@ from customized_areal.tree_search import (
     CacheMode,
     AdvantageMode,
     LossMode,
-    SampleSource,
     TreeAdvantageComputer,
     TreeCheckpointManager,
     TreeSearchGroupedRolloutWorkflow,
@@ -1367,6 +1485,8 @@ from customized_areal.tree_search import (
     EpisodeDiagnosis,
     InteractionWithTokenLevelReward,
 )
+from customized_areal.tree_search.config import SampleSource
+from customized_areal.tree_search.agents import ExecutionDAG, SuperNode, EdgeType
 ```
 
 ### Lazy Imports
@@ -1379,9 +1499,6 @@ from customized_areal.tree_search import (
     OnPolicyDistillAgent,               # from distilling.agent
     TeacherConfig,                       # from distilling.teacher_client
     TeacherClient,                       # from distilling.teacher_client
-    TeacherProvider,                     # from distilling.teacher_provider
-    EngineTeacherProvider,              # from distilling.teacher_provider
-    ExternalTeacherProvider,            # from distilling.teacher_provider
     MultiCandidateFSDPEngine,           # from engine
     MultiCandidateFSDPPPOActor,         # from training (via engine)
     grpo_distill_loss_fn,               # from training.loss
@@ -1446,8 +1563,9 @@ with CustomizedPPOTrainer(
 | `config.py`                           | `Config`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource`     |
 | `core/advantage.py`                   | `TreeAdvantageComputer`, `GAEAdvantageComputer`, `HybridGAEAdvantageComputer`                |
 | `core/checkpoint.py`                  | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                           |
-| `core/tree_store.py`                  | `MCTSTreeStore`, `Node` — flat trajectory store with MCTS statistics                         |
+| `core/tree_store.py`                  | `MCTSTreeStore`, `Node` — `SuperNode` store with Node-level MCTS statistics                  |
 | `core/customized_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops               |
+| `agents/`                             | Torch-free Multica multi-agent DAG RL components, branch materialization, verifier seams, and DAG GAE helpers |
 | `core/critic_prompt.py`               | Critic instruction/message construction, digit-token resolution, soft expected value + variance |
 | `core/critic_value_client.py`         | `CriticValueClient` — rollout-time critic value + variance via shared inference engine       |
 | `core/process_reward.py`              | `build_episode_process_rewards` — dense per-turn LLM-judge reward construction               |
@@ -1460,7 +1578,6 @@ with CustomizedPPOTrainer(
 | `distilling/distill_types.py`         | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward` |
 | `distilling/reward_compute.py`        | Student vs teacher logprob reward computation                                                |
 | `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference client                      |
-| `distilling/teacher_provider.py`      | `TeacherProvider` protocol, `ExternalTeacherProvider`, `EngineTeacherProvider`               |
 | `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                                 |
 | `engine/__init__.py`                  | Engine subpackage exports                                                                    |
 | `engine/fsdp_engine.py`               | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                               |

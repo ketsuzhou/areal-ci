@@ -9,14 +9,56 @@ on is unit-tested torch-free or behind `pytest.importorskip("torch")`.
 
 ## Building blocks (implemented, tested)
 
+Grouped by role. All modules are torch-free at import time (torch is imported
+lazily inside the differentiable helpers) so the package unit-tests without the
+training stack.
+
+### DAG model & linear-log codec
+
 | Module | Role |
 |--------|------|
-| `critic_observation.py` | Global joint-state frontier → critic observation (`V_{t+1}` indexing). |
-| `critic_score.py` | Generative critic prompt/parse + differentiable expected-score value over 11 buckets. |
-| `gae.py` | Global GAE over the completion-ordered event sequence. |
-| `dag_advantage.py` | `assemble_node_advantages(...)` → per-node advantage/return; `explained_variance`. |
-| `critic_advantage.py` | Broadcast node advantage → actor tokens; `critic_huber_loss`; `combined_actor_critic_loss`. |
-| `config.py` | `advantage_mode=GAE`, `critic_loss_weight`. |
+| `execution_dag.py` | In-memory **agent-execution DAG** (`SuperNode`, `Edge`, `EdgeType` = `DELEGATION`/`MENTION`/`COMPLETION`, `ExecutionDAG`). Topological order, fork/join queries, `event_ids()`. |
+| `event_model.py` | `EdgeRef = (node_id, EdgeType)` alias + `message_timeline` helper that flattens SuperNode payloads into the completion-ordered message list the critic consumes. |
+| `event_codec.py` | Bidirectional codec: `dag_to_supernodes` (linearize DAG → completion-ordered SuperNodes) and `supernodes_to_dag` (lossless rebuild from persisted log); `replay_prefix_for` derives a branch-replay prefix shaped for `BranchMaterializer`. |
+| `supernode_assembler.py` | `SuperNodeAssembler` — consumes Multica's pre-defined `SegmentSpec`s and proxy interactions, maps each agent's turns into segments, maintains the unified `parent_node_id`/`extra_parent_node_ids` causal chain (delegation, completion fan-in, mention topology-only), stamps `TeamEnvSnapshot` and `session_id` onto each SuperNode. |
+
+### Environment, branching, and integration
+
+| Module | Role |
+|--------|------|
+| `environment.py` | `ForkableEnvironment` Protocol + `FleetSandboxProvider` / `MulticaSweLegoProvider`; `snapshot` / `fork` / `ForkResult` / `SnapshotResult`; `EnvironmentError`/`SnapshotError`/`ForkError`. Training code sees only this Protocol, never a vendor SDK. |
+| `integration.py` | `BranchMaterializer` / `BranchStarter` / `MulticaIssueForker` — snapshot-at-frontier + transcript replay: snapshot the source sandbox, fork a fresh sandbox, fork the Multica issue subtree at `(task_id, seq)`, replay `messages ≤ seq`, drop `PriorSessionID`; paired rollback on failure. Also `finalize_with_verifier`, `materialize_cloud_branch`, `cleanup_cloud_branch`. |
+| `branch_selection.py` | Pure branch-point selection over the canonical SuperNode sequence: critic TD-error gate (`td_error`, `passes_gate`) + max-entropy ranking (`select_branch_points`, `lane_successor_value`); emits one `BranchPoint` per `task_id` lane keyed for `replay_prefix_for`. Ports the legacy `select_branch_candidate` criterion. |
+
+### Verifiers & reward
+
+| Module | Role |
+|--------|------|
+| `verifier.py` | Forward-compatible Phase-2 slice: `VerifierResult`, `Verifier` Protocol, deterministic `ObjectiveVerifier`. |
+| `agentic_verifier.py` | `AgenticVerifier` + `PiVerifierLauncher` — pi-agent verifier on a fixed judge model reviews the finished collaboration and assigns a reward per RL `session_id`; `build_verifier_prompt`, `parse_verifier_output`, `VerifierRun`, `VerifierReward`. Falls back to a neutral reward on launch/parse failure. |
+| `harvest.py` | `VerifierFinalizer` + `TrajectoryHarvester` + `RewardWriter` — run the agentic verifier, write each session's reward authoritatively via the bridge (enforces reward-before-export), then harvest each session's reward-stamped trajectory via `/export_trajectories` (terminal — revokes the session). Supersedes `rl_session.RLSessionRewardWriter` / `integration.finalize_with_verifier`. |
+| `rl_session.py` | `RLSessionRewardWriter` + `RLBridgeClient` Protocol — legacy single-verifier path: `set_reward` then `end_session`; leaves the session open if `set_reward` fails so the trajectory is not lost. |
+| `dag_backup.py` | `distribute_reward_over_dag` — distributes a terminal verifier reward backward along DAG edges with `backup_decay`; `CreditAssignment` for explicit per-agent credit at fan-in joins (no fixed sum/mean/max rule). |
+| `reward/swe_lego_types.py` | Shared dataclasses: `SweLegoIssue`, `SweLegoRollout`, `SweLegoSetup`, `SweLegoIssueResult`. |
+| `reward/swe_lego_verifier.py` | Hybrid SWE-Lego verifier: objective tests + generative critic + semi-resolved blend (spec §5.3); objective layer short-circuits when decisive, blend runs only in the mixed middle. |
+
+### Critic + GAE (Phase 3, Tasks 5–9)
+
+| Module | Role |
+|--------|------|
+| `critic_observation.py` | Global joint-state frontier → critic observation (`V_{t+1}` next-state indexing; `build_critic_observations`, `build_observation_after_turn`, `DEFAULT_CRITIC_FIELDS`). |
+| `critic_score.py` | Generative critic prompt/parse (`build_critic_score_prompt`, `parse_score`, `score_to_value`) + differentiable `expected_score_value` over 11 digit-token logits. The critic shares the actor's trunk. |
+| `gae.py` | Global joint-state GAE over the completion-ordered event sequence: `events_from_nodes`, `compute_global_gae`, `GlobalEvent`, `NodeGAEResult` (`δ_t = r_t + γ·V_{t+1} − V_t`, `A_t = δ_t + γλ·A_{t+1}`). |
+| `dag_advantage.py` | `assemble_node_advantages(...)` → per-node advantage/return; `explained_variance`. The GAE-replaces-GRPO orchestration core. |
+| `critic_advantage.py` | `assign_token_advantages` / `broadcast_node_advantages` (node advantage → actor tokens), `value_targets_from_gae`, `critic_huber_loss`, `combined_actor_critic_loss`. |
+
+### Episode orchestration (env-dispatch drivers)
+
+| Module | Role |
+|--------|------|
+| `swe_lego_client.py` | `MulticaEnvDispatchClient` — thin HTTP client for the unified env-dispatch API: `POST /api/v1/env`, `DELETE /api/v1/env/{envID}`, `POST /api/v1/env-dispatch`, `DELETE /api/v1/env-dispatch/{projectID}` (spec §6). |
+| `swe_lego_issue_runner.py` | `run_swe_lego_issue` — per-issue orchestration (spec §5.1): atomic env-dispatch, open one RL session per rollout, drive per-lane branching, verify+reward each terminal run, always-cleanup. |
+| `self_play_runner.py` | `run_self_play` — mirrors the SWE-Lego runner but dispatches a `SelfPlayQuery` from `query_bank` as a chat message (`domain=self_play`, `dispatch_type=message`); returns `SelfPlayResult` with per-agent rewards/success. |
 
 ## Per-step training flow (DAG run, `advantage_mode == GAE`)
 
