@@ -17,8 +17,8 @@
 - Exactly one of `agent_id` / `squad_id` (neither or both → 400). `squad_id` present → `agent_id` forbidden; the squad leader is resolved server-side.
 - `squad_id` supported for BOTH domains. Squad dispatch MUST use leader signals: issue → `assignee_type=squad` + enqueue leader with `is_leader_task=true`; chat → enqueue leader + `squad_id` task-context hint + daemon briefing injection. A plain leader enqueue without a leader signal is NOT acceptable.
 - Migration is `141_workspace_default_self_play_env` (next after `140_environment_state`). Column: `default_self_play_env_id UUID NULL REFERENCES environment(id) ON DELETE SET NULL`.
-- After ANY change under `server/pkg/db/queries/*.sql`, run `cd server && sqlc generate` (`make sqlc`) and commit the regenerated `server/pkg/db/generated/*` alongside.
-- Run `cd server && go build ./... && go vet ./...` before each server commit; `gofmt` all Go.
+- After ANY change under `server/pkg/db/queries/*.sql`: **DO NOT run `sqlc generate`** — it is not runnable in this repo (a clean run rewrites unrelated files and creates `agent_skill_suggestion.sql.go`/`evolution.sql.go` that redeclare symbols in hand-maintained `*_manual.sql.go` companions, breaking the build). Instead, add the query to `queries/*.sql` as source-of-truth AND **hand-write the corresponding generated Go** (function + `Params` struct + any `models.go` field) by appending to the existing `generated/<file>.sql.go`, mirroring sqlc's exact style for a sibling query in the same file. Verify with `go build` + the DB-backed test.
+- Run `cd server && go build ./internal/handler/ ./internal/service/ ./cmd/migrate/... && go vet ./internal/handler/ ./internal/service/` before each server commit; `gofmt` all Go. (Do NOT use `go build ./...`: `internal/service/webpush/webpush.go:180` has a pre-existing, unrelated build failure on go 1.26 — `constant 4096 overflows byte` — that is out of scope for B.)
 - No wildcard imports (Go or Python). Follow existing patterns in each file.
 
 ---
@@ -455,6 +455,8 @@ UPDATE issue
 
 Run `cd server && make sqlc`.
 
+> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global Constraints). Instead: add the `SetIssueAssignee :exec` query to `queries/issue.sql` as source-of-truth, then hand-write `func (q *Queries) SetIssueAssignee(ctx, arg SetIssueAssigneeParams) error` + the `SetIssueAssigneeParams` struct in `generated/issue.sql.go`, mirroring the style of an existing `:exec` query in that file (e.g. an existing `UPDATE issue ... :exec`). Verify with `go build`.
+
 - [ ] **Step 2: Write the DB-backed test**
 
 Create `server/internal/handler/env_dispatch_squad_issue_test.go` following the existing DB-backed squad test fixtures (`squad_assign_trigger_test.go`): create a workspace agent as leader, a squad with that leader, a project+issue, then call the adapter's `EnqueueAgentRun` with `squadID` set and `issueID` set; assert (a) the issue's `assignee_type='squad'` and `assignee_id=squad`, and (b) the created `agent_task_queue` row has `is_leader_task=true` and `agent_id=leader`.
@@ -571,7 +573,9 @@ git commit -m "feat(env-dispatch): issue-path squad dispatch (assignee=squad + l
 
 - [ ] **Step 1: Extend CreateChatTask with a context param**
 
-In `server/pkg/db/queries/chat.sql`, change the `CreateChatTask` insert to also write `context` (add `context` to the column list and a `$N` param). Run `cd server && make sqlc`; confirm `CreateChatTaskParams` gains a `Context []byte` (or `pgtype`-appropriate) field.
+In `server/pkg/db/queries/chat.sql`, change the `CreateChatTask` insert to also write `context` (add `context` to the column list and a `$N` param).
+
+> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global Constraints). Instead, hand-edit `generated/chat.sql.go` `CreateChatTask`: add the `context` column + `$N` placeholder to the `createChatTask` SQL const, add a `Context []byte` field to `CreateChatTaskParams` (mirror how another generated query passes a JSONB/`[]byte` context param — e.g. `CreateAgentTask` if it has one), and pass `arg.Context` in the `q.db.QueryRow` arg list at the matching position. Verify `CreateChatTaskParams` has the `Context` field and `go build` passes.
 
 - [ ] **Step 2: Write the DB-backed tests (chat task hint + daemon injection)**
 
@@ -741,15 +745,16 @@ git commit -m "feat(areal): env-dispatch client optional env_id/agent_id, squad_
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Verify sqlc is in sync**
+- [ ] **Step 1: Verify generated code builds (sqlc no-drift gate is N/A)**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && sqlc generate && git -C /workspaces/leagent/backend/areal/multica status --short server/pkg/db/generated`
-Expected: empty output (regenerated code already committed; no drift).
+`sqlc generate` is not runnable in this repo (see Global Constraints), so the drift gate is replaced by a build check of the hand-written generated code:
+Run: `cd /workspaces/leagent/backend/areal/multica/server && go build ./pkg/db/generated/`
+Expected: exit 0 (all hand-written query functions compile).
 
 - [ ] **Step 2: Build + vet + full server test suite**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go build ./... && go vet ./... && go test ./internal/service/ ./internal/handler/ -v`
-Expected: PASS (or, for DB-backed tests, skips clearly attributable to no DB in this environment — note them explicitly).
+Run: `cd /workspaces/leagent/backend/areal/multica/server && go build ./internal/service/ ./internal/handler/ ./cmd/migrate/... && go vet ./internal/service/ ./internal/handler/ && DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable go test ./internal/service/ ./internal/handler/`
+Expected: PASS. (Do NOT run `go build ./...` / `go test ./...` — the pre-existing `webpush.go:180` failure is unrelated to B; note it explicitly rather than treating it as a regression.)
 
 - [ ] **Step 3: AReaL client suite**
 
