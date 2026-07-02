@@ -7,9 +7,6 @@ import torch
 
 from areal.api import TrainEngine
 from areal.api.cli_args import MicroBatchSpec, PPOCriticConfig
-from areal.experimental.training_service.controller.controller import (
-    GatewayTrainController,
-)
 from areal.infra import TrainController
 from areal.infra.rpc.serialization import serialize_value
 from areal.trainer.ppo.stats import infer_token_denominator

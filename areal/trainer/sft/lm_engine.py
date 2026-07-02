@@ -5,9 +5,6 @@ from typing import Any
 import torch
 
 from areal.api import TrainEngine
-from areal.experimental.training_service.controller.controller import (
-    GatewayTrainController,
-)
 from areal.infra import TrainController
 from areal.infra.rpc.serialization import serialize_value
 from areal.utils import stats_tracker
