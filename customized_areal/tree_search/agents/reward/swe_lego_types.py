@@ -26,19 +26,21 @@ class SweLegoIssue:
 
 
 @dataclass(frozen=True)
-class SweLegoSetup:
-    """The result of ``POST /api/v1/swe-lego/issues``.
+class SweLegoRollout:
+    """One rollout in an env-dispatch group (spec §6.3 response)."""
 
-    Mirrors the 201 response from the multica atomic endpoint (spec §4.1).
-    """
-
+    env_id: str
     project_id: str
-    issue_id: str
-    image_id: str
-    build_node_id: str
-    base_sandbox_id: str
-    base_sandbox_runtime_id: str
-    agent_run_ids: list[str]
+    issue_id: str = ""
+    chat_session_id: str = ""
+    agent_run_id: str = ""
+
+
+@dataclass(frozen=True)
+class SweLegoSetup:
+    """The result of POST /api/v1/env-dispatch (spec §6.3)."""
+
+    rollouts: list[SweLegoRollout]
 
 
 @dataclass(frozen=True)

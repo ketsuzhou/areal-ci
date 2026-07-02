@@ -5,6 +5,7 @@ from __future__ import annotations
 from customized_areal.tree_search.agents.reward.swe_lego_types import (
     SweLegoIssue,
     SweLegoIssueResult,
+    SweLegoRollout,
     SweLegoSetup,
 )
 
@@ -24,17 +25,16 @@ def test_swe_lego_issue_carries_test_lists():
     assert issue.pass_to_pass == ["tests/test_retry.py::test_basic"]
 
 
-def test_swe_lego_setup_holds_group_size_agent_runs():
+def test_swe_lego_setup_holds_rollout_group():
     setup = SweLegoSetup(
-        project_id="p1",
-        issue_id="i1",
-        image_id="img1",
-        build_node_id="n1",
-        base_sandbox_id="sbx-base",
-        base_sandbox_runtime_id="rt-base",
-        agent_run_ids=["r1", "r2", "r3"],
+        rollouts=[
+            SweLegoRollout(env_id="e1", project_id="p1", issue_id="i1", agent_run_id="r1"),
+            SweLegoRollout(env_id="e2", project_id="p2", issue_id="i2", agent_run_id="r2"),
+            SweLegoRollout(env_id="e3", project_id="p3", issue_id="i3", agent_run_id="r3"),
+        ]
     )
-    assert len(setup.agent_run_ids) == 3
+    assert len(setup.rollouts) == 3
+    assert [r.agent_run_id for r in setup.rollouts] == ["r1", "r2", "r3"]
 
 
 def test_swe_lego_issue_result_collects_per_agent_rewards():
