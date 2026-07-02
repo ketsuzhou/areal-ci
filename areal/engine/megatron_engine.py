@@ -5,9 +5,11 @@ from __future__ import annotations
 import dataclasses
 import functools
 import gc
+import json
 import math
 import os
 import re
+import struct
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
@@ -60,7 +62,9 @@ from areal.engine.core.model import (
     disable_dropout_in_model,
     is_valid_vision_model,
     lang_config,
+    requires_padded_seq,
 )
+from areal.engine.megatron_utils import megatron_bridge_patches  # noqa: F401
 from areal.engine.megatron_utils.checkpointer import MegatronCheckpointManager
 from areal.engine.megatron_utils.deterministic import set_deterministic_algorithms
 from areal.engine.megatron_utils.fp8 import FP8BlockwiseTensorHelper
@@ -346,6 +350,10 @@ class MegatronEngine(TrainEngine):
             )
 
             self.is_vision_model = is_valid_vision_model(self.hf_config.model_type)
+            # GDN/SSM models (e.g. Qwen3.5) reject packed THD input and must run
+            # the padded BSHD forward. Derived from model type rather than a
+            # config flag so the layout can't be mis-set.
+            self.use_padded_seq = requires_padded_seq(self.hf_config.model_type)
             if self.is_vision_model:
                 if self.parallel_strategy.context_parallel_size > 1:
                     raise NotImplementedError(
@@ -361,12 +369,39 @@ class MegatronEngine(TrainEngine):
                     f"Loaded processor and tokenizer."
                 )
 
+            if self.use_padded_seq and self.parallel_strategy.context_parallel_size > 1:
+                raise NotImplementedError(
+                    f"Context parallel (CP > 1) is not supported for "
+                    f"model_type={self.hf_config.model_type!r}, which requires the "
+                    "padded BSHD forward (it operates on [B, S] tensors while the "
+                    "CP path packs sequences). "
+                    f"Got context_parallel_size={self.parallel_strategy.context_parallel_size}."
+                )
+
             self.quantization_config = getattr(
                 self.hf_config, "quantization_config", None
             )
 
             self._check_and_apply_fp8_config()
             self._validate_fp8_consistency()
+
+            # Warn once if bridge-delegated weight sync was requested but a
+            # fallback condition forces the registry conversion path (the
+            # dispatch in _update_weights_from_distributed silently falls back).
+            if self.mcore_config.use_bridge_for_update_weights:
+                fallback_reasons = []
+                if self.bridge_cls != "megatron-bridge":
+                    fallback_reasons.append(f"bridge_type={self.bridge_cls!r}")
+                if self.quantization_config:
+                    fallback_reasons.append("FP8/quantized training")
+                if self.config.use_lora:
+                    fallback_reasons.append("LoRA enabled")
+                if fallback_reasons:
+                    self.logger.warning(
+                        "use_bridge_for_update_weights=True, but live weight sync "
+                        "will use the registry conversion path instead because: "
+                        f"{', '.join(fallback_reasons)}."
+                    )
 
             with self.device:
                 models = make_mcore_model(
@@ -525,6 +560,51 @@ class MegatronEngine(TrainEngine):
                     distribute_saved_activations=self.mcore_config.distribute_saved_activations,
                     recompute_modules=self.mcore_config.recompute_modules,
                 )
+
+            # Set MoE configuration overrides (aux-loss-free balancing, z-loss).
+            moe_extra_args: dict = {
+                "moe_token_dispatcher_type": self.mcore_config.moe_token_dispatcher_type,
+                "moe_permute_fusion": self.mcore_config.moe_permute_fusion,
+                "moe_router_fusion": self.mcore_config.moe_router_fusion,
+                "moe_shared_expert_overlap": self.mcore_config.moe_shared_expert_overlap,
+                "moe_router_bias_update_rate": self.mcore_config.moe_router_bias_update_rate,
+            }
+            if self.mcore_config.moe_router_dtype is not None:
+                moe_extra_args["moe_router_dtype"] = self.mcore_config.moe_router_dtype
+            if self.mcore_config.moe_z_loss_coeff is not None:
+                moe_extra_args["moe_z_loss_coeff"] = self.mcore_config.moe_z_loss_coeff
+            if self.mcore_config.moe_enable_deepep:
+                moe_extra_args["moe_enable_deepep"] = True
+            # Filter out args not accepted by the target TransformerConfig class.
+            accepted = {
+                f.name for f in dataclasses.fields(self.bridge.TransformerConfigClass)
+            }
+            moe_extra_args = {k: v for k, v in moe_extra_args.items() if k in accepted}
+            self.bridge.set_extra_args(**moe_extra_args)
+
+            # Set precision and loss configuration (may not be supported by all
+            # model configs, e.g. MLATransformerConfig rejects enable_fp32_lm_head).
+            precision_args = {}
+            if self.mcore_config.enable_fp32_lm_head:
+                precision_args["enable_fp32_lm_head"] = True
+            if self.mcore_config.cross_entropy_loss_fusion:
+                precision_args["cross_entropy_loss_fusion"] = True
+            if precision_args:
+                skipped_precision_args = [
+                    k for k in precision_args if k not in accepted
+                ]
+                precision_args = {
+                    k: v for k, v in precision_args.items() if k in accepted
+                }
+                if skipped_precision_args:
+                    self.logger.warning(
+                        "Some precision/loss args are not supported by this model "
+                        f"config ({self.bridge.TransformerConfigClass.__name__}); "
+                        f"skipping: {skipped_precision_args}"
+                    )
+                if precision_args:
+                    self.bridge.set_extra_args(**precision_args)
+
             self.logger.info(
                 "Using mbridge to create models and hf model save/load in MegatronEngine."
             )
@@ -602,6 +682,10 @@ class MegatronEngine(TrainEngine):
     def destroy(self):
         self._initialized = False
         self.process_group_initialized = False
+        # Drain any pending async checkpoint saves before tearing down process
+        # groups; the background save workers issue collectives during finalize.
+        if getattr(self, "checkpointer", None) is not None:
+            self.checkpointer.close()
         if hasattr(self, "optimizer"):
             del self.optimizer
         if hasattr(self, "model"):
@@ -802,6 +886,7 @@ class MegatronEngine(TrainEngine):
             [torch.Tensor, dict[str, Any]], torch.Tensor | None
         ],
         forward_only: bool = False,
+        gather_cp_output: bool = False,
     ) -> None:
         self._ensure_ready()
 
@@ -833,13 +918,20 @@ class MegatronEngine(TrainEngine):
                     tree_attn_keys = list(tree_kwargs.keys())
 
             cp_size = mpu.get_context_parallel_world_size()
-            cp_local = cp_size > 1
+            # forward_batch (compute_logp / compute_values) passes
+            # gather_cp_output=True so CP-local outputs are gathered back to the
+            # full sequence length inside forward. This matches downstream
+            # labels / output_seqlens and fixes split_with_sizes mismatches when
+            # compute_logp runs with CP > 1. Train/eval keeps the default False
+            # value, so the CP-local loss path (_cp_local_labels) is unchanged.
+            cp_local = cp_size > 1 and not gather_cp_output
 
             output = packed_context_parallel_forward(
                 model,
                 mb_input.padded_mb,
                 gather_cp_output=not cp_local,
                 is_vision_model=self.is_vision_model,
+                use_padded_seq=self.use_padded_seq,
             )
 
             # Release tree attention metadata after forward pass
@@ -1037,7 +1129,9 @@ class MegatronEngine(TrainEngine):
             outputs.append(result)
             return None
 
-        self.forward_backward_batch(mb_list, process_output, forward_only=True)
+        self.forward_backward_batch(
+            mb_list, process_output, forward_only=True, gather_cp_output=True
+        )
 
         # Step 4: Aggregate, reorder, and broadcast outputs
         res = None
@@ -1084,6 +1178,17 @@ class MegatronEngine(TrainEngine):
             )
 
         self.get_device_stats().log("before offload model")
+
+        # Discard gradient buffers via Megatron's native API *before* TMS pause.
+        # `DDP.offload_grad_buffers()` releases grad storage in-place
+        # (storage().resize_(0)); views like param.main_grad recover automatically
+        # on restore. Since grads are recomputed every step, they need no CPU
+        # backup. Doing this before pause() means the grad region has no physical
+        # memory left for TMS to back up.
+        if self.mcore_config.disable_grad_buffers_cpu_backup:
+            for m in self.model:
+                m.offload_grad_buffers(synchronize=False, empty_cache=False)
+
         current_platform.clear_memory()
         torch_memory_saver.pause()
 
@@ -1101,6 +1206,13 @@ class MegatronEngine(TrainEngine):
         """
 
         torch_memory_saver.resume()
+
+        # Reallocate gradient buffers released in offload(). resize_() restores
+        # storage and zeroes it; param.main_grad views become valid again.
+        if self.mcore_config.disable_grad_buffers_cpu_backup:
+            for m in self.model:
+                m.restore_grad_buffers(synchronize=False)
+
         current_platform.clear_memory()
 
         # TODO: NCCL onload
@@ -1110,17 +1222,19 @@ class MegatronEngine(TrainEngine):
 
         self.is_offload = False
 
-    def clear_batches(self, shard_ids: list[str]) -> None:
+    def clear_batches(self, shard_ids: list[str] | None = None) -> None:
         """Drain this worker's client-side RTensor fetch buffer.
 
         Called via RPC by ``TrainController.clear_batches`` at step end so
         cross-node consumer DP heads release cached tensors. See #1209.
-        Upstream ``TrainController.clear_batches`` guards against empty
-        input, so ``shard_ids`` is always a non-empty ``list[str]``.
+        Non-DP-head ranks receive no positional args via
+        ``_call_workers`` (see train_controller.py:575-577) — accept the
+        no-args call and noop, since their ``_fetch_buffer`` is empty.
         """
         from areal.infra.rpc.rtensor import clear_fetch_buffer
 
-        clear_fetch_buffer(shard_ids)
+        if shard_ids:
+            clear_fetch_buffer(shard_ids)
 
     def fetch_buffer_stats(self) -> dict[str, int]:
         """Expose local fetch-buffer stats for post-step drain verification."""
@@ -1618,40 +1732,124 @@ class MegatronEngine(TrainEngine):
 
     def _init_weight_update_from_distributed(self, meta: WeightUpdateMeta) -> None:
         assert meta.type == "xccl"
-        # Reset weight weight meta with local info
-        meta.nccl_master_address = self.weight_update_master_addr = gethostip()
-        meta.nccl_master_port = self.weight_update_master_port = find_free_ports(1)[0]
-        meta.nccl_group_name = self.weight_update_group_name
+        gen_pp_size = meta.gen_allocation.parallel.pp_size if meta.gen_allocation else 1
 
         # NOTE: Processes launched with torchrun will set the following env var to True,
         # which blocks creating another TCP store for weight update.
         os.environ["TORCHELASTIC_USE_AGENT_STORE"] = str(False)
-        if self.is_pipeline_parallel_head():
-            assert meta.gen_allocation is not None
 
-            self.engine_lock.acquire()
+        if gen_pp_size > 1:
+            # Per-PP-rank weight sync requires a 1:1 mapping between training
+            # PP stages and inference (sglang) PP stages, because each training
+            # PP head creates exactly the group update_weight_group_{train_pp_rank}
+            # and each sglang PP stage joins update_weight_group_{gen_pp_rank}.
+            # If the two sizes differ:
+            #   * train_pp_size > gen_pp_size: training heads with
+            #     train_pp_rank >= gen_pp_size create a group sglang never joins
+            #     -> rendezvous hang;
+            #   * train_pp_size < gen_pp_size: sglang stages with
+            #     gen_pp_rank >= train_pp_size find no training source
+            #     -> rendezvous hang.
+            # Fail fast here on every rank with a clear error.
+            train_pp_size = self.parallel_strategy.pipeline_parallel_size
+            if train_pp_size != gen_pp_size:
+                raise ValueError(
+                    f"Per-PP-rank weight sync requires train_pp_size == gen_pp_size, "
+                    f"got train_pp_size={train_pp_size}, gen_pp_size={gen_pp_size}. "
+                    f"Set the inference allocation pp_size to match the training "
+                    f"pipeline_parallel_size."
+                )
+            # PP>1: every PP source rank (dp=0, tp=0) creates its own per-PP-rank
+            # NCCL group. The group contains only the inference workers at the
+            # corresponding PP rank (TP * DP workers) plus one training rank.
+            if self.is_pipeline_parallel_head():
+                assert meta.gen_allocation is not None
 
-            fut = self.rollout_engine.init_weights_update_group(meta)
+                self.engine_lock.acquire()
+                try:
+                    meta.nccl_master_address = self.weight_update_master_addr = (
+                        gethostip()
+                    )
+                    meta.nccl_master_port = self.weight_update_master_port = (
+                        find_free_ports(1)[0]
+                    )
+                    meta.nccl_group_name = self.weight_update_group_name
 
-            gen_world_size = meta.gen_allocation.parallel.world_size
-            init_method = f"tcp://{format_host_for_url(meta.nccl_master_address)}:{meta.nccl_master_port}"
-            self.logger.info(
-                f"Initializing weight update group: type={meta.type} "
-                f"init_method={init_method} "
-                f"group={self.weight_update_group_name}"
-            )
-            self.weight_update_group = init_custom_process_group(
-                backend=current_platform.communication_backend,
-                world_size=gen_world_size + 1,
-                init_method=init_method,
-                rank=0,
-                group_name=self.weight_update_group_name,
-                timeout=DIST_GROUP_DEFAULT_TIMEOUT,
-            )
+                    fut = self.rollout_engine.init_weights_update_group(meta)
 
-            fut.result()
+                    per_pp_world_size = (
+                        meta.gen_allocation.parallel.world_size // gen_pp_size
+                    )
+                    init_method = (
+                        f"tcp://{format_host_for_url(meta.nccl_master_address)}"
+                        f":{meta.nccl_master_port}"
+                    )
+                    self.logger.info(
+                        f"Initializing per-PP-rank weight update group: "
+                        f"type={meta.type} init_method={init_method} "
+                        f"group={self.weight_update_group_name} "
+                        f"per_pp_world_size={per_pp_world_size}"
+                    )
+                    self.weight_update_group = init_custom_process_group(
+                        backend=current_platform.communication_backend,
+                        world_size=per_pp_world_size + 1,
+                        init_method=init_method,
+                        rank=0,
+                        group_name=self.weight_update_group_name,
+                        timeout=DIST_GROUP_DEFAULT_TIMEOUT,
+                    )
 
-            self.engine_lock.release()
+                    fut.result()
+                finally:
+                    self.engine_lock.release()
+            else:
+                # Non-PP-head ranks do not create NCCL groups.  Set placeholder values so
+                # the attributes exist; they are never used for network I/O
+                # on non-PP-head ranks.
+                self.weight_update_master_addr = ""
+                self.weight_update_master_port = 0
+        else:
+            # PP==1: original behaviour – only the pp_rank=0 head creates
+            # a single group spanning all inference workers.
+            # Only one PP head exists, so no port race is possible.
+            if self.is_pipeline_parallel_head():
+                assert meta.gen_allocation is not None
+
+                meta.nccl_master_address = self.weight_update_master_addr = gethostip()
+                meta.nccl_master_port = self.weight_update_master_port = (
+                    find_free_ports(1)[0]
+                )
+                meta.nccl_group_name = self.weight_update_group_name
+
+                self.engine_lock.acquire()
+                try:
+                    fut = self.rollout_engine.init_weights_update_group(meta)
+
+                    gen_world_size = meta.gen_allocation.parallel.world_size
+                    init_method = (
+                        f"tcp://{format_host_for_url(meta.nccl_master_address)}"
+                        f":{meta.nccl_master_port}"
+                    )
+                    self.logger.info(
+                        f"Initializing weight update group: type={meta.type} "
+                        f"init_method={init_method} "
+                        f"group={self.weight_update_group_name}"
+                    )
+                    self.weight_update_group = init_custom_process_group(
+                        backend=current_platform.communication_backend,
+                        world_size=gen_world_size + 1,
+                        init_method=init_method,
+                        rank=0,
+                        group_name=self.weight_update_group_name,
+                        timeout=DIST_GROUP_DEFAULT_TIMEOUT,
+                    )
+
+                    fut.result()
+                finally:
+                    self.engine_lock.release()
+            else:
+                self.weight_update_master_addr = ""
+                self.weight_update_master_port = 0
 
     @trace_perf("megatron_engine.update_weights_from_distributed", category="comm")
     def _update_weights_from_distributed(self, meta: WeightUpdateMeta) -> None:
@@ -1665,6 +1863,35 @@ class MegatronEngine(TrainEngine):
 
         dist.barrier(group=self.cpu_group)
 
+        # Bridge delegation: when bridge_type=megatron-bridge and the user opts in,
+        # stream HF tensors directly from bridge.export_hf_weights. Falls back to
+        # the hand-rolled registry path for FP8 (quant_mapping in megatron-bridge
+        # is amax-style, not TE blockwise) and for LoRA (separate adapter export
+        # path not yet wired here).
+        use_bridge = (
+            self.bridge_cls == "megatron-bridge"
+            and self.mcore_config.use_bridge_for_update_weights
+            and not self.quantization_config
+            and not self.config.use_lora
+        )
+        if use_bridge:
+            self._update_weights_via_bridge(meta)
+        else:
+            self._update_weights_via_registry(meta)
+
+        if dist.get_rank() == 0:
+            self.rollout_engine.continue_generation()
+
+        current_platform.synchronize()
+        dist.barrier(group=self.cpu_group)
+
+    def _update_weights_via_registry(self, meta: WeightUpdateMeta) -> None:
+        """Hand-rolled conversion path via convert_to_hf registry.
+
+        Used for FP8, LoRA, and models with a converter entry. Iterates this PP
+        rank's local params, TP-gathers per param, converts to HF layout, and
+        bucket-broadcasts to the rollout engine.
+        """
         num_moe_experts = self.tf_config.num_moe_experts
         weight_chunked_mem_size = meta.weight_chunked_mem_mb * 1024 * 1024
 
@@ -1719,10 +1946,37 @@ class MegatronEngine(TrainEngine):
 
         dist.barrier(group=self.cpu_group)
 
-        if dist.get_rank() == 0:
-            self.rollout_engine.continue_generation()
+    def _update_weights_via_bridge(self, meta: WeightUpdateMeta) -> None:
+        """Delegate live weight sync to megatron-bridge.export_hf_weights.
 
-        current_platform.synchronize()
+        Streams (hf_name, hf_tensor) directly from the bridge, which handles
+        TP/EP/PP gather and layout transformation internally. Each PP rank
+        iterates the global parameter set (vs registry path which iterates only
+        local layers); non-PP-heads participate in collectives but do not bucket.
+        MoE expert weights are yielded inline by the bridge's grouped-export
+        path, so no separate second pass is needed.
+        """
+        weight_chunked_mem_size = meta.weight_chunked_mem_mb * 1024 * 1024
+        bucket: list[tuple[str, torch.Tensor]] = []
+        bucket_size = 0
+
+        for hf_name, hf_tensor in self.bridge.export_hf_weights(
+            self.model,
+            cpu=False,
+            show_progress=False,
+        ):
+            if not self.is_pipeline_parallel_head():
+                continue
+            size = hf_tensor.numel() * hf_tensor.element_size()
+            if bucket_size + size > weight_chunked_mem_size:
+                self._update_bucket_weights_from_distributed(meta, bucket)
+                bucket_size = 0
+            bucket.append((hf_name, hf_tensor.contiguous()))
+            bucket_size += size
+
+        if bucket:
+            self._update_bucket_weights_from_distributed(meta, bucket)
+
         dist.barrier(group=self.cpu_group)
 
     @trace_perf("megatron_engine.update_weights_from_disk", category="io")
@@ -1774,10 +2028,17 @@ class MegatronEngine(TrainEngine):
                     base_model_name_or_path=base_model_path or self.config.path,
                 )
             else:
+                # When the MTP head was dropped (enable_mtp=False), the export
+                # yields no mtp.* tensors and strict=True would silently skip
+                # every source shard containing an MTP key -- discarding the
+                # non-MTP weights packed in those shards (e.g. lm_head).
+                # strict=False writes such shards with all present keys, so the
+                # export loses only the intentionally dropped MTP weights.
                 self.bridge.save_hf_pretrained(
                     self.model,
                     path,
                     source_path=base_model_path,
+                    strict=not self._mtp_head_dropped,
                 )
         else:
             if self.mcore_config.use_mbridge_save:
@@ -1809,9 +2070,95 @@ class MegatronEngine(TrainEngine):
                 tokenizer.save_pretrained(path)
             if processor is not None:
                 processor.save_pretrained(path)
+            if self._mtp_head_dropped:
+                self._scrub_mtp_from_saved_config(path)
+                self._rebuild_index_from_saved_shards(path)
 
         current_platform.synchronize()
         dist.barrier(group=self.cpu_group)
+
+    @property
+    def _mtp_head_dropped(self) -> bool:
+        """True when the model declares an MTP head but enable_mtp left it unbuilt."""
+        if self.bridge_cls != "megatron-bridge" or self.mcore_config.enable_mtp:
+            return False
+        text_config = getattr(self.hf_config, "text_config", self.hf_config)
+        return any(
+            bool(getattr(text_config, key, 0))
+            for key in ("mtp_num_hidden_layers", "num_nextn_predict_layers")
+        )
+
+    def _scrub_mtp_from_saved_config(self, path: str) -> None:
+        """Zero MTP layer counts in an exported config.json so it matches the
+        MTP-stripped weights (the head is dropped when enable_mtp=False)."""
+        cfg_path = os.path.join(path, "config.json")
+        if not os.path.exists(cfg_path):
+            return
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+
+        def _walk(node: Any) -> bool:
+            changed = False
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if (
+                        key in ("mtp_num_hidden_layers", "num_nextn_predict_layers")
+                        and value
+                    ):
+                        node[key] = 0
+                        changed = True
+                    else:
+                        changed |= _walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    changed |= _walk(item)
+            return changed
+
+        if _walk(cfg):
+            with open(cfg_path, "w") as f:
+                json.dump(cfg, f, indent=2, sort_keys=True)
+            self.logger.info(
+                "Exported checkpoint is MTP-stripped (enable_mtp=False); "
+                "zeroed MTP layer counts in %s.",
+                cfg_path,
+            )
+
+    def _rebuild_index_from_saved_shards(self, path: str) -> None:
+        """Rewrite model.safetensors.index.json from the shard files' actual
+        contents. megatron-bridge's strict=False save marks each shard's full
+        expected key set as saved, leaving ghost entries for the dropped mtp.*
+        tensors and a stale metadata.total_size."""
+        index_path = os.path.join(path, "model.safetensors.index.json")
+        if not os.path.exists(index_path):
+            return
+        weight_map: dict[str, str] = {}
+        total_size = 0
+        for filename in sorted(os.listdir(path)):
+            if not filename.endswith(".safetensors"):
+                continue
+            with open(os.path.join(path, filename), "rb") as f:
+                header_len = struct.unpack("<Q", f.read(8))[0]
+                header = json.loads(f.read(header_len))
+            for key, meta in header.items():
+                if key == "__metadata__":
+                    continue
+                weight_map[key] = filename
+                begin, end = meta["data_offsets"]
+                total_size += end - begin
+        with open(index_path) as f:
+            index = json.load(f)
+        ghosts = set(index.get("weight_map", {})) - set(weight_map)
+        index["weight_map"] = weight_map
+        index.setdefault("metadata", {})["total_size"] = total_size
+        with open(index_path, "w") as f:
+            json.dump(index, f, indent=2, sort_keys=True)
+        if ghosts:
+            self.logger.info(
+                "Rebuilt safetensors index from shard contents; removed %d ghost "
+                "entries (e.g. %s).",
+                len(ghosts),
+                sorted(ghosts)[:3],
+            )
 
     def _load_model_from_hf(self, path: str) -> None:
         assert self.model is not None, "Model is not initialized."
@@ -1821,7 +2168,17 @@ class MegatronEngine(TrainEngine):
                 raise ValueError(
                     "Loading critic model is not supported with megatron-bridge."
                 )
-            self.bridge.load_hf_weights(self.model, hf_path=path)
+            # megatron-bridge's load path builds shard-index tensors via
+            # ``torch.arange(...)`` to index HF weights that live on CPU. Under
+            # the caller's ``with self.device:`` (CUDA) context, those indices
+            # become CUDA tensors and the CPU-tensor indexing raises
+            # ``RuntimeError: indices should be either on cpu or on the same
+            # device as the indexed tensor (cpu)`` — triggered by ChunkedMapping
+            # for any model with GDN/Mamba-style conv1d weights (e.g. Qwen3.5).
+            # Force CPU as the factory-op default here; tensor data assignment
+            # to GPU model params is unaffected (handled by .copy_()).
+            with torch.device("cpu"):
+                self.bridge.load_hf_weights(self.model, hf_path=path)
         else:
             load_weights_from_hf_with_mbridge_fast(
                 bridge=self.bridge,
@@ -1969,6 +2326,10 @@ class MegatronEngine(TrainEngine):
                 vocab_min_logits, vocab_max_logits = gather_packed_tree_vocab_stats(
                     output, trie_node
                 )
+                # Tree training only supports packed min/max vocab stats; mean/norm
+                # would need per-sequence unpacking, so leave them unset.
+                vocab_mean_logits = None
+                vocab_norm_logits = None
                 logprobs, entropy = gather_packed_tree_logprobs_entropy(
                     output,
                     trie_node,
@@ -1995,6 +2356,8 @@ class MegatronEngine(TrainEngine):
                 )
                 vocab_min_logits = output.detach().min(-1).values.float()
                 vocab_max_logits = output.detach().max(-1).values.float()
+                vocab_mean_logits = output.detach().float().mean(-1)
+                vocab_norm_logits = output.detach().float().norm(dim=-1)
                 if cp_padded_cu_seqlens is not None:
                     logprobs = reassemble_cp_packed_logprobs(
                         logprobs, cp_padded_cu_seqlens
@@ -2007,6 +2370,12 @@ class MegatronEngine(TrainEngine):
                     )
                     vocab_max_logits = reassemble_cp_packed_logprobs(
                         vocab_max_logits, cp_padded_cu_seqlens
+                    )
+                    vocab_mean_logits = reassemble_cp_packed_logprobs(
+                        vocab_mean_logits, cp_padded_cu_seqlens
+                    )
+                    vocab_norm_logits = reassemble_cp_packed_logprobs(
+                        vocab_norm_logits, cp_padded_cu_seqlens
                     )
                     cp_padding_length = inputs.get("_cp_padding_length", 0)
                     cp_old_cu_seqlens = inputs.get("_cp_old_cu_seqlens")
@@ -2034,6 +2403,18 @@ class MegatronEngine(TrainEngine):
                         cp_padded_cu_seqlens,
                         cp_old_cu_seqlens,
                     )
+                    vocab_mean_logits = unpad_logits(
+                        vocab_mean_logits,
+                        cp_padding_length,
+                        cp_padded_cu_seqlens,
+                        cp_old_cu_seqlens,
+                    )
+                    vocab_norm_logits = unpad_logits(
+                        vocab_norm_logits,
+                        cp_padding_length,
+                        cp_padded_cu_seqlens,
+                        cp_old_cu_seqlens,
+                    )
                     inputs = {
                         k: v for k, v in inputs.items() if not k.startswith("_cp_")
                     }
@@ -2043,6 +2424,8 @@ class MegatronEngine(TrainEngine):
                 inputs,
                 vocab_min_logits=vocab_min_logits,
                 vocab_max_logits=vocab_max_logits,
+                vocab_mean_logits=vocab_mean_logits,
+                vocab_norm_logits=vocab_norm_logits,
             )
         else:
             values = output.squeeze(-1)

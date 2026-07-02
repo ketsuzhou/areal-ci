@@ -320,12 +320,6 @@ class LocalScheduler(Scheduler):
         worker_id = f"{role}/{idx}"
         guard_url = f"http://{format_hostport(target_wi.worker.ip, int(target_wi.worker.worker_ports[0]))}"
 
-        # Optional: pin proxy-rollout to a fixed port so downstream bridges
-        # (db_bridge) can reach it deterministically. Set AREAL_PROXY_ROLLOUT_PORT
-        # in the trainer env. Accepts a comma-separated list (e.g.
-        # "17727,17737,17747") — AReaL tries each in order and binds the first
-        # free one. Only honored for the proxy-rollout role; other roles fall
-        # through to the normal random allocation.
         alloc_payload: dict[str, object] = {"count": 1}
         if role == "proxy-rollout":
             pinned_raw = os.environ.get("AREAL_PROXY_ROLLOUT_PORT")

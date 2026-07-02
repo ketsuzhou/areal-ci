@@ -142,14 +142,9 @@ def find_free_ports(
         exclude_ports = set()
 
     min_port, max_port = port_range
-    free_ports: list[int] = []
+    free_ports = []
     attempted_ports = set()
 
-    # Try preferred ports first, in order. Note the final `return sorted(...)`
-    # does not preserve this ordering, so the "first free preferred port"
-    # guarantee only holds for the proxy-rollout use case where count == 1.
-    # If preferred_ports is ever used with count > 1 and callers depend on
-    # preference order in the result, return the unsorted list instead.
     for port in preferred_ports or []:
         if len(free_ports) >= count:
             break
@@ -159,13 +154,15 @@ def find_free_ports(
         if is_port_free(port):
             free_ports.append(port)
 
-    # Calculate available port range
-    available_range = max_port - min_port + 1 - len(exclude_ports)
+    # Calculate available port range. Only excluded ports that fall within
+    # [min_port, max_port] reduce availability; out-of-range entries do not.
+    in_range_excluded = sum(min_port <= p <= max_port for p in exclude_ports)
+    available_range = max_port - min_port + 1 - in_range_excluded
 
-    if count > available_range + len(free_ports):
+    if count > available_range:
         raise ValueError(
             f"Cannot find {count} ports in range {port_range}. "
-            f"Only {available_range + len(free_ports)} ports available."
+            f"Only {available_range} ports available."
         )
 
     max_attempts = count * 10  # Reasonable limit to avoid infinite loops
