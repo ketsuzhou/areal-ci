@@ -74,9 +74,10 @@ class MulticaEnvDispatchClient:
         self,
         *,
         mode: str,
-        env_id: str,
+        env_id: str | None = None,
         dispatch_type: str,
-        agent_id: str,
+        agent_id: str | None = None,
+        squad_id: str | None = None,
         group_size: int = 1,
         domain: str | None = None,
         issue: SweLegoIssue | None = None,
@@ -85,11 +86,15 @@ class MulticaEnvDispatchClient:
         """POST /api/v1/env-dispatch — unified dispatch (spec §6.3)."""
         payload: dict = {
             "mode": mode,
-            "env_id": env_id,
             "dispatch_type": dispatch_type,
             "group_size": group_size,
-            "agent_id": agent_id,
         }
+        if env_id:
+            payload["env_id"] = env_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if squad_id:
+            payload["squad_id"] = squad_id
         if domain is not None:
             payload["domain"] = domain
         if issue is not None:

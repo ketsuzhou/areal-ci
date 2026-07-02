@@ -71,3 +71,41 @@ def test_delete_env_idempotent_on_404():
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(c.delete_env(env_id="env-1"))  # no raise
+
+
+def test_create_env_dispatch_squad_omits_agent_and_env():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"rollouts": [
+            {"env_id": "e1", "project_id": "p1", "chat_session_id": "c1", "agent_run_id": "r1"},
+        ]})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    asyncio.run(c.create_env_dispatch(
+        mode="scratch", env_id=None, dispatch_type="message",
+        agent_id=None, squad_id="sq-1", group_size=1,
+        domain="self_play", message="hi",
+    ))
+    assert "env_id" not in seen["body"]
+    assert "agent_id" not in seen["body"]
+    assert seen["body"]["squad_id"] == "sq-1"
+    assert seen["body"]["mode"] == "scratch"
+
+
+def test_create_env_dispatch_resume_mode_passthrough():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"rollouts": [
+            {"env_id": "e1", "project_id": "p1", "issue_id": "i1", "agent_run_id": "r1"},
+        ]})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    asyncio.run(c.create_env_dispatch(
+        mode="resume", env_id="src", dispatch_type="issue",
+        agent_id="ag", group_size=1, domain="swe_lego",
+    ))
+    assert seen["body"]["mode"] == "resume"
