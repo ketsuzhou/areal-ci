@@ -20,6 +20,9 @@ from areal.utils.data import (
 )
 from areal.utils.functional import ppo_critic_loss_fn
 from areal.utils.perf_tracer import trace_perf
+from areal.v2.training_service.controller.controller import (
+    GatewayTrainController,
+)
 
 
 class PPOCritic:
