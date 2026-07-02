@@ -7,8 +7,16 @@ name = "areal"
 description = "AReaL: A Large-Scale Asynchronous Reinforcement Learning System"
 readme = "README.md"
 license = {text = "Apache-2.0"}
+<<<<<<< /tmp/tmpx4s94vp1/ours
 requires-python = ">=3.12,<3.13"
 version = "1.0.4"
+=======
+requires-python = ">=3.11,<3.13"
+version = "2.0.0"
+<<<<<<< /tmp/tmpx4s94vp1/ours
+>>>>>>> /tmp/tmpx4s94vp1/theirs
+=======
+>>>>>>> /tmp/tmpx4s94vp1/theirs
 authors = [
     {name = "AReaL Team"},
 ]
@@ -132,7 +140,15 @@ dependencies = [
     "uvicorn",
     "uvloop>=0.21.0",
     "flask",
+<<<<<<< /tmp/tmpx4s94vp1/ours
+<<<<<<< /tmp/tmpx4s94vp1/ours
     "tenacity",
+=======
+=======
+>>>>>>> /tmp/tmpx4s94vp1/theirs
+    "tenacity>=8.2.0",
+
+>>>>>>> /tmp/tmpx4s94vp1/theirs
     # Build and packaging tools
     "build>=1.2.1",
     "wheel>=0.43.0",
@@ -191,13 +207,29 @@ cuda = [
 ]
 sandbox = [
     "daytona>=0.167.0",
+<<<<<<< /tmp/tmpx4s94vp1/ours
+<<<<<<< /tmp/tmpx4s94vp1/ours
+=======
+=======
+>>>>>>> /tmp/tmpx4s94vp1/theirs
+]
+cli = [
+    "click>=8.1",
+    "colorlog",
+<<<<<<< /tmp/tmpx4s94vp1/ours
+>>>>>>> /tmp/tmpx4s94vp1/theirs
+=======
+>>>>>>> /tmp/tmpx4s94vp1/theirs
 ]
 
+[project.scripts]
+areal = "areal.v2.cli.main:cli"
+
 [project.urls]
-"Homepage" = "https://github.com/inclusionAI/AReaL"
-"Repository" = "https://github.com/inclusionAI/AReaL"
-"Documentation" = "https://inclusionai.github.io/AReaL/en/intro.html"
-"Bug Tracker" = "https://github.com/inclusionAI/AReaL/issues"
+"Homepage" = "https://github.com/areal-project/AReaL"
+"Repository" = "https://github.com/areal-project/AReaL"
+"Documentation" = "https://areal-project.github.io/AReaL/en/intro.html"
+"Bug Tracker" = "https://github.com/areal-project/AReaL/issues"
 
 [dependency-groups]
 dev = [
@@ -231,6 +263,15 @@ module-root = ""
 # This prevents uv from failing when CUDA-only packages don't have wheels for macOS
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
+<<<<<<< /tmp/tmpx4s94vp1/ours
+=======
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+<<<<<<< /tmp/tmpx4s94vp1/ours
+>>>>>>> /tmp/tmpx4s94vp1/theirs
+=======
+>>>>>>> /tmp/tmpx4s94vp1/theirs
 ]
 override-dependencies = [
     # litellm[proxy] conflicts with sglang's exact pins:
@@ -266,6 +307,7 @@ url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [tool.uv.sources]
+<<<<<<< /tmp/tmpx4s94vp1/ours
 # Local wheels
 torch = { path = "wheels/torch-2.9.1+cu129-cp312-cp312-manylinux_2_28_x86_64.whl" }
 triton = { path = "wheels/triton-3.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" }
@@ -275,6 +317,12 @@ nvidia-nccl-cu12 = { path = "wheels/nvidia_nccl_cu12-2.27.5-py3-none-manylinux20
 nvidia-nvshmem-cu12 = { path = "wheels/nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" }
 sglang-kernel = { path = "wheels/sglang_kernel-0.4.1-cp310-abi3-manylinux2014_x86_64.whl" }
 flashinfer-cubin = { path = "wheels/flashinfer_cubin-0.6.7.post3-py3-none-any.whl" }
+=======
+torch = [
+    { index = "pytorch-cu129", extra = "sglang" },
+    { index = "pytorch-cu129", extra = "cuda" },
+]
+>>>>>>> /tmp/tmpx4s94vp1/theirs
 torchaudio = [
     { index = "pytorch-cu129", extra = "sglang" },
     { index = "pytorch-cu129", extra = "cuda" },

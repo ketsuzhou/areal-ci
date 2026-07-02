@@ -22,6 +22,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from areal.api.cli_args import InferenceEngineConfig
 from areal.api import RolloutWorkflow
+from areal.infra.rpc.rtensor import RTensor
 from .async_task_runner import (
     AsyncTaskRunner,
     TaskQueueFullError,
@@ -248,7 +249,7 @@ _MAX_FETCH_BATCH_SIZE = 100
 # Timeout for shutting down threads
 _SHUTDOWN_TIMEOUT_SECONDS = 2.0
 # Timeout for "wait" and "wait_for_task" if timeout parameter is None
-_DEFAULT_WAIT_TIMEOUT_SECONDS = float(30 * 60)
+_DEFAULT_WAIT_TIMEOUT_SECONDS = float(7 * 24 * 3600)
 
 
 class WithTaskID(Protocol):
@@ -356,8 +357,6 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
 
         get_executor().submit(post)
 
-    _commit_loop_logged = False
-
     def _commit_loop(self) -> None:
         """Producer thread - continuously submits tasks based on capacity."""
         while not self._shutdown_event.is_set():
@@ -369,23 +368,12 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 if task_input is None:
                     continue
 
-                if not self._commit_loop_logged:
-                    self.logger.info(
-                        "_commit_loop: first task picked up, task_id=%s, pending_inputs=%d",
-                        task_input.task_id,
-                        len(self._pending_inputs),
-                    )
-                    self._commit_loop_logged = True
-
                 task_fn = self.task_factory(task_input)
                 try:
                     self.runner.submit(task_fn, task_id=task_input.task_id)
                     self.staleness_manager.on_rollout_submitted()
-                    self.logger.info(
-                        "_commit_loop: submitted task_id=%s to runner. %s",
-                        task_input.task_id,
-                        self._rollout_stats(),
-                    )
+                    if self.enable_tracing:
+                        self.logger.info(f"Submit rollout. {self._rollout_stats()}")
                 except TaskQueueFullError:
                     with self._input_cv:
                         self._pending_inputs.appendleft(task_input)
@@ -446,29 +434,16 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                     self._input_cv.notify()
                 break
 
-    _get_next_logged = False
-
     def _get_next_task_for_submission(self) -> TInput | None:
         with self._input_cv:
             while not self._shutdown_event.is_set():
                 self._check_thread_exception()
                 # There is capacity and pending inputs
-                has_capacity = (
+                if (
                     not self.runner.paused.is_set()
                     and self.staleness_manager.get_capacity() > 0
                     and self._pending_inputs
-                )
-                if not self._get_next_logged:
-                    self.logger.info(
-                        "_get_next_task_for_submission: pending_inputs=%d, "
-                        "runner_paused=%s, staleness_capacity=%d, has_capacity=%s",
-                        len(self._pending_inputs),
-                        self.runner.paused.is_set(),
-                        self.staleness_manager.get_capacity(),
-                        has_capacity,
-                    )
-                    self._get_next_logged = True
-                if has_capacity:
+                ):
                     return self._pending_inputs.popleft()
                 self._input_cv.wait()
 
@@ -551,8 +526,6 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
             f"rejected: {stats.rejected}."
         )
 
-    _submit_count = 0
-
     def submit_task_input(self, task_input: TInput) -> None:
         """Submit a task input for processing.
 
@@ -565,15 +538,8 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         with self._input_cv:
             self._pending_inputs.append(task_input)
             self.staleness_manager.on_rollout_enqueued()
-            self._submit_count += 1
-            if self._submit_count <= 5 or self._submit_count % 32 == 0:
-                self.logger.info(
-                    "submit_task_input: task_id=%s, total_submitted=%d, pending_inputs=%d. %s",
-                    task_input.task_id,
-                    self._submit_count,
-                    len(self._pending_inputs),
-                    self._rollout_stats(),
-                )
+            if self.enable_tracing:
+                self.logger.info(f"Enqueue rollout. {self._rollout_stats()}")
             self._input_cv.notify()
         with self._result_cv:
             self._active_task_ids.add(task_input.task_id)
@@ -672,16 +638,6 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         batch_size: int,
         dynamic_bs: bool = False,
     ) -> list[TResult]:
-        self.logger.info(
-            "active_submit_and_wait: batch_size=%d, dynamic_bs=%s, "
-            "runner_queue_sizes=(input=%d, output=%d), pending_inputs=%d, pending_results=%d",
-            batch_size,
-            dynamic_bs,
-            self.runner.get_input_queue_size(),
-            self.runner.get_output_queue_size(),
-            len(self._pending_inputs),
-            len(self._pending_results),
-        )
         """Continuously submit tasks and wait until a full batch of results is ready.
 
         This method maintains overlap between submission and result collection
@@ -716,7 +672,6 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
         total_attempts = 0
         results = []
 
-        loop_iter = 0
         while True:
             # Submit tasks to maintain overlap
             with self._input_cv:
@@ -726,36 +681,10 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 raise ValueError(
                     f"Inference engine config's queue size is too small: {self.runner.max_queue_size} < batch size {batch_size}."
                 )
-            if self.runner.max_queue_size <= batch_size and accepted_cnt == 0:
-                raise ValueError(
-                    f"queue_size ({self.runner.max_queue_size}) must be > batch_size ({batch_size}) "
-                    f"to avoid deadlock in active_submit_and_wait. "
-                    f"Increase rollout.queue_size in config (e.g. batch_size * 4 = {batch_size * 4})."
-                )
             cap_queue = self.runner.max_queue_size - (
                 self.runner.get_input_queue_size() + batch_size
             )
             capacity = min(cap_staleness, cap_queue)
-            if loop_iter % 10 == 0:
-                conc_cap, stal_cap = self.staleness_manager.get_capacity_breakdown()
-                self.logger.info(
-                    "active_submit_and_wait loop: iter=%d, cap_staleness=%d, cap_queue=%d, "
-                    "capacity=%d, pending_inputs=%d, accepted_cnt=%d/%d, "
-                    "runner_input_q=%d, runner_output_q=%d, runner_paused=%s, "
-                    "concurrency_capacity=%d, staleness_capacity=%d",
-                    loop_iter,
-                    cap_staleness,
-                    cap_queue,
-                    capacity,
-                    pending_inputs,
-                    accepted_cnt,
-                    batch_size,
-                    self.runner.get_input_queue_size(),
-                    self.runner.get_output_queue_size(),
-                    self.runner.paused.is_set(),
-                    conc_cap,
-                    stal_cap,
-                )
             if capacity > 0:
                 if self.enable_tracing:
                     perf_tracer.instant(
@@ -797,7 +726,6 @@ class BatchTaskDispatcher(Generic[TInput, TResult]):
                 elif accepted_cnt >= batch_size:
                     break
             else:
-                loop_iter += 1
                 continue
             break
 
@@ -904,6 +832,80 @@ class WorkflowExecutor:
         subdir = "eval-rollout" if is_eval else "rollout"
         return os.path.join(log_path, subdir)
 
+    @staticmethod
+    def _compute_output_versions(
+        sample_versions: list[int], mask: list[int]
+    ) -> tuple[int, int, list[list[int]]]:
+        """Filter versions by loss_mask and compute head, tail, and RLE."""
+        output_versions = [v for v, m in zip(sample_versions, mask) if m == 1]
+        head = min(output_versions) if output_versions else -1
+        tail = max(output_versions) if output_versions else -1
+        rle: list[list[int]] = []
+        for v in output_versions:
+            if rle and rle[-1][0] == v:
+                rle[-1][1] += 1
+            else:
+                rle.append([v, 1])
+        return head, tail, rle
+
+    @staticmethod
+    def _split_trajectory_for_dump(
+        ids: list[int], mask: list[int], tokenizer
+    ) -> dict[str, Any]:
+        if len(ids) != len(mask):
+            raise ValueError(f"ids length {len(ids)} != mask length {len(mask)}")
+        prompt_end = mask.index(1) if 1 in mask else len(ids)
+        prompt_text = tokenizer.decode(ids[:prompt_end], skip_special_tokens=False)
+        completion_text = tokenizer.decode(ids[prompt_end:], skip_special_tokens=False)
+
+        # Count generation runs without decoding to avoid unnecessary work
+        # in the common single-turn case.
+        n = len(mask)
+        gen_count = 0
+        idx = 0
+        while idx < n:
+            j = idx + 1
+            while j < n and mask[j] == mask[idx]:
+                j += 1
+            if mask[idx] == 1:
+                gen_count += 1
+            idx = j
+
+        # Only decode segments for multi-turn trajectories so single-turn
+        # keeps the same 2-decode cost as before.
+        segments: list[dict[str, Any]] | None = None
+        if gen_count > 1:
+            raw_segments: list[dict[str, Any]] = []
+            idx = 0
+            seen_prompt = False
+            while idx < n:
+                j = idx + 1
+                while j < n and mask[j] == mask[idx]:
+                    j += 1
+                if mask[idx] == 1:
+                    role = "gen"
+                elif not seen_prompt:
+                    role = "prompt"
+                    seen_prompt = True
+                else:
+                    role = "context"
+                raw_segments.append(
+                    {
+                        "role": role,
+                        "len": j - idx,
+                        "text": tokenizer.decode(ids[idx:j], skip_special_tokens=False),
+                    }
+                )
+                idx = j
+            segments = raw_segments
+
+        return {
+            "prompt_end": prompt_end,
+            "prompt_text": prompt_text,
+            "completion_text": completion_text,
+            "segments": segments,
+        }
+
     async def _dump_trajectory(
         self,
         traj: dict[str, Any] | None,
@@ -913,85 +915,100 @@ class WorkflowExecutor:
         if traj is None:
             return False, "trajectory is None"
 
-        dump_dir = self._get_dump_dir(is_eval)
-        if dump_dir is None:
-            return False, "dump dir is empty"
+        try:
+            traj = RTensor.localize(traj)
 
-        tokenizer = self._get_tokenizer()
-        if tokenizer is None:
-            return False, "tokenizer not configured"
+            dump_dir = self._get_dump_dir(is_eval)
+            if dump_dir is None:
+                return False, "dump dir is empty"
 
-        # Extract tensors
-        input_ids = traj.get("input_ids")
-        rewards = traj.get("rewards")
-        loss_mask = traj.get("loss_mask")
-        attention_mask = traj.get("attention_mask")
+            tokenizer = self._get_tokenizer()
+            if tokenizer is None:
+                return False, "tokenizer not configured"
 
-        if (
-            input_ids is None
-            or rewards is None
-            or loss_mask is None
-            or attention_mask is None
-        ):
-            return (
-                False,
-                "missing required tensor fields: input_ids, rewards, attention_mask, or loss_mask",
-            )
+            # Extract tensors
+            input_ids = traj.get("input_ids")
+            rewards = traj.get("rewards")
+            loss_mask = traj.get("loss_mask")
+            attention_mask = traj.get("attention_mask")
 
-        if "versions" not in traj:
-            self.logger.warning(
-                "Trajectory missing 'versions' field, defaulting to current inference engine version."
-            )
-            versions = [self.inference_engine.get_version()]
-        else:
-            versions = traj["versions"].flatten().tolist()
-
-        tail_version = max(versions)
-        head_version = min(versions)
-        # Create versioned directory
-        version_dir = os.path.join(dump_dir, str(tail_version))
-        await aiofiles.os.makedirs(version_dir, exist_ok=True)
-
-        # Handle batched trajectories
-        batch_size = input_ids.shape[0]
-
-        file_path = os.path.join(version_dir, f"{task_id}.jsonl")
-        async with aiofiles.open(file_path, "a") as f:
-            for i in range(batch_size):
-                seqlen = attention_mask[i].sum().item()
-                if seqlen == 0:
-                    continue
-                ids = input_ids[i, :seqlen].tolist()
-                mask = loss_mask[i, :seqlen].tolist()
-                # Skip samples with empty completions (all prompt, no completion tokens)
-                if mask[-1] != 1:
-                    continue
-
-                prompt_end = seqlen - sum(mask)
-                prompt_ids = ids[:prompt_end]
-                completion_ids = ids[prompt_end:]
-
-                # Decode to text
-                prompt_text = tokenizer.decode(prompt_ids, skip_special_tokens=False)
-                completion_text = tokenizer.decode(
-                    completion_ids, skip_special_tokens=False
+            if (
+                input_ids is None
+                or rewards is None
+                or loss_mask is None
+                or attention_mask is None
+            ):
+                return (
+                    False,
+                    "missing required tensor fields: input_ids, rewards, attention_mask, or loss_mask",
                 )
 
-                reward = rewards[i].item()
+            if "versions" not in traj:
+                self.logger.warning(
+                    "Trajectory missing 'versions' field, defaulting to current inference engine version."
+                )
+                all_versions = None
+                default_version = self.inference_engine.get_version()
+            else:
+                all_versions = traj["versions"]
 
-                record = {
-                    "task_id": task_id,
-                    "sample_idx": i,
-                    "seqlen": seqlen,
-                    "prompt_len": prompt_end,
-                    "head_version": head_version,
-                    "tail_version": tail_version,
-                    "reward": reward,
-                    "prompt": prompt_text,
-                    "completion": completion_text,
-                }
-                await f.write(json.dumps(record) + "\n")
-        return True, ""
+            global_tail = (
+                all_versions.max().item()
+                if all_versions is not None
+                else default_version
+            )
+            # Directory is named by batch-global max version (global_tail).
+            # Individual records may have tail_version <= global_tail.
+            version_dir = os.path.join(dump_dir, str(global_tail))
+            await aiofiles.os.makedirs(version_dir, exist_ok=True)
+
+            # Handle batched trajectories
+            batch_size = input_ids.shape[0]
+
+            file_path = os.path.join(version_dir, f"{task_id}.jsonl")
+            async with aiofiles.open(file_path, "a") as f:
+                for i in range(batch_size):
+                    seqlen = attention_mask[i].sum().item()
+                    if seqlen == 0:
+                        continue
+                    ids = input_ids[i, :seqlen].tolist()
+                    mask = loss_mask[i, :seqlen].tolist()
+                    # Skip samples with empty completions
+                    if mask[-1] != 1:
+                        continue
+
+                    if all_versions is not None:
+                        sample_versions = all_versions[i, :seqlen].tolist()
+                        head_version, tail_version, version_rle = (
+                            self._compute_output_versions(sample_versions, mask)
+                        )
+                    else:
+                        head_version = tail_version = default_version
+                        version_rle = [[default_version, sum(mask)]]
+
+                    split = self._split_trajectory_for_dump(ids, mask, tokenizer)
+
+                    reward = rewards[i].item()
+
+                    record = {
+                        "task_id": task_id,
+                        "sample_idx": i,
+                        "seqlen": seqlen,
+                        "prompt_len": split["prompt_end"],
+                        "head_version": head_version,
+                        "tail_version": tail_version,
+                        "version_rle": version_rle,
+                        "reward": reward,
+                        "prompt": split["prompt_text"],
+                        "completion": split["completion_text"],
+                    }
+                    if split["segments"] is not None:
+                        record["segments"] = split["segments"]
+
+                    await f.write(json.dumps(record) + "\n")
+            return True, ""
+        except Exception as e:
+            return False, f"dump failed: {e}"
 
     def initialize(self, logger=None, train_data_parallel_size: int | None = None):
         """Initialize the workflow executor and start background threads.
@@ -1244,12 +1261,6 @@ class WorkflowExecutor:
         """
         if task_id is None:
             task_id = self._task_id_generator.next()
-        self.logger.info(
-            "WorkflowExecutor.submit: task_id=%d, workflow=%s, is_eval=%s",
-            task_id,
-            type(workflow).__name__,
-            is_eval,
-        )
         perf_tracer.register_task(task_id)
         task_input = _RolloutTaskInput(
             data=data,

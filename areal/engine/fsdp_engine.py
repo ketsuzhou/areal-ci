@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import gc
 import math
@@ -231,7 +232,8 @@ class FSDPEngine(TrainEngine):
         self.own_global_group = False
         self._cpu_group: dist.ProcessGroup
         self.weight_update_group_initialized = False
-        self.weight_update_group_name: str
+        self.weight_update_group_names: list[str] = []
+        self.weight_update_groups: list = []
         self.weight_update_master_addr: str
         self.weight_update_master_port: int
 
@@ -378,7 +380,6 @@ class FSDPEngine(TrainEngine):
 
         if is_tms_enabled():
             torch_memory_saver.hook_mode = "preload"
-        self.weight_update_group_name = "update_weight_group"
 
         # Create device model
         self._create_device_model()
@@ -933,17 +934,19 @@ class FSDPEngine(TrainEngine):
 
         self.is_offload = False
 
-    def clear_batches(self, shard_ids: list[str]) -> None:
+    def clear_batches(self, shard_ids: list[str] | None = None) -> None:
         """Drain this worker's client-side RTensor fetch buffer.
 
         Called via RPC by ``TrainController.clear_batches`` at step end so
         cross-node consumer DP heads release cached tensors. See #1209.
-        Upstream ``TrainController.clear_batches`` guards against empty
-        input, so ``shard_ids`` is always a non-empty ``list[str]``.
+        Non-DP-head ranks receive no positional args via
+        ``_call_workers`` (see train_controller.py:575-577) — accept the
+        no-args call and noop, since their ``_fetch_buffer`` is empty.
         """
         from areal.infra.rpc.rtensor import clear_fetch_buffer
 
-        clear_fetch_buffer(shard_ids)
+        if shard_ids:
+            clear_fetch_buffer(shard_ids)
 
     def fetch_buffer_stats(self) -> dict[str, int]:
         """Expose local fetch-buffer stats for post-step drain verification."""
@@ -972,7 +975,10 @@ class FSDPEngine(TrainEngine):
         )
 
     def _create_llm_actor_or_critic(self):
-        dtype = getattr(torch, self.config.dtype)
+        # Storage dtype = optimizer_dtype. FSDP2 MixedPrecisionPolicy
+        # (configured in parallelize_model) will cast to self.config.dtype
+        # in forward/backward.
+        dtype = getattr(torch, self.config.optimizer_dtype)
 
         if self.config.is_critic:
             model_class = AutoModelForTokenClassification
@@ -1008,7 +1014,9 @@ class FSDPEngine(TrainEngine):
         else:
             self.device = torch.device(int(os.environ["LOCAL_RANK"]))
 
-        dtype = getattr(torch, self.config.dtype)
+        # Load weights in optimizer_dtype (typically fp32) to maintain
+        # master weights. FSDP2 MP casts to compute dtype on-the-fly.
+        dtype = getattr(torch, self.config.optimizer_dtype)
 
         if self.config.fsdp.memory_efficient_load:
             # Only rank 0 loads on CPU; other ranks use meta device (zero memory)
@@ -1025,8 +1033,14 @@ class FSDPEngine(TrainEngine):
 
         self.get_device_stats().log("before model creation/loading")
 
+        # Note: VLMs often have vision_tower in fp32 already; loading whole
+        # model in optimizer_dtype (fp32 default) is consistent.
         if self.is_vision_model:
-            if dtype == torch.float16:
+            # Compute dtype (config.dtype) is what FSDP2 MP casts to in
+            # forward/backward; storage dtype (optimizer_dtype) is restricted
+            # to fp32/bf16 by config validation, so checking it would never
+            # catch a float16 misconfiguration.
+            if self._compute_dtype() == torch.float16:
                 raise ValueError(
                     "Vision models do not support float16 dtype. Please use bfloat16."
                 )
@@ -1091,6 +1105,12 @@ class FSDPEngine(TrainEngine):
             raise NotImplementedError()
 
         self.model.enable_input_require_grads()
+        # autocast_adapter_dtype=False: with optimizer_dtype=float32, LoRA
+        # adapter weights are stored in fp32 alongside the base model.
+        # FSDP2 MixedPrecisionPolicy (param_dtype=config.dtype) casts both
+        # base and adapter params to compute dtype during forward/backward.
+        # The fp32 adapter path is not exercised by tests/test_fsdp_optimizer_dtype.py
+        # (full-model only); LoRA + fp32 master is a known untested combination.
         self.model = get_peft_model(
             self.model,
             peft_config,
@@ -1111,9 +1131,33 @@ class FSDPEngine(TrainEngine):
             "adam_bf16",
             "sgd",
         ], "Only adam/adam_bf16/sgd optimizer is supported in this engine."
-        if self.optimizer_config.type in ["sgd", "adam_bf16"]:
+        if self.optimizer_config.type == "sgd":
             self.logger.warning(
-                f"Using the '{self.optimizer_config.type}' optimizer with FSDP may be less stable. Consider using the 'adam' (AdamW) optimizer for improved stability and performance."
+                "Using SGD with FSDP may be less stable. Consider using "
+                "the 'adam' (AdamW) optimizer for improved stability."
+            )
+        elif self.optimizer_config.type == "adam_bf16":
+            if self.config.optimizer_dtype != "bfloat16":
+                # __post_init__ canonicalizes bf16 → bfloat16; check canonical value only.
+                self.logger.warning(
+                    "adam_bf16 is intended to be paired with optimizer_dtype="
+                    "'bfloat16' for memory savings (m/v in bf16, Kahan summation "
+                    "for fp32-equivalent updates). Current optimizer_dtype=%s — "
+                    "you may want to use the standard 'adam' optimizer instead.",
+                    self.config.optimizer_dtype,
+                )
+        elif (
+            self.optimizer_config.type == "adam"
+            and self.config.optimizer_dtype == "bfloat16"
+        ):
+            self.logger.warning(
+                "optimizer.type='adam' with optimizer_dtype='bfloat16' is the "
+                "exact configuration that triggers issue #1292 (silent loss "
+                "plateau ~3x higher than fp32 master weights). torch.optim.AdamW "
+                "will create bf16 exp_avg/exp_avg_sq inheriting from "
+                "model.parameters(). For memory savings, switch to "
+                "optimizer.type='adam_bf16' (uses Kahan summation). "
+                "For default behavior, leave optimizer_dtype='float32'."
             )
         lr = self.optimizer_config.lr
         weight_decay = self.optimizer_config.weight_decay
@@ -1243,6 +1287,24 @@ class FSDPEngine(TrainEngine):
         else:
             yield from name_params_iterator
 
+    def _compute_dtype(self) -> torch.dtype:
+        """Resolve config.dtype to torch.dtype (canonicalized in TrainEngineConfig)."""
+        return getattr(torch, self.config.dtype)
+
+    def _cast_to_compute_dtype(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Cast fp32 master storage to compute dtype for export / rollout sync.
+
+        When optimizer_dtype=float32 (the fp32 master weights default), the
+        underlying storage is fp32. HF export and xccl weight sync to rollout
+        engines (SGLang/vLLM) must cast back to compute dtype (typically bf16)
+        so deployment artefacts and broadcast bandwidth stay unchanged.
+        No-op when storage already matches compute dtype.
+        """
+        compute_dtype = self._compute_dtype()
+        if tensor.is_floating_point() and tensor.dtype != compute_dtype:
+            return tensor.to(compute_dtype)
+        return tensor
+
     def _get_full_tensor(self, param: nn.Parameter) -> torch.Tensor:
         """Get full tensor from a parameter, handling DTensor and CPU offloaded tensors."""
         tensor = param.data
@@ -1297,6 +1359,33 @@ class FSDPEngine(TrainEngine):
                 "bias": "none",
             }
 
+        if len(self.weight_update_groups) > 1:
+            # Per-PP-rank groups: broadcast to each group sequentially.
+            # Each group's NCCL broadcast must complete before the next
+            # starts, because sglang's PP event loop processes requests
+            # serially within each PP rank.
+            for group_name, group in zip(
+                self.weight_update_group_names, self.weight_update_groups
+            ):
+                pp_meta = copy.copy(meta)
+                pp_meta.nccl_group_name = group_name
+                fut = self.rollout_engine.update_weights_from_distributed(
+                    pp_meta, param_specs
+                )
+                for _, tensor in named_tensors:
+                    dist.broadcast(tensor, src=0, group=group, async_op=False)
+                fut.result()
+            # Return a no-op bucket (all work is already done).
+            _done_fut: Future = Future()
+            _done_fut.set_result(None)
+            return _PendingWeightUpdateBucket(
+                handles=[],
+                fut=_done_fut,
+                named_tensors=named_tensors,
+                stream=stream,
+            )
+
+        # Single group: original async path
         fut = self.rollout_engine.update_weights_from_distributed(meta, param_specs)
 
         handles = []
@@ -1310,7 +1399,10 @@ class FSDPEngine(TrainEngine):
             for _, tensor in named_tensors:
                 handles.append(
                     dist.broadcast(
-                        tensor, src=0, group=self.weight_update_group, async_op=True
+                        tensor,
+                        src=0,
+                        group=self.weight_update_groups[0],
+                        async_op=True,
                     )
                 )
 
@@ -1345,37 +1437,132 @@ class FSDPEngine(TrainEngine):
 
     def _init_weight_update_from_distributed(self, meta: WeightUpdateMeta):
         assert meta.type == "xccl"
+        gen_pp_size = meta.gen_allocation.parallel.pp_size if meta.gen_allocation else 1
 
-        # Reset weight weight meta with local info
-        meta.nccl_master_address = self.weight_update_master_addr = gethostip()
-        meta.nccl_master_port = self.weight_update_master_port = find_free_ports(1)[0]
-        meta.nccl_group_name = self.weight_update_group_name
-
-        # NOTE: Processes launched with torchrun will set the following env var to True,
-        # which blocks creating another TCP store for weight update.
+        # NOTE: Processes launched with torchrun will set the following env var
+        # to True, which blocks creating another TCP store for weight update.
         os.environ["TORCHELASTIC_USE_AGENT_STORE"] = str(False)
-        if dist.get_rank() == 0:
-            assert meta.gen_allocation is not None
 
-            fut = self.rollout_engine.init_weights_update_group(meta)
-
-            gen_world_size = meta.gen_allocation.parallel.world_size
-            init_method = f"tcp://{format_host_for_url(meta.nccl_master_address)}:{meta.nccl_master_port}"
+        if gen_pp_size > 1:
+            # When the inference side uses PP > 1, we MUST create per-PP-rank
+            # NCCL groups (one per PP stage).  sglang's PP scheduler event loop
+            # processes requests at PP rank 0 BEFORE forwarding them to PP
+            # rank 1.  If a single NCCL group spans all PP ranks, the TCP
+            # rendezvous at PP rank 0 blocks forever because PP rank 1 never
+            # receives the init request -> deadlock.  Per-PP-rank groups avoid
+            # this: each group only requires the trainer + one PP stage's TP
+            # workers, so the rendezvous can complete within one PP stage.
             self.logger.info(
-                f"Initializing weight update group: type={meta.type} "
-                f"init_method={init_method} "
-                f"group={meta.nccl_group_name}"
+                f"gen_pp_size={gen_pp_size} > 1: creating per-PP-rank "
+                f"weight update groups to avoid PP event-loop deadlock."
             )
-            self.weight_update_group = init_custom_process_group(
-                backend=current_platform.communication_backend,
-                world_size=gen_world_size + 1,
-                init_method=init_method,
-                rank=0,
-                group_name=meta.nccl_group_name,
-                timeout=DIST_GROUP_DEFAULT_TIMEOUT,
-            )
+            self._init_per_pp_weight_update_groups(meta, gen_pp_size)
+        else:
+            # PP == 1: single group spanning all inference workers.
+            group_name = "update_weight_group"
+            self.weight_update_group_names = [group_name]
 
-            fut.result()
+            meta.nccl_master_address = self.weight_update_master_addr = gethostip()
+            meta.nccl_master_port = self.weight_update_master_port = find_free_ports(1)[
+                0
+            ]
+            meta.nccl_group_name = group_name
+
+            if dist.get_rank() == 0:
+                assert meta.gen_allocation is not None
+                gen_world_size = meta.gen_allocation.parallel.world_size
+
+                fut = self.rollout_engine.init_weights_update_group(meta)
+
+                init_method = (
+                    f"tcp://{format_host_for_url(meta.nccl_master_address)}"
+                    f":{meta.nccl_master_port}"
+                )
+                self.logger.info(
+                    f"Initializing weight update group: type={meta.type} "
+                    f"init_method={init_method} group={group_name} "
+                    f"world_size={gen_world_size + 1}"
+                )
+                pg = init_custom_process_group(
+                    backend=current_platform.communication_backend,
+                    world_size=gen_world_size + 1,
+                    init_method=init_method,
+                    rank=0,
+                    group_name=group_name,
+                    timeout=DIST_GROUP_DEFAULT_TIMEOUT,
+                )
+                self.weight_update_groups = [pg]
+                self.weight_update_group = pg
+
+                fut.result()
+                self.logger.info(f"Weight update group '{group_name}' initialized.")
+
+    def _init_per_pp_weight_update_groups(
+        self, meta: WeightUpdateMeta, gen_pp_size: int
+    ):
+        """Create one NCCL weight-update group per inference PP stage.
+
+        The group name carries a PP-rank suffix (e.g. ``update_weight_group_0``)
+        which the inference side uses (Scenario 2 in ``sglang_remote.py``) to
+        route the request to the correct PP stage's workers.
+        """
+        assert meta.gen_allocation is not None
+        gen_world_size = meta.gen_allocation.parallel.world_size
+        per_pp_world_size = gen_world_size // gen_pp_size
+
+        self.weight_update_group_names = []
+        self.weight_update_groups = []
+
+        if dist.get_rank() == 0:
+            for pp_rank in range(gen_pp_size):
+                group_name = f"update_weight_group_{pp_rank}"
+                self.weight_update_group_names.append(group_name)
+
+                pp_meta = copy.copy(meta)
+                pp_meta.nccl_master_address = gethostip()
+                pp_meta.nccl_master_port = find_free_ports(1)[0]
+                pp_meta.nccl_group_name = group_name
+
+                if pp_rank == 0:
+                    self.weight_update_master_addr = pp_meta.nccl_master_address
+                    self.weight_update_master_port = pp_meta.nccl_master_port
+
+                self.logger.info(
+                    f"Initializing per-PP weight update group: "
+                    f"pp_rank={pp_rank} group={group_name} "
+                    f"world_size={per_pp_world_size + 1}"
+                )
+
+                fut = self.rollout_engine.init_weights_update_group(pp_meta)
+
+                init_method = (
+                    f"tcp://{format_host_for_url(pp_meta.nccl_master_address)}"
+                    f":{pp_meta.nccl_master_port}"
+                )
+                pg = init_custom_process_group(
+                    backend=current_platform.communication_backend,
+                    world_size=per_pp_world_size + 1,
+                    init_method=init_method,
+                    rank=0,
+                    group_name=group_name,
+                    timeout=DIST_GROUP_DEFAULT_TIMEOUT,
+                )
+                self.weight_update_groups.append(pg)
+
+                fut.result()
+                self.logger.info(
+                    f"Per-PP weight update group '{group_name}' "
+                    f"(pp_rank={pp_rank}) initialized."
+                )
+
+            # Backward compat: set single-group attribute to first group
+            self.weight_update_group = self.weight_update_groups[0]
+        else:
+            # Non rank-0 FSDP ranks do not participate in NCCL groups
+            for pp_rank in range(gen_pp_size):
+                self.weight_update_group_names.append(f"update_weight_group_{pp_rank}")
+            self.weight_update_master_addr = ""
+            self.weight_update_master_port = 0
 
     @trace_perf("fsdp_engine.update_weights_from_distributed", category="comm")
     def _update_weights_from_distributed(self, meta: WeightUpdateMeta):
@@ -1384,7 +1571,11 @@ class FSDPEngine(TrainEngine):
         # Reset weight weight meta with local info
         meta.nccl_master_address = self.weight_update_master_addr
         meta.nccl_master_port = self.weight_update_master_port
-        meta.nccl_group_name = self.weight_update_group_name
+        meta.nccl_group_name = (
+            self.weight_update_group_names[0]
+            if self.weight_update_group_names
+            else "update_weight_group"
+        )
 
         main_rank = dist.get_rank() == 0
         if main_rank:
@@ -1420,9 +1611,15 @@ class FSDPEngine(TrainEngine):
         try:
             for name, param in param_iterator:
                 # Ranks other than 0 only help to get the full tensor
+                # (DTensor.full_tensor() is a collective; all ranks must
+                # call _get_full_tensor). Only rank 0 broadcasts to the
+                # rollout engine, so casting is main-rank-only by design.
                 tensor = self._get_full_tensor(param)
                 if not main_rank:
                     continue
+                # Cast fp32 master storage to compute dtype before broadcast.
+                # Rollout engines (SGLang/vLLM) expect compute dtype (bf16).
+                tensor = self._cast_to_compute_dtype(tensor)
 
                 tensor_size = tensor.numel() * tensor.element_size()
                 bucket_overflow = (
@@ -1509,6 +1706,16 @@ class FSDPEngine(TrainEngine):
         # Get full state dict with FSDP2
         options = StateDictOptions(full_state_dict=True, cpu_offload=True)
         state_dict = get_model_state_dict(self.model, options=options)
+
+        # Cast weights to compute dtype before HF export. When
+        # optimizer_dtype=float32 (default for fp32 master weights), the
+        # underlying storage is fp32, but downstream consumers
+        # (rollout engines, HF users) expect compute dtype (bfloat16).
+        if dist.get_rank() == 0:
+            state_dict = {
+                k: self._cast_to_compute_dtype(v) if v.is_floating_point() else v
+                for k, v in state_dict.items()
+            }
 
         # save huggingface model on rank 0
         if dist.get_rank() == 0:

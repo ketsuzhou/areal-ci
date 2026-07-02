@@ -115,7 +115,13 @@ def find_free_ports(
     count: int,
     port_range: tuple = (10000, 32767),
     exclude_ports: set[int] | None = None,
+<<<<<<< /tmp/tmptkbbm6vp/ours
+<<<<<<< /tmp/tmptkbbm6vp/ours
     preferred_ports: list[int] | None = None,
+=======
+>>>>>>> /tmp/tmptkbbm6vp/theirs
+=======
+>>>>>>> /tmp/tmptkbbm6vp/theirs
 ) -> list[int]:
     """
     Find multiple free ports within a specified range.
@@ -145,6 +151,8 @@ def find_free_ports(
     free_ports: list[int] = []
     attempted_ports = set()
 
+<<<<<<< /tmp/tmptkbbm6vp/ours
+<<<<<<< /tmp/tmptkbbm6vp/ours
     # Try preferred ports first, in order. Note the final `return sorted(...)`
     # does not preserve this ordering, so the "first free preferred port"
     # guarantee only holds for the proxy-rollout use case where count == 1.
@@ -161,8 +169,21 @@ def find_free_ports(
 
     # Calculate available port range
     available_range = max_port - min_port + 1 - len(exclude_ports)
+=======
+=======
+>>>>>>> /tmp/tmptkbbm6vp/theirs
+    # Calculate available port range. Only excluded ports that fall within
+    # [min_port, max_port] reduce availability; out-of-range entries do not.
+    in_range_excluded = sum(min_port <= p <= max_port for p in exclude_ports)
+    available_range = max_port - min_port + 1 - in_range_excluded
+<<<<<<< /tmp/tmptkbbm6vp/ours
+>>>>>>> /tmp/tmptkbbm6vp/theirs
 
     if count > available_range + len(free_ports):
+=======
+
+    if count > available_range:
+>>>>>>> /tmp/tmptkbbm6vp/theirs
         raise ValueError(
             f"Cannot find {count} ports in range {port_range}. "
             f"Only {available_range + len(free_ports)} ports available."

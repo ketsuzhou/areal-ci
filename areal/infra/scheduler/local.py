@@ -319,6 +319,8 @@ class LocalScheduler(Scheduler):
         """
         worker_id = f"{role}/{idx}"
         guard_url = f"http://{format_hostport(target_wi.worker.ip, int(target_wi.worker.worker_ports[0]))}"
+<<<<<<< /tmp/tmpu50sew01/ours
+<<<<<<< /tmp/tmpu50sew01/ours
 
         # Optional: pin proxy-rollout to a fixed port so downstream bridges
         # (db_bridge) can reach it deterministically. Set AREAL_PROXY_ROLLOUT_PORT
@@ -347,12 +349,24 @@ class LocalScheduler(Scheduler):
                     logger.warning(
                         f"Ignoring invalid AREAL_PROXY_ROLLOUT_PORT={pinned_raw!r}: {e}"
                     )
+=======
+>>>>>>> /tmp/tmpu50sew01/theirs
+=======
+>>>>>>> /tmp/tmpu50sew01/theirs
 
         try:
             # 1. Allocate a port on the target guard
             async with session.post(
                 f"{guard_url}/alloc_ports",
+<<<<<<< /tmp/tmpu50sew01/ours
+<<<<<<< /tmp/tmpu50sew01/ours
                 json=alloc_payload,
+=======
+                json={"count": 1},
+>>>>>>> /tmp/tmpu50sew01/theirs
+=======
+                json={"count": 1},
+>>>>>>> /tmp/tmpu50sew01/theirs
             ) as alloc_resp:
                 if alloc_resp.status != 200:
                     error_text = await alloc_resp.text()
