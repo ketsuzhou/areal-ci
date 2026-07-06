@@ -235,3 +235,13 @@ FINAL REVIEW: READY TO MERGE. No Critical/Important. Spec-complete per revised D
 SUB-PROJECT C COMPLETE. Commits local-only (not pushed): areal master bf64810e..11cc632c (+docs to HEAD);
   multica main bcbe0fce..7969187a. D6 env-dispatch rewire of the wired loop DEFERRED (needs external le-agent
   materialize endpoint). Remaining: sub-projects D (session lifecycle) and E (entropy + critic env-save).
+
+=== SUB-PROJECT D — training_agent session lifecycle ===
+Spec: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
+Plan: docs/superpowers/plans/2026-07-06-training-agent-session-lifecycle.md (both areal master, committed)
+Base: multica main @ 7969187a (== C/T7 tip). Commit D to multica main (working tree switched back main<-dev by user).
+Approach A (server-side lifecycle). Locked decisions D1-D6 (see spec §3). Key: constraint (b) — trained
+teammate task created AFTER dispatch (mention-delegation / /api/agent/start), so session hooks live on
+task-creation + completion paths, not env_dispatch. proxy_url = multica config. Reward = default placeholder (E owns real).
+Tasks: T1 read-doc(STOP-if-broken) T2 contract T3 persist(mig152) T4 rl-client T5 open-hook T6 execenv T7 close-hook T8 config T9 regression.
+T1: DISPATCHED (investigation; may return BLOCKED and reshape plan).

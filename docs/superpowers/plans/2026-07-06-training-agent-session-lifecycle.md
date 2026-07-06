@@ -98,66 +98,97 @@ Approach A's server-side open-hook and require re-brainstorming. Otherwise begin
 
 **Files:** new `internal/arealrl/client.go` (+ `client_test.go`).
 
-- [ ] Define `Client` with `StartSession(ctx, taskID string, groupSize int) (SessionCreds, error)`
-  (`SessionCreds{SessionID, ProxyKey}`), `SetReward(ctx, sessionID string, reward float64) error`,
-  `EndSession(ctx, sessionID string) error`. POST JSON to `<stubBaseURL>/rl/start_session`,
-  `/rl/set_reward`, `/rl/end_session` with admin key header. Decode
-  `StartSessionResponse{group_id, sessions:[{session_id, session_api_key}]}` →
-  first session's `session_api_key` = ProxyKey.
-- [ ] Tests with `httptest.Server`: asserts paths/method/body; maps
-  session_api_key→ProxyKey; error on non-2xx; empty-sessions error.
+Contract = **experimental openai-proxy stack** (T1/1d, user-approved):
+- [ ] `StartSession(ctx, taskID string) (SessionCreds, error)` — POST
+  `<stubBaseURL>/rl/start_session`, **admin-key** auth (Bearer/`x-api-key` per
+  proxy_rollout_server), body `{task_id, group_size:1}`, decode **flat**
+  `{session_id, api_key}` → `SessionCreds{SessionID, ProxyKey}` (api_key = ProxyKey).
+- [ ] `SetReward(ctx, proxyKey string, reward float64) error` — POST
+  `/rl/set_reward`, **session-key** auth (Bearer `<proxyKey>`), body `{reward}`
+  (NO session_id).
+- [ ] `EndSession(ctx, proxyKey string) error` — POST `/rl/end_session`,
+  **session-key** auth (Bearer `<proxyKey>`), NO body session_id.
+- [ ] Client ctor takes stub base URL + admin key.
+- [ ] Tests with `httptest.Server`: assert paths/method/auth header (admin on
+  start, session-key on reward/end); map api_key→ProxyKey; error on non-2xx;
+  missing-key error. First confirm the exact auth header names against
+  `areal/experimental/openai/proxy/proxy_rollout_server.py`
+  (`_require_session_key` / admin key extraction).
 - [ ] Run: `go test ./internal/arealrl/`.
-- [ ] Commit: `feat(arealrl): Go client for /rl start/set_reward/end_session bridge channels`.
+- [ ] Commit: `feat(arealrl): Go client for experimental /rl start/set_reward/end_session`.
 
 ---
 
 ### Task 5: Session-open hook at trained-member task creation (TDD)
 
-**Files:** the chokepoint(s) from Task 1a (`internal/service/task.go` and/or
-`internal/handler/agent.go`), a new `internal/service` seam, queries to store
-`session_id` on the task + set `context`, tests.
+**Files:** `internal/service/task.go` (the `Enqueue*` family: `EnqueueTaskForIssue`,
+`EnqueueTaskForMention`/`EnqueueTaskForSquadLeader`, `EnqueueChatTask`,
+`EnqueueQuickCreateTask`) **and** `handler/env_dispatch.go` `EnqueueAgentRun`
+(both funnel into `CreateAgentTask`/`CreateChatTask`). NO `/api/agent/start`
+(does not exist here — T1/1a). New query to store `session_id`+`proxy_key`+merge
+`context` on the task (hand-written generated). Tests.
 
-- [ ] Failing tests (fake RL client + fake queries): when a new task's project has
-  a `training_dispatch` row AND `task.agent_id == train_agent_id` AND no session:
-  `StartSession(group_size=1)` is called once, `session_id` stored on the task,
+- [ ] Factor a single server-side helper `maybeOpenTrainingSession(ctx, taskID,
+  agentID, projectID, ...)` invoked right after each task insert, so all
+  chokepoints share one implementation.
+- [ ] Failing tests (fake RL client + fake queries): project has a
+  `training_dispatch` row AND `agent_id == train_agent_id` AND no session →
+  `StartSession(taskID)` called once, `session_id`+`proxy_key` stored,
   `context.areal_proxy = {provider:areal, model:areal-default, api_key:proxy_key,
-  base_url:proxy_url}` injected. Idempotent: task with a session is skipped.
-  Non-trained task: no RL call, context untouched.
-- [ ] Implement the hook at the chokepoint; add query to set task session_id +
-  merge context (hand-written generated). `proxy_url` from config (§4.7).
-- [ ] Run: `go test ./internal/service/ -run 'Training|SessionOpen'` (+ handler if hooked there).
+  base_url:proxy_url}` injected. Idempotent (has session → skip). Non-trained →
+  no RL call, context untouched. Missing bridge config → loud error (Task 8 guard).
+- [ ] Implement the helper. Persist the RL session state **inside
+  `context.areal_proxy`** (`{provider, model, api_key:proxy_key, base_url,
+  session_id}`) via a `MergeTaskContext`/`SetTaskContext` query (hand-written
+  generated) — NO new task column (the existing `agent_task.session_id` is the
+  runtime/chat session, do not reuse it). `proxy_url` from config (§4.7).
+  Resolve project via Issue.ProjectID / ChatSession.ProjectID (T1/1e).
+- [ ] Run: `go test ./internal/service/ ./internal/handler/ -run 'Training|SessionOpen|EnvDispatch'`.
 - [ ] Commit: `feat(training): open RL session + inject areal proxy config on trained task creation`.
 
 ---
 
-### Task 6: Runtime provider wiring in execenv (TDD) — size per Task 1c
+### Task 6: Runtime provider wiring in execenv (TDD) — NEEDS-NEW-FIELD (T1/1c)
 
-**Files:** `internal/daemon/execenv/*` (+ tests). If Task 1c found an existing
-per-task provider override via context, this task just maps `areal_proxy` onto it;
-else add a minimal field.
+**Files:** `handler/daemon.go` (`ClaimTaskByRuntime` ~:1066 — populate a new
+field from `task.context.areal_proxy`), `internal/daemon/types.go` (Task /
+AgentData struct — new field), `internal/daemon/daemon.go` (ExecOptions build
+~:3039), `pkg/agent/pi.go` (confirm pi arg/env mapping), tests.
 
-- [ ] Failing test: a task whose `context.areal_proxy` is set produces a runtime
-  config with `provider=areal, model=areal-default, api_key=<proxy_key>,
-  base_url=<base_url>` (the `pi --provider areal --model areal-default --api-key`
-  invocation / provider config file).
-- [ ] Implement minimal mapping.
-- [ ] Run: `go test ./internal/daemon/execenv/ -run 'Provider|ArealProxy'`.
-- [ ] Commit: `feat(execenv): wire areal proxy provider config from task context`.
+T1 confirmed there is NO existing per-task, context-sourced provider override
+(provider is per-runtime; base_url/api_key only via agent-scoped CustomEnv).
+
+- [ ] First confirm `pkg/agent/pi.go` `buildPiArgs` — how Model→`--provider`/
+  `--model` maps and the env-var names pi reads for api-key/base-url.
+- [ ] Failing test: a claim response whose `context.areal_proxy` is set yields a
+  daemon Task carrying the override, and ExecOptions produce
+  `pi --provider areal --model areal-default --api-key <proxy_key>` with
+  `base_url=<base_url>` (via the confirmed env vars).
+- [ ] Implement: new field on claim response + daemon Task, populated at
+  ClaimTaskByRuntime from context, consumed at ExecOptions.
+- [ ] Run: `go test ./internal/daemon/... ./internal/handler/ -run 'Provider|ArealProxy|Claim'`.
+- [ ] Commit: `feat(execenv): wire areal proxy provider config from task context at claim`.
 
 ---
 
 ### Task 7: Session-close hook on completion (TDD)
 
-**Files:** the completion path from Task 1b (`internal/service/task.go` /
-completion handler), tests.
+**Files:** `internal/service/task.go` (`CompleteTask` :1285, `FailTask` :1468,
+`CancelTask`/`CancelTaskWithResult` :905/:915), tests.
 
-- [ ] Failing tests (fake RL client): a task with a training `session_id`
-  transitioning to `completed` → `SetReward(session_id, default_reward)` THEN
-  `EndSession(session_id)` (order asserted); also fires on `failed`/`cancelled`.
-  A task without a session → no RL calls. RL errors are logged, not fatal.
-- [ ] Implement the close hook; read `default_reward` from `training_dispatch`
-  (fallback config `TRAINING_DEFAULT_REWARD`).
-- [ ] Run: `go test ./internal/service/ -run 'TrainingClose|SessionClose'`.
+- [ ] Failing tests (fake RL client): a task whose `context.areal_proxy` carries
+  `session_id`+`api_key`(proxy_key) reaching `completed` → `SetReward(proxy_key,
+  default_reward)` THEN `EndSession(proxy_key)` (order asserted, session-key
+  auth); also fires on `failed`/`cancelled`. Task without `areal_proxy` → no RL
+  calls. RL errors logged, not fatal.
+- [ ] Implement a shared `maybeCloseTrainingSession(ctx, task)` called from the
+  three terminal transitions; read the proxy_key from `task.context.areal_proxy`
+  and `default_reward` from `training_dispatch` (fallback config
+  `TRAINING_DEFAULT_REWARD`).
+- [ ] NOTE (deferred, document only): `runtime_sweeper.FailStaleTasks` (raw SQL)
+  bypasses `FailTask`, so timeout tasks won't auto-close — a reaper is future
+  hardening, out of D scope.
+- [ ] Run: `go test ./internal/service/ -run 'TrainingClose|SessionClose|Complete|Fail|Cancel'`.
 - [ ] Commit: `feat(training): default reward + end_session on trained task completion`.
 
 ---

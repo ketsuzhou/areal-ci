@@ -73,38 +73,68 @@ intent keyed to the dispatched **project** (each rollout lane = one project):
   the natural join key for later task creation.)
 
 ### 4.3 Session-open hook (multica service, task creation)
-At the server-side chokepoint where an agent task is created for the trained
-member (see §6 open item — mention-delegation and/or `/api/agent/start` /
-leader-spawn), when the task's project has a `training_dispatch` row AND
+The hook fires wherever the trained member's task is created server-side,
+pre-claim. Per T1/1a the chokepoints funnel into `CreateAgentTask` /
+`CreateChatTask` reached from the `Enqueue*` family in `internal/service/task.go`
+(`EnqueueTaskForIssue`, `EnqueueTaskForMention`/`EnqueueTaskForSquadLeader`
+[leader @mention delegation via `enqueueCommentAgentTriggers`],
+`EnqueueChatTask`, `EnqueueQuickCreateTask`) **and** `env_dispatch`'s separate
+`EnqueueAgentRun` path (`handler/env_dispatch.go`). There is **no
+`/api/agent/start` route** in this Go server (the db_bridge `agent_start`
+channel targets a different le-agent SaaS API) — do not hook it.
+
+When a new task's project has a `training_dispatch` row AND
 `task.agent_id == train_agent_id` AND the task has no session yet:
-1. `start_session(task_id, group_size=1)` via the RL bridge client →
-   `{session_id, proxy_key}`.
-2. Store `session_id` on the task row.
+1. `start_session(task_id=agent_task.id, group_size=1)` via the RL bridge
+   client → `{session_id, proxy_key}`.
+2. Store `session_id` **and `proxy_key`** on the task row (the close hook needs
+   the proxy_key for session-key-authed set_reward/end_session).
 3. Inject into `task.context`:
    `{"areal_proxy": {"provider":"areal","model":"areal-default",
    "api_key":<proxy_key>,"base_url":<proxy_url>}}`.
 Idempotent: a task that already has a session is skipped (retry-safe).
 
 ### 4.4 Runtime provider wiring (multica daemon `execenv`)
-When a claimed task's `context` carries `areal_proxy`, `execenv` configures the
-agent runtime to `provider=areal, model=areal-default, api_key=<proxy_key>,
-base_url=<base_url>` — i.e. the `pi -p --provider areal --model areal-default
---api-key <proxy_key>` invocation. (§6 open item: confirm whether execenv
-already supports a per-task provider/base_url override via context or needs a
-new field.)
+Per T1/1c this is **NEEDS-NEW-FIELD**: there is no existing per-task,
+context-sourced provider/base_url/api_key override (provider is per-runtime;
+base_url/api_key only via agent-scoped `CustomEnv`). Add a new field on the
+daemon `Task`/`TaskAgentData`, populated in `ClaimTaskByRuntime`
+(`handler/daemon.go`) from `task.context.areal_proxy`, consumed when building
+`ExecOptions` (`daemon.go`) → `pi -p --provider areal --model areal-default
+--api-key <proxy_key>` with `base_url=<base_url>`. (Confirm the pi runtime's
+env-var names for key/base_url in `pkg/agent/pi.go` during implementation.)
 
 ### 4.5 Session-close hook (multica, task completion)
-When a training task transitions to `completed`/`failed` (task-completion path
-/ daemon completion report), if the task has a training session:
-`set_reward(session_id, default_reward)` then `end_session(session_id)` via the
-RL bridge client. Errors logged; end is best-effort (a reaper for stale
-sessions is a later hardening, not D).
+Per T1/1b the terminal transitions are `TaskService.CompleteTask` / `FailTask` /
+`CancelTask` (`internal/service/task.go`), driven by daemon completion reports.
+When a training task (has a stored `session_id`+`proxy_key`) reaches a terminal
+state: `set_reward(reward=default_reward)` **then** `end_session`, both
+authenticated with the stored **`proxy_key`** (session-key auth; no session_id
+arg — experimental contract §4.6). Errors logged; best-effort.
+**Known gap (deferred):** timeout/stale expiry runs through
+`cmd/server/runtime_sweeper.go` (`FailStaleTasks`, raw SQL) and **bypasses**
+`FailTask`, so timed-out trainings won't auto-close. Consistent with deferring a
+session reaper (§4.5 was already best-effort); a reaper is future hardening, not D.
 
 ### 4.6 RL bridge client (multica Go) — new
 A small Go client that POSTs to the local db_bridge **stub** for the
 `gateway`-group channels (`/rl/start_session`, `/rl/set_reward`,
-`/rl/end_session`). Config: stub base URL + admin api key (env). This is the
-multica→AReaL direction; the channels already exist in `db_bridge/channels.py`.
+`/rl/end_session`). The channels already exist in `db_bridge/channels.py`
+(stub on the multica/le-agent side, executor forwards to AReaL).
+
+**Contract = the EXPERIMENTAL openai-proxy stack** (`areal/experimental/openai/
+proxy/proxy_gateway.py` + `proxy_rollout_server.py`) — the ONLY stack that
+serves `end_session`, and it matches the `tiggered_training` online-flow docs
+(confirmed T1/1d, user-approved 2026-07-06):
+- `start_session` — **admin-key** auth; body `{task_id, group_size:1}`; returns
+  **flat** `{session_id, api_key}` (api_key = the per-session `proxy_key`).
+  multica passes `agent_task_queue.id` as `task_id`.
+- `set_reward` — **session-key** auth (Authorization: Bearer `<proxy_key>`);
+  body `{reward}`; NO session_id argument.
+- `end_session` — **session-key** auth (Bearer `<proxy_key>`); NO session_id body.
+So the client holds the admin key (for start) and, per session, the returned
+`proxy_key` (for set_reward + end_session). The close hook therefore needs the
+stored `proxy_key`, not just `session_id`.
 
 ### 4.7 Config
 `AREAL_PROXY_URL` (default `http://db_bridge_stub:9100/v1`),
@@ -112,29 +142,26 @@ multica→AReaL direction; the channels already exist in `db_bridge/channels.py`
 `TRAINING_DEFAULT_REWARD` (default `1.0`).
 
 ### 4.8 AReaL side
-`start_session`/`set_reward`/`end_session` already exist
-(`areal/v2/inference_service/data_proxy/session.py`;
-`StartSessionResponse{group_id, sessions:[{session_id, session_api_key}]}`).
-Confirm-only: the bridge routes `/rl/*` to the running gateway. Expected **no
-AReaL code change**.
+The full lifecycle (`start_session`/`set_reward`/`end_session`) is served ONLY
+by the **experimental openai-proxy stack** (`areal/experimental/openai/proxy/
+proxy_gateway.py` + `proxy_rollout_server.py`); the v2 `inference_service`
+gateway lacks `end_session`. D targets the experimental stack (user-approved).
+Confirm-only: the bridge `rl_*` executor points at the running experimental
+gateway. Expected **no AReaL code change**.
 
 ## 5. Out of scope (⇒ sub-project E)
 Real reward computation, entropy recording, critic-agent squad membership,
 environment save/`env_id` emission back to AReaL. D emits only a default reward.
 
-## 6. Open items to pin in implementation Task 1 (read-and-document)
-1. The exact server-side task-creation chokepoint(s) for a spawned squad
-   teammate (mention-delegation comment→task vs `/api/agent/start` w/
-   `parent_task_id` vs a leader-spawn service method). Confirm one hook or N.
-2. The exact task-completion path (daemon completion report → server handler)
-   to attach the close hook, incl. failed/cancelled/timeout transitions.
-3. Whether `execenv` already supports per-task provider/base_url/api_key
-   override via `context` (so §4.4 is minimal) or needs a new field.
-4. Codegen: any new query (training_dispatch, store session_id, mark session
-   config) must follow the hand-written-generated rule (no repo-wide `sqlc
-   generate`).
-5. Confirm `start_session`'s `task_id` semantics vs multica's `task_id` (the
-   AReaL session is keyed by a task_id string — decide what multica passes).
+## 6. Open items — RESOLVED by Task 1 (`docs/superpowers/notes/2026-07-06-D-seams.md`)
+1. Chokepoints = `Enqueue*`→`CreateAgentTask`/`CreateChatTask` + `EnqueueAgentRun`
+   (there is NO `/api/agent/start` route here). See §4.3.
+2. Close hook = `CompleteTask`/`FailTask`/`CancelTask`; sweeper-timeout gap
+   deferred. See §4.5.
+3. execenv = NEEDS-NEW-FIELD (new claim-time field from `context`). See §4.4.
+4. RL contract = experimental (flat `{session_id, api_key}`, session-key auth
+   for set_reward/end_session). task_id = `agent_task.id`. See §4.6.
+5. project join confirmed (Issue.ProjectID / ChatSession.ProjectID). See §4.2.
 
 ## 7. Test strategy
 - Go service unit tests: train_agent_id validation; training_dispatch persist;
