@@ -16,7 +16,7 @@
 - **Backend `env_id` emission is EXTERNAL** (spec §3): C only reads `metadata["env_id"]`. Do NOT implement backend emission.
 - **`/api/agent/start-branch` server endpoint is EXTERNAL** (le-agent backend, not in this repo): remove only its client + db_bridge channel here.
 - **Clean break (D5):** no back-compat for legacy `branch_*` keys in checkpoints/serialization.
-- Python: no wildcard imports; use `python -m pytest` (NOT `uv run` — the areal-root `.venv` symlink is broken; db_bridge has its own working venv via `uv run`).
+- Python: no wildcard imports. **Run areal tests with the working test venv: `/workspaces/leagent/backend/areal/.venv-test/bin/python -m pytest …`** (Python 3.12.13, pytest 9.1.1, torch 2.12.1+cpu — needed for `tree_search` paths that import torch). Do NOT use bare `python -m pytest` (no torch) or `uv run` (the areal-root `.venv` symlink is broken). db_bridge has its own working venv via `uv run`.
 - Go: build/test scoped to touched packages; `gofmt` all Go. (The repo-wide `go build ./...` has a pre-existing unrelated `webpush.go:180` failure — do not fix, do not gate on it.)
 - Follow existing patterns in each file. Read a file before editing it.
 
@@ -53,7 +53,7 @@ def test_annotate_nodes_reads_env_id_from_metadata():
     assert not hasattr(node, "branch_sandbox_id")
 ```
 
-- [ ] **Step 2: Run to confirm failure** — `cd /workspaces/leagent/backend/areal && python -m pytest customized_areal/tree_search/tests/ -k env_id -v`
+- [ ] **Step 2: Run to confirm failure** — `cd /workspaces/leagent/backend/areal && /workspaces/leagent/backend/areal/.venv-test/bin/python -m pytest customized_areal/tree_search/tests/ -k env_id -v`
 
 - [ ] **Step 3: Implement**
   - `tree_store.py`: delete the three `branch_*` fields (and the "Cloud-env branch refs" comment block); add `env_id: str | None = None` near `need_branch`.
@@ -240,7 +240,7 @@ def test_branch_driver_calls_env_dispatch_branch():
 
 **Files:** none
 
-- [ ] **Step 1: areal client** — `cd /workspaces/leagent/backend/areal && python -m pytest customized_areal/tree_search/ tests/customized_areal/ -q`. Expected: green; any failures must be pre-existing and reproduced at the pre-C base (check out the pre-C areal commit to confirm, as in sub-project B).
+- [ ] **Step 1: areal client** — `cd /workspaces/leagent/backend/areal && /workspaces/leagent/backend/areal/.venv-test/bin/python -m pytest customized_areal/tree_search/ tests/customized_areal/ -q`. Expected: green; any failures must be pre-existing and reproduced at the pre-C base (check out the pre-C areal commit to confirm, as in sub-project B).
 - [ ] **Step 2: import surface** — `python -c "import customized_areal.tree_search.agents; import customized_areal.tree_search.core.customized_grouped_workflow; import customized_areal.tree_search.core.tree_store"`.
 - [ ] **Step 3: db_bridge** — `cd multica/db_bridge && uv run pytest -q`.
 - [ ] **Step 4: multica Go** — `cd multica/server && go build ./internal/handler/ ./internal/service/ ./cmd/server/ && DATABASE_URL=… go test ./internal/handler/ ./internal/service/ ./cmd/server/` (only the pre-existing 16 `ON CONFLICT` failures allowed; prove pre-existing at base if in doubt).
