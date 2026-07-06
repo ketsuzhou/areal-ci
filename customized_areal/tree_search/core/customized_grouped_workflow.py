@@ -388,12 +388,8 @@ def annotate_nodes_from_run(
         entropy_stats = metadata.get("entropy_stats")
         node.entropy_stats = entropy_stats if isinstance(entropy_stats, dict) else None
         node.need_branch = bool(metadata.get("need_branch"))
-        branch_sandbox_id = metadata.get("branch_sandbox_id")
-        node.branch_sandbox_id = (
-            branch_sandbox_id
-            if isinstance(branch_sandbox_id, str) and branch_sandbox_id
-            else None
-        )
+        env_id = metadata.get("env_id")
+        node.env_id = env_id if isinstance(env_id, str) and env_id else None
         if node.topk_ids is None:
             topk_ids = _topk_ids_from_metadata(metadata)
             if topk_ids is not None:
