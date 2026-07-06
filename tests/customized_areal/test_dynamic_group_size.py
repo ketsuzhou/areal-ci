@@ -305,54 +305,6 @@ class TestWorkflowFailureHandling:
         assert base.arun_episode.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_branch_cleanup_runs_when_branch_rollout_raises(self):
-        """A failed branch rollout still marks the branch candidate consumed."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from customized_areal.tree_search.config import (
-            AdvantageMode,
-            CacheMode,
-            LossMode,
-            SampleSource,
-        )
-        from customized_areal.tree_search.core.customized_grouped_workflow import (
-            TreeSearchGroupedRolloutWorkflow,
-        )
-        from customized_areal.tree_search.core.tree_store import Node
-
-        wf = TreeSearchGroupedRolloutWorkflow(
-            MagicMock(),
-            group_size=1,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            sample_source=SampleSource.BRANCH,
-        )
-        candidate = Node(
-            input_ids=[1, 2],
-            loss_mask=[0, 1],
-            logprobs=[0.0, -0.1],
-            versions=[-1, 0],
-            node_id="candidate",
-            query_id="q_branch",
-            task_id="task",
-            need_branch=True,
-            branch_sandbox_id="sandbox",
-        )
-        wf.tree_store.trajectories["q_branch"] = [candidate]
-        wf._prepare_branch_task = AsyncMock(return_value="branch_task")
-        wf._retry_episode = AsyncMock(side_effect=RuntimeError("branch failed"))
-        wf._cleanup_branch = AsyncMock()
-
-        with pytest.raises(RuntimeError, match="branch failed"):
-            await wf._run_fresh_episode(
-                MagicMock(), {"query_id": "q_branch"}, 0, "q_branch"
-            )
-
-        wf._cleanup_branch.assert_awaited_once_with(candidate)
-
-    @pytest.mark.asyncio
     async def test_dynamic_distill_mode_does_not_generate_without_cache(self):
         """Dynamic DISTILL mode matches fixed mode and consumes cache only."""
         from unittest.mock import AsyncMock, MagicMock

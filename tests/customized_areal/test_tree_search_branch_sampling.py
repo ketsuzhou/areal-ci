@@ -9,15 +9,13 @@ from customized_areal.db_service.messages import (
 )
 from customized_areal.tpfc.tpfc_agent import TPFCAgentResult
 from customized_areal.tree_search.config import SampleSource
-from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
 from customized_areal.tree_search.core.customized_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
     annotate_nodes_from_run,
-    build_branch_task,
     choose_sample_source,
     select_branch_candidate,
 )
-from customized_areal.tree_search.core.tree_store import MCTSTreeStore, Node
+from customized_areal.tree_search.core.tree_store import Node
 
 
 class FakeInsert:
@@ -138,6 +136,21 @@ def _node(turn_idx: int) -> Node:
     )
 
 
+def test_node_has_no_branch_sandbox_id():
+    """Clean-break contract: the legacy branch_sandbox_id field is gone."""
+    node = _node(1)
+    assert not hasattr(node, "branch_sandbox_id")
+
+
+def test_workflow_no_longer_exposes_branch_machinery():
+    """The wired grouped workflow no longer branches; the helpers are removed."""
+    import customized_areal.tree_search.core.customized_grouped_workflow as mod
+
+    assert not hasattr(mod, "build_branch_task")
+    assert not hasattr(mod.TreeSearchGroupedRolloutWorkflow, "_prepare_branch_task")
+    assert not hasattr(mod.TreeSearchGroupedRolloutWorkflow, "_cleanup_branch")
+
+
 def test_annotate_nodes_from_run_copies_entropy_metadata():
     nodes = [_node(1), _node(2)]
     raw_messages = [
@@ -153,7 +166,7 @@ def test_annotate_nodes_from_run_copies_entropy_metadata():
             "metadata": {
                 "entropy_stats": {"max_entropy": 3.4},
                 "need_branch": True,
-                "branch_sandbox_id": "sb2",
+                "env_id": "env-2",
             },
         },
     ]
@@ -163,10 +176,12 @@ def test_annotate_nodes_from_run_copies_entropy_metadata():
     assert nodes[0].task_id == "task-id"
     assert nodes[0].entropy_stats == {"max_entropy": 0.2}
     assert nodes[0].need_branch is False
+    assert nodes[0].env_id is None
     assert nodes[1].task_id == "task-id"
     assert nodes[1].entropy_stats == {"max_entropy": 3.4}
     assert nodes[1].need_branch is True
-    assert nodes[1].branch_sandbox_id == "sb2"
+    assert nodes[1].env_id == "env-2"
+    assert not hasattr(nodes[1], "branch_sandbox_id")
 
 
 def test_annotate_nodes_from_run_populates_topk_from_raw_message_metadata():
@@ -224,7 +239,7 @@ def test_annotate_nodes_from_run_skips_invalid_turn_idx():
             "metadata": {
                 "entropy_stats": {"max_entropy": 9.9},
                 "need_branch": True,
-                "branch_sandbox_id": "wrong",
+                "env_id": "wrong",
             },
         }
     ]
@@ -234,29 +249,7 @@ def test_annotate_nodes_from_run_skips_invalid_turn_idx():
     assert node.task_id == "task-id"
     assert node.entropy_stats is None
     assert node.need_branch is False
-    assert node.branch_sandbox_id is None
-
-
-def test_checkpoint_preserves_tpfc_node_metadata(tmp_path, monkeypatch):
-    monkeypatch.setenv("TRAIN_ID", "train-now")
-    store = MCTSTreeStore()
-    node = _node(1)
-    node.query_id = "query-1"
-    node.task_id = "task-id"
-    node.entropy_stats = {"max_entropy": 3.4}
-    node.need_branch = True
-    node.branch_sandbox_id = "sandbox-id"
-    store.insert_batch([node])
-
-    manager = TreeCheckpointManager(str(tmp_path))
-    manager.save(store)
-    loaded = manager.load()
-
-    loaded_node = loaded.trajectories["query-1"][0]
-    assert loaded_node.task_id == "task-id"
-    assert loaded_node.entropy_stats == {"max_entropy": 3.4}
-    assert loaded_node.need_branch is True
-    assert loaded_node.branch_sandbox_id == "sandbox-id"
+    assert node.env_id is None
 
 
 def test_choose_sample_source_modes():
@@ -312,14 +305,12 @@ def test_select_branch_candidate_prefers_max_entropy():
     low.query_id = "q"
     low.task_id = "task-low"
     low.need_branch = True
-    low.branch_sandbox_id = "sb-low"
     low.entropy_stats = {"max_entropy": 2.5}
 
     high = _node(2)
     high.query_id = "q"
     high.task_id = "task-high"
     high.need_branch = True
-    high.branch_sandbox_id = "sb-high"
     high.entropy_stats = {"max_entropy": 4.0}
 
     assert select_branch_candidate([low, high], "q") is high
@@ -330,38 +321,28 @@ def test_select_branch_candidate_filters_invalid_nodes_and_tolerates_bad_entropy
     wrong_query.query_id = "other"
     wrong_query.task_id = "task-wrong"
     wrong_query.need_branch = True
-    wrong_query.branch_sandbox_id = "sb-wrong"
     wrong_query.entropy_stats = {"max_entropy": 99.0}
 
     missing_task = _node(2)
     missing_task.query_id = "q"
     missing_task.need_branch = True
-    missing_task.branch_sandbox_id = "sb-missing-task"
     missing_task.entropy_stats = {"max_entropy": 98.0}
 
-    missing_sandbox = _node(3)
-    missing_sandbox.query_id = "q"
-    missing_sandbox.task_id = "task-missing-sandbox"
-    missing_sandbox.need_branch = True
-    missing_sandbox.entropy_stats = {"max_entropy": 97.0}
-
-    no_branch = _node(4)
+    no_branch = _node(3)
     no_branch.query_id = "q"
     no_branch.task_id = "task-no-branch"
-    no_branch.branch_sandbox_id = "sb-no-branch"
     no_branch.need_branch = False
     no_branch.entropy_stats = {"max_entropy": 96.0}
 
-    candidate = _node(5)
+    candidate = _node(4)
     candidate.query_id = "q"
     candidate.task_id = "task-candidate"
     candidate.need_branch = True
-    candidate.branch_sandbox_id = "sb-candidate"
     candidate.entropy_stats = {"max_entropy": "not numeric"}
 
     assert (
         select_branch_candidate(
-            [wrong_query, missing_task, missing_sandbox, no_branch, candidate],
+            [wrong_query, missing_task, no_branch, candidate],
             "q",
         )
         is candidate
@@ -369,133 +350,15 @@ def test_select_branch_candidate_filters_invalid_nodes_and_tolerates_bad_entropy
     assert select_branch_candidate([wrong_query, missing_task], "q") is None
 
 
-@pytest.mark.asyncio
-async def test_build_branch_task_uses_sandbox_directly_without_clone(monkeypatch):
-    """build_branch_task should bind candidate.branch_sandbox_id directly, not clone it."""
-    created = []
-    copied = []
+def test_select_branch_candidate_ignores_non_branch_node():
+    """A node whose need_branch flag is False is never a branch candidate."""
+    node = _node(2)
+    node.query_id = "q"
+    node.task_id = "task-cleaned"
+    node.need_branch = False
+    node.entropy_stats = {"max_entropy": 5.0}
 
-    class FakeClient:
-        pass
-
-    candidate = _node(2)
-    candidate.task_id = "source-task"
-    candidate.turn_idx = 2
-    candidate.branch_sandbox_id = "direct-sandbox-id"
-
-    raw_messages = [
-        {
-            "message_id": "u1",
-            "role": "user",
-            "content": {"role": "user", "content": "q"},
-        },
-        {
-            "message_id": "a1",
-            "role": "assistant",
-            "content": {"role": "assistant", "content": "step1"},
-        },
-        {
-            "message_id": "a2",
-            "role": "assistant",
-            "content": {"role": "assistant", "content": "step2"},
-        },
-    ]
-
-    async def fake_get_raw_messages(client, task_id):
-        assert isinstance(client, FakeClient)
-        assert task_id == "source-task"
-        return raw_messages
-
-    async def fake_create_task(**kwargs):
-        created.append(kwargs)
-        return "branch-task"
-
-    async def fake_bind_sandbox_to_task(client, *, sandbox_id, task_id, account_id):
-        assert isinstance(client, FakeClient)
-        copied.append(("bind", sandbox_id, task_id, account_id))
-
-    async def fake_copy_messages_to_task(client, *, task_id, messages):
-        assert isinstance(client, FakeClient)
-        copied.append(("messages", task_id, messages))
-
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow._get_raw_messages_with_client",
-        fake_get_raw_messages,
-    )
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow.create_task",
-        fake_create_task,
-    )
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow.bind_sandbox_to_task",
-        fake_bind_sandbox_to_task,
-    )
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow.copy_messages_to_task",
-        fake_copy_messages_to_task,
-    )
-
-    branch_task_id = await build_branch_task(
-        client=FakeClient(),
-        account_id="account",
-        agent_id="agent",
-        candidate=candidate,
-        name="branch",
-    )
-
-    assert branch_task_id == "branch-task"
-    assert created[0]["account_id"] == "account"
-    assert created[0]["agent_id"] == "agent"
-    assert created[0]["name"] == "branch"
-    # Key assertion: sandbox bound is the DIRECT sandbox, not a clone
-    assert copied[0] == ("bind", "direct-sandbox-id", "branch-task", "account")
-    assert copied[1] == (
-        "messages",
-        "branch-task",
-        [
-            {"role": "user", "content": {"role": "user", "content": "q"}},
-            {
-                "role": "assistant",
-                "content": {"role": "assistant", "content": "step1"},
-            },
-        ],
-    )
-
-
-@pytest.mark.asyncio
-async def test_run_fresh_episode_falls_back_to_scratch_when_branch_prep_errors():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
-        TreeSearchGroupedRolloutWorkflow
-    )
-    workflow.sample_source = SampleSource.BRANCH
-    workflow.branch_probability = 1.0
-
-    candidate = _node(2)
-    candidate.query_id = "q"
-    candidate.task_id = "source-task"
-    candidate.need_branch = True
-    candidate.branch_sandbox_id = "source-sandbox"
-    workflow.tree_store = type("Store", (), {"trajectories": {"q": [candidate]}})()
-
-    calls = []
-
-    async def fail_prepare_branch_task(data, candidate_arg):
-        assert candidate_arg is candidate
-        raise RuntimeError("copy failed")
-
-    async def retry_episode(engine, episode_data, group_idx):
-        calls.append((episode_data, group_idx))
-        return {"scratch": True}
-
-    workflow._prepare_branch_task = fail_prepare_branch_task
-    workflow._retry_episode = retry_episode
-
-    data = {"query_id": "q"}
-    result = await workflow._run_fresh_episode(None, data, 3, "q")
-
-    assert result == {"scratch": True}
-    assert calls == [(data, 3)]
-    assert "seed_messages_already_inserted" not in data
+    assert select_branch_candidate([node], "q") is None
 
 
 @pytest.mark.asyncio
@@ -503,9 +366,6 @@ async def test_run_fresh_episode_uses_isolated_data_for_scratch_metadata():
     workflow = TreeSearchGroupedRolloutWorkflow.__new__(
         TreeSearchGroupedRolloutWorkflow
     )
-    workflow.sample_source = SampleSource.SCRATCH
-    workflow.branch_probability = 0.0
-    workflow.tree_store = type("Store", (), {"trajectories": {"q": []}})()
 
     seen_episode_data = []
 
@@ -529,6 +389,36 @@ async def test_run_fresh_episode_uses_isolated_data_for_scratch_metadata():
     assert seen_episode_data[0] is not seen_episode_data[1]
     assert first.task_id == "task-1"
     assert second.task_id == "task-2"
+
+
+@pytest.mark.asyncio
+async def test_run_fresh_episode_never_branches_even_with_candidate():
+    """The wired loop always runs a scratch episode, ignoring branch candidates."""
+    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
+        TreeSearchGroupedRolloutWorkflow
+    )
+    # A branch candidate present in the store must NOT trigger any branch path.
+    candidate = _node(2)
+    candidate.query_id = "q"
+    candidate.task_id = "source-task"
+    candidate.need_branch = True
+    workflow.tree_store = type("Store", (), {"trajectories": {"q": [candidate]}})()
+
+    calls = []
+
+    async def retry_episode(engine, episode_data, group_idx):
+        calls.append((episode_data, group_idx))
+        return {"scratch": True}
+
+    workflow._retry_episode = retry_episode
+
+    data = {"query_id": "q"}
+    result = await workflow._run_fresh_episode(None, data, 3, "q")
+
+    assert result == {"scratch": True}
+    assert calls == [(data, 3)]
+    assert "seed_messages_already_inserted" not in data
+    assert "_branch_point_node_id" not in data
 
 
 def test_tpfca_agent_result_is_picklable():
@@ -587,117 +477,3 @@ def test_tpfca_agent_result_propagates_to_data_dict():
     assert data["_backend_run_raw_messages"] == [
         {"role": "assistant", "content": "response"}
     ]
-
-
-@pytest.mark.asyncio
-async def test_cleanup_branch_deletes_sandbox_and_clears_node_state(monkeypatch):
-    deleted_ids = []
-
-    async def fake_delete_sandbox(sandbox_id):
-        deleted_ids.append(sandbox_id)
-
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow.delete_sandbox",
-        fake_delete_sandbox,
-    )
-
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
-        TreeSearchGroupedRolloutWorkflow
-    )
-    candidate = _node(2)
-    candidate.need_branch = True
-    candidate.branch_sandbox_id = "sb-to-delete"
-
-    await workflow._cleanup_branch(candidate)
-
-    assert deleted_ids == ["sb-to-delete"]
-    assert candidate.need_branch is False
-    assert candidate.branch_sandbox_id is None
-
-
-@pytest.mark.asyncio
-async def test_cleanup_branch_tolerates_delete_failure(monkeypatch):
-    async def failing_delete(sandbox_id):
-        raise RuntimeError("sandbox API down")
-
-    monkeypatch.setattr(
-        "customized_areal.tree_search.core.customized_grouped_workflow.delete_sandbox",
-        failing_delete,
-    )
-
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
-        TreeSearchGroupedRolloutWorkflow
-    )
-    candidate = _node(2)
-    candidate.need_branch = True
-    candidate.branch_sandbox_id = "sb-failing"
-
-    await workflow._cleanup_branch(candidate)
-
-    # Node state should still be cleared even if delete fails
-    assert candidate.need_branch is False
-    assert candidate.branch_sandbox_id is None
-
-
-@pytest.mark.asyncio
-async def test_cleanup_branch_skips_delete_when_no_sandbox_id():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
-        TreeSearchGroupedRolloutWorkflow
-    )
-    candidate = _node(2)
-    candidate.need_branch = True
-    candidate.branch_sandbox_id = None
-
-    await workflow._cleanup_branch(candidate)
-
-    assert candidate.need_branch is False
-    assert candidate.branch_sandbox_id is None
-
-
-def test_select_branch_candidate_ignores_cleaned_up_node():
-    """After _cleanup_branch, node should not be a branch candidate."""
-    cleaned = _node(2)
-    cleaned.query_id = "q"
-    cleaned.task_id = "task-cleaned"
-    cleaned.need_branch = False  # cleared by _cleanup_branch
-    cleaned.branch_sandbox_id = None  # cleared by _cleanup_branch
-    cleaned.entropy_stats = {"max_entropy": 5.0}
-
-    assert select_branch_candidate([cleaned], "q") is None
-
-
-@pytest.mark.asyncio
-async def test_run_fresh_episode_calls_cleanup_after_branch():
-    workflow = TreeSearchGroupedRolloutWorkflow.__new__(
-        TreeSearchGroupedRolloutWorkflow
-    )
-    workflow.sample_source = SampleSource.BRANCH
-    workflow.branch_probability = 1.0
-
-    candidate = _node(2)
-    candidate.query_id = "q"
-    candidate.task_id = "source-task"
-    candidate.need_branch = True
-    candidate.branch_sandbox_id = "sb-branch"
-    workflow.tree_store = type("Store", (), {"trajectories": {"q": [candidate]}})()
-
-    cleanup_called = []
-
-    async def fake_prepare_branch_task(data, candidate_arg):
-        return "branch-task-id"
-
-    async def fake_retry_episode(engine, episode_data, group_idx):
-        return {"branch": True}
-
-    async def fake_cleanup(candidate_arg):
-        cleanup_called.append(candidate_arg)
-
-    workflow._prepare_branch_task = fake_prepare_branch_task
-    workflow._retry_episode = fake_retry_episode
-    workflow._cleanup_branch = fake_cleanup
-
-    data = {"query_id": "q"}
-    await workflow._run_fresh_episode(None, data, 0, "q")
-
-    assert len(cleanup_called) == 1
-    assert cleanup_called[0] is candidate

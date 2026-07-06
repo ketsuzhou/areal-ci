@@ -14,10 +14,10 @@ shared post-processing.
 
 Fixed group_size path (``_arun_episode_fixed``):
   1. Query the tree_store for cached (untrained) episodes.
-  2. Generate ``group_size - cached_count`` fresh episodes in parallel.
-     Each fresh episode may come from scratch or from a *branch* of an
-     existing high-entropy node (controlled by ``sample_source`` /
-     ``branch_probability``).
+  2. Generate ``group_size - cached_count`` fresh episodes in parallel,
+     each generated from scratch.  (Branching now lives only in the
+     env-dispatch runner model; the wired grouped workflow no longer
+     branches from cached nodes.)
   3. Combine cached + fresh nodes.
 
 Dynamic group_size path (``_arun_episode_dynamic``):
@@ -44,7 +44,6 @@ Helper functions
 ~~~~~~~~~~~~~~~~
 - ``choose_sample_source`` — probabilistic selection between SCRATCH / BRANCH / MIXED.
 - ``select_branch_candidate`` — pick the highest-entropy node eligible for branching.
-- ``build_branch_task`` — create a TPFC task that reuses a branch sandbox.
 - ``interactions_dict_to_nodes`` — convert inference-engine interactions to ``Node``
   objects, handling both live ``model_response`` and proxy-deserialized tensor caches.
 - ``annotate_nodes_from_run`` — stamp TPFC assistant metadata (entropy, branch info)
@@ -65,21 +64,12 @@ try:
     load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 except ImportError:
     pass
-import random
 import re
 import traceback
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from customized_areal.db_service import (
-    bind_sandbox_to_task,
-    copy_messages_to_task,
-    create_task,
-    delete_sandbox,
-    truncate_messages_before_turn,
-)
-from customized_areal.tpfc.backend_run import _get_raw_messages_with_client
 from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.config import (
     AdvantageMode,
@@ -249,7 +239,7 @@ def select_branch_candidate(
 ) -> Node | None:
     """Pick the best branch candidate, optionally gated by critic TD-error.
 
-    Candidates are ``need_branch`` nodes (with a task + sandbox) for this query.
+    Candidates are ``need_branch`` nodes (with a task) for this query.
     When ``td_threshold > 0`` and a tree store is supplied, a candidate is kept
     only if its critic TD-error magnitude meets the threshold::
 
@@ -267,7 +257,6 @@ def select_branch_candidate(
         if node.query_id == query_id
         and node.need_branch
         and bool(node.task_id)
-        and bool(node.branch_sandbox_id)
     ]
     if not candidates:
         return None
@@ -301,38 +290,6 @@ def select_branch_candidate(
     if not gated:
         return None
     return max(gated, key=_max_entropy)
-
-
-async def build_branch_task(
-    *,
-    client: Any,
-    account_id: str,
-    agent_id: str,
-    candidate: Node,
-    name: str | None,
-) -> str | None:
-    if not candidate.task_id or not candidate.branch_sandbox_id:
-        return None
-
-    raw_messages = await _get_raw_messages_with_client(client, candidate.task_id)
-    prefix = truncate_messages_before_turn(raw_messages, candidate.turn_idx)
-    branch_sandbox_id = candidate.branch_sandbox_id
-
-    branch_task_id = await create_task(
-        client=client,
-        account_id=account_id,
-        agent_id=agent_id,
-        name=name,
-    )
-    await bind_sandbox_to_task(
-        client,
-        sandbox_id=branch_sandbox_id,
-        task_id=branch_task_id,
-        account_id=account_id,
-    )
-    await copy_messages_to_task(client, task_id=branch_task_id, messages=prefix)
-
-    return branch_task_id
 
 
 def _assistant_metadata(raw_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -646,8 +603,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         then iteratively add episodes until uncertainty drops below threshold
         or ``max_group_size`` is reached.
 
-    Fresh episodes can optionally **branch** from high-entropy cached nodes
-    (``sample_source`` = BRANCH or MIXED) by reusing their TPFC sandbox state.
+    Fresh episodes are always generated from scratch; the wired workflow no
+    longer branches from cached nodes (branching lives in the env-dispatch
+    runner model).
 
     When ``loss_mode`` is DISTILL or BOTH, a teacher model diagnoses each
     episode to identify weak turns, then provides logprobs for distillation
@@ -1457,142 +1415,11 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         group_idx: int,
         query_id: str,
     ) -> Any:
+        # Branching now lives only in the env-dispatch runner model; the wired
+        # grouped workflow always generates fresh episodes from scratch.
         episode_data = dict(data)
-        all_query_nodes = self.tree_store.trajectories.get(query_id, [])
-        candidate = select_branch_candidate(
-            all_query_nodes,
-            query_id,
-            tree_store=self.tree_store,
-            td_threshold=self.branch_td_threshold,
-            gamma=self.critic_gamma,
-        )
-        source = choose_sample_source(
-            self.sample_source,
-            branch_probability=self.branch_probability,
-            has_candidate=candidate is not None,
-            random_value=random.random(),
-        )
-        # ------------------------------------------------------------------
-        # Branch contract mapping (Task 4, Step 1) — env-dispatch vs. the
-        # wired branch site.  DOCUMENTED IMPEDANCE POINT / BLOCKER.
-        #
-        # What ``_retry_episode`` needs to produce a *trainable* branch episode:
-        #   * ``branch_data["task_id"]`` — a **le-agent TPFC task_id** (a task
-        #     on the le-agent backend, seeded with the truncated prefix).
-        #   * ``branch_data["seed_messages_already_inserted"] = True`` +
-        #     ``model_name`` — so the inner ``self.workflow`` (an
-        #     ``OpenAIProxyWorkflow``) *drives generation* through the le-agent
-        #     proxy and returns a dict/list of ``InteractionWithTokenLogpReward``
-        #     plus ``_backend_run_task_id`` / ``_backend_run_raw_messages`` in
-        #     ``branch_data``.  ``_result_to_nodes`` then builds token-level
-        #     training ``Node``s from those raw_messages.
-        #   * ``branch_data["_branch_point_node_id"]`` — the candidate node_id
-        #     (MCTS backup linkage); this part is orthogonal and fine.
-        #
-        # What the env-dispatch branch primitive actually produces:
-        #   * ``EnvDispatchBranchDriver.drive_lane(...) -> str`` returns ONLY a
-        #     new terminal **multica env_id** (a forked sandbox on the multica
-        #     server via ``create_env_dispatch(mode="branch", env_id=…)``).
-        #   * The richer env-dispatch result is a ``SweLegoRollout`` with
-        #     ``env_id`` / ``project_id`` / ``issue_id`` / ``chat_session_id`` /
-        #     ``agent_run_id`` — ALL multica-side identifiers.  There is NO
-        #     le-agent TPFC ``task_id``, NO ``InteractionWithTokenLogpReward``
-        #     stream, and NO ``raw_messages``.  The env-dispatch *runners*
-        #     (``run_swe_lego_issue`` / ``run_self_play``) yield only
-        #     ``SweLegoIssueResult`` (per-agent rewards), not token-level
-        #     rollouts.
-        #
-        # => No field of the env-dispatch result maps to the le-agent
-        # ``task_id`` that ``_retry_episode`` -> ``OpenAIProxyWorkflow`` ->
-        # ``_result_to_nodes`` fundamentally requires.  Rewiring this site to
-        # env-dispatch would require a broader change (either a new
-        # backend capability that materializes a le-agent driven-generation
-        # task from a forked multica env, or replacing the grouped workflow's
-        # token-level node pipeline with the reward-only env-dispatch runner
-        # pipeline).  Both exceed Task 4's scope, so per the plan's STOP rule
-        # the branch site is left on the (now-broken) TPFC path pending that
-        # decision instead of shipping a leaky adapter.
-        # ------------------------------------------------------------------
-        if source == SampleSource.BRANCH and candidate is not None:
-            branch_data = dict(episode_data)
-            try:
-                branch_task_id = await self._prepare_branch_task(branch_data, candidate)
-            except Exception as exc:
-                logger.warning(
-                    "Branch task preparation errored for query_id=%s; "
-                    "falling back to scratch: %s",
-                    query_id,
-                    exc,
-                )
-                branch_task_id = None
-            if branch_task_id:
-                branch_data["task_id"] = branch_task_id
-                branch_data["seed_messages_already_inserted"] = True
-                # Link this branch episode's first turn to the branch-point node
-                # so MCTS backup aggregates returns at the shared prefix.
-                if candidate.node_id:
-                    branch_data["_branch_point_node_id"] = candidate.node_id
-                try:
-                    result = await self._retry_episode(engine, branch_data, group_idx)
-                finally:
-                    await self._cleanup_branch(candidate)
-                return _with_episode_metadata(result, branch_data)
-            logger.warning(
-                "Branch task preparation failed for query_id=%s; falling back to scratch",
-                query_id,
-            )
         result = await self._retry_episode(engine, episode_data, group_idx)
         return _with_episode_metadata(result, episode_data)
-
-    async def _prepare_branch_task(
-        self,
-        data: dict[str, Any],
-        candidate: Node,
-    ) -> str | None:
-        from customized_areal.tpfc.backend_run import (
-            DEFAULT_AGENT_ID,
-            DEFAULT_USER_ID,
-            _close_db_client,
-            _create_shortlived_db_client,
-            _resolve_agent_id,
-        )
-
-        account_id = str(data.get("user_id") or DEFAULT_USER_ID or "")
-        if not account_id:
-            logger.warning("Cannot branch TPFC episode without user/account id")
-            return None
-
-        client = await _create_shortlived_db_client()
-        try:
-            agent_id = await _resolve_agent_id(
-                client,
-                account_id,
-                data.get("agent_id") or DEFAULT_AGENT_ID,
-            )
-            query = data.get("query")
-            return await build_branch_task(
-                client=client,
-                account_id=account_id,
-                agent_id=agent_id,
-                candidate=candidate,
-                name=str(query)[:100] if query else None,
-            )
-        finally:
-            await _close_db_client(client)
-
-    async def _cleanup_branch(self, candidate: Node) -> None:
-        """Delete branch sandbox and mark node as branched to prevent re-use."""
-        if candidate.branch_sandbox_id:
-            try:
-                await delete_sandbox(candidate.branch_sandbox_id)
-            except Exception:
-                logger.warning(
-                    "Failed to delete branch sandbox_id=%s",
-                    candidate.branch_sandbox_id,
-                    exc_info=True,
-                )
-        candidate.need_branch = False
-        candidate.branch_sandbox_id = None
 
     async def _prepare_distill_for_node_groups(
         self,

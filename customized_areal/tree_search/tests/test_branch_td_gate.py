@@ -28,7 +28,6 @@ def _cand(
         outcome_reward=outcome_reward,
         need_branch=need_branch,
         task_id="task" if need_branch else "",
-        branch_sandbox_id="sb" if need_branch else None,
         entropy_stats={"max_entropy": entropy},
     )
 
