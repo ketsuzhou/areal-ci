@@ -121,3 +121,117 @@ FINAL REVIEW: READY TO MERGE. No Critical/Important. Spec-complete vs D1-D6; con
   defensive zero-UUID guard made unreachable by validate()'s exactly-one rule (defense-in-depth).
 SUB-PROJECT B COMPLETE. Commits local-only (not pushed): multica main 392295a..bcbe0fce,
   areal master ...b3d646f. Awaiting user decision on push.
+
+# SDD progress — branch via env-dispatch (sub-project C)
+
+Plan: docs/superpowers/plans/2026-07-02-branch-via-env-dispatch.md
+Spec: docs/superpowers/specs/2026-07-02-branch-via-env-dispatch-design.md
+Impl areas: areal client (customized_areal/**, commit areal master) + db_bridge (multica/db_bridge, multica main) + multica server (multica/server Go, multica main)
+Controller: kiro (this session), subagent-driven
+Review bases: areal master bf64810e ; multica main bcbe0fce (both clean).
+Env: areal tests via /workspaces/leagent/backend/areal/.venv-test/bin/python -m pytest (py3.12.13,
+  pytest 9.1.1, torch 2.12.1+cpu). db_bridge via `uv run pytest`. multica Go: DATABASE_URL=
+  postgres://multica:multica@localhost:5432/multica?sslmode=disable, build/test scoped to touched pkgs.
+  Pre-existing (NOT ours), do not gate on: (1) go build ./... webpush.go:180; (2) 16 handler ON CONFLICT
+  daemon/claim failures (runtime unique-constraint, reproduced at base).
+Decisions: D1 env_dispatch(mode=branch,env_id) single mechanism; D2 per-node env_id, no seq; D3 read
+  metadata["env_id"] (backend emission EXTERNAL); D4 full removal (client + agent_start_branch channel +
+  multica /api/issues/{id}/fork; start-branch server endpoint EXTERNAL le-agent); D5 clean break; D6 rewire
+  wired loop too; Approach 2 (_BranchDriver seam). SuperNode also carries branch refs -> env_id (T2).
+
+## Tasks
+- [ ] T1: Node.env_id replaces branch refs + annotate_nodes_from_run reads metadata["env_id"] (areal)
+- [ ] T2: SuperNode + serialization clean break (env_id only) (areal)
+- [ ] T3: EnvDispatchBranchDriver (branch via env-dispatch) (areal)
+- [ ] T4: rewire customized_grouped_workflow branch site; drop build_branch_task (areal, highest risk)
+- [ ] T5: remove BranchMaterializer/MulticaIssueForker/start-branch client + exports + dead tests (areal)
+- [ ] T6: remove agent_start_branch db_bridge channel + schema + tests (multica main)
+- [ ] T7: remove /api/issues/{id}/fork handlers/service/routes (multica server Go)
+- [ ] T8: full-suite regression across all three areas
+
+## Ledger
+(append "Task N: complete (...)" as tasks finish)
+
+Task 1: complete (areal master bf64810e..226c5c0b, review clean; test_annotate_env_id.py 2 passed)
+  Node.env_id replaces branch_sandbox_id/branch_issue_id/branch_env_snapshot_id; annotate_nodes_from_run
+  reads metadata['env_id']. tree_store + customized_grouped_workflow import cleanly.
+  CAVEAT (pre-existing, NOT ours): 5 test files fail COLLECTION with ModuleNotFoundError 'datasets'
+  (test_critic_*/test_judge_integration). => run TARGET test files directly, avoid broad `-k` sweeps.
+Task 2: complete (areal master 226c5c0b..d3f6cebe, review clean; event_codec+checkpoint_super 21 passed)
+  SuperNode is in execution_dag.py (:70), env_id set in event_codec.dag_to_supernodes; supernode_assembler
+  untouched (builds from Multica specs, no source node). Clean-break cascade also removed dead branch_seq
+  consumers: branch_selection.py + ReplayPrefix/replay_prefix_for. Zero branch_* keys remain in the 4 files.
+  NOTE: plan's test path wrong (real: tests/test_tree_search/test_checkpoint.py, has 17 PRE-EXISTING
+  unrelated failures: MCTSTreeStore.insert_batch missing, Node distill_reward kwarg — not env_id-related).
+Task 3: complete (areal master d3f6cebe..bdc2328c, review clean; 10 target tests pass incl 2 runner-satisfaction)
+  EnvDispatchBranchDriver.drive_lane -> create_env_dispatch(mode=branch, env_id=sandbox_id[=source env],
+  dispatch_type/agent_id/domain, group_size=1) returns rollouts[0].env_id. Satisfies _BranchDriver Protocol
+  in both runners (swe_lego_issue_runner:53, self_play_runner:58). Imports without torch. branch_driver.py new.
+Task 4: BLOCKED (legitimate; reviewer-confirmed). doc-only commit 4ea01afa.
+  ROOT CAUSE: the wired branch site is structurally coupled to the le-agent TPFC driven-generation
+  contract (task_id + seed_messages_already_inserted -> OpenAIProxyWorkflow -> InteractionWithTokenLogpReward
+  -> token-level Nodes). The env-dispatch branch primitive yields only a forked multica env_id + reward-only
+  SweLegoIssueResult; NO mapping to the required le-agent task_id. => D6 (rewire wired loop to env-dispatch)
+  is NOT achievable within C's scope.
+  Options: (1) external backend "materialize" endpoint: le-agent TPFC task from a forked multica env_id
+  (seeded w/ truncated prefix) -> returns task_id, keeping the existing seam [external, defer]; (2) replace
+  token-level node pipeline with reward-only runner pipeline [huge, own plan]; (3) revert to Q6 option (a):
+  remove the wired loop's branch machinery entirely (that loop stops branching; branching lives only in the
+  runner model) [achievable NOW within C].
+  ALSO: master currently runtime-broken — Task 1 removed Node.branch_sandbox_id but dead candidate.branch_sandbox_id
+  refs remain in select_branch_candidate + build_branch_task + _cleanup_branch => 7 failing tests. Must fix
+  (T1 review only checked imports, not the branch-path tests). ESCALATED TO USER.
+Task 4 (REVISED, Option 3): complete (areal master ...18a71edf, review clean; branch_sampling 18/18 green)
+  Removed build_branch_task, _prepare_branch_task, _cleanup_branch, the `if branch_task_id:` episode block +
+  dead imports; episode loop falls through to scratch _retry_episode. Kept select_branch_candidate +
+  choose_sample_source (shared helpers) with no dead branch_sandbox_id access. Remaining branch_sandbox_id
+  refs are Task-5-owned (integration.py) or negative-assert/doc. Pre-existing unrelated failures 5->4.
+  D6 rewire deferred (needs external le-agent materialize endpoint).
+Task 5: complete (areal master 18a71edf..11cc632c, review clean; import ok, 508 collected, 6 pre-existing datasets errors only)
+  Removed from integration.py: BranchMaterializer/BranchMaterializationResult/MulticaIssueForker/BranchStarter/
+  BranchCandidate/materialize_cloud_branch/cleanup_cloud_branch (kept finalize_with_verifier+VerifierResult).
+  __init__ exports pruned; backend_run.py stripped of _start_branch_agent_run_for_task(+_with_refresh)+
+  LE_AGENT_BRANCH_RUN_ENDPOINT; dead tests deleted/trimmed. Retained seed_messages_already_inserted param
+  (its full removal cascades to out-of-scope callers; guarded dispatch is dead) - sound scope call.
+  MINOR (non-blocking, final-review): stale markdown docs still mention removed symbols - debug_tpfc.md:350
+  (_start_branch_agent_run_for_task), tree_search/README.md, agents/README.md, multica_environment_protocol.md.
+Task 6: complete (multica main bcbe0fce..17dd0bad, review clean; db_bridge suite 168 passed/1 skipped)
+  Removed agent_start_branch Channel (channels.py), rpc_agent_start_branch (schema.sql), START_BRANCH cases
+  (test_leagent_channels.py, replaced by negative test test_agent_start_branch_channel_removed),
+  BRIDGE_CONCURRENCY_AGENT_START_BRANCH (test_integration_e2e.py), README row+mermaid. env_dispatch channels
+  intact. Also cleaned .env.areal.example comment + unused import json (disclosed).
+Task 7: complete (multica main 17dd0bad..7969187a, review clean; 6 files, 748 deletions)
+  Deleted handler/issue_fork.go(+test), service/issue_fork.go(+test); removed both issue /fork routes from
+  router.go (enclosing /{id} group kept - has metadata/pull-requests); removed issue /fork rows + dead
+  sampleIssue const from router_fork_routes_test.go. sqlc orphans (generated/issue_fork.sql.go, queries/
+  issue_fork.sql) intentionally LEFT (no sqlc generate). ForkCloudRuntimeSandbox + /api/v1/sandboxes/fork +
+  env_dispatch ForkSandbox all UNTOUCHED. handler+service build/vet PASS; internal/service PASS; handler =
+  the 16 pre-existing ON CONFLICT fails only (0 fork-related).
+  CAVEAT: `go build ./cmd/server/` fails on pre-existing webpush.go:180 (cmd/server imports webpush) => the
+  router.go edit + router_fork_routes_test could NOT be compiled/run here; validated by diff inspection
+  (2-line route removal, low risk). Pre-existing, not ours.
+Task 8: complete (verification only). Results:
+  - areal imports OK (agents, customized_grouped_workflow, tree_store, branch_driver, event_codec, execution_dag).
+  - areal branch/codec/driver/runner/branch_sampling suites: 49 passed.
+  - db_bridge: 168 passed / 1 skipped.
+  - multica Go (from T7): handler+service build/vet PASS; internal/service PASS; internal/handler = 16
+    pre-existing ON CONFLICT fails only (0 fork-related). cmd/server uncompilable here (pre-existing webpush).
+  - grep sweep: NO live refs to removed symbols. Only remaining: integration.py:8 docstring (describes
+    removal) + intentional sqlc orphans (generated/issue_fork.sql.go, queries/issue_fork.sql).
+ALL TASKS COMPLETE (T4 via Option 3; D6 env-dispatch rewire DEFERRED pending external le-agent materialize endpoint).
+Commits: areal master 226c5c0b..11cc632c (T1-T5) + docs; multica main bcbe0fce..7969187a (T6 db_bridge, T7 server).
+Open MINOR (non-blocking): stale markdown docs (debug_tpfc.md:350, tree_search/README.md, agents/README.md,
+  multica_environment_protocol.md) still describe removed branch features.
+
+FINAL REVIEW: READY TO MERGE. No Critical/Important. Spec-complete per revised D6 (Option 3).
+  Verified: D1/D2/D3 (Node.env_id + annotate + EnvDispatchBranchDriver, no seq); D5 clean break (env_id-only
+  serialization, zero branch_* keys); D6 revised (wired loop no longer branches, falls through to scratch);
+  D4 removals (client + db_bridge channel + multica issue-fork; /api/v1/sandboxes/fork + ForkSandbox intact;
+  start-branch server endpoint left external). Runs: areal 41+8 passed; db_bridge 168/1 skip; multica
+  handler+service build/vet + service test OK.
+  Minor (non-blocking): (1) select_branch_candidate/choose_sample_source/SampleSource enum + sample_source/
+  branch_probability/branch_td_threshold config now test-only dead code (plan permitted retaining
+  select_branch_candidate); (2) stale markdown docs still describe removed features.
+SUB-PROJECT C COMPLETE. Commits local-only (not pushed): areal master bf64810e..11cc632c (+docs to HEAD);
+  multica main bcbe0fce..7969187a. D6 env-dispatch rewire of the wired loop DEFERRED (needs external le-agent
+  materialize endpoint). Remaining: sub-projects D (session lifecycle) and E (entropy + critic env-save).
