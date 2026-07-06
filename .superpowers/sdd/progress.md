@@ -245,3 +245,47 @@ teammate task created AFTER dispatch (mention-delegation / /api/agent/start), so
 task-creation + completion paths, not env_dispatch. proxy_url = multica config. Reward = default placeholder (E owns real).
 Tasks: T1 read-doc(STOP-if-broken) T2 contract T3 persist(mig152) T4 rl-client T5 open-hook T6 execenv T7 close-hook T8 config T9 regression.
 T1: DISPATCHED (investigation; may return BLOCKED and reshape plan).
+T1: DONE (investigation; Approach A feasible). Note docs/superpowers/notes/2026-07-06-D-seams.md.
+  Findings folded into spec+plan (areal commit above): (1a) chokepoints = Enqueue* family ->
+  CreateAgentTask/CreateChatTask (service/task.go) + env_dispatch EnqueueAgentRun; NO /api/agent/start route
+  here. (1b) close at CompleteTask/FailTask/CancelTask; runtime_sweeper timeout BYPASSES FailTask (gap,
+  deferred). (1c) execenv NEEDS-NEW-FIELD (claim-time field from context.areal_proxy). (1d) RL contract =
+  EXPERIMENTAL stack: start_session admin-key -> flat {session_id, api_key}; set_reward+end_session
+  session-key(proxy_key) auth, no session_id body; task_id = agent_task.id. (1e) project via
+  Issue.ProjectID/ChatSession.ProjectID. Store RL state in context.areal_proxy (no new task column).
+  USER DECISION: target experimental gateway contract.
+T2: DISPATCHED (contract: train_agent_id).
+T2: complete (multica main 7969187a..0a5cb9332, review clean; 4 files +87). TrainAgentID on
+  EnvDispatchRequest (json train_agent_id,omitempty + UUID shape-check) + service.EnvDispatchInput; validate
+  rule: TrainAgentID requires SquadID or ==AgentID; empty unchanged. New tests green, no new failures, gofmt
+  clean, no scope creep/sqlc churn.
+T3: DISPATCHED (training_dispatch persistence + migration 152).
+T3: complete (multica main 0a5cb9332..992be04dc, review clean; build+ 19 service tests green incl 2 new).
+  Migration 152 training_dispatch(project_id PK FK ON DELETE CASCADE, workspace_id, train_agent_id,
+  default_reward dp default 1.0, created_at). 152 chosen ABOVE dev's max (151) so no collision on future
+  dev<-main merge (main was only at 141). queries + HAND-WRITTEN generated/training_dispatch.sql.go (mirrors
+  environment.sql.go), no sqlc churn. SaveTrainingDispatch on Deps+adapter+stub+fake; called once per rollout
+  project when TrainAgentID set (save errors non-fatal). GetTrainingDispatchByProject ready for T5.
+T4: DISPATCHED (Go RL client, experimental contract).
+T4: complete (multica main 992be04dc..eeac55e62, review clean; build/vet/gofmt clean, 8 httptest green).
+  internal/arealrl.Client{New(stubBaseURL, adminKey)}: StartSession(taskID)->SessionCreds{SessionID,ProxyKey}
+  (admin Bearer, body {task_id, group_size:1 [Pydantic-ignored no-op]}, decodes FLAT {session_id, api_key});
+  SetReward(proxyKey, reward){reward}; EndSession(proxyKey) - both session-key Bearer(proxyKey). Confirmed
+  against experimental proxy_rollout_server.py. stdlib only, %w wrapped. Not yet wired (T5/T8).
+T5: DISPATCHED (session-open hook at enqueue chokepoints).
+T5: complete (multica main eeac55e62..57f17d572, review clean; build OK, 6/6 TDD green, no new failures).
+  Shared maybeOpenTrainingSession helper (training-only via GetTrainingDispatchByProject; skip if
+  agent!=train_agent_id; idempotent if context.areal_proxy already set; StartSession(task.id); merge
+  context.areal_proxy={provider:areal,model:areal-default,api_key:proxy_key,base_url:proxyURL,session_id}).
+  Wired at all Enqueue* chokepoints (service/task.go) + env_dispatch EnqueueAgentRun; deps interface-injected
+  (fake in tests). Hand-written MergeTaskArealProxyContext query (no sqlc churn). Does NOT reuse
+  agent_task.session_id column. Loud error if training target but bridge dep missing (no un-proxied run).
+T6: DISPATCHED (execenv provider wiring, NEEDS-NEW-FIELD).
+T6: complete (multica main 57f17d572..816d1e86c, review clean; build/vet/gofmt clean, 5 TDD green).
+  context.areal_proxy parsed at ClaimTaskByRuntime -> carried to daemon via omitempty fields (matching json
+  tags on claim response + daemon Task/AgentData). At ExecOptions: provider/model via splitPiModel
+  (model "areal/areal-default"), api-key via pi --api-key CustomArg; base_url injected as env
+  AREAL_PROXY_BASE_URL (pi has NO base-url flag). No hardcoded secrets.
+  DEPENDENCY -> T8: must wire pi models.json `areal` provider baseURL = $AREAL_PROXY_BASE_URL so the trained
+  pi actually routes to the bridge stub (plan Task 8 updated).
+T7: DISPATCHED (session-close hook: default reward + end_session).

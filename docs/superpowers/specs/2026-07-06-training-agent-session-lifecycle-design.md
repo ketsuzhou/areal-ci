@@ -1,3 +1,9 @@
+---
+comet_change: sub-project-d-session-lifecycle
+role: technical-design
+canonical_spec: openspec
+---
+
 # Sub-project D — training_agent session lifecycle (design)
 
 Status: DRAFT (awaiting hard-gate approval)
@@ -103,6 +109,13 @@ daemon `Task`/`TaskAgentData`, populated in `ClaimTaskByRuntime`
 `ExecOptions` (`daemon.go`) → `pi -p --provider areal --model areal-default
 --api-key <proxy_key>` with `base_url=<base_url>`. (Confirm the pi runtime's
 env-var names for key/base_url in `pkg/agent/pi.go` during implementation.)
+
+**T6 refinement (2026-07-06, folded into D close-out):** pi has no `--base-url`
+flag. T6 injects the proxy base URL as env `AREAL_PROXY_BASE_URL`; T8 must wire
+the `areal` provider entry in pi's `models.json` (or the daemon's provider
+config) so its `baseURL` reads `$AREAL_PROXY_BASE_URL`, so the trained pi
+actually routes to the bridge stub. This closes the `base_url=<base_url>` loose
+end above.
 
 ### 4.5 Session-close hook (multica, task completion)
 Per T1/1b the terminal transitions are `TaskService.CompleteTask` / `FailTask` /

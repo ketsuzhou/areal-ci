@@ -1,3 +1,9 @@
+---
+change: sub-project-d-session-lifecycle
+design-doc: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
+base-ref: b48c9ab222428efb022fc772e0526cefc055e9aa
+---
+
 # Sub-project D — training_agent session lifecycle (implementation plan)
 
 Spec: `docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md`
@@ -201,6 +207,11 @@ handler/service construction, `.env.example`, docs.
 - [ ] Add `AREAL_PROXY_URL` (default `http://db_bridge_stub:9100/v1`),
   `AREAL_BRIDGE_STUB_URL`, `AREAL_ADMIN_API_KEY`, `TRAINING_DEFAULT_REWARD`
   (default 1.0). Construct the `arealrl.Client` and inject into the service.
+- [ ] **From T6:** pi has no base-url flag — T6 injects the proxy base URL as env
+  `AREAL_PROXY_BASE_URL`. Wire the `areal` provider entry in pi's `models.json`
+  (or the daemon's provider config) so its base URL reads `$AREAL_PROXY_BASE_URL`,
+  so the trained pi actually routes to the bridge stub. Confirm the exact
+  models.json/provider-config seam and add a test.
 - [ ] Guard: if training is requested but `AREAL_BRIDGE_STUB_URL`/admin key are
   unset, fail the open-hook loudly (don't silently run un-proxied).
 - [ ] `.env.example` entries + short note in db_bridge/README or protocol doc.
@@ -224,5 +235,7 @@ handler/service construction, `.env.example`, docs.
 ## Task ledger (track in `.superpowers/sdd/progress.md`)
 T1 (read-doc) → T2 (contract) → T3 (persist) → T4 (rl client) → T5 (open hook)
 → T6 (execenv) → T7 (close hook) → T8 (config) → T9 (regression+review).
-Bases: multica `main` @ `7969187a` (T7 of sub-project C). Commits local-only
-unless the user says push.
+Bases: areal `master` @ `b48c9ab2` (OpenSpec change creation point);
+multica `main` @ `816d1e86c` (T6 tip — code-side base for T7-T9).
+T1-T6 complete on multica main (`7969187a..816d1e86c`). This OpenSpec change
+tracks T7-T9 only. Commits local-only unless the user says push.
