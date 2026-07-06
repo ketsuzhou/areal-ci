@@ -393,116 +393,6 @@ async def _start_agent_run_with_refresh(
                 )
 
 
-async def _start_branch_agent_run_for_task(
-    *,
-    client,
-    api_base_url: str,
-    auth_token: str,
-    task_id: str,
-    account_id: str,
-    model_name: str,
-    base_url: str | None,
-    api_key: str | None,
-) -> dict[str, Any]:
-    """Start a run for an existing task whose messages are already in the DB."""
-    del client
-    endpoint = os.environ.get("LE_AGENT_BRANCH_RUN_ENDPOINT", "/api/agent/start-branch")
-    url = (
-        endpoint
-        if endpoint.startswith(("http://", "https://"))
-        else f"{api_base_url}{endpoint}"
-    )
-    async with httpx.AsyncClient(timeout=_agent_start_http_timeout()) as http_client:
-        request_body = {
-            "task_id": task_id,
-            "model_name": model_name,
-            "proxy_base_url": base_url,
-            "proxy_api_key": api_key,
-            "stream": False,
-        }
-        logger.info(
-            "_start_branch_agent_run_for_task: proxy_base_url=%s, proxy_api_key=%s",
-            base_url,
-            api_key[:8] + "..." if api_key else None,
-        )
-        response = await http_client.post(
-            url,
-            headers=_auth_headers(auth_token, account_id),
-            json=request_body,
-        )
-    if response.status_code in _AUTH_ERROR_STATUS_CODES:
-        raise AuthTokenExpiredError(
-            f"Backend rejected auth token while starting branch task run: "
-            f"{response.status_code} - {response.text}"
-        )
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to start branch task run: {response.status_code} - {response.text}"
-        )
-    return _safe_response_json(response)
-
-
-async def _start_branch_agent_run_for_task_with_refresh(
-    *,
-    client,
-    api_base_url: str,
-    token_manager: SharedTokenManager,
-    auth_token: str,
-    task_id: str,
-    account_id: str,
-    model_name: str,
-    base_url: str | None,
-    api_key: str | None,
-) -> tuple[dict[str, Any], str]:
-    """Start a branch task run with the same auth fallbacks as the normal path."""
-
-    async def _start_with_token(token: str) -> dict[str, Any]:
-        return await _start_branch_agent_run_for_task(
-            client=client,
-            api_base_url=api_base_url,
-            auth_token=token,
-            task_id=task_id,
-            account_id=account_id,
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-        )
-
-    try:
-        return await _start_with_token(auth_token), auth_token
-    except AuthTokenExpiredError:
-        logger.warning(
-            "Backend auth token expired while starting branch run; refreshing token"
-        )
-        fresh_token = await token_manager.get_valid_token(force_refresh=True)
-        try:
-            return await _start_with_token(fresh_token), fresh_token
-        except AuthTokenExpiredError:
-            logger.warning(
-                "Backend rejected refreshed auth token for branch run; "
-                "attempting credential login"
-            )
-            login_token = await token_manager.login_and_store_token()
-            try:
-                return await _start_with_token(login_token), login_token
-            except AuthTokenExpiredError:
-                legacy_token = _mint_legacy_hs256_auth_token(login_token)
-                if legacy_token:
-                    logger.warning(
-                        "Backend rejected login-issued token for branch run; "
-                        "trying HS256 compatibility token"
-                    )
-                    try:
-                        return await _start_with_token(legacy_token), legacy_token
-                    except AuthTokenExpiredError:
-                        pass
-                raise AuthTokenExpiredError(
-                    "Backend rejected refreshed and login-issued tokens while "
-                    f"starting branch run. Token diagnostics: "
-                    f"{_token_diagnostics(login_token)}"
-                )
-
-
 def _task_stream_url(api_base_url: str, task_id: str, auth_token: str) -> str:
     return (
         f"{api_base_url}/api/tasks/{task_id}/stream?token={quote(auth_token, safe='')}"
@@ -964,42 +854,25 @@ async def run_backend(
         async def _do_run():
             nonlocal agent_started, terminal_status, auth_token
 
-            if seed_messages_already_inserted:
-                (
-                    result,
-                    auth_token,
-                ) = await _start_branch_agent_run_for_task_with_refresh(
-                    client=client,
-                    api_base_url=LE_AGENT_API_URL,
-                    token_manager=token_manager,
-                    auth_token=auth_token,
-                    task_id=task_id,
-                    account_id=user_id,
-                    model_name=model_name,
-                    base_url=base_url,
-                    api_key=api_key,
-                )
-                logger.info("Branch agent run started for task: %s", result)
-            else:
-                form_data = _prepare_form_data(
-                    task_id=task_id,
-                    task_description=task_description,
-                    agent_id=resolved_agent_id,
-                    model_name=model_name,
-                    base_url=base_url,
-                    api_key=api_key,
-                    tags=tags,
-                )
+            form_data = _prepare_form_data(
+                task_id=task_id,
+                task_description=task_description,
+                agent_id=resolved_agent_id,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                tags=tags,
+            )
 
-                result, auth_token = await _start_agent_run_with_refresh(
-                    api_base_url=LE_AGENT_API_URL,
-                    token_manager=token_manager,
-                    auth_token=auth_token,
-                    form_data=form_data,
-                    task_file_path=task_file_path,
-                    user_id=user_id,
-                )
-                logger.info("Agent run started via API: %s", result)
+            result, auth_token = await _start_agent_run_with_refresh(
+                api_base_url=LE_AGENT_API_URL,
+                token_manager=token_manager,
+                auth_token=auth_token,
+                form_data=form_data,
+                task_file_path=task_file_path,
+                user_id=user_id,
+            )
+            logger.info("Agent run started via API: %s", result)
             agent_started = True
 
             agent_run_id = result.get("agent_run_id")

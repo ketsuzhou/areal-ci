@@ -215,8 +215,8 @@ class MulticaSweLegoProvider:
       POST /api/v1/sandboxes/{id}/restore   → None
       DELETE /api/v1/sandboxes/{id}         → None   (idempotent on 404)
 
-    Identical surface to :class:`FleetSandboxProvider` so :class:`BranchMaterializer`
-    is unchanged — only the injected provider class differs. ``base_url`` /
+    Identical surface to :class:`FleetSandboxProvider`, so the two providers are
+    interchangeable — only the injected provider class differs. ``base_url`` /
     ``api_key`` default to ``MULTICA_BASE_URL`` / ``MULTICA_API_KEY``.
     """
 
