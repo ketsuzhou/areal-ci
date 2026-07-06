@@ -28,6 +28,7 @@ class StartSessionRequest(BaseModel):
 
     task_id: str
     api_key: str | None = None  # Reuse a previously-issued key (refresh)
+    env_id: str | None = None  # Environment ID for trajectory attribution
 
 
 class StartSessionResponse(BaseModel):
@@ -66,8 +67,9 @@ class ExportTrajectoriesResponse(BaseModel):
 class SessionData:
     """Data associated with a single RL session."""
 
-    def __init__(self, session_id: str, prefix_matcher=None):
+    def __init__(self, session_id: str, prefix_matcher=None, env_id: str | None = None):
         self.session_id = session_id
+        self.env_id = env_id
 
         self._completed = False
         self._completions = InteractionCache(

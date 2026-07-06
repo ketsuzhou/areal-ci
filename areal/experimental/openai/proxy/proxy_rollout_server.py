@@ -496,6 +496,7 @@ def start_session(request: StartSessionRequest) -> StartSessionResponse:
         _session_cache[session_id] = SessionData(
             session_id=session_id,
             prefix_matcher=_prefix_matcher,
+            env_id=request.env_id,
         )
         _api_key_to_session[session_api_key] = session_id
         _session_to_api_key[session_id] = session_api_key
