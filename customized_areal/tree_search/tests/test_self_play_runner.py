@@ -99,3 +99,25 @@ def test_run_self_play_cleans_up_on_verifier_failure():
             )
         )
     assert multica.cleanup_calls == ["proj-0", "proj-1"]
+
+
+def test_run_self_play_accepts_env_dispatch_branch_driver():
+    # The concrete EnvDispatchBranchDriver satisfies the structural
+    # _BranchDriver Protocol and is accepted by run_self_play.
+    from customized_areal.tree_search.agents.branch_driver import (
+        EnvDispatchBranchDriver,
+    )
+
+    multica = FakeMulticaClient()
+    driver = EnvDispatchBranchDriver(
+        multica=multica, domain="self_play", dispatch_type="message", agent_id="ag",
+    )
+    result = asyncio.run(
+        run_self_play(
+            query=_query(), group_size=2, agent_id="ag", base_env_id="base",
+            multica=multica, rl_session=FakeRlSession(), verifier=FakeVerifier(),
+            branch_driver=driver,
+        )
+    )
+    assert isinstance(result, SelfPlayResult)
+    assert result.per_agent_rewards == [1.0, 1.0]

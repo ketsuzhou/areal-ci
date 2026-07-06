@@ -130,6 +130,30 @@ def test_run_swe_lego_issue_cleans_up_when_branch_driver_raises():
     assert multica.cleanup_calls == ["proj-0", "proj-1"]
 
 
+def test_run_swe_lego_issue_accepts_env_dispatch_branch_driver():
+    # The concrete EnvDispatchBranchDriver satisfies the structural
+    # _BranchDriver Protocol and is accepted by the runner. The runner's
+    # rollouts and the driver's branch calls both go through the same
+    # FakeMulticaClient here.
+    from customized_areal.tree_search.agents.branch_driver import (
+        EnvDispatchBranchDriver,
+    )
+
+    multica = FakeMulticaClient()
+    driver = EnvDispatchBranchDriver(
+        multica=multica, domain="swe_lego", dispatch_type="issue", agent_id="ag",
+    )
+    result = asyncio.run(
+        run_swe_lego_issue(
+            issue=_issue(), group_size=2, agent_id="ag", base_env_id="base-env-1",
+            multica=multica, rl_session=FakeRlSession(), verifier=FakeVerifier(),
+            branch_driver=driver,
+        )
+    )
+    assert isinstance(result, SweLegoIssueResult)
+    assert result.per_agent_rewards == [1.0, 1.0]
+
+
 def test_run_swe_lego_issue_logs_when_cleanup_itself_raises():
     multica = FakeMulticaClient(cleanup_raises=True)
     rl = FakeRlSession()
