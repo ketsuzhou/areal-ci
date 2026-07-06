@@ -144,31 +144,30 @@ def test_branch_driver_calls_env_dispatch_branch():
 
 ---
 
-### Task 4: Rewire the wired workflow branch site (areal — highest risk, D6/risk #2)
+### Task 4: Remove the wired workflow's branch machinery (areal — D6 revised to Option 3)
+
+> **Execution note:** The original D6 (rewire the wired branch site to env-dispatch) was found BLOCKED during implementation — the wired site requires a le-agent TPFC `task_id` + seeded messages (token-level Node pipeline) that the env-dispatch branch primitive cannot supply without an external "materialize" endpoint. Per user decision, D6 reverts to **removing** the wired loop's branch machinery; branching lives only in the runner model (T3). A prior doc-only commit (`4ea01afa`) documents the blocker.
 
 **Files:**
-- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py` (`_prepare_branch_task`, the `if branch_task_id:` block, `_cleanup_branch`; delete `build_branch_task`)
-- Test: `tests/customized_areal/test_tree_search_branch_sampling.py` (rewrite `build_branch_task` tests to the env-dispatch branch path)
+- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py`
+- Test: `tests/customized_areal/test_tree_search_branch_sampling.py`
 
-**Interfaces:**
-- `_prepare_branch_task` (rename allowed, e.g. `_prepare_branch_via_env_dispatch`) calls the branch primitive with `candidate.env_id` and returns the branch run handle (`agent_run_id` / `session_id` / new `env_id`).
-- The branch block feeds that handle into `_retry_episode` (replacing `task_id` + `seed_messages_already_inserted`).
+**Goal:** The grouped workflow no longer branches (falls back to normal/scratch episodes). Remove `build_branch_task`, `_prepare_branch_task`, the `if branch_task_id:` branch block in the episode loop, and the branch-specific parts of `_cleanup_branch`; and fix the now-dead `candidate.branch_sandbox_id` references left after Task 1 (in `select_branch_candidate`, `build_branch_task`, `_cleanup_branch`) — which currently cause ~7 failing tests.
 
-- [ ] **Step 1: Read + document the `_retry_episode` contract.** Read how `_retry_episode` consumes `branch_data` (`task_id`, `seed_messages_already_inserted`, `_branch_point_node_id`) and how the env-dispatch runners feed `agent_run_id`/`session_id` into a rollout. Write the mapping as a short comment block in the file BEFORE coding (this is the impedance point). If `_retry_episode` cannot consume env-dispatch results without a broader change, STOP and report the specific blocker (do not build a leaky adapter silently).
+- [ ] **Step 1: Map the branch machinery.** Read `build_branch_task`, `_prepare_branch_task`, the `if branch_task_id:` block (~L1490), `_cleanup_branch`, and `select_branch_candidate`. Determine which are branch-only (remove) vs shared with the runner model / used elsewhere (keep). Grep every caller before deleting.
 
-- [ ] **Step 2: Write failing tests** — rewrite `test_tree_search_branch_sampling.py`'s `build_branch_task` tests to assert the branch path now calls `create_env_dispatch(mode="branch", env_id=candidate.env_id, …)` (monkeypatch the client) and that `_cleanup_branch` no longer references `branch_sandbox_id`.
+- [ ] **Step 2: Update tests to the no-branch contract.** In `test_tree_search_branch_sampling.py`, remove/rewrite the `build_branch_task` tests; assert the episode loop no longer attempts a branch (the candidate path is gone) and that no code references `branch_sandbox_id`. Run to confirm current failures/shape.
 
-- [ ] **Step 3: Run to confirm failure** — `python -m pytest tests/customized_areal/test_tree_search_branch_sampling.py -v`
+- [ ] **Step 3: Remove the branch machinery.**
+  - Delete `build_branch_task` and `_prepare_branch_task`.
+  - Remove the `if branch_task_id:` block from the episode loop (fall through to the normal `_retry_episode(episode_data)` path).
+  - `_cleanup_branch`: remove entirely if now unused, or strip its branch-only body; remove all `candidate.branch_sandbox_id` references.
+  - `select_branch_candidate`: if it exists solely to feed the removed wired branch path, remove it and its dead `branch_sandbox_id` reference; if it is shared (e.g., referenced by the runner model or DAG), keep it but remove the dead `branch_sandbox_id` access (candidates now carry `env_id`).
+  - Prune now-unused imports (`truncate_messages_before_turn`, `bind_sandbox_to_task`, `copy_messages_to_task`) — grep first.
 
-- [ ] **Step 4: Implement**
-  - Replace `_prepare_branch_task` body: gate on `candidate.env_id` (not `candidate.branch_sandbox_id`); call the branch primitive/`EnvDispatchBranchDriver` with `candidate.env_id`; return the branch run handle.
-  - Update the `if branch_task_id:` block to the new handle (set `branch_data` fields the mapping from Step 1 defines; keep `_branch_point_node_id` linkage).
-  - `_cleanup_branch`: drop `branch_sandbox_id` deletion; reset `need_branch=False` and `env_id=None`. (Server owns sandbox cleanup via env-dispatch `DELETE`/project cleanup — do not call `delete_sandbox` on an env_id.)
-  - Delete `build_branch_task` and its now-unused imports (`truncate_messages_before_turn`, `bind_sandbox_to_task`, `copy_messages_to_task` if unused elsewhere — grep first).
+- [ ] **Step 4: Run tests + import** — `cd /workspaces/leagent/backend/areal && /workspaces/leagent/backend/areal/.venv-test/bin/python -m pytest tests/customized_areal/test_tree_search_branch_sampling.py -v` (the ~7 previously-failing branch tests are removed/green) and `/workspaces/leagent/backend/areal/.venv-test/bin/python -c "import customized_areal.tree_search.core.customized_grouped_workflow"`.
 
-- [ ] **Step 5: Run** — `python -m pytest tests/customized_areal/test_tree_search_branch_sampling.py customized_areal/tree_search/tests/ -k 'branch or workflow' -v` + `python -c "import customized_areal.tree_search.core.customized_grouped_workflow"`
-
-- [ ] **Step 6: Commit** (areal `master`): `feat(tree-search): branch via env-dispatch in grouped workflow; drop build_branch_task`
+- [ ] **Step 5: Commit** (areal `master`): `refactor(tree-search): remove wired-loop branch machinery; branching now runner-only`
 
 ---
 

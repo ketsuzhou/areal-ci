@@ -39,9 +39,18 @@ one primitive.
 - **D5** — **Clean break** for checkpoint/serialization: persist `env_id` only;
   drop `branch_sandbox_id` / `branch_issue_id` / `branch_env_snapshot_id`. Old
   checkpoints carrying the legacy keys are not supported.
-- **D6** — Rewire the wired `customized_grouped_workflow` branch site to the new
-  env-dispatch `BranchDriver` too (both the runner model and the wired loop
-  branch via env-dispatch).
+- **D6** — ~~Rewire the wired `customized_grouped_workflow` branch site to the
+  new env-dispatch `BranchDriver`.~~ **REVISED (post-implementation blocker):**
+  the wired branch site is structurally coupled to the le-agent TPFC
+  driven-generation contract (`task_id` + seeded messages → token-level Nodes),
+  which the env-dispatch branch primitive (forked `env_id` + reward-only result)
+  cannot supply without an external backend "materialize" endpoint. Therefore
+  D6 reverts to the original option: **remove the wired loop's branch machinery
+  entirely** — that loop stops branching (falls back to normal/scratch
+  episodes); branching lives exclusively in the runner model
+  (`run_swe_lego_issue` / `run_self_play` + `EnvDispatchBranchDriver`). Rewiring
+  the wired loop via env-dispatch is deferred until an external le-agent
+  materialize endpoint exists (out of C's scope).
 - **Approach 2** — Implement the existing `_BranchDriver.drive_lane` Protocol
   seam (in `swe_lego_issue_runner.py` / `self_play_runner.py`) with a concrete
   env-dispatch-backed driver, rather than building a throwaway adapter inside
