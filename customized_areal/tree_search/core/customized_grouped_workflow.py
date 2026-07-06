@@ -1472,6 +1472,47 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             has_candidate=candidate is not None,
             random_value=random.random(),
         )
+        # ------------------------------------------------------------------
+        # Branch contract mapping (Task 4, Step 1) — env-dispatch vs. the
+        # wired branch site.  DOCUMENTED IMPEDANCE POINT / BLOCKER.
+        #
+        # What ``_retry_episode`` needs to produce a *trainable* branch episode:
+        #   * ``branch_data["task_id"]`` — a **le-agent TPFC task_id** (a task
+        #     on the le-agent backend, seeded with the truncated prefix).
+        #   * ``branch_data["seed_messages_already_inserted"] = True`` +
+        #     ``model_name`` — so the inner ``self.workflow`` (an
+        #     ``OpenAIProxyWorkflow``) *drives generation* through the le-agent
+        #     proxy and returns a dict/list of ``InteractionWithTokenLogpReward``
+        #     plus ``_backend_run_task_id`` / ``_backend_run_raw_messages`` in
+        #     ``branch_data``.  ``_result_to_nodes`` then builds token-level
+        #     training ``Node``s from those raw_messages.
+        #   * ``branch_data["_branch_point_node_id"]`` — the candidate node_id
+        #     (MCTS backup linkage); this part is orthogonal and fine.
+        #
+        # What the env-dispatch branch primitive actually produces:
+        #   * ``EnvDispatchBranchDriver.drive_lane(...) -> str`` returns ONLY a
+        #     new terminal **multica env_id** (a forked sandbox on the multica
+        #     server via ``create_env_dispatch(mode="branch", env_id=…)``).
+        #   * The richer env-dispatch result is a ``SweLegoRollout`` with
+        #     ``env_id`` / ``project_id`` / ``issue_id`` / ``chat_session_id`` /
+        #     ``agent_run_id`` — ALL multica-side identifiers.  There is NO
+        #     le-agent TPFC ``task_id``, NO ``InteractionWithTokenLogpReward``
+        #     stream, and NO ``raw_messages``.  The env-dispatch *runners*
+        #     (``run_swe_lego_issue`` / ``run_self_play``) yield only
+        #     ``SweLegoIssueResult`` (per-agent rewards), not token-level
+        #     rollouts.
+        #
+        # => No field of the env-dispatch result maps to the le-agent
+        # ``task_id`` that ``_retry_episode`` -> ``OpenAIProxyWorkflow`` ->
+        # ``_result_to_nodes`` fundamentally requires.  Rewiring this site to
+        # env-dispatch would require a broader change (either a new
+        # backend capability that materializes a le-agent driven-generation
+        # task from a forked multica env, or replacing the grouped workflow's
+        # token-level node pipeline with the reward-only env-dispatch runner
+        # pipeline).  Both exceed Task 4's scope, so per the plan's STOP rule
+        # the branch site is left on the (now-broken) TPFC path pending that
+        # decision instead of shipping a leaky adapter.
+        # ------------------------------------------------------------------
         if source == SampleSource.BRANCH and candidate is not None:
             branch_data = dict(episode_data)
             try:
