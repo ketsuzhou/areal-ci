@@ -2,9 +2,7 @@
 
 Forward (``dag_to_supernodes``): linearize the DAG into completion-ordered
 SuperNodes for reward backup. Reverse (``supernodes_to_dag``): losslessly
-rebuild the DAG from a persisted SuperNode log, then
-(``replay_prefix_for``) derive a branch replay prefix shaped to
-``BranchMaterializer.materialize``'s inputs.
+rebuild the DAG from a persisted SuperNode log.
 
 Pure: no mutation of inputs, no I/O, torch-free. All failures raise ``DAGError``.
 """
@@ -12,9 +10,7 @@ Pure: no mutation of inputs, no I/O, torch-free. All failures raise ``DAGError``
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 
-from customized_areal.tree_search.agents.event_model import message_timeline
 from customized_areal.tree_search.agents.execution_dag import (
     DAGError,
     EdgeType,
@@ -89,9 +85,7 @@ def dag_to_supernodes(
             completion_time=node.metadata.get("completion_time"),
             incoming_edges=tuple(incoming[nid]),
             outgoing_edges=tuple(outgoing[nid]),
-            branch_seq=node.branch_seq,
-            branch_issue_id=node.branch_issue_id,
-            branch_env_snapshot_id=node.branch_env_snapshot_id,
+            env_id=node.env_id,
             value=node.value,
             process_reward=node.process_reward,
             outcome_reward=node.outcome_reward,
@@ -157,9 +151,7 @@ def supernodes_to_dag(supers: Sequence[SuperNode]) -> ExecutionDAG:
                 closing_event=s.closing_event,
                 closing_event_target=s.closing_event_target,
                 session_id=s.session_id,
-                branch_seq=s.branch_seq,
-                branch_issue_id=s.branch_issue_id,
-                branch_env_snapshot_id=s.branch_env_snapshot_id,
+                env_id=s.env_id,
                 process_reward=s.process_reward,
                 outcome_reward=s.outcome_reward,
                 value=s.value,
@@ -183,56 +175,7 @@ def supernodes_to_dag(supers: Sequence[SuperNode]) -> ExecutionDAG:
     return dag
 
 
-@dataclass(frozen=True)
-class ReplayPrefix:
-    """Branch replay data, shaped to ``BranchMaterializer.materialize`` inputs."""
-
-    replay_messages: list[dict]
-    task_id: str
-    seq: int
-    source_issue_id: str
-    branch_env_snapshot_id: str | None
-
-
-def replay_prefix_for(
-    supers: Sequence[SuperNode],
-    *,
-    branch_point: tuple[str, int],
-) -> ReplayPrefix:
-    """Derive the replay prefix for a branch point from a linear SuperNode log.
-
-    ``branch_point = (task_id, seq)`` where ``seq`` is the ``task_message.seq``
-    the run is allowed to branch at. Locates the unique SuperNode with matching
-    ``task_id`` and ``branch_seq == seq`` (zero or multiple matches -> DAGError),
-    collects that node's ancestors (plus the node itself) in completion order,
-    and flattens their message payloads via ``message_timeline``.
-    """
-    task_id, seq = branch_point
-    dag = supernodes_to_dag(supers)
-    matches = [s for s in supers if s.task_id == task_id and s.branch_seq == seq]
-    if len(matches) != 1:
-        raise DAGError(
-            f"branch point (task_id={task_id!r}, seq={seq}) matched {len(matches)} "
-            f"nodes; expected exactly 1"
-        )
-    branch_super = matches[0]
-    ancestor_ids = dag.ancestors(branch_super.node_id) | {branch_super.node_id}
-    prefix_supers = sorted(
-        (s for s in supers if s.node_id in ancestor_ids),
-        key=lambda s: s.completion_index,
-    )
-    return ReplayPrefix(
-        replay_messages=message_timeline(prefix_supers),
-        task_id=task_id,
-        seq=seq,
-        source_issue_id=branch_super.issue_id,
-        branch_env_snapshot_id=branch_super.branch_env_snapshot_id,
-    )
-
-
 __all__ = [
-    "ReplayPrefix",
     "dag_to_supernodes",
-    "replay_prefix_for",
     "supernodes_to_dag",
 ]

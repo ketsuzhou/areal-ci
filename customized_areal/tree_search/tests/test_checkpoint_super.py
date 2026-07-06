@@ -2,7 +2,7 @@
 
 Verifies that TreeCheckpointManager persists and restores a SuperNode
 losslessly -- DAG topology (edges, closing event), team env snapshot, reward
-bookkeeping, and branch provenance -- not just identity + nodes. Torch-free
+bookkeeping, and the branch frontier ``env_id`` -- not just identity + nodes. Torch-free
 (Node is torch-lazy; serialization reads plain list/scalar fields only).
 """
 
@@ -42,9 +42,7 @@ def test_super_node_checkpoint_round_trip_is_lossless(tmp_path, monkeypatch):
         completion_time=12.5,
         incoming_edges=(("sup-0", EdgeType.COMPLETION),),
         outgoing_edges=(("sup-2", EdgeType.DELEGATION),),
-        branch_seq=3,
-        branch_issue_id="iss-branch",
-        branch_env_snapshot_id="snap-9",
+        env_id="env-9",
         value=0.7,
         process_reward=0.25,
         outcome_reward=1.0,
@@ -70,9 +68,7 @@ def test_super_node_checkpoint_round_trip_is_lossless(tmp_path, monkeypatch):
     assert r.completion_time == 12.5
     assert r.incoming_edges == (("sup-0", EdgeType.COMPLETION),)
     assert r.outgoing_edges == (("sup-2", EdgeType.DELEGATION),)
-    assert r.branch_seq == 3
-    assert r.branch_issue_id == "iss-branch"
-    assert r.branch_env_snapshot_id == "snap-9"
+    assert r.env_id == "env-9"
     assert r.value == 0.7
     assert r.process_reward == 0.25
     assert r.outcome_reward == 1.0

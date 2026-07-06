@@ -15,8 +15,6 @@ def test_agents_package_exports_supernode_api() -> None:
         "message_timeline",
         "dag_to_supernodes",
         "supernodes_to_dag",
-        "replay_prefix_for",
-        "ReplayPrefix",
         "SuperNodeAssembler",
         "SegmentSpec",
         "EdgeSpec",

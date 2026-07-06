@@ -65,11 +65,9 @@ class SuperNode:
     # run, shared across all SuperNodes of that run. None until bound.
     session_id: str | None = None
 
-    # Branch boundary + fork provenance (filled when this node becomes a branch
-    # source; Phase 3).
-    branch_seq: int | None = None
-    branch_issue_id: str | None = None
-    branch_env_snapshot_id: str | None = None
+    # Branch frontier: the backend env_id captured on this segment's terminal
+    # turn. A branch is created via ``env_dispatch(mode="branch", env_id=...)``.
+    env_id: str | None = None
 
     # Reward bookkeeping (set by the verifier / backup). Plain floats so the
     # DAG stays torch-free; the training Node carries tensors.
@@ -131,9 +129,7 @@ class SuperNode:
             "completion_time": self.completion_time,
             "incoming_edges": [[s, t.value] for s, t in self.incoming_edges],
             "outgoing_edges": [[d, t.value] for d, t in self.outgoing_edges],
-            "branch_seq": self.branch_seq,
-            "branch_issue_id": self.branch_issue_id,
-            "branch_env_snapshot_id": self.branch_env_snapshot_id,
+            "env_id": self.env_id,
             "value": self.value,
             "process_reward": self.process_reward,
             "outcome_reward": self.outcome_reward,
@@ -160,9 +156,7 @@ class SuperNode:
                 completion_time=d.get("completion_time"),
                 incoming_edges=cls._coerce_edges(d.get("incoming_edges", ())),
                 outgoing_edges=cls._coerce_edges(d.get("outgoing_edges", ())),
-                branch_seq=d.get("branch_seq"),
-                branch_issue_id=d.get("branch_issue_id"),
-                branch_env_snapshot_id=d.get("branch_env_snapshot_id"),
+                env_id=d.get("env_id"),
                 value=d.get("value"),
                 process_reward=d.get("process_reward", 0.0),
                 outcome_reward=d.get("outcome_reward", 0.0),
@@ -318,8 +312,8 @@ class ExecutionDAG:
         """Serialize to ``(runs, edges)`` records for a checkpoint round-trip.
 
         The inverse of :meth:`from_records` with explicit edges. Every
-        ``SuperNode`` field (including ``session_id`` and the ``branch_*``
-        provenance) is emitted so the DAG can be reconstructed verbatim.
+        ``SuperNode`` field (including ``session_id`` and the ``env_id`` branch
+        frontier) is emitted so the DAG can be reconstructed verbatim.
         """
         from dataclasses import asdict
 

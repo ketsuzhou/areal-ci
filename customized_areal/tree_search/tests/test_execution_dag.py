@@ -211,13 +211,13 @@ def test_from_records_carries_optional_fields() -> None:
             "agent_id": "ag",
             "issue_id": "i1",
             "task_id": "t1",
-            "branch_seq": 7,
+            "env_id": "env-7",
             "outcome_reward": 1.0,
         },
     ]
     dag = ExecutionDAG.from_records(runs)
     node = dag.get("A")
-    assert node.branch_seq == 7
+    assert node.env_id == "env-7"
     assert node.outcome_reward == 1.0
 
 

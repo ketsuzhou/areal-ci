@@ -20,9 +20,7 @@ from customized_areal.tree_search.agents.critic_observation import (
     build_critic_observations,
 )
 from customized_areal.tree_search.agents.event_codec import (
-    ReplayPrefix,
     dag_to_supernodes,
-    replay_prefix_for,
     supernodes_to_dag,
 )
 from customized_areal.tree_search.agents.event_model import message_timeline
@@ -228,43 +226,24 @@ def test_supernode_dict_round_trip_identity() -> None:
     assert sorted(dag_a.event_ids()) == sorted(dag_b.event_ids())
 
 
-def _build_dag_with_branch() -> ExecutionDAG:
+def test_supernode_env_id_round_trips_through_codec_and_dict() -> None:
     dag = _build_dag()
-    c1 = dag.get("C1")
-    c1.branch_seq = 7
-    c1.branch_env_snapshot_id = "snap-C1"
-    return dag
-
-
-def test_replay_prefix_for_returns_ancestor_slice() -> None:
-    dag = _build_dag_with_branch()
+    dag.get("C1").env_id = "env-C1"
     events = dag_to_supernodes(dag, ordering=ORDER)
-    prefix = replay_prefix_for(events, branch_point=("task-C1", 7))
-    assert isinstance(prefix, ReplayPrefix)
-    assert prefix.task_id == "task-C1"
-    assert prefix.seq == 7
-    assert prefix.source_issue_id == "iss-C1"
-    assert prefix.branch_env_snapshot_id == "snap-C1"
-    contents = [m["content"] for m in prefix.replay_messages]
-    assert contents == ["O0-out", "R0-out", "C0-out", "T0-out", "C1-out"]
-
-
-def test_replay_prefix_for_unknown_branch_point_raises() -> None:
-    dag = _build_dag_with_branch()
-    events = dag_to_supernodes(dag, ordering=ORDER)
-    with pytest.raises(DAGError):
-        replay_prefix_for(events, branch_point=("task-C1", 999))
-
-
-def test_replay_prefix_for_ambiguous_branch_point_raises() -> None:
-    dag = _build_dag_with_branch()
-    dag.get("C0").task_id = "task-dup"
-    dag.get("C0").branch_seq = 42
-    dag.get("T0").task_id = "task-dup"
-    dag.get("T0").branch_seq = 42
-    events = dag_to_supernodes(dag, ordering=ORDER)
-    with pytest.raises(DAGError):
-        replay_prefix_for(events, branch_point=("task-dup", 42))
+    by_id = {e.node_id: e for e in events}
+    assert by_id["C1"].env_id == "env-C1"
+    assert by_id["O0"].env_id is None
+    # SuperNode dict round-trip preserves env_id.
+    redecoded = {e.node_id: SuperNode.from_dict(e.to_dict()) for e in events}
+    assert redecoded["C1"].env_id == "env-C1"
+    assert redecoded["O0"].env_id is None
+    assert "branch_seq" not in by_id["C1"].to_dict()
+    assert "branch_issue_id" not in by_id["C1"].to_dict()
+    assert "branch_env_snapshot_id" not in by_id["C1"].to_dict()
+    # supernodes_to_dag preserves env_id.
+    rebuilt = supernodes_to_dag(events)
+    assert rebuilt.get("C1").env_id == "env-C1"
+    assert rebuilt.get("O0").env_id is None
 
 
 def _old_events_from_nodes(ordered_nodes):
@@ -330,8 +309,6 @@ def test_public_exports_available_from_package() -> None:
         "message_timeline",
         "dag_to_supernodes",
         "supernodes_to_dag",
-        "replay_prefix_for",
-        "ReplayPrefix",
     ):
         assert name in d.__all__, f"{name} missing from __all__"
         assert hasattr(d, name), f"{name} not importable from package"

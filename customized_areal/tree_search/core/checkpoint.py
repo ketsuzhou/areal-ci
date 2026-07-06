@@ -213,9 +213,7 @@ class TreeCheckpointManager:
             "task_id": node.task_id,
             "entropy_stats": node.entropy_stats,
             "need_branch": node.need_branch,
-            "branch_sandbox_id": node.branch_sandbox_id,
-            "branch_issue_id": node.branch_issue_id,
-            "branch_env_snapshot_id": node.branch_env_snapshot_id,
+            "env_id": node.env_id,
         }
         if node.topk_ids is not None:
             data["topk_ids"] = node.topk_ids
@@ -247,9 +245,7 @@ class TreeCheckpointManager:
             task_id=data.get("task_id", ""),
             entropy_stats=data.get("entropy_stats"),
             need_branch=bool(data.get("need_branch", False)),
-            branch_sandbox_id=data.get("branch_sandbox_id"),
-            branch_issue_id=data.get("branch_issue_id"),
-            branch_env_snapshot_id=data.get("branch_env_snapshot_id"),
+            env_id=data.get("env_id"),
             topk_ids=data.get("topk_ids"),
             topk_logp=data.get("topk_logp"),
             teacher_logp=data.get("teacher_logp"),

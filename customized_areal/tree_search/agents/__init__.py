@@ -19,13 +19,6 @@ from customized_areal.tree_search.agents.agentic_verifier import (
     build_verifier_prompt,
     parse_verifier_output,
 )
-from customized_areal.tree_search.agents.branch_selection import (
-    BranchPoint,
-    lane_successor_value,
-    passes_gate,
-    select_branch_points,
-    td_error,
-)
 from customized_areal.tree_search.agents.critic_observation import (
     DEFAULT_CRITIC_FIELDS,
     CriticObservation,
@@ -48,9 +41,7 @@ from customized_areal.tree_search.agents.environment import (
     SnapshotResult,
 )
 from customized_areal.tree_search.agents.event_codec import (
-    ReplayPrefix,
     dag_to_supernodes,
-    replay_prefix_for,
     supernodes_to_dag,
 )
 from customized_areal.tree_search.agents.event_model import (
@@ -145,8 +136,6 @@ __all__ = [
     "message_timeline",
     "dag_to_supernodes",
     "supernodes_to_dag",
-    "replay_prefix_for",
-    "ReplayPrefix",
     # supernode assembler (Phase 1a -- Multica segment specs -> SuperNodes)
     "SuperNodeAssembler",
     "SegmentSpec",
@@ -158,12 +147,6 @@ __all__ = [
     "NodeGAEResult",
     "compute_global_gae",
     "events_from_nodes",
-    # branch selection (branch-point selection policy over the SuperNode sequence)
-    "BranchPoint",
-    "lane_successor_value",
-    "passes_gate",
-    "select_branch_points",
-    "td_error",
     # dag advantage assembler (Phase 3 -- GAE replaces GRPO for DAG runs)
     "AssembledAdvantages",
     "assemble_node_advantages",
