@@ -28,9 +28,15 @@ def test_swe_lego_issue_carries_test_lists():
 def test_swe_lego_setup_holds_rollout_group():
     setup = SweLegoSetup(
         rollouts=[
-            SweLegoRollout(env_id="e1", project_id="p1", issue_id="i1", agent_run_id="r1"),
-            SweLegoRollout(env_id="e2", project_id="p2", issue_id="i2", agent_run_id="r2"),
-            SweLegoRollout(env_id="e3", project_id="p3", issue_id="i3", agent_run_id="r3"),
+            SweLegoRollout(
+                env_id="e1", project_id="p1", issue_id="i1", agent_run_id="r1"
+            ),
+            SweLegoRollout(
+                env_id="e2", project_id="p2", issue_id="i2", agent_run_id="r2"
+            ),
+            SweLegoRollout(
+                env_id="e3", project_id="p3", issue_id="i3", agent_run_id="r3"
+            ),
         ]
     )
     assert len(setup.rollouts) == 3

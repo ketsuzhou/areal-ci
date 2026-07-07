@@ -27,7 +27,9 @@ from customized_areal.tree_search.agents.harvest import (
 
 
 class _FakeLauncher:
-    def __init__(self, *, output: str | None = None, raise_exc: Exception | None = None):
+    def __init__(
+        self, *, output: str | None = None, raise_exc: Exception | None = None
+    ):
         self._output = output
         self._raise = raise_exc
 
@@ -120,7 +122,9 @@ async def test_finalize_error_path_writes_neutral_then_exports() -> None:
     launcher = _FakeLauncher(raise_exc=RuntimeError("boom"))
     bridge = _RecordingBridge()
     finalizer = VerifierFinalizer(
-        verifier=AgenticVerifier(launcher=launcher, judge_model="j", neutral_reward=0.0),
+        verifier=AgenticVerifier(
+            launcher=launcher, judge_model="j", neutral_reward=0.0
+        ),
         reward_writer=bridge,
         harvester=bridge,
     )

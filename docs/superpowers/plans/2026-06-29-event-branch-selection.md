@@ -1,35 +1,63 @@
 # Event Branch-Point Selection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a torch-free branch-point selection policy over the canonical `Event` sequence that ports the existing TD-error-gate + max-entropy criterion and emits one `(task_id, seq)` branch point per task lane.
+**Goal:** Add a torch-free branch-point selection policy over the canonical `Event`
+sequence that ports the existing TD-error-gate + max-entropy criterion and emits one
+`(task_id, seq)` branch point per task lane.
 
-**Architecture:** A new pure module `agents/branch_selection.py` composed of three small helpers (`lane_successor_value`, `td_error`, `passes_gate`) plus an orchestrator `select_branch_points`. It reconstructs/validates the DAG once via `events_to_dag` (single source of validation), groups eligible Events by `task_id`, applies the ported gate, and returns the highest-entropy survivor per lane as a `BranchPoint`. It coexists with the legacy `Node`-based `select_branch_candidate` (left untouched); live-workflow wiring is an out-of-scope follow-up.
+**Architecture:** A new pure module `agents/branch_selection.py` composed of three small
+helpers (`lane_successor_value`, `td_error`, `passes_gate`) plus an orchestrator
+`select_branch_points`. It reconstructs/validates the DAG once via `events_to_dag`
+(single source of validation), groups eligible Events by `task_id`, applies the ported
+gate, and returns the highest-entropy survivor per lane as a `BranchPoint`. It coexists
+with the legacy `Node`-based `select_branch_candidate` (left untouched); live-workflow
+wiring is an out-of-scope follow-up.
 
-**Tech Stack:** Python 3.12, dataclasses, torch-free. Tests via `.venv-test/bin/python -m pytest`. Lint/format via project ruff at `/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff`.
+**Tech Stack:** Python 3.12, dataclasses, torch-free. Tests via
+`.venv-test/bin/python -m pytest`. Lint/format via project ruff at
+`/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff`.
 
 **Spec:** `docs/superpowers/specs/2026-06-29-event-branch-selection-design.md`
 
----
+______________________________________________________________________
 
 ## File Structure
 
-- **Create** `customized_areal/tree_search/agents/branch_selection.py` — the entire feature: `BranchPoint` dataclass, three pure helpers, `select_branch_points` orchestrator, `__all__`. One clear responsibility (branch-point selection over Events). Depends only on `event_model`, `event_codec`. Torch-free.
-- **Create** `customized_areal/tree_search/tests/test_branch_selection.py` — all tests (helper-level + orchestrator + lane/integration).
-- **Modify** `customized_areal/tree_search/agents/__init__.py` — export the new public symbols (must stay torch-free).
+- **Create** `customized_areal/tree_search/agents/branch_selection.py` — the entire
+  feature: `BranchPoint` dataclass, three pure helpers, `select_branch_points`
+  orchestrator, `__all__`. One clear responsibility (branch-point selection over
+  Events). Depends only on `event_model`, `event_codec`. Torch-free.
+- **Create** `customized_areal/tree_search/tests/test_branch_selection.py` — all tests
+  (helper-level + orchestrator + lane/integration).
+- **Modify** `customized_areal/tree_search/agents/__init__.py` — export the new public
+  symbols (must stay torch-free).
 
 ### Reference conventions (read before starting)
-- Imports use the full path: `from customized_areal.tree_search.agents.branch_selection import ...`.
-- `Event` fields (see `agents/event_model.py`): `node_id, agent_id, issue_id, task_id, completion_index, incoming_edges, outgoing_edges, branch_seq, value, process_reward, outcome_reward, messages, metadata`. Edges are tuples `(dst_node_id, EdgeType)`.
-- `EdgeType` (see `agents/execution_dag.py`): `DELEGATION`, `MENTION`, `COMPLETION` (a `StrEnum`). The selection logic ignores edge *type*; it only matches on the child's `task_id`.
-- `events_to_dag(events)` (see `agents/event_codec.py`) validates: dense `completion_index` `0..n-1`, unique `node_id`, **edge symmetry** (every `outgoing` `A->B` needs a matching `incoming` `A->B` of the same `EdgeType`), and topological order (`index(src) < index(dst)`). It raises `DAGError` on violation.
 
----
+- Imports use the full path:
+  `from customized_areal.tree_search.agents.branch_selection import ...`.
+- `Event` fields (see `agents/event_model.py`):
+  `node_id, agent_id, issue_id, task_id, completion_index, incoming_edges, outgoing_edges, branch_seq, value, process_reward, outcome_reward, messages, metadata`.
+  Edges are tuples `(dst_node_id, EdgeType)`.
+- `EdgeType` (see `agents/execution_dag.py`): `DELEGATION`, `MENTION`, `COMPLETION` (a
+  `StrEnum`). The selection logic ignores edge *type*; it only matches on the child's
+  `task_id`.
+- `events_to_dag(events)` (see `agents/event_codec.py`) validates: dense
+  `completion_index` `0..n-1`, unique `node_id`, **edge symmetry** (every `outgoing`
+  `A->B` needs a matching `incoming` `A->B` of the same `EdgeType`), and topological
+  order (`index(src) < index(dst)`). It raises `DAGError` on violation.
+
+______________________________________________________________________
 
 ## Task 1: BranchPoint dataclass + pure helpers
 
 **Files:**
+
 - Create: `customized_areal/tree_search/agents/branch_selection.py`
+
 - Test: `customized_areal/tree_search/tests/test_branch_selection.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -143,8 +171,10 @@ def test_branchpoint_is_frozen():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'customized_areal.tree_search.agents.branch_selection'`.
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
+Expected: FAIL —
+`ModuleNotFoundError: No module named 'customized_areal.tree_search.agents.branch_selection'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -244,10 +274,14 @@ __all__ = [
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
-Expected: PASS — but `select_branch_points` import will still fail at collection. To isolate, run only the implemented classes:
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
+Expected: PASS — but `select_branch_points` import will still fail at collection. To
+isolate, run only the implemented classes:
 `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q -k "LaneSuccessorValue or TdError or PassesGate or frozen"`
-Expected: these PASS. (The module-level `select_branch_points` import fails collection; Task 2 adds it. If collection blocks the run, temporarily import only the implemented names — but Task 2 follows immediately, so prefer to proceed.)
+Expected: these PASS. (The module-level `select_branch_points` import fails collection;
+Task 2 adds it. If collection blocks the run, temporarily import only the implemented
+names — but Task 2 follows immediately, so prefer to proceed.)
 
 - [ ] **Step 5: Commit**
 
@@ -256,12 +290,14 @@ git add customized_areal/tree_search/agents/branch_selection.py customized_areal
 git commit -m "feat: add Event branch-selection helpers (BranchPoint, gate, td_error)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: select_branch_points orchestrator (single lane, ported scenarios)
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/branch_selection.py`
+
 - Test: `customized_areal/tree_search/tests/test_branch_selection.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -362,12 +398,14 @@ class TestSelectSingleLane:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::TestSelectSingleLane -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::TestSelectSingleLane -q`
 Expected: FAIL — `ImportError: cannot import name 'select_branch_points'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `customized_areal/tree_search/agents/branch_selection.py`, add the lane-children builder and orchestrator above `__all__`, then update `__all__`:
+In `customized_areal/tree_search/agents/branch_selection.py`, add the lane-children
+builder and orchestrator above `__all__`, then update `__all__`:
 
 ```python
 def _lane_children(events: Sequence[Event]) -> dict[str, Event]:
@@ -459,7 +497,8 @@ __all__ = [
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
 Expected: PASS (all Task 1 + Task 2 tests).
 
 - [ ] **Step 5: Commit**
@@ -469,11 +508,12 @@ git add customized_areal/tree_search/agents/branch_selection.py customized_areal
 git commit -m "feat: add select_branch_points orchestrator (one per task_id lane)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: Multi-lane, determinism, integration round-trip, error propagation
 
 **Files:**
+
 - Test: `customized_areal/tree_search/tests/test_branch_selection.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -531,15 +571,22 @@ class TestMultiLaneAndIntegration:
 
 - [ ] **Step 2: Run test to verify it fails (then passes)**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::TestMultiLaneAndIntegration -q`
-Expected: These tests exercise already-implemented behavior, so they should PASS immediately. If any FAIL, fix the implementation in `branch_selection.py` (do not weaken the test) until green. In particular confirm:
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::TestMultiLaneAndIntegration -q`
+Expected: These tests exercise already-implemented behavior, so they should PASS
+immediately. If any FAIL, fix the implementation in `branch_selection.py` (do not weaken
+the test) until green. In particular confirm:
+
 - result list is sorted by `task_id`,
+
 - `replay_prefix_for` accepts the emitted `(task_id, seq)`,
+
 - `DAGError` is not swallowed.
 
 - [ ] **Step 3: Run full module test**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py -q`
 Expected: PASS (all classes).
 
 - [ ] **Step 4: Commit**
@@ -549,11 +596,12 @@ git add customized_areal/tree_search/tests/test_branch_selection.py
 git commit -m "test: multi-lane, determinism, replay round-trip, DAGError propagation"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: Export from package + lint + full agents suite
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -572,12 +620,14 @@ def test_public_symbols_exported_from_dag_package():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
 Expected: FAIL — `BranchPoint missing from agents.__all__`.
 
 - [ ] **Step 3: Add the exports**
 
-In `customized_areal/tree_search/agents/__init__.py`, add the import block (after the `gae` import block, keeping alphabetical-ish grouping consistent with the file):
+In `customized_areal/tree_search/agents/__init__.py`, add the import block (after the
+`gae` import block, keeping alphabetical-ish grouping consistent with the file):
 
 ```python
 from customized_areal.tree_search.agents.branch_selection import (
@@ -589,7 +639,8 @@ from customized_areal.tree_search.agents.branch_selection import (
 )
 ```
 
-And add to the `__all__` list (a new grouped section near the `gae` / `dag advantage` entries):
+And add to the `__all__` list (a new grouped section near the `gae` / `dag advantage`
+entries):
 
 ```python
     # branch selection (branch-point selection policy over the Event sequence)
@@ -602,7 +653,8 @@ And add to the `__all__` list (a new grouped section near the `gae` / `dag advan
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_branch_selection.py::test_public_symbols_exported_from_dag_package -q`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full agents test suite + lint/format**
@@ -613,7 +665,11 @@ RUFF=/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff
 $RUFF check customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/agents/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
 $RUFF format --check customized_areal/tree_search/agents/branch_selection.py customized_areal/tree_search/agents/__init__.py customized_areal/tree_search/tests/test_branch_selection.py
 ```
-Expected: all tests PASS; ruff reports no errors and "would reformat 0 files" (run `$RUFF format` without `--check` to apply if needed, then re-verify). Confirm `import customized_areal.tree_search.agents` still succeeds (proves the package stayed torch-free):
+
+Expected: all tests PASS; ruff reports no errors and "would reformat 0 files" (run
+`$RUFF format` without `--check` to apply if needed, then re-verify). Confirm
+`import customized_areal.tree_search.agents` still succeeds (proves the package stayed
+torch-free):
 `.venv-test/bin/python -c "import customized_areal.tree_search.agents as d; print('ok', 'select_branch_points' in d.__all__)"`
 Expected: `ok True`.
 
@@ -624,26 +680,46 @@ git add customized_areal/tree_search/agents/__init__.py customized_areal/tree_se
 git commit -m "feat: export branch-selection API from agents package"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review
 
 **1. Spec coverage:**
-- §4 placement (`agents/branch_selection.py`, torch-free, deps on event_model/codec) → Tasks 1–2.
-- §5 API (`BranchPoint` + 3 helpers + orchestrator, list output, default gamma=1.0/td_threshold=0.0) → Tasks 1–2.
-- §6 field mapping (eligibility `branch_seq is not None`; successor = in-lane DAG child; value = `Event.value`; entropy = `metadata['max_entropy']`) → Tasks 1–2 (`_lane_children`, `lane_successor_value`, `_entropy`).
-- §7 algorithm (validate via `events_to_dag`, group by task_id, gate, rank, tiebreak on completion_index, sort by task_id) → Task 2.
-- §8 error handling (empty → []; no eligible → []; all-dropped lane omitted; missing value bypass; missing entropy → 0.0; terminal uses outcome_reward; DAGError propagates; no config validation) → Tasks 2–3.
-- §9 testing (helper unit, ported orchestrator scenarios, multi-lane, replay round-trip, determinism, empty, malformed) → Tasks 1–3.
+
+- §4 placement (`agents/branch_selection.py`, torch-free, deps on event_model/codec) →
+  Tasks 1–2.
+- §5 API (`BranchPoint` + 3 helpers + orchestrator, list output, default
+  gamma=1.0/td_threshold=0.0) → Tasks 1–2.
+- §6 field mapping (eligibility `branch_seq is not None`; successor = in-lane DAG child;
+  value = `Event.value`; entropy = `metadata['max_entropy']`) → Tasks 1–2
+  (`_lane_children`, `lane_successor_value`, `_entropy`).
+- §7 algorithm (validate via `events_to_dag`, group by task_id, gate, rank, tiebreak on
+  completion_index, sort by task_id) → Task 2.
+- §8 error handling (empty → \[\]; no eligible → \[\]; all-dropped lane omitted; missing
+  value bypass; missing entropy → 0.0; terminal uses outcome_reward; DAGError
+  propagates; no config validation) → Tasks 2–3.
+- §9 testing (helper unit, ported orchestrator scenarios, multi-lane, replay round-trip,
+  determinism, empty, malformed) → Tasks 1–3.
 - §10 follow-up (workflow wiring) → explicitly out of scope; not a task. Correct.
 
-**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to Task N". All code shown in full.
+**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to Task N". All code
+shown in full.
 
-**3. Type consistency:** `BranchPoint(task_id, seq, node_id, td_error, entropy)` identical in spec, dataclass, and all test constructions. `select_branch_points(events, *, td_threshold=0.0, gamma=1.0)`, `lane_successor_value(event, lane_children)`, `td_error(event, r_t, v_next, *, gamma)`, `passes_gate(delta, *, td_threshold)` consistent across all tasks. `events_to_dag` / `replay_prefix_for` / `DAGError` / `EdgeType` / `Event` names match the codebase.
+**3. Type consistency:** `BranchPoint(task_id, seq, node_id, td_error, entropy)`
+identical in spec, dataclass, and all test constructions.
+`select_branch_points(events, *, td_threshold=0.0, gamma=1.0)`,
+`lane_successor_value(event, lane_children)`, `td_error(event, r_t, v_next, *, gamma)`,
+`passes_gate(delta, *, td_threshold)` consistent across all tasks. `events_to_dag` /
+`replay_prefix_for` / `DAGError` / `EdgeType` / `Event` names match the codebase.
 
-Note for the implementer: in `TestSelectSingleLane.test_highest_entropy_among_survivors`, only `n2` survives the threshold-0.5 gate (n1's delta is 0); the assertion (`out[0].node_id == "n2"`) is correct as written — the inline comments explain why. If you want a true two-survivor entropy comparison, see `test_two_lanes_emit_two_branch_points` and the entropy-tie test instead.
+Note for the implementer: in
+`TestSelectSingleLane.test_highest_entropy_among_survivors`, only `n2` survives the
+threshold-0.5 gate (n1's delta is 0); the assertion (`out[0].node_id == "n2"`) is
+correct as written — the inline comments explain why. If you want a true two-survivor
+entropy comparison, see `test_two_lanes_emit_two_branch_points` and the entropy-tie test
+instead.
 
----
+______________________________________________________________________
 
 ## Execution Handoff
 

@@ -92,65 +92,65 @@ flowchart TD
 
 Dataclasses controlling tree backup, caching, and advantage computation.
 
-| Class                | Field                     | Type            | Default                   | Description                                               |
-| -------------------- | ------------------------- | --------------- | ------------------------- | --------------------------------------------------------- |
-| `Config`             | `mode`                    | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates                   |
-|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable tree backup                                |
-|                      | `checkpoint_dir`          | `str`           | `""`                      | Directory for MCTS tree checkpoints                       |
-|                      | `advantage_mode`          | `AdvantageMode` | `TREE`                    | TREE (Q-values), GAE, or HYBRID_GAE (LOO-MC blend)        |
-|                      | `hybrid_mc_min_visits`    | `int`           | `5`                       | Min node visit count for LOO-MC substitution (HYBRID_GAE) |
-|                      | `hybrid_critic_var_floor` | `float`         | `1e-3`                    | Floor on critic categorical variance in the blend         |
-|                      | `branch_td_threshold`     | `float`         | `0.0`                     | Min \|TD-error\| for branch candidate eligibility (0 = entropy-only) |
-|                      | `enable_generative_critic` | `bool`         | `False`                   | Enable shared-model generative critic (forces GAE/HYBRID_GAE) |
-|                      | `critic_avg_success_rate` | `float`         | `0.29`                    | Avg dataset success rate embedded in the critic prompt    |
-|                      | `critic_gamma`            | `float`         | `1.0`                     | GAE discount                                               |
-|                      | `critic_lambda`           | `float`         | `0.95`                    | GAE lambda                                                 |
-|                      | `critic_score_max`        | `int`           | `10`                      | Max integer score label (`0..score_max`)                   |
-|                      | `critic_target_scale`     | `float`         | `1.0`                     | Divisor applied to `q_value` before clamping to `[0, 1]`   |
-|                      | `critic_max_new_tokens`   | `int`           | `1024`                    | Max tokens for critic generation                           |
-|                      | `critic_temperature`      | `float`         | `0.0`                     | Critic generation temperature                              |
-|                      | `critic_loss_weight`      | `float`         | `1.0`                     | Weight of the critic regression term in the combined loss  |
-|                      | `critic_mc_weight`        | `float`         | `1.0`                     | TD/MC blend weight `w` (1 = pure MCTS, 0 = pure n-step TD) |
-|                      | `critic_td_n_steps`       | `int`           | `1`                       | TD horizon for the bootstrap component                     |
-|                      | `critic_mc_adaptive`      | `bool`          | `False`                   | Per-node adaptive `w` from visit counts + critic error EMA |
-|                      | `critic_mc_c`             | `float`         | `4.0`                     | Adaptive controller scale `c`                              |
-|                      | `enable_judge_process_reward` | `bool`      | `False`                   | Enable LLM-judge step-level process rewards                |
-|                      | `judge_process_reward_beta` | `float`       | `0.2`                     | Convex shaping weight `β` (0 = sparse terminal only)       |
-|                      | `judge_model_name`        | `str`           | `""`                      | Judge model name (falls back to diagnose model)            |
-|                      | `judge_max_concurrency`   | `int`           | `4`                       | Max concurrent judge requests per query                    |
-|                      | `loss_mode`               | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                                    |
-|                      | `max_reasoning_tokens`    | `int`           | `1000`                    | Max tokens for reasoning                                  |
-|                      | `rl_loss_weight`          | `float`         | `1.0`                     | Weight for RL loss in BOTH mode                           |
-|                      | `distill_loss_weight`     | `float`         | `0.005`                   | Weight for distillation loss                              |
-|                      | `reward_bias`             | `float`         | `0.0`                     | Bias added to outcome rewards                             |
-|                      | `reward_scaling`          | `float`         | `1.0`                     | Scaling factor for outcome rewards                        |
-|                      | `reward_clip`             | `float`         | `20.0`                    | Reward clipping threshold                                 |
-|                      | `overlong_reward_penalty` | `bool`          | `False`                   | Apply penalty for overlong episodes                       |
-|                      | `overlong_tokens`         | `int \| None`   | `None`                    | Token threshold for overlong penalty                      |
-|                      | `overlong_penalty_factor` | `float \| None` | `None`                    | Penalty factor for overlong episodes                      |
-|                      | `topk_distill`            | `bool`          | `False`                   | Use top-k distillation                                    |
-|                      | `teacher_provider`        | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`)        |
-|                      | `teacher_base_url`        | `str`           | `"http://localhost:8001"` | Teacher API endpoint                                      |
-|                      | `teacher_backend`         | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)           |
-|                      | `teacher_model_name`      | `str`           | `""`                      | Teacher model identifier                                  |
-|                      | `teacher_api_key`         | `str`           | `""`                      | API key for teacher endpoint                              |
-|                      | `teacher_top_k`           | `int`           | `10`                      | Top-k tokens from teacher                                 |
-|                      | `teacher_max_retries`     | `int`           | `3`                       | Max retries for teacher requests                          |
-|                      | `teacher_timeout`         | `float`         | `300.0`                   | Timeout for teacher requests                              |
-|                      | `teacher_missing_logprob` | `float`         | `-23.0`                   | Default logprob for missing teacher tokens                |
-|                      | `diagnose_model_name`     | `str`           | `""`                      | Model name for episode diagnosis                          |
-|                      | `diagnose_max_tokens`     | `int`           | `1024`                    | Max tokens for diagnosis responses                        |
-|                      | `diagnose_temperature`    | `float`         | `0.0`                     | Temperature for diagnosis sampling                        |
-|                      | `diagnose_base_url`       | `str`           | `""`                      | Base URL for diagnosis API                                |
-|                      | `diagnose_api_key`        | `str`           | `""`                      | API key for diagnosis endpoint                            |
-|                      | `strict_distill_json`     | `bool`          | `True`                    | Enforce strict JSON parsing in distillation               |
-|                      | `sample_source`           | `SampleSource`  | `SCRATCH`                 | Episode sampling strategy                                 |
-|                      | `branch_probability`      | `float`         | `0.5`                     | Probability of branch when MIXED                          |
-|                      | `use_fresh_query`         | `bool`          | `False`                   | Enable database-backed query loading                      |
-|                      | `fresh_query_table`       | `str`           | `""`                      | DB table name (or `FRESH_QUERY_TABLE` env var)            |
-| `RolloutCacheConfig` | `cache_dir`               | `str`           | `""`                      | Directory for rollout cache                               |
-|                      | `enabled`                 | `bool`          | `True`                    | Enable/disable caching                                    |
-|                      | `n_samples`               | `int`           | `1`                       | Number of rollout samples per prompt                      |
+| Class                | Field                         | Type            | Default                   | Description                                                          |
+| -------------------- | ----------------------------- | --------------- | ------------------------- | -------------------------------------------------------------------- |
+| `Config`             | `mode`                        | `CacheMode`     | `OFF`                     | Controls when/how tree backup activates                              |
+|                      | `enabled`                     | `bool`          | `True`                    | Enable/disable tree backup                                           |
+|                      | `checkpoint_dir`              | `str`           | `""`                      | Directory for MCTS tree checkpoints                                  |
+|                      | `advantage_mode`              | `AdvantageMode` | `TREE`                    | TREE (Q-values), GAE, or HYBRID_GAE (LOO-MC blend)                   |
+|                      | `hybrid_mc_min_visits`        | `int`           | `5`                       | Min node visit count for LOO-MC substitution (HYBRID_GAE)            |
+|                      | `hybrid_critic_var_floor`     | `float`         | `1e-3`                    | Floor on critic categorical variance in the blend                    |
+|                      | `branch_td_threshold`         | `float`         | `0.0`                     | Min \|TD-error\| for branch candidate eligibility (0 = entropy-only) |
+|                      | `enable_generative_critic`    | `bool`          | `False`                   | Enable shared-model generative critic (forces GAE/HYBRID_GAE)        |
+|                      | `critic_avg_success_rate`     | `float`         | `0.29`                    | Avg dataset success rate embedded in the critic prompt               |
+|                      | `critic_gamma`                | `float`         | `1.0`                     | GAE discount                                                         |
+|                      | `critic_lambda`               | `float`         | `0.95`                    | GAE lambda                                                           |
+|                      | `critic_score_max`            | `int`           | `10`                      | Max integer score label (`0..score_max`)                             |
+|                      | `critic_target_scale`         | `float`         | `1.0`                     | Divisor applied to `q_value` before clamping to `[0, 1]`             |
+|                      | `critic_max_new_tokens`       | `int`           | `1024`                    | Max tokens for critic generation                                     |
+|                      | `critic_temperature`          | `float`         | `0.0`                     | Critic generation temperature                                        |
+|                      | `critic_loss_weight`          | `float`         | `1.0`                     | Weight of the critic regression term in the combined loss            |
+|                      | `critic_mc_weight`            | `float`         | `1.0`                     | TD/MC blend weight `w` (1 = pure MCTS, 0 = pure n-step TD)           |
+|                      | `critic_td_n_steps`           | `int`           | `1`                       | TD horizon for the bootstrap component                               |
+|                      | `critic_mc_adaptive`          | `bool`          | `False`                   | Per-node adaptive `w` from visit counts + critic error EMA           |
+|                      | `critic_mc_c`                 | `float`         | `4.0`                     | Adaptive controller scale `c`                                        |
+|                      | `enable_judge_process_reward` | `bool`          | `False`                   | Enable LLM-judge step-level process rewards                          |
+|                      | `judge_process_reward_beta`   | `float`         | `0.2`                     | Convex shaping weight `β` (0 = sparse terminal only)                 |
+|                      | `judge_model_name`            | `str`           | `""`                      | Judge model name (falls back to diagnose model)                      |
+|                      | `judge_max_concurrency`       | `int`           | `4`                       | Max concurrent judge requests per query                              |
+|                      | `loss_mode`                   | `LossMode`      | `GRPO`                    | GRPO, DISTILL, or BOTH                                               |
+|                      | `max_reasoning_tokens`        | `int`           | `1000`                    | Max tokens for reasoning                                             |
+|                      | `rl_loss_weight`              | `float`         | `1.0`                     | Weight for RL loss in BOTH mode                                      |
+|                      | `distill_loss_weight`         | `float`         | `0.005`                   | Weight for distillation loss                                         |
+|                      | `reward_bias`                 | `float`         | `0.0`                     | Bias added to outcome rewards                                        |
+|                      | `reward_scaling`              | `float`         | `1.0`                     | Scaling factor for outcome rewards                                   |
+|                      | `reward_clip`                 | `float`         | `20.0`                    | Reward clipping threshold                                            |
+|                      | `overlong_reward_penalty`     | `bool`          | `False`                   | Apply penalty for overlong episodes                                  |
+|                      | `overlong_tokens`             | `int \| None`   | `None`                    | Token threshold for overlong penalty                                 |
+|                      | `overlong_penalty_factor`     | `float \| None` | `None`                    | Penalty factor for overlong episodes                                 |
+|                      | `topk_distill`                | `bool`          | `False`                   | Use top-k distillation                                               |
+|                      | `teacher_provider`            | `str`           | `"external"`              | Teacher provider type (`"external"` or `"engine"`)                   |
+|                      | `teacher_base_url`            | `str`           | `"http://localhost:8001"` | Teacher API endpoint                                                 |
+|                      | `teacher_backend`             | `str`           | `"openai"`                | Teacher backend type (`"openai"` or `"sglang"`)                      |
+|                      | `teacher_model_name`          | `str`           | `""`                      | Teacher model identifier                                             |
+|                      | `teacher_api_key`             | `str`           | `""`                      | API key for teacher endpoint                                         |
+|                      | `teacher_top_k`               | `int`           | `10`                      | Top-k tokens from teacher                                            |
+|                      | `teacher_max_retries`         | `int`           | `3`                       | Max retries for teacher requests                                     |
+|                      | `teacher_timeout`             | `float`         | `300.0`                   | Timeout for teacher requests                                         |
+|                      | `teacher_missing_logprob`     | `float`         | `-23.0`                   | Default logprob for missing teacher tokens                           |
+|                      | `diagnose_model_name`         | `str`           | `""`                      | Model name for episode diagnosis                                     |
+|                      | `diagnose_max_tokens`         | `int`           | `1024`                    | Max tokens for diagnosis responses                                   |
+|                      | `diagnose_temperature`        | `float`         | `0.0`                     | Temperature for diagnosis sampling                                   |
+|                      | `diagnose_base_url`           | `str`           | `""`                      | Base URL for diagnosis API                                           |
+|                      | `diagnose_api_key`            | `str`           | `""`                      | API key for diagnosis endpoint                                       |
+|                      | `strict_distill_json`         | `bool`          | `True`                    | Enforce strict JSON parsing in distillation                          |
+|                      | `sample_source`               | `SampleSource`  | `SCRATCH`                 | Episode sampling strategy                                            |
+|                      | `branch_probability`          | `float`         | `0.5`                     | Probability of branch when MIXED                                     |
+|                      | `use_fresh_query`             | `bool`          | `False`                   | Enable database-backed query loading                                 |
+|                      | `fresh_query_table`           | `str`           | `""`                      | DB table name (or `FRESH_QUERY_TABLE` env var)                       |
+| `RolloutCacheConfig` | `cache_dir`                   | `str`           | `""`                      | Directory for rollout cache                                          |
+|                      | `enabled`                     | `bool`          | `True`                    | Enable/disable caching                                               |
+|                      | `n_samples`                   | `int`           | `1`                       | Number of rollout samples per prompt                                 |
 
 **`CacheMode`** values:
 
@@ -182,10 +182,10 @@ Dataclasses controlling tree backup, caching, and advantage computation.
 ### 2. MCTS Tree Store (`core/tree_store.py`)
 
 The central data structure. Stores per-query `SuperNode` records, indexes the `Node`
-objects inside each `SuperNode`, tracks MCTS statistics at the `Node` level, and provides
-cached trajectory loading. The single-agent workflow wraps each episode's `list[Node]` in
-a leaf `SuperNode`; multi-agent DAG runs can insert real communication-bounded
-`SuperNode` segments assembled from Multica output.
+objects inside each `SuperNode`, tracks MCTS statistics at the `Node` level, and
+provides cached trajectory loading. The single-agent workflow wraps each episode's
+`list[Node]` in a leaf `SuperNode`; multi-agent DAG runs can insert real
+communication-bounded `SuperNode` segments assembled from Multica output.
 
 #### Node Dataclass
 
@@ -193,37 +193,37 @@ A `Node` represents one assistant response turn with its full conversation conte
 tokens from the beginning through this turn's response). Nodes are linked via `node_id`
 / `parent_node_id` and grouped into episodes via `episode_id`.
 
-| Field               | Type                        | Description                                          |
-| ------------------- | --------------------------- | ---------------------------------------------------- |
-| `input_ids`         | `list[int]`                 | Full token sequence (prompt + response)              |
-| `loss_mask`         | `list[int]`                 | 0=prompt tokens, 1=response tokens                   |
-| `logprobs`          | `list[float]`               | Per-token log probabilities                          |
-| `versions`          | `list[int]`                 | Policy version per token (-1 on prompt)              |
-| `node_id`           | `str`                       | Globally unique interaction ID (UUID)                |
-| `parent_node_id`    | `str \| None`               | Primary causal parent interaction ID (None for root) |
-| `extra_parent_node_ids` | `list[str] \| None`     | Extra causal parents at DAG fan-in joins             |
-| `episode_id`        | `str`                       | Groups turns into a trajectory path                  |
-| `turn_idx`          | `int`                       | 1-based turn position within episode                 |
-| `query_id`          | `str`                       | Dataset query identifier                             |
-| `train_id`          | `str`                       | Training run that trained this node ("" = untrained) |
-| `discarded`         | `bool`                      | Excluded from cache reuse without marking as trained |
-| `task_id`           | `str`                       | TPFC backend task that produced this node            |
-| `entropy_stats`     | `dict \| None`              | Entropy statistics from TPFC assistant metadata      |
-| `need_branch`       | `bool`                      | Whether this node is a candidate for branch sampling |
-| `branch_sandbox_id` | `str \| None`               | Sandbox ID for legacy branch task creation           |
-| `branch_issue_id`   | `str \| None`               | Forked Multica issue ID for cloud branch cleanup     |
-| `branch_env_snapshot_id` | `str \| None`         | Cloud environment snapshot marker for branch candidates |
-| `outcome_reward`    | `float`                     | Trajectory-level reward                              |
-| `credit`            | `float \| None`             | Optional per-node DAG credit from reward backup      |
-| `value`             | `float`                     | Generative-critic state value `v_phi(s_t)` (0.0 if disabled) |
-| `value_variance`    | `float`                     | Critic categorical variance `var_theta(s_t)` (0.0 if one-hot/disabled) |
-| `advantages`        | `torch.Tensor \| None`      | Tree-computed per-token advantages                   |
-| `returns`           | `torch.Tensor \| None`      | Tree-computed per-token returns                      |
-| `topk_ids`          | `list[list[int]] \| None`   | Top-k candidate token IDs per response position      |
-| `topk_logp`         | `list[list[float]] \| None` | Top-k candidate log probabilities                    |
-| `distill_reward`    | `list[list[float]] \| None` | Per-position distillation rewards                    |
-| `teacher_logp`      | `list[list[float]] \| None` | Teacher log probabilities per position               |
-| `guidance`          | `dict[int, str] \| None`    | Turn index → guidance text map (on leaf nodes)       |
+| Field                    | Type                        | Description                                                            |
+| ------------------------ | --------------------------- | ---------------------------------------------------------------------- |
+| `input_ids`              | `list[int]`                 | Full token sequence (prompt + response)                                |
+| `loss_mask`              | `list[int]`                 | 0=prompt tokens, 1=response tokens                                     |
+| `logprobs`               | `list[float]`               | Per-token log probabilities                                            |
+| `versions`               | `list[int]`                 | Policy version per token (-1 on prompt)                                |
+| `node_id`                | `str`                       | Globally unique interaction ID (UUID)                                  |
+| `parent_node_id`         | `str \| None`               | Primary causal parent interaction ID (None for root)                   |
+| `extra_parent_node_ids`  | `list[str] \| None`         | Extra causal parents at DAG fan-in joins                               |
+| `episode_id`             | `str`                       | Groups turns into a trajectory path                                    |
+| `turn_idx`               | `int`                       | 1-based turn position within episode                                   |
+| `query_id`               | `str`                       | Dataset query identifier                                               |
+| `train_id`               | `str`                       | Training run that trained this node ("" = untrained)                   |
+| `discarded`              | `bool`                      | Excluded from cache reuse without marking as trained                   |
+| `task_id`                | `str`                       | TPFC backend task that produced this node                              |
+| `entropy_stats`          | `dict \| None`              | Entropy statistics from TPFC assistant metadata                        |
+| `need_branch`            | `bool`                      | Whether this node is a candidate for branch sampling                   |
+| `branch_sandbox_id`      | `str \| None`               | Sandbox ID for legacy branch task creation                             |
+| `branch_issue_id`        | `str \| None`               | Forked Multica issue ID for cloud branch cleanup                       |
+| `branch_env_snapshot_id` | `str \| None`               | Cloud environment snapshot marker for branch candidates                |
+| `outcome_reward`         | `float`                     | Trajectory-level reward                                                |
+| `credit`                 | `float \| None`             | Optional per-node DAG credit from reward backup                        |
+| `value`                  | `float`                     | Generative-critic state value `v_phi(s_t)` (0.0 if disabled)           |
+| `value_variance`         | `float`                     | Critic categorical variance `var_theta(s_t)` (0.0 if one-hot/disabled) |
+| `advantages`             | `torch.Tensor \| None`      | Tree-computed per-token advantages                                     |
+| `returns`                | `torch.Tensor \| None`      | Tree-computed per-token returns                                        |
+| `topk_ids`               | `list[list[int]] \| None`   | Top-k candidate token IDs per response position                        |
+| `topk_logp`              | `list[list[float]] \| None` | Top-k candidate log probabilities                                      |
+| `distill_reward`         | `list[list[float]] \| None` | Per-position distillation rewards                                      |
+| `teacher_logp`           | `list[list[float]] \| None` | Teacher log probabilities per position                                 |
+| `guidance`               | `dict[int, str] \| None`    | Turn index → guidance text map (on leaf nodes)                         |
 
 **Turn boundaries** are derived from `loss_mask` transitions (0→1 = response start, 1→0
 = response end) via `_find_turn_boundaries()`, rather than using tokenizer-specific
@@ -231,31 +231,31 @@ assistant markers.
 
 #### Store Methods
 
-| Method                                          | Description                                                                |
-| ----------------------------------------------- | -------------------------------------------------------------------------- |
-| `insert_super_batch(supers, backup=True, query_id="")` | Insert `SuperNode` records, index nested Nodes, and optionally run backup |
-| `get_super_node(super_node_id)` / `get_node(node_id)` | Lookup indexed `SuperNode` or nested `Node` records                   |
-| `backup_episode_terminal(node_id, reward)`      | Public root-ward backup from a terminal node                               |
-| `backup_path_returns(node_id, returns_by_node_id)` | Root-ward backup with per-node return-to-go values                      |
-| `get_q_value(node_id)`                          | Raw Q-value (mean reward) for a trajectory                                 |
-| `get_visit_count(node_id)`                      | Number of episodes whose root-ward backup passed through this node         |
-| `get_total_value(node_id)` / `get_sum_sq_value(node_id)` | Sum / sum-of-squares of backed-up returns (numerator + variance feedstock) |
-| `get_loo_value_and_variance(node_id, excluded_reward)` | Leave-one-out MC mean, variance-of-the-mean, and LOO sample size |
-| `set_value` / `get_value` / `has_value`         | Store/retrieve generative-critic `v_phi(s_t)`                              |
-| `set_value_variance` / `get_value_variance`     | Store/retrieve critic categorical variance `var_theta(s_t)`                |
-| `add_judge_score` / `get_judge_scores` / `get_mean_judge_score` | Accumulate/query raw LLM-judge credit scores per node (None = unjudged) |
-| `set_trained(node_id)` / `is_trained(node_id)`  | Mark/check whether a single node has been trained                          |
-| `set_discarded(node_id)` / `is_discarded(node_id)` | Mark/check exclusion from cache reuse without marking as trained        |
-| `get_untrained_count(query_id)`                 | Count untrained nodes for a query                                          |
-| `get_untrained_episode_count(query_id)`         | Count untrained episodes for a query (used by workflow)                    |
-| `get_untrained_node_ids(query_id, n)`           | Get up to N untrained node IDs                                             |
-| `load_untrained_episodes(query_id, n_episodes)` | Load untrained Node objects grouped by episode (used by workflow)          |
-| `load_trajectories(query_id, n_samples)`        | Load untrained Node objects by sample count                                |
-| `reset_trained_flags()`                         | Reset all trained flags (for fresh training run)                           |
-| `mark_episodes_trained(episode_ids)`            | Mark trained by episode ID set (for recover checkpoint restore)            |
-| `clear()`                                       | Reset all state                                                            |
-| `set/get_normalized_advantage(node_id)`         | Store/retrieve GRPO-normalized advantage                                   |
-| `set/get_normalized_return(node_id)`            | Store/retrieve GRPO-normalized return                                      |
+| Method                                                          | Description                                                                |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `insert_super_batch(supers, backup=True, query_id="")`          | Insert `SuperNode` records, index nested Nodes, and optionally run backup  |
+| `get_super_node(super_node_id)` / `get_node(node_id)`           | Lookup indexed `SuperNode` or nested `Node` records                        |
+| `backup_episode_terminal(node_id, reward)`                      | Public root-ward backup from a terminal node                               |
+| `backup_path_returns(node_id, returns_by_node_id)`              | Root-ward backup with per-node return-to-go values                         |
+| `get_q_value(node_id)`                                          | Raw Q-value (mean reward) for a trajectory                                 |
+| `get_visit_count(node_id)`                                      | Number of episodes whose root-ward backup passed through this node         |
+| `get_total_value(node_id)` / `get_sum_sq_value(node_id)`        | Sum / sum-of-squares of backed-up returns (numerator + variance feedstock) |
+| `get_loo_value_and_variance(node_id, excluded_reward)`          | Leave-one-out MC mean, variance-of-the-mean, and LOO sample size           |
+| `set_value` / `get_value` / `has_value`                         | Store/retrieve generative-critic `v_phi(s_t)`                              |
+| `set_value_variance` / `get_value_variance`                     | Store/retrieve critic categorical variance `var_theta(s_t)`                |
+| `add_judge_score` / `get_judge_scores` / `get_mean_judge_score` | Accumulate/query raw LLM-judge credit scores per node (None = unjudged)    |
+| `set_trained(node_id)` / `is_trained(node_id)`                  | Mark/check whether a single node has been trained                          |
+| `set_discarded(node_id)` / `is_discarded(node_id)`              | Mark/check exclusion from cache reuse without marking as trained           |
+| `get_untrained_count(query_id)`                                 | Count untrained nodes for a query                                          |
+| `get_untrained_episode_count(query_id)`                         | Count untrained episodes for a query (used by workflow)                    |
+| `get_untrained_node_ids(query_id, n)`                           | Get up to N untrained node IDs                                             |
+| `load_untrained_episodes(query_id, n_episodes)`                 | Load untrained Node objects grouped by episode (used by workflow)          |
+| `load_trajectories(query_id, n_samples)`                        | Load untrained Node objects by sample count                                |
+| `reset_trained_flags()`                                         | Reset all trained flags (for fresh training run)                           |
+| `mark_episodes_trained(episode_ids)`                            | Mark trained by episode ID set (for recover checkpoint restore)            |
+| `clear()`                                                       | Reset all state                                                            |
+| `set/get_normalized_advantage(node_id)`                         | Store/retrieve GRPO-normalized advantage                                   |
+| `set/get_normalized_return(node_id)`                            | Store/retrieve GRPO-normalized return                                      |
 
 **MCTS backup** (`_backup_path` -> `_backup_node`): One root-ward walk per freshly
 inserted episode, starting at the terminal node and following `parent_node_id` plus
@@ -286,10 +286,10 @@ Replaces GAE with per-query GRPO-normalized MCTS Q-values. For each trajectory:
 1. Group nodes by `(query_id, episode_id)`; each episode contributes one reward (all
    nodes in an episode share the same `outcome_reward`).
 1. **Per-query GRPO normalization**: across episodes within each query group, normalize
-   rewards to zero-mean unit-variance (`(r - mean) / (std + eps)`). Single-episode
-   query groups get `0.0`.
-1. Broadcast the normalized return to every response position: `advantages = returns =
-   loss_mask.float() * norm_return`.
+   rewards to zero-mean unit-variance (`(r - mean) / (std + eps)`). Single-episode query
+   groups get `0.0`.
+1. Broadcast the normalized return to every response position:
+   `advantages = returns = loss_mask.float() * norm_return`.
 
 Does not consume critic values — purely outcome-reward-driven.
 
@@ -319,8 +319,8 @@ Requires `enable_generative_critic=True` (the config auto-switches `advantage_mo
 #### Theoretical Foundation: GAE as λ-Return for Advantage Estimation
 
 Generalized Advantage Estimation (GAE) is the λ-return method applied to estimating the
-advantage function. Following the n-step return idea used in the λ-return formulation, we
-can list N advantage estimators of increasing horizon:
+advantage function. Following the n-step return idea used in the λ-return formulation,
+we can list N advantage estimators of increasing horizon:
 
 ```
 A_t^{(1)} = -V_θ(S_t) + R_t + γ·V_θ(S_{t+1})                              = δ_t
@@ -341,18 +341,18 @@ A_t^{(N)} = -V_θ(S_t) + R_t + γ·R_{t+1} + ... + γ^N·R_{t+N}               =
 GAE's `A_t^{GAE(γ,λ)}` is the exponentially-weighted average of these n-step estimators,
 `A_t^{GAE} = (1−λ)·Σ_{n=1}^∞ λ^{n−1}·A_t^{(n)}`, which collapses to
 `(1−λ)·Σ_{k=0}^∞ (γλ)^k·δ_{t+k}` — the backward recursion implemented in
-`GAEAdvantageComputer` above. So GAE sits on a continuum between `A_t^{(1)}` (λ=0,
-pure TD) and `A_t^{(N)}` (λ=1, pure MC), interpolated by `λ`.
+`GAEAdvantageComputer` above. So GAE sits on a continuum between `A_t^{(1)}` (λ=0, pure
+TD) and `A_t^{(N)}` (λ=1, pure MC), interpolated by `λ`.
 
 ##### Replacing `V_θ(S_t)` with Monte-Carlo estimation when the critic is untrustworthy
 
 In `A_t^{(N)} = −V_θ(S_t) + Σ_{k=0}^{N} γ^k·R_{t+k}`, the learned critic enters only
 through the leading `−V_θ(S_t)` baseline (the `+γⁿ·V_θ(S_{t+n})` bootstrap vanishes once
 `n` reaches the horizon). When `V_θ` is not trustworthy — early in training before the
-critic has regressed, on states the critic has never seen, or whenever
-`var_theta(s_t)` is large — that `−V_θ(S_t)` term injects bias directly into every
-finite-horizon estimator `A_t^{(n)}` for `n < ∞`, and even the MC estimator `A_t^{(N)}`
-inherits the bias through the baseline.
+critic has regressed, on states the critic has never seen, or whenever `var_theta(s_t)`
+is large — that `−V_θ(S_t)` term injects bias directly into every finite-horizon
+estimator `A_t^{(n)}` for `n < ∞`, and even the MC estimator `A_t^{(N)}` inherits the
+bias through the baseline.
 
 The fix is to **replace `V_θ(S_t)` with a Monte-Carlo estimate of `V(s_t)`** built from
 empirical returns observed from `s_t`. In the tree-search setting, every episode that
@@ -395,11 +395,11 @@ So the N-step → MC substitution is not a single hard swap; it is a continuum g
 eligibility (`need_branch` + `visit_count >= hybrid_mc_min_visits`) and weighted by
 relative variance. Mapping the theory back to the three `AdvantageMode` values:
 
-| Mode        | N-step analogue                                     | `V_θ(S_t)` treatment                            |
-| ----------- | --------------------------------------------------- | ----------------------------------------------- |
-| `GAE`       | λ-weighted blend of `A_t^{(1..N)}`                 | raw critic `v_theta(s_t)` everywhere            |
-| `HYBRID_GAE`| same λ-weighted blend, with `V_mc` baseline on eligible nodes | inverse-variance `v_hat` on branched nodes, `v_theta` elsewhere |
-| `TREE`      | `A_t^{(N)}` extreme (pure MC, no bootstrap)        | `V_mc(s_t)` (MCTS Q-value) on every node        |
+| Mode         | N-step analogue                                               | `V_θ(S_t)` treatment                                            |
+| ------------ | ------------------------------------------------------------- | --------------------------------------------------------------- |
+| `GAE`        | λ-weighted blend of `A_t^{(1..N)}`                            | raw critic `v_theta(s_t)` everywhere                            |
+| `HYBRID_GAE` | same λ-weighted blend, with `V_mc` baseline on eligible nodes | inverse-variance `v_hat` on branched nodes, `v_theta` elsewhere |
+| `TREE`       | `A_t^{(N)}` extreme (pure MC, no bootstrap)                   | `V_mc(s_t)` (MCTS Q-value) on every node                        |
 
 With `advantage_mode=HYBRID_GAE` and eligible branched nodes, the recursion effectively
 runs `A_t` with `V_mc^{(-i)}` in place of `V_θ`; with `advantage_mode=TREE`, every node
@@ -439,11 +439,11 @@ var_mc    = loo_var / n'                        # variance of the LOO mean
 
 **Blend cases** (in code order):
 
-| Condition                             | Result                              |
-| ------------------------------------- | ----------------------------------- |
-| `n_loo < 2` or `var_mc < 0`           | keep `v_theta` (not enough samples) |
+| Condition                             | Result                               |
+| ------------------------------------- | ------------------------------------ |
+| `n_loo < 2` or `var_mc < 0`           | keep `v_theta` (not enough samples)  |
 | `var_mc == 0.0` (all remaining equal) | `v_hat = v_mc` (maximally confident) |
-| otherwise                             | inverse-variance blend (below)      |
+| otherwise                             | inverse-variance blend (below)       |
 
 ```
 var_theta = max(categorical_var(critic), hybrid_critic_var_floor)
@@ -460,16 +460,16 @@ with the hybrid values.
 > one-hot distribution with zero categorical variance, so `hybrid_critic_var_floor`
 > dominates `var_theta` and the blend collapses toward the MC value on eligible nodes.
 
-> **MC-value scale & estimand caveat.** The LOO MC value
-> (`get_loo_value_and_variance`) is the mean of backed-up `outcome_reward`, while the
-> critic value `v_theta` lives in `[0, 1]` (`i / score_max`). `_blended_value` mixes the
-> two **without** applying `critic_target_scale` or clamping.
+> **MC-value scale & estimand caveat.** The LOO MC value (`get_loo_value_and_variance`)
+> is the mean of backed-up `outcome_reward`, while the critic value `v_theta` lives in
+> `[0, 1]` (`i / score_max`). `_blended_value` mixes the two **without** applying
+> `critic_target_scale` or clamping.
 >
 > - *Scale (a non-issue in the standard setup).* When `outcome_reward ∈ {0, 1}`, the
 >   judge process reward is per-episode normalized so `Σ_t jbar_t = 1`, and the episode
 >   return `G = β + (1−β)·outcome ∈ [0, 1]`, every quantity is already in `[0, 1]` and
->   `critic_target_scale = 1.0`. The blend is then scale-consistent and **no rescaling is
->   needed**. (Rescaling/clamping `v_mc` only matters if a future reward scheme moves
+>   `critic_target_scale = 1.0`. The blend is then scale-consistent and **no rescaling
+>   is needed**. (Rescaling/clamping `v_mc` only matters if a future reward scheme moves
 >   `outcome_reward` outside `[0, 1]` or sets `critic_target_scale != 1.0`.)
 > - *Estimand mismatch (the real issue when `judge_beta > 0`).* The MCTS backup
 >   (`_backup_inserted_episodes`) propagates **only `outcome_reward`**, so
@@ -481,11 +481,12 @@ with the hybrid values.
 >   under-credits a failed episode by ≈ `β·(1−P)` at the start). When `judge_beta = 0`
 >   (sparse, `γ = 1`) the return-to-go from every turn *is* `outcome`, so
 >   `v_mc = V(s_t)` exactly and HybridGAE is fully consistent.
-> - *Mitigation.* The backup runs inside `insert_super_batch` **before** judge scores exist, so
->   `G` cannot be backed up at insert time. Either (a) re-run the backup after judging
->   using per-turn return-to-go `Σ_{k≥t} r_k`, or (b) correct `v_mc` analytically in
->   `_blended_value` via `v_mc_consistent = (1−β)·v_mc + β·credit_to_go_t` (and scale
->   `var_mc` by `(1−β)^2`), which reduces to a no-op when `β = 0`.
+> - *Mitigation.* The backup runs inside `insert_super_batch` **before** judge scores
+>   exist, so `G` cannot be backed up at insert time. Either (a) re-run the backup after
+>   judging using per-turn return-to-go `Σ_{k≥t} r_k`, or (b) correct `v_mc`
+>   analytically in `_blended_value` via
+>   `v_mc_consistent = (1−β)·v_mc + β·credit_to_go_t` (and scale `var_mc` by `(1−β)^2`),
+>   which reduces to a no-op when `β = 0`.
 
 #### GAE recursion diagram
 
@@ -535,9 +536,9 @@ flowchart TD
 ```
 
 With `enable_judge_process_reward=True` and `judge_beta > 0`, the sparse `r_t` row is
-replaced by the dense LLM-judge process reward (intermediate turns get
-`beta * jbar_t`, terminal gets `(1-beta) * outcome_reward + beta * jbar_T`); the
-recursion structure above is unchanged.
+replaced by the dense LLM-judge process reward (intermediate turns get `beta * jbar_t`,
+terminal gets `(1-beta) * outcome_reward + beta * jbar_T`); the recursion structure
+above is unchanged.
 
 #### HybridGAE: LOO-MC blend with critic estimation
 
@@ -596,7 +597,8 @@ flowchart TD
 - The blend is **inverse-variance**: the estimator with lower variance gets more weight.
   When the critic is one-hot (`var_theta` floored to `1e-3`) and the MC samples are
   tight (`var_mc` small), the blend collapses toward the MC value — this is the intended
-  behavior on well-visited branched nodes where MCTS has accumulated reliable statistics.
+  behavior on well-visited branched nodes where MCTS has accumulated reliable
+  statistics.
 - `excluded_reward` is the episode's terminal `outcome_reward` (shared across all turns
   of the episode, since the MCTS backup walks the full parent chain from the terminal).
 - Self-consistency: the blended `values[]` array is used for **both** `v(s_t)` in
@@ -607,9 +609,9 @@ flowchart TD
 
 Independent of the advantage computer, `branch_td_threshold` concentrates branch budget
 where the critic disagrees with reality. A `need_branch` candidate is kept only if
-`|r_t + gamma*v(s_{t+1}) - v(s_t)| >= branch_td_threshold` (computed from critic values),
-then survivors are ranked by entropy. `branch_td_threshold = 0.0` keeps the previous
-entropy-only behavior.
+`|r_t + gamma*v(s_{t+1}) - v(s_t)| >= branch_td_threshold` (computed from critic
+values), then survivors are ranked by entropy. `branch_td_threshold = 0.0` keeps the
+previous entropy-only behavior.
 
 ### 4. Checkpoint Manager (`core/checkpoint.py`)
 
@@ -725,17 +727,17 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 
 **Methods:**
 
-| Method                      | Description                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| `_run_fresh_episode()`      | Run a single fresh episode, deciding between scratch and branch sampling             |
-| `_prepare_branch_task()`    | Create a TPFC branch task from a branch candidate node                               |
-| `_cleanup_branch()`         | Delete branch sandbox and mark node as branched to prevent re-use                    |
-| `_get_tokenizer()`          | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)      |
-| `_get_tokenizer_unconditional()` | Lazy-load tokenizer for critic paths even when `loss_mode=GRPO`                |
-| `_annotate_judge_process_rewards()` | Score each episode with the judge and store per-node process credit          |
-| `_annotate_critic_values()` | Compute rollout-time generative-critic values and variances on Nodes                 |
-| `_attach_critic_train_data()` | Attach critic soft-regression samples consumed by the patched actor update         |
-| `_setup_distill_provider()` | Build `ExternalDiagnoseProvider` + `TeacherClient` with external or engine provider settings |
+| Method                              | Description                                                                                  |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `_run_fresh_episode()`              | Run a single fresh episode, deciding between scratch and branch sampling                     |
+| `_prepare_branch_task()`            | Create a TPFC branch task from a branch candidate node                                       |
+| `_cleanup_branch()`                 | Delete branch sandbox and mark node as branched to prevent re-use                            |
+| `_get_tokenizer()`                  | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)              |
+| `_get_tokenizer_unconditional()`    | Lazy-load tokenizer for critic paths even when `loss_mode=GRPO`                              |
+| `_annotate_judge_process_rewards()` | Score each episode with the judge and store per-node process credit                          |
+| `_annotate_critic_values()`         | Compute rollout-time generative-critic values and variances on Nodes                         |
+| `_attach_critic_train_data()`       | Attach critic soft-regression samples consumed by the patched actor update                   |
+| `_setup_distill_provider()`         | Build `ExternalDiagnoseProvider` + `TeacherClient` with external or engine provider settings |
 
 `multica_dag_enabled` and `multica_dag_client` are accepted and stored, but the live
 coordinator dispatch is not wired in this workflow yet. Today the live rollout path is
@@ -847,13 +849,13 @@ computation:
 
 #### `distilling/` — On-Policy Distillation
 
-| File                                  | Purpose                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------ |
-| `distilling/config.py`                | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`                  |
-| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training                 |
-| `distilling/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison             |
-| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference               |
-| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                   |
+| File                                  | Purpose                                                            |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| `distilling/config.py`                | `OnPolicyDistillConfig` (extends PPOConfig) and `AgentConfig`      |
+| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent class for distillation training     |
+| `distilling/reward_compute.py`        | `_compute_token_rewards()` — student vs teacher logprob comparison |
+| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference   |
+| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards       |
 
 #### `engine/` — Multi-Candidate Engine
 
@@ -1156,9 +1158,9 @@ export FRESH_QUERY_TABLE=query_bank   # optional if set in config
 The `agents/` package contains the torch-free Multica DAG RL layer that sits next to the
 single-agent tree-search workflow. It models collaborative agent runs as a DAG of
 communication-bounded `SuperNode` segments, provides branch materialization helpers for
-cloud environments, and defines the verifier/critic/GAE seams needed to train multi-agent
-rollouts. These modules are importable without torch so they can be unit-tested without
-the full FSDP/Megatron training stack.
+cloud environments, and defines the verifier/critic/GAE seams needed to train
+multi-agent rollouts. These modules are importable without torch so they can be
+unit-tested without the full FSDP/Megatron training stack.
 
 The live `TreeSearchGroupedRolloutWorkflow` does not yet dispatch through a multi-agent
 coordinator: `multica_dag_enabled` and `multica_dag_client` are stored as future wiring
@@ -1167,51 +1169,51 @@ as leaf `SuperNode`s before insertion into `MCTSTreeStore`.
 
 ### Core DAG Model
 
-| Module | Responsibility |
-| ------ | -------------- |
-| `agents/execution_dag.py` | Defines `SuperNode`, `ExecutionDAG`, typed `EdgeType`s (`delegation`, `mention`, `completion`), DAG validation, roots/leaves/fork/join queries, session mapping, and serialization. |
+| Module                          | Responsibility                                                                                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/execution_dag.py`       | Defines `SuperNode`, `ExecutionDAG`, typed `EdgeType`s (`delegation`, `mention`, `completion`), DAG validation, roots/leaves/fork/join queries, session mapping, and serialization.                               |
 | `agents/supernode_assembler.py` | Converts Multica `SegmentSpec` + `EdgeSpec` + team environment snapshots into `SuperNode`s and an `ExecutionDAG`; also sets the unified `parent_node_id` / `extra_parent_node_ids` chain across agents and joins. |
-| `agents/event_codec.py` | Round-trips between `ExecutionDAG` and a completion-ordered `SuperNode` log, and derives branch replay prefixes for selected branch points. |
-| `agents/event_model.py` | Builds a message-level timeline from completion-ordered `SuperNode`s for critic observations. |
+| `agents/event_codec.py`         | Round-trips between `ExecutionDAG` and a completion-ordered `SuperNode` log, and derives branch replay prefixes for selected branch points.                                                                       |
+| `agents/event_model.py`         | Builds a message-level timeline from completion-ordered `SuperNode`s for critic observations.                                                                                                                     |
 
 ### Branching and Environment Forking
 
-| Module | Responsibility |
-| ------ | -------------- |
-| `agents/branch_selection.py` | Selects one branch point per agent lane using the same entropy ranking and optional TD-error gate as the single-agent branch selector. |
-| `agents/environment.py` | Defines `ForkableEnvironment` and cloud providers (`FleetSandboxProvider`, `MulticaSweLegoProvider`) for snapshot/fork/restore/cleanup operations. |
-| `agents/integration.py` | Implements `BranchMaterializer`: snapshot sandbox, fork sandbox, fork Multica issue subtree, start the branch run, and rollback on partial failure. Also exposes helper functions for verifier finalization and cloud branch cleanup. |
+| Module                       | Responsibility                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/branch_selection.py` | Selects one branch point per agent lane using the same entropy ranking and optional TD-error gate as the single-agent branch selector.                                                                                                |
+| `agents/environment.py`      | Defines `ForkableEnvironment` and cloud providers (`FleetSandboxProvider`, `MulticaSweLegoProvider`) for snapshot/fork/restore/cleanup operations.                                                                                    |
+| `agents/integration.py`      | Implements `BranchMaterializer`: snapshot sandbox, fork sandbox, fork Multica issue subtree, start the branch run, and rollback on partial failure. Also exposes helper functions for verifier finalization and cloud branch cleanup. |
 
 ### Verifier, Rewards, and Harvest
 
-| Module | Responsibility |
-| ------ | -------------- |
-| `agents/agentic_verifier.py` | Builds verifier-agent prompts, parses per-session reward XML, and drives a pi verifier launcher through `AgenticVerifier`. |
-| `agents/verifier.py` | Legacy/objective verifier seam with `VerifierResult`, `Verifier`, and `ObjectiveVerifier`. |
-| `agents/rl_session.py` | Writes verifier-driven rewards to RL sessions through an `RLBridgeClient` seam. |
-| `agents/harvest.py` | Runs the verifier, writes rewards, and harvests reward-stamped trajectories through pluggable protocols. |
-| `agents/reward/swe_lego_types.py` | SWE-Lego issue, rollout, setup, and result dataclasses. |
-| `agents/reward/swe_lego_verifier.py` | Hybrid SWE-Lego verifier that blends objective tests, generative critic judgment, and semi-resolved weighting. |
+| Module                               | Responsibility                                                                                                             |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `agents/agentic_verifier.py`         | Builds verifier-agent prompts, parses per-session reward XML, and drives a pi verifier launcher through `AgenticVerifier`. |
+| `agents/verifier.py`                 | Legacy/objective verifier seam with `VerifierResult`, `Verifier`, and `ObjectiveVerifier`.                                 |
+| `agents/rl_session.py`               | Writes verifier-driven rewards to RL sessions through an `RLBridgeClient` seam.                                            |
+| `agents/harvest.py`                  | Runs the verifier, writes rewards, and harvests reward-stamped trajectories through pluggable protocols.                   |
+| `agents/reward/swe_lego_types.py`    | SWE-Lego issue, rollout, setup, and result dataclasses.                                                                    |
+| `agents/reward/swe_lego_verifier.py` | Hybrid SWE-Lego verifier that blends objective tests, generative critic judgment, and semi-resolved weighting.             |
 
 ### Critic and Advantage Assembly
 
-| Module | Responsibility |
-| ------ | -------------- |
-| `agents/critic_observation.py` | Builds global joint-state frontier observations: `V_0` plus one observation after each completed `SuperNode`. |
-| `agents/critic_score.py` | Renders critic prompts, parses `<score>N</score>`, and computes differentiable expected score values from bucket logits. |
-| `agents/gae.py` | Computes global GAE over the completion-ordered DAG event sequence. |
-| `agents/dag_advantage.py` | Assembles per-node advantages/returns and computes explained variance. |
-| `agents/critic_advantage.py` | Broadcasts node advantages to actor tokens and defines critic Huber + combined actor/critic loss helpers. |
-| `agents/dag_backup.py` | Provides an explicit DAG-edge reward-distribution helper for structural credit assignment experiments. |
+| Module                         | Responsibility                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `agents/critic_observation.py` | Builds global joint-state frontier observations: `V_0` plus one observation after each completed `SuperNode`.            |
+| `agents/critic_score.py`       | Renders critic prompts, parses `<score>N</score>`, and computes differentiable expected score values from bucket logits. |
+| `agents/gae.py`                | Computes global GAE over the completion-ordered DAG event sequence.                                                      |
+| `agents/dag_advantage.py`      | Assembles per-node advantages/returns and computes explained variance.                                                   |
+| `agents/critic_advantage.py`   | Broadcasts node advantages to actor tokens and defines critic Huber + combined actor/critic loss helpers.                |
+| `agents/dag_backup.py`         | Provides an explicit DAG-edge reward-distribution helper for structural credit assignment experiments.                   |
 
 ### Orchestration Helpers
 
-| Module | Responsibility |
-| ------ | -------------- |
-| `agents/swe_lego_client.py` | Thin HTTP client for Multica's unified `env-dispatch` API. |
-| `agents/swe_lego_issue_runner.py` | Per-SWE-Lego-issue loop: create env-dispatch, open RL sessions, drive lanes, verify/reward terminal runs, and clean up projects. |
-| `agents/self_play_runner.py` | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue. |
-| `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration. |
+| Module                                          | Responsibility                                                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/swe_lego_client.py`                     | Thin HTTP client for Multica's unified `env-dispatch` API.                                                                       |
+| `agents/swe_lego_issue_runner.py`               | Per-SWE-Lego-issue loop: create env-dispatch, open RL sessions, drive lanes, verify/reward terminal runs, and clean up projects. |
+| `agents/self_play_runner.py`                    | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue.                          |
+| `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration.                                    |
 
 ### DAG Rollout Data Flow
 
@@ -1330,13 +1332,13 @@ flowchart TD
 
 Key metadata fields attached to trajectory dicts throughout the pipeline:
 
-| Field                 | Attached by                         | Type                       | Used by                                         |
-| --------------------- | ----------------------------------- | -------------------------- | ----------------------------------------------- |
-| `query_id`            | `TreeSearchGroupedRolloutWorkflow`  | `str`                      | Tree lookup, cache splitting, advantage compute |
-| `node_id`             | `insert_super_batch()` / inference engine | `str`                 | Advantage lookup, mark trained                  |
-| `position_rewards`    | `TreeSearchGroupedRolloutWorkflow`  | `list[PositionRewardInfo]` | Multi-candidate logprob computation             |
-| `distill_loss_weight` | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for teacher KL loss                      |
-| `rl_loss_weight`      | `TreeSearchGroupedRolloutWorkflow`  | `float`                    | Weight for GRPO loss                            |
+| Field                 | Attached by                               | Type                       | Used by                                         |
+| --------------------- | ----------------------------------------- | -------------------------- | ----------------------------------------------- |
+| `query_id`            | `TreeSearchGroupedRolloutWorkflow`        | `str`                      | Tree lookup, cache splitting, advantage compute |
+| `node_id`             | `insert_super_batch()` / inference engine | `str`                      | Advantage lookup, mark trained                  |
+| `position_rewards`    | `TreeSearchGroupedRolloutWorkflow`        | `list[PositionRewardInfo]` | Multi-candidate logprob computation             |
+| `distill_loss_weight` | `TreeSearchGroupedRolloutWorkflow`        | `float`                    | Weight for teacher KL loss                      |
+| `rl_loss_weight`      | `TreeSearchGroupedRolloutWorkflow`        | `float`                    | Weight for GRPO loss                            |
 
 ## How Distillation Works with Tree Attention
 
@@ -1557,44 +1559,43 @@ with CustomizedPPOTrainer(
 
 ## File Index
 
-| File                                  | Purpose                                                                                      |
-| ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `__init__.py`                         | Public API exports and lazy imports for distillation components                              |
-| `config.py`                           | `Config`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource`     |
-| `core/advantage.py`                   | `TreeAdvantageComputer`, `GAEAdvantageComputer`, `HybridGAEAdvantageComputer`                |
-| `core/checkpoint.py`                  | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                           |
-| `core/tree_store.py`                  | `MCTSTreeStore`, `Node` — `SuperNode` store with Node-level MCTS statistics                  |
-| `core/customized_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops               |
+| File                                  | Purpose                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`                         | Public API exports and lazy imports for distillation components                                               |
+| `config.py`                           | `Config`, `RolloutCacheConfig`, `CacheMode`, `AdvantageMode`, `LossMode`, `SampleSource`                      |
+| `core/advantage.py`                   | `TreeAdvantageComputer`, `GAEAdvantageComputer`, `HybridGAEAdvantageComputer`                                 |
+| `core/checkpoint.py`                  | `TreeCheckpointManager` — serialize/deserialize tree state to JSON                                            |
+| `core/tree_store.py`                  | `MCTSTreeStore`, `Node` — `SuperNode` store with Node-level MCTS statistics                                   |
+| `core/customized_grouped_workflow.py` | `TreeSearchGroupedRolloutWorkflow` — core workflow with cache reuse + tree ops                                |
 | `agents/`                             | Torch-free Multica multi-agent DAG RL components, branch materialization, verifier seams, and DAG GAE helpers |
-| `core/critic_prompt.py`               | Critic instruction/message construction, digit-token resolution, soft expected value + variance |
-| `core/critic_value_client.py`         | `CriticValueClient` — rollout-time critic value + variance via shared inference engine       |
-| `core/process_reward.py`              | `build_episode_process_rewards` — dense per-turn LLM-judge reward construction               |
-| `core/judge_prompt.py`                | LLM-judge prompt template and XML score parsing                                              |
-| `core/uncertainty.py`                 | Bayesian-posterior uncertainty metric for dynamic group sizing                               |
-| `distilling/__init__.py`              | Distilling subpackage exports                                                                |
-| `distilling/config.py`                | `OnPolicyDistillConfig`, `AgentConfig`                                                       |
-| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent for distillation training                                     |
-| `distilling/diagnose_provider.py`     | `ExternalDiagnoseProvider` — episode diagnosis + judge scoring via OpenAI-compatible API     |
-| `distilling/distill_types.py`         | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward` |
-| `distilling/reward_compute.py`        | Student vs teacher logprob reward computation                                                |
-| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference client                      |
-| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                                 |
-| `engine/__init__.py`                  | Engine subpackage exports                                                                    |
-| `engine/fsdp_engine.py`               | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                               |
-| `training/__init__.py`                | Training subpackage exports                                                                  |
-| `training/actor.py`                   | `MultiCandidateFSDPPPOActor`, distill-loss + combined-critic-loss patching functions         |
-| `training/critic_update.py`           | `run_critic_regression_step`, `build_critic_minibatch` — shared-model critic train step      |
-| `training/loss.py`                    | Compatibility exports re-exporting `grpo_distill_loss_fn` and critic helpers                  |
-| `training/losses/`                    | `grpo`, `distill`, `combined`, `critic` loss implementations + `compute_critic_targets`/`AdaptiveMCWeight` |
-| `training/logprobs.py`                | Multi-candidate logprob/entropy gathering utilities                                          |
-| `training/trainer.py`                 | `CustomizedPPOTrainer` — PPO trainer with distillation engine + critic support               |
+| `core/critic_prompt.py`               | Critic instruction/message construction, digit-token resolution, soft expected value + variance               |
+| `core/critic_value_client.py`         | `CriticValueClient` — rollout-time critic value + variance via shared inference engine                        |
+| `core/process_reward.py`              | `build_episode_process_rewards` — dense per-turn LLM-judge reward construction                                |
+| `core/judge_prompt.py`                | LLM-judge prompt template and XML score parsing                                                               |
+| `core/uncertainty.py`                 | Bayesian-posterior uncertainty metric for dynamic group sizing                                                |
+| `distilling/__init__.py`              | Distilling subpackage exports                                                                                 |
+| `distilling/config.py`                | `OnPolicyDistillConfig`, `AgentConfig`                                                                        |
+| `distilling/agent.py`                 | `OnPolicyDistillAgent` — agent for distillation training                                                      |
+| `distilling/diagnose_provider.py`     | `ExternalDiagnoseProvider` — episode diagnosis + judge scoring via OpenAI-compatible API                      |
+| `distilling/distill_types.py`         | `PositionRewardInfo`, `DiagnosisTurn`, `EpisodeDiagnosis`, `InteractionWithTokenLevelReward`                  |
+| `distilling/reward_compute.py`        | Student vs teacher logprob reward computation                                                                 |
+| `distilling/teacher_client.py`        | `TeacherConfig`, `TeacherClient` — async teacher model inference client                                       |
+| `distilling/selected_turn_distill.py` | Diagnoses episodes and builds position-level teacher rewards                                                  |
+| `engine/__init__.py`                  | Engine subpackage exports                                                                                     |
+| `engine/fsdp_engine.py`               | `MultiCandidateFSDPEngine` — multi-candidate logprob gathering                                                |
+| `training/__init__.py`                | Training subpackage exports                                                                                   |
+| `training/actor.py`                   | `MultiCandidateFSDPPPOActor`, distill-loss + combined-critic-loss patching functions                          |
+| `training/critic_update.py`           | `run_critic_regression_step`, `build_critic_minibatch` — shared-model critic train step                       |
+| `training/loss.py`                    | Compatibility exports re-exporting `grpo_distill_loss_fn` and critic helpers                                  |
+| `training/losses/`                    | `grpo`, `distill`, `combined`, `critic` loss implementations + `compute_critic_targets`/`AdaptiveMCWeight`    |
+| `training/logprobs.py`                | Multi-candidate logprob/entropy gathering utilities                                                           |
+| `training/trainer.py`                 | `CustomizedPPOTrainer` — PPO trainer with distillation engine + critic support                                |
 
 ## Generative Critic (Shared Model) with GAE
 
 When `tree_search.enable_generative_critic=true`, the **actor's own model** (same
 weights, same SGLang server) doubles as a **generative critic** that scores
 partial-solution states, and those scores drive **GAE** advantages for the actor.
-
 
 ### How it works
 
@@ -1636,13 +1637,14 @@ partial-solution states, and those scores drive **GAE** advantages for the actor
    Defaults `gamma=1.0`, `lambda=0.95`. `A_t`/`ret_t` are broadcast over each node's
    response positions and consumed by the standard PPO actor update. When
    `enable_judge_process_reward=True` the reward becomes the dense per-turn process
-   reward instead (see [LLM-Judge Step-Level Process Reward](#llm-judge-step-level-process-reward-critic--actor)).
+   reward instead (see
+   [LLM-Judge Step-Level Process Reward](#llm-judge-step-level-process-reward-critic--actor)).
 
 1. **Critic regression (training).** The same shared model is additionally trained with
    an **expected-value soft regression**: at the answer position it produces a
    distribution over the digit tokens, and the expected value is regressed (MSE) toward
-   a **unified TD/MC target**. The regression target is a convex blend of two
-   estimators of `v_phi(s_t)`, both in normalized `[0, 1]` space:
+   a **unified TD/MC target**. The regression target is a convex blend of two estimators
+   of `v_phi(s_t)`, both in normalized `[0, 1]` space:
 
    ```
    y_mc_t = q_mcts(s_t) / target_scale                              # Monte-Carlo (MCTS)
@@ -1682,28 +1684,29 @@ partial-solution states, and those scores drive **GAE** advantages for the actor
    `MultiCandidateFSDPEngine` is selected (`loss_mode=BOTH`/`DISTILL`). With
    `loss_mode=GRPO` the critic still drives GAE advantages, while the extra regression
    step is skipped gracefully. The regression step is installed by
-   `patch_ppo_actor_class_to_use_combined_critic_loss`, which wraps `PPOActor._ppo_update`
-   to run the actor update first, then — if the batch carries `critic_train_data` — run
-   one additional critic train step via `run_critic_regression_step`. Engine errors are
-   caught and logged so they can never crash the actor update.
+   `patch_ppo_actor_class_to_use_combined_critic_loss`, which wraps
+   `PPOActor._ppo_update` to run the actor update first, then — if the batch carries
+   `critic_train_data` — run one additional critic train step via
+   `run_critic_regression_step`. Engine errors are caught and logged so they can never
+   crash the actor update.
 
 ### Config fields (`tree_search`)
 
-| Field                      | Default | Meaning                                                     |
-| -------------------------- | ------- | ----------------------------------------------------------- |
-| `enable_generative_critic` | `false` | Enable the shared-model generative critic (forces GAE/HYBRID_GAE). |
-| `critic_avg_success_rate`  | `0.29`  | Average dataset success rate embedded in the critic prompt. |
-| `critic_gamma`             | `1.0`   | GAE discount.                                               |
-| `critic_lambda`            | `0.95`  | GAE lambda.                                                 |
-| `critic_score_max`         | `10`    | Max integer score label (`0..score_max`).                   |
+| Field                      | Default | Meaning                                                                    |
+| -------------------------- | ------- | -------------------------------------------------------------------------- |
+| `enable_generative_critic` | `false` | Enable the shared-model generative critic (forces GAE/HYBRID_GAE).         |
+| `critic_avg_success_rate`  | `0.29`  | Average dataset success rate embedded in the critic prompt.                |
+| `critic_gamma`             | `1.0`   | GAE discount.                                                              |
+| `critic_lambda`            | `0.95`  | GAE lambda.                                                                |
+| `critic_score_max`         | `10`    | Max integer score label (`0..score_max`).                                  |
 | `critic_target_scale`      | `1.0`   | Divisor applied to `q_value`/`outcome_reward` before clamping to `[0, 1]`. |
-| `critic_max_new_tokens`    | `1024`  | Max tokens for the critic's generation.                     |
-| `critic_temperature`       | `0.0`   | Critic generation temperature.                              |
-| `critic_loss_weight`       | `1.0`   | Weight of the critic regression term in the combined loss.  |
-| `critic_mc_weight`         | `1.0`   | TD/MC blend weight `w` (1 = pure MCTS, 0 = pure n-step TD). |
-| `critic_td_n_steps`        | `1`     | TD horizon `n` for the bootstrap component.                 |
-| `critic_mc_adaptive`       | `false` | Per-node adaptive `w` from visit counts + critic-error EMA. |
-| `critic_mc_c`              | `4.0`   | `AdaptiveMCWeight` scale `c`.                               |
+| `critic_max_new_tokens`    | `1024`  | Max tokens for the critic's generation.                                    |
+| `critic_temperature`       | `0.0`   | Critic generation temperature.                                             |
+| `critic_loss_weight`       | `1.0`   | Weight of the critic regression term in the combined loss.                 |
+| `critic_mc_weight`         | `1.0`   | TD/MC blend weight `w` (1 = pure MCTS, 0 = pure n-step TD).                |
+| `critic_td_n_steps`        | `1`     | TD horizon `n` for the bootstrap component.                                |
+| `critic_mc_adaptive`       | `false` | Per-node adaptive `w` from visit counts + critic-error EMA.                |
+| `critic_mc_c`              | `4.0`   | `AdaptiveMCWeight` scale `c`.                                              |
 
 ### Tokenization caveat
 

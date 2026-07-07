@@ -1,49 +1,92 @@
 # SuperNode Multi-Agent DAG Rollout Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Unify `Event` + `AgentRunNode` into a single `SuperNode` type that carries `list[Node]`, refactor `MCTSTreeStore` to hold SuperNodes while keeping MCTS stats per-Node, and lay the data-model foundation for Multica-orchestrated multi-agent DAG rollout.
+**Goal:** Unify `Event` + `AgentRunNode` into a single `SuperNode` type that carries
+`list[Node]`, refactor `MCTSTreeStore` to hold SuperNodes while keeping MCTS stats
+per-Node, and lay the data-model foundation for Multica-orchestrated multi-agent DAG
+rollout.
 
-**Architecture:** SuperNode = communication-bounded segment of one agent run (not the whole run). Multica decides segment boundaries and edges; AReal's `SuperNodeAssembler` consumes `DagResult` (segments + edges + env snapshots) and the per-session `list[Node]` from the N×M proxy workers, builds `list[SuperNode]` + `ExecutionDAG`, and sets a unified `parent_node_id` chain across SuperNode and agent boundaries (causal flattening). Reward backup walks Node-level only; `distribute_reward_over_dag` stays as a utility, off the reward path. Node becomes torch-lazy so the DAG layer imports cleanly without torch.
+**Architecture:** SuperNode = communication-bounded segment of one agent run (not the
+whole run). Multica decides segment boundaries and edges; AReal's `SuperNodeAssembler`
+consumes `DagResult` (segments + edges + env snapshots) and the per-session `list[Node]`
+from the N×M proxy workers, builds `list[SuperNode]` + `ExecutionDAG`, and sets a
+unified `parent_node_id` chain across SuperNode and agent boundaries (causal
+flattening). Reward backup walks Node-level only; `distribute_reward_over_dag` stays as
+a utility, off the reward path. Node becomes torch-lazy so the DAG layer imports cleanly
+without torch.
 
-**Tech Stack:** Python 3.14, dataclasses, pytest, httpx (client only), stdlib logging. No torch in the agents/ layer (Node torch-lazy); no new runtime deps.
+**Tech Stack:** Python 3.14, dataclasses, pytest, httpx (client only), stdlib logging.
+No torch in the agents/ layer (Node torch-lazy); no new runtime deps.
 
 **Spec:** `docs/superpowers/specs/2026-06-30-supernode-multica-dag-rollout-design.md`
 
-**Scope:** Phase 1a only (data model + codec + assembler + tests + single-agent path wrapping). Phase 1b/2 (coordinator, `MulticaDagClient`, verifier wiring) is a separate plan landed after this one merges. Every task below is Phase 1a unless tagged `[Phase 1b/2]`.
+**Scope:** Phase 1a only (data model + codec + assembler + tests + single-agent path
+wrapping). Phase 1b/2 (coordinator, `MulticaDagClient`, verifier wiring) is a separate
+plan landed after this one merges. Every task below is Phase 1a unless tagged
+`[Phase 1b/2]`.
 
----
+______________________________________________________________________
 
 ## File Structure
 
 ### Files created
-- `customized_areal/tree_search/agents/supernode_assembler.py` — `SuperNodeAssembler`, `SegmentSpec`, `EdgeSpec`, `TeamEnvSnapshot`, `DagResult`. Pure, torch-free. The only new module in Phase 1a.
-- `customized_areal/tree_search/tests/test_supernode_assembler.py` — unit tests for the assembler's 6-step algorithm.
-- `customized_areal/tree_search/tests/test_tree_store_super.py` — unit tests for `insert_super_batch`, dual indices, cross-SuperNode backup.
+
+- `customized_areal/tree_search/agents/supernode_assembler.py` — `SuperNodeAssembler`,
+  `SegmentSpec`, `EdgeSpec`, `TeamEnvSnapshot`, `DagResult`. Pure, torch-free. The only
+  new module in Phase 1a.
+- `customized_areal/tree_search/tests/test_supernode_assembler.py` — unit tests for the
+  assembler's 6-step algorithm.
+- `customized_areal/tree_search/tests/test_tree_store_super.py` — unit tests for
+  `insert_super_batch`, dual indices, cross-SuperNode backup.
 
 ### Files modified
-- `customized_areal/tree_search/core/tree_store.py` — Node torch-lazy; `MCTSTreeStore.trajectories: dict[str, list[SuperNode]]`; `insert_super_batch` + dual indices; backup walks parent chain unchanged.
-- `customized_areal/tree_search/agents/execution_dag.py` — `SuperNode` dataclass (replaces `AgentRunNode`); `ExecutionDAG` holds SuperNodes; `add_event`/`get`/`session_map`/`to_records`/`from_records` re-typed.
-- `customized_areal/tree_search/agents/event_model.py` — shrink to `EdgeRef` + `message_timeline` (Event class removed).
-- `customized_areal/tree_search/agents/event_codec.py` — `dag_to_supernodes` / `supernodes_to_dag` / `replay_prefix_for` (renamed, SuperNode-typed).
-- `customized_areal/tree_search/agents/__init__.py` — update exports.
-- `customized_areal/tree_search/agents/gae.py` — `events_from_nodes` constructs `SuperNode` (pure rename); `GlobalEvent` unchanged.
-- `customized_areal/tree_search/core/customized_grouped_workflow.py` — single-agent path wraps Nodes in a leaf SuperNode before `insert_super_batch` (Phase 1a); coordinator params declared but `None` (Phase 1b/2 wire-up).
-- `customized_areal/tree_search/tests/test_event_codec.py` — `Event` → `SuperNode`, `dag_to_events` → `dag_to_supernodes`, etc.
-- `customized_areal/tree_search/tests/test_event_model.py` — shrinks to `message_timeline` tests only (Event class gone).
-- `customized_areal/tree_search/tests/test_execution_dag.py` — `AgentRunNode` → `SuperNode`.
-- `customized_areal/tree_search/tests/test_dag_backup.py` — `AgentRunNode` → `SuperNode`.
-- `customized_areal/tree_search/tests/test_session_map.py` — `AgentRunNode` → `SuperNode`.
-- `customized_areal/tree_search/tests/test_e2e_critic_gae.py` — `AgentRunNode` → `SuperNode` (rename only; logic unchanged).
 
----
+- `customized_areal/tree_search/core/tree_store.py` — Node torch-lazy;
+  `MCTSTreeStore.trajectories: dict[str, list[SuperNode]]`; `insert_super_batch` + dual
+  indices; backup walks parent chain unchanged.
+- `customized_areal/tree_search/agents/execution_dag.py` — `SuperNode` dataclass
+  (replaces `AgentRunNode`); `ExecutionDAG` holds SuperNodes;
+  `add_event`/`get`/`session_map`/`to_records`/`from_records` re-typed.
+- `customized_areal/tree_search/agents/event_model.py` — shrink to `EdgeRef` +
+  `message_timeline` (Event class removed).
+- `customized_areal/tree_search/agents/event_codec.py` — `dag_to_supernodes` /
+  `supernodes_to_dag` / `replay_prefix_for` (renamed, SuperNode-typed).
+- `customized_areal/tree_search/agents/__init__.py` — update exports.
+- `customized_areal/tree_search/agents/gae.py` — `events_from_nodes` constructs
+  `SuperNode` (pure rename); `GlobalEvent` unchanged.
+- `customized_areal/tree_search/core/customized_grouped_workflow.py` — single-agent path
+  wraps Nodes in a leaf SuperNode before `insert_super_batch` (Phase 1a); coordinator
+  params declared but `None` (Phase 1b/2 wire-up).
+- `customized_areal/tree_search/tests/test_event_codec.py` — `Event` → `SuperNode`,
+  `dag_to_events` → `dag_to_supernodes`, etc.
+- `customized_areal/tree_search/tests/test_event_model.py` — shrinks to
+  `message_timeline` tests only (Event class gone).
+- `customized_areal/tree_search/tests/test_execution_dag.py` — `AgentRunNode` →
+  `SuperNode`.
+- `customized_areal/tree_search/tests/test_dag_backup.py` — `AgentRunNode` →
+  `SuperNode`.
+- `customized_areal/tree_search/tests/test_session_map.py` — `AgentRunNode` →
+  `SuperNode`.
+- `customized_areal/tree_search/tests/test_e2e_critic_gae.py` — `AgentRunNode` →
+  `SuperNode` (rename only; logic unchanged).
+
+______________________________________________________________________
 
 ## Task 0: Node torch-lazy refactor
 
-**Why first:** Every subsequent task imports `Node` from `tree_store`. Making it torch-lazy now means the agents/ layer (which imports `Node` for the `SuperNode.nodes` field) stays import-clean without torch. This is the foundation — nothing else compiles cleanly without it.
+**Why first:** Every subsequent task imports `Node` from `tree_store`. Making it
+torch-lazy now means the agents/ layer (which imports `Node` for the `SuperNode.nodes`
+field) stays import-clean without torch. This is the foundation — nothing else compiles
+cleanly without it.
 
 **Files:**
-- Modify: `customized_areal/tree_search/core/tree_store.py:14-20` (top-level `import torch`), `:81-82` (tensor field types), `:155` (`_optional_tensor_field`), `:199-205` (`_node_to_tensor_dict` tensor construction)
+
+- Modify: `customized_areal/tree_search/core/tree_store.py:14-20` (top-level
+  `import torch`), `:81-82` (tensor field types), `:155` (`_optional_tensor_field`),
+  `:199-205` (`_node_to_tensor_dict` tensor construction)
 
 - [ ] **Step 1: Write the failing test — module imports without torch**
 
@@ -82,7 +125,9 @@ def test_tree_store_imports_without_torch(monkeypatch):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_node_torch_lazy.py -v`
-Expected: FAIL — `ImportError: No module named 'torch'` (raised from `tree_store.py:20` `import torch`), caught by pytest as a collection error or a raised `ImportError` inside the test body.
+Expected: FAIL — `ImportError: No module named 'torch'` (raised from `tree_store.py:20`
+`import torch`), caught by pytest as a collection error or a raised `ImportError` inside
+the test body.
 
 - [ ] **Step 3: Make Node torch-lazy**
 
@@ -122,7 +167,8 @@ Change the tensor field type hints (lines 81-82) to `Any` with a comment:
     returns: Any = None
 ```
 
-In `_optional_tensor_field` (around line 155), replace the `torch.tensor(...)` calls with a lazy import:
+In `_optional_tensor_field` (around line 155), replace the `torch.tensor(...)` calls
+with a lazy import:
 
 ```python
 def _optional_tensor_field(
@@ -161,7 +207,9 @@ def _optional_tensor_field(
         traj[key] = torch.tensor(sliced, dtype=dtype).unsqueeze(0)
 ```
 
-In `_node_to_tensor_dict` (around line 199), replace each `torch.tensor(...)` / `torch.full(...)` / `torch.ones(...)` with a `torch = _lazy_torch()` call at the top of the function, then use `torch.tensor(...)`:
+In `_node_to_tensor_dict` (around line 199), replace each `torch.tensor(...)` /
+`torch.full(...)` / `torch.ones(...)` with a `torch = _lazy_torch()` call at the top of
+the function, then use `torch.tensor(...)`:
 
 ```python
 def _node_to_tensor_dict(
@@ -189,8 +237,10 @@ Expected: PASS
 
 - [ ] **Step 5: Run the existing tree_store tests to verify no regression**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py -v`
-Expected: PASS (these exercise the tensor paths with torch installed; lazy import resolves to the real torch).
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py -v`
+Expected: PASS (these exercise the tensor paths with torch installed; lazy import
+resolves to the real torch).
 
 - [ ] **Step 6: Commit**
 
@@ -205,14 +255,19 @@ field live in a torch-free module without forcing every agents/ test
 to install torch."
 ```
 
----
+______________________________________________________________________
 
 ## Task 1: SuperNode dataclass in execution_dag.py
 
-**Why:** `SuperNode` replaces `AgentRunNode` and absorbs `Event`'s role. It's the single type for both DAG-node and linear-log views. Everything downstream (codec, assembler, tree_store, tests) references this type, so it must land first.
+**Why:** `SuperNode` replaces `AgentRunNode` and absorbs `Event`'s role. It's the single
+type for both DAG-node and linear-log views. Everything downstream (codec, assembler,
+tree_store, tests) references this type, so it must land first.
 
 **Files:**
-- Modify: `customized_areal/tree_search/agents/execution_dag.py:38-77` (replace `AgentRunNode` with `SuperNode`)
+
+- Modify: `customized_areal/tree_search/agents/execution_dag.py:38-77` (replace
+  `AgentRunNode` with `SuperNode`)
+
 - Test: `customized_areal/tree_search/tests/test_execution_dag.py`
 
 - [ ] **Step 1: Write the failing test — SuperNode carries nodes + env snapshot**
@@ -265,7 +320,8 @@ def test_supernode_branch_node_id_none_when_empty():
     assert s.branch_node_id is None
 ```
 
-Update the existing `_node` helper at the top of the file to return `SuperNode` instead of `AgentRunNode`:
+Update the existing `_node` helper at the top of the file to return `SuperNode` instead
+of `AgentRunNode`:
 
 ```python
 from customized_areal.tree_search.agents.execution_dag import (
@@ -288,7 +344,8 @@ def _node(
     )
 ```
 
-(Run `replace_all` over the file to swap every remaining `AgentRunNode` token to `SuperNode` in the test bodies and helper functions.)
+(Run `replace_all` over the file to swap every remaining `AgentRunNode` token to
+`SuperNode` in the test bodies and helper functions.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -517,7 +574,8 @@ Update `from_records` (line 286) to build `SuperNode` instead of `AgentRunNode`:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_execution_dag.py -v`
-Expected: PASS — all existing structural tests now use `SuperNode`, plus the 3 new SuperNode-specific tests.
+Expected: PASS — all existing structural tests now use `SuperNode`, plus the 3 new
+SuperNode-specific tests.
 
 - [ ] **Step 5: Commit**
 
@@ -533,19 +591,24 @@ API is otherwise unchanged: add_event/get/edges/topological_order all
 re-typed to SuperNode."
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: Shrink event_model.py — Event removed, message_timeline kept
 
-**Why:** `Event` is now redundant with `SuperNode`. The only thing `event_model.py` still owns that nothing else does is `message_timeline` (used by the critic observation builder) and the `EdgeRef` type alias. Shrink the module to those two.
+**Why:** `Event` is now redundant with `SuperNode`. The only thing `event_model.py`
+still owns that nothing else does is `message_timeline` (used by the critic observation
+builder) and the `EdgeRef` type alias. Shrink the module to those two.
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/event_model.py` (whole file)
+
 - Test: `customized_areal/tree_search/tests/test_event_model.py` (rewrite)
 
 - [ ] **Step 1: Write the failing test — message_timeline still works, Event is gone**
 
-Replace the entire contents of `customized_areal/tree_search/tests/test_event_model.py` with:
+Replace the entire contents of `customized_areal/tree_search/tests/test_event_model.py`
+with:
 
 ```python
 """Tests for the message_timeline helper (Event class removed).
@@ -620,12 +683,14 @@ def test_event_class_removed():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_model.py -v`
-Expected: FAIL — `Event` still exists; `test_event_class_removed` asserts `not hasattr(event_model, "Event")` which fails.
+Run: `uv run pytest customized_areal/tree_search/tests/test_event_model.py -v` Expected:
+FAIL — `Event` still exists; `test_event_class_removed` asserts
+`not hasattr(event_model, "Event")` which fails.
 
 - [ ] **Step 3: Shrink event_model.py**
 
-Replace the entire contents of `customized_areal/tree_search/agents/event_model.py` with:
+Replace the entire contents of `customized_areal/tree_search/agents/event_model.py`
+with:
 
 ```python
 """Edge ref type + message-timeline helper for the linear Event-log view.
@@ -712,8 +777,8 @@ __all__ = ["EdgeRef", "message_timeline"]
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_model.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/tests/test_event_model.py -v` Expected:
+PASS
 
 - [ ] **Step 5: Commit**
 
@@ -727,19 +792,25 @@ message_timeline; the latter accepts SuperNode-like objects (reads .nodes
 or legacy .messages). Critic observation builder is unchanged."
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: Rename codec — dag_to_supernodes / supernodes_to_dag / replay_prefix_for
 
-**Why:** The codec round-trips the DAG ↔ linear-log view. With `Event` gone and `SuperNode` the unified type, the codec functions take and return `list[SuperNode]`. Pure rename + type re-annotation; algorithm unchanged.
+**Why:** The codec round-trips the DAG ↔ linear-log view. With `Event` gone and
+`SuperNode` the unified type, the codec functions take and return `list[SuperNode]`.
+Pure rename + type re-annotation; algorithm unchanged.
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/event_codec.py` (whole file)
+
 - Test: `customized_areal/tree_search/tests/test_event_codec.py`
 
 - [ ] **Step 1: Write the failing test — new function names, SuperNode-typed**
 
-Update `customized_areal/tree_search/tests/test_event_codec.py`. Replace the imports and every call site. The test fixture `_build_dag` already builds SuperNodes (after Task 1's `AgentRunNode → SuperNode` rename in the test file). Replace the imports block:
+Update `customized_areal/tree_search/tests/test_event_codec.py`. Replace the imports and
+every call site. The test fixture `_build_dag` already builds SuperNodes (after Task 1's
+`AgentRunNode → SuperNode` rename in the test file). Replace the imports block:
 
 ```python
 from customized_areal.tree_search.agents.event_codec import (
@@ -758,7 +829,8 @@ from customized_areal.tree_search.agents.execution_dag import (
 from customized_areal.tree_search.agents.gae import GlobalEvent, events_from_nodes
 ```
 
-Replace every `dag_to_events` → `dag_to_supernodes` and `events_to_dag` → `supernodes_to_dag` in the test bodies (use `replace_all`).
+Replace every `dag_to_events` → `dag_to_supernodes` and `events_to_dag` →
+`supernodes_to_dag` in the test bodies (use `replace_all`).
 
 Update the public-exports test at the bottom:
 
@@ -778,7 +850,8 @@ def test_public_exports_available_from_package() -> None:
         assert hasattr(d, name), f"{name} not importable from package"
 ```
 
-Also drop the `Event.from_dict` round-trip test (`test_full_dict_round_trip_identity`) — `Event` no longer exists. Replace it with a SuperNode-based dict round-trip:
+Also drop the `Event.from_dict` round-trip test (`test_full_dict_round_trip_identity`) —
+`Event` no longer exists. Replace it with a SuperNode-based dict round-trip:
 
 ```python
 def test_supernode_dict_round_trip_identity() -> None:
@@ -798,12 +871,13 @@ def test_supernode_dict_round_trip_identity() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py -v`
-Expected: FAIL — `ImportError: cannot import name 'dag_to_supernodes'` from `event_codec`.
+Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py -v` Expected:
+FAIL — `ImportError: cannot import name 'dag_to_supernodes'` from `event_codec`.
 
 - [ ] **Step 3: Rename the codec functions and re-type to SuperNode**
 
-Edit `customized_areal/tree_search/agents/event_codec.py`. Replace the imports and the three function signatures. The full new file:
+Edit `customized_areal/tree_search/agents/event_codec.py`. Replace the imports and the
+three function signatures. The full new file:
 
 ```python
 """Bidirectional codec between an ExecutionDAG and its linear SuperNode log.
@@ -1041,7 +1115,9 @@ __all__ = ["ReplayPrefix", "dag_to_supernodes", "replay_prefix_for", "supernodes
 
 - [ ] **Step 4: Add to_dict / from_dict to SuperNode**
 
-The codec test calls `SuperNode.to_dict()` / `SuperNode.from_dict()`. Add these to `customized_areal/tree_search/agents/execution_dag.py` inside the `SuperNode` class (after `branch_node_id` property):
+The codec test calls `SuperNode.to_dict()` / `SuperNode.from_dict()`. Add these to
+`customized_areal/tree_search/agents/execution_dag.py` inside the `SuperNode` class
+(after `branch_node_id` property):
 
 ```python
     def to_dict(self) -> dict:
@@ -1134,8 +1210,8 @@ The codec test calls `SuperNode.to_dict()` / `SuperNode.from_dict()`. Add these 
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py -v` Expected:
+PASS
 
 - [ ] **Step 6: Commit**
 
@@ -1149,15 +1225,21 @@ it losslessly. Adds SuperNode.to_dict/from_dict for the round-trip test
 (edges + env snapshot + nodes serialized)."
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: Update gae.py — events_from_nodes constructs SuperNode
 
-**Why:** `gae.py` imports `Event` and constructs it in `events_from_nodes` (line 117-130). After the `Event` removal, this breaks at import time. Pure rename: construct `SuperNode` instead. `GlobalEvent` and the GAE algorithm are unchanged (Phase 3 logic, out of scope, but the import must not break).
+**Why:** `gae.py` imports `Event` and constructs it in `events_from_nodes` (line
+117-130). After the `Event` removal, this breaks at import time. Pure rename: construct
+`SuperNode` instead. `GlobalEvent` and the GAE algorithm are unchanged (Phase 3 logic,
+out of scope, but the import must not break).
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/gae.py:117-138`
-- Test: `customized_areal/tree_search/tests/test_event_codec.py` (already has `events_from_nodes` parity test from Task 3 — verify it still passes)
+
+- Test: `customized_areal/tree_search/tests/test_event_codec.py` (already has
+  `events_from_nodes` parity test from Task 3 — verify it still passes)
 
 - [ ] **Step 1: Write the failing test — events_from_nodes works with SuperNode**
 
@@ -1178,12 +1260,15 @@ def test_events_from_nodes_projects_supernode_to_global_event():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py::test_events_from_nodes_projects_supernode_to_global_event -v`
-Expected: FAIL — `ImportError: cannot import name 'Event' from 'event_model'` raised inside `gae.events_from_nodes`.
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_event_codec.py::test_events_from_nodes_projects_supernode_to_global_event -v`
+Expected: FAIL — `ImportError: cannot import name 'Event' from 'event_model'` raised
+inside `gae.events_from_nodes`.
 
 - [ ] **Step 3: Update gae.py to construct SuperNode**
 
-Edit `customized_areal/tree_search/agents/gae.py`. Replace the `events_from_nodes` function (lines 105-138):
+Edit `customized_areal/tree_search/agents/gae.py`. Replace the `events_from_nodes`
+function (lines 105-138):
 
 ```python
 def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
@@ -1225,8 +1310,10 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_event_codec.py customized_areal/tree_search/tests/test_gae.py -v`
-Expected: PASS — `events_from_nodes_parity_with_old_logic` and the new projection test both pass.
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_event_codec.py customized_areal/tree_search/tests/test_gae.py -v`
+Expected: PASS — `events_from_nodes_parity_with_old_logic` and the new projection test
+both pass.
 
 - [ ] **Step 5: Commit**
 
@@ -1239,14 +1326,20 @@ SuperNode's identity fields (node_id/agent_id/issue_id/task_id/value/
 process_reward/outcome_reward), so the projection still works."
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: SuperNodeAssembler + Multica data structures (new module)
 
-**Why:** This is the core new module of Phase 1a. `SuperNodeAssembler.assemble` implements the 6-step algorithm from spec §5.4: resolve session→agent_run→nodes, slice by turn range, construct SuperNodes, build DAG from edges, set the unified `parent_node_id` chain with explicit precedence, identify the unique sink. Pure, torch-free, no I/O.
+**Why:** This is the core new module of Phase 1a. `SuperNodeAssembler.assemble`
+implements the 6-step algorithm from spec §5.4: resolve session→agent_run→nodes, slice
+by turn range, construct SuperNodes, build DAG from edges, set the unified
+`parent_node_id` chain with explicit precedence, identify the unique sink. Pure,
+torch-free, no I/O.
 
 **Files:**
+
 - Create: `customized_areal/tree_search/agents/supernode_assembler.py`
+
 - Test: `customized_areal/tree_search/tests/test_supernode_assembler.py`
 
 - [ ] **Step 1: Write the failing test — the 3-segment planner→worker→synthesizer DAG**
@@ -1645,7 +1738,8 @@ def test_assemble_rejects_dangling_agent_run_id():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_supernode_assembler.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'customized_areal.tree_search.agents.supernode_assembler'`.
+Expected: FAIL —
+`ModuleNotFoundError: No module named 'customized_areal.tree_search.agents.supernode_assembler'`.
 
 - [ ] **Step 3: Implement SuperNodeAssembler + Multica data structures**
 
@@ -1973,14 +2067,22 @@ MENTION is topology-only), identify the unique sink for root_terminal.
 Pure, torch-free, no I/O. All validation raises DAGError."
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: Unified MCTSTreeStore — trajectories holds SuperNodes
 
-**Why:** The tree store currently holds `list[Node]` per query. After unification, it holds `list[SuperNode]` (each carrying its own `nodes`). MCTS stats stay per-Node (keyed by `node_id`). The dual indices let `get_node` walk into a SuperNode's `nodes` and `get_super_node` look up by UUID. `backup_episode_terminal` / `backup_path_returns` walk the unified `parent_node_id` chain unchanged — the cross-SuperNode and cross-agent links are already set by the assembler, so the walk transparently crosses boundaries.
+**Why:** The tree store currently holds `list[Node]` per query. After unification, it
+holds `list[SuperNode]` (each carrying its own `nodes`). MCTS stats stay per-Node (keyed
+by `node_id`). The dual indices let `get_node` walk into a SuperNode's `nodes` and
+`get_super_node` look up by UUID. `backup_episode_terminal` / `backup_path_returns` walk
+the unified `parent_node_id` chain unchanged — the cross-SuperNode and cross-agent links
+are already set by the assembler, so the walk transparently crosses boundaries.
 
 **Files:**
-- Modify: `customized_areal/tree_search/core/tree_store.py:251-843` (MCTSTreeStore class)
+
+- Modify: `customized_areal/tree_search/core/tree_store.py:251-843` (MCTSTreeStore
+  class)
+
 - Test: `customized_areal/tree_search/tests/test_tree_store_super.py`
 
 - [ ] **Step 1: Write the failing test — insert_super_batch + cross-SuperNode backup**
@@ -2066,11 +2168,14 @@ def test_backup_episode_terminal_walks_across_super_boundary():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_tree_store_super.py -v`
-Expected: FAIL — `MCTSTreeStore` has no `insert_super_batch` method; `trajectories` is `dict[str, list[Node]]` not `dict[str, list[SuperNode]]`.
+Expected: FAIL — `MCTSTreeStore` has no `insert_super_batch` method; `trajectories` is
+`dict[str, list[Node]]` not `dict[str, list[SuperNode]]`.
 
 - [ ] **Step 3: Refactor MCTSTreeStore to hold SuperNodes**
 
-Edit `customized_areal/tree_search/core/tree_store.py`. Replace the `MCTSTreeStore.__init__` (lines 260-287) and the indexing/insert/backup methods. The full new class body (replace lines 251-843):
+Edit `customized_areal/tree_search/core/tree_store.py`. Replace the
+`MCTSTreeStore.__init__` (lines 260-287) and the indexing/insert/backup methods. The
+full new class body (replace lines 251-843):
 
 ```python
 class MCTSTreeStore:
@@ -2513,8 +2618,10 @@ Expected: PASS
 
 - [ ] **Step 5: Run the existing tree_store tests to verify no regression**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_return_to_go_backup.py -v`
-Expected: these tests use `insert_batch` which no longer exists. They will FAIL — that's expected; Task 7 updates them. Move on.
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_return_to_go_backup.py -v`
+Expected: these tests use `insert_batch` which no longer exists. They will FAIL — that's
+expected; Task 7 updates them. Move on.
 
 - [ ] **Step 6: Commit**
 
@@ -2532,20 +2639,29 @@ set by SuperNodeAssembler. Per-Node MCTS stats (visit_counts, q_values,
 loo, judge scores, values, variances) unchanged."
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: Update existing tree_store tests to use insert_super_batch
 
-**Why:** Tasks 1-6 left `test_tree_store_backup.py` / `test_tree_store_loo.py` / `test_return_to_go_backup.py` calling the removed `insert_batch(list[Node])`. Update them to wrap Nodes in a leaf SuperNode and call `insert_super_batch`. Single-agent behavior is unchanged after wrapping.
+**Why:** Tasks 1-6 left `test_tree_store_backup.py` / `test_tree_store_loo.py` /
+`test_return_to_go_backup.py` calling the removed `insert_batch(list[Node])`. Update
+them to wrap Nodes in a leaf SuperNode and call `insert_super_batch`. Single-agent
+behavior is unchanged after wrapping.
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tests/test_tree_store_backup.py`
+
 - Modify: `customized_areal/tree_search/tests/test_tree_store_loo.py`
+
 - Modify: `customized_areal/tree_search/tests/test_return_to_go_backup.py`
 
 - [ ] **Step 1: Update test_tree_store_backup.py**
 
-Add a helper at the top of `customized_areal/tree_search/tests/test_tree_store_backup.py` that wraps Nodes in a single leaf SuperNode, and replace `insert_batch(nodes)` with `insert_super_batch([_wrap_leaf(nodes)], query_id="q")`:
+Add a helper at the top of
+`customized_areal/tree_search/tests/test_tree_store_backup.py` that wraps Nodes in a
+single leaf SuperNode, and replace `insert_batch(nodes)` with
+`insert_super_batch([_wrap_leaf(nodes)], query_id="q")`:
 
 ```python
 from customized_areal.tree_search.agents.execution_dag import SuperNode
@@ -2562,15 +2678,21 @@ def _wrap_leaf(nodes, *, super_id="s-leaf"):
     )
 ```
 
-Then replace every `store.insert_batch(nodes)` call with `store.insert_super_batch([_wrap_leaf(nodes)], query_id="q")`. The test assertions (visit counts, q-values, total values) are unchanged because the backup algorithm walks `parent_node_id` the same way.
+Then replace every `store.insert_batch(nodes)` call with
+`store.insert_super_batch([_wrap_leaf(nodes)], query_id="q")`. The test assertions
+(visit counts, q-values, total values) are unchanged because the backup algorithm walks
+`parent_node_id` the same way.
 
-- [ ] **Step 2: Update test_tree_store_loo.py and test_return_to_go_backup.py the same way**
+- [ ] **Step 2: Update test_tree_store_loo.py and test_return_to_go_backup.py the same
+  way**
 
-Apply the same `_wrap_leaf` helper and `insert_batch` → `insert_super_batch` replacement to both files. The LOO and return-to-go test assertions are unchanged.
+Apply the same `_wrap_leaf` helper and `insert_batch` → `insert_super_batch` replacement
+to both files. The LOO and return-to-go test assertions are unchanged.
 
 - [ ] **Step 3: Run all tree_store tests to verify they pass**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_return_to_go_backup.py customized_areal/tree_search/tests/test_tree_store_super.py -v`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_tree_store_backup.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_return_to_go_backup.py customized_areal/tree_search/tests/test_tree_store_super.py -v`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
@@ -2584,14 +2706,21 @@ wrapping the Nodes and call insert_super_batch. Backup assertions unchanged
 (the algorithm walks parent_node_id identically)."
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: Update single-agent workflow path to wrap Nodes in a leaf SuperNode
 
-**Why:** `customized_grouped_workflow.py` calls `self.tree_store.insert_batch(fresh_nodes)` (lines 1890, 1916). After Task 6, `insert_batch` is gone. Wrap the single-agent `fresh_nodes` in a leaf SuperNode before insert — this preserves today's behavior (one SuperNode per insert call, no DAG edges, no comm events) while exercising the unified data model. The multi-agent coordinator path is Phase 1b/2; for now the workflow declares the params but doesn't use them.
+**Why:** `customized_grouped_workflow.py` calls
+`self.tree_store.insert_batch(fresh_nodes)` (lines 1890, 1916). After Task 6,
+`insert_batch` is gone. Wrap the single-agent `fresh_nodes` in a leaf SuperNode before
+insert — this preserves today's behavior (one SuperNode per insert call, no DAG edges,
+no comm events) while exercising the unified data model. The multi-agent coordinator
+path is Phase 1b/2; for now the workflow declares the params but doesn't use them.
 
 **Files:**
-- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py:650-720` (constructor), `:1890`, `:1916` (insert_batch call sites)
+
+- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py:650-720`
+  (constructor), `:1890`, `:1916` (insert_batch call sites)
 
 - [ ] **Step 1: Write the failing test — single-agent insert still works**
 
@@ -2615,14 +2744,17 @@ def test_single_agent_leaf_super_preserves_backup_behavior():
     assert store.get_q_value("n1") == 1.0
 ```
 
-- [ ] **Step 2: Run test to verify it passes (it should — Task 6 already implemented this)**
+- [ ] **Step 2: Run test to verify it passes (it should — Task 6 already implemented
+  this)**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_tree_store_super.py::test_single_agent_leaf_super_preserves_backup_behavior -v`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_tree_store_super.py::test_single_agent_leaf_super_preserves_backup_behavior -v`
 Expected: PASS
 
 - [ ] **Step 3: Update the workflow's insert_batch call sites**
 
-Edit `customized_areal/tree_search/core/customized_grouped_workflow.py`. Add a helper near the top of the file (after the existing imports, around line 30):
+Edit `customized_areal/tree_search/core/customized_grouped_workflow.py`. Add a helper
+near the top of the file (after the existing imports, around line 30):
 
 ```python
 def _wrap_leaf_super(nodes: list[Node], *, super_id: str = "") -> "SuperNode":
@@ -2649,6 +2781,7 @@ def _wrap_leaf_super(nodes: list[Node], *, super_id: str = "") -> "SuperNode":
 Replace the two `insert_batch` call sites:
 
 Line 1890:
+
 ```python
                 self.tree_store.insert_super_batch(
                     [_wrap_leaf_super(fresh_nodes)], query_id=query_id
@@ -2656,17 +2789,22 @@ Line 1890:
 ```
 
 Line 1916:
+
 ```python
                 self.tree_store.insert_super_batch(
                     [_wrap_leaf_super(fresh_nodes)], query_id=query_id, backup=not defer_backup
                 )
 ```
 
-Also update the discard path (around line 1890) — the `set_discarded` calls iterate `all_nodes` and use `node.node_id`, which still works because the Nodes are now inside the leaf SuperNode but their `node_id` is unchanged.
+Also update the discard path (around line 1890) — the `set_discarded` calls iterate
+`all_nodes` and use `node.node_id`, which still works because the Nodes are now inside
+the leaf SuperNode but their `node_id` is unchanged.
 
-- [ ] **Step 4: Add multica_dag_enabled + multica_dag_client params (declared, not yet used)**
+- [ ] **Step 4: Add multica_dag_enabled + multica_dag_client params (declared, not yet
+  used)**
 
-Edit the constructor `__init__` (around line 650). Add the two new params after the existing params:
+Edit the constructor `__init__` (around line 650). Add the two new params after the
+existing params:
 
 ```python
     def __init__(
@@ -2681,7 +2819,8 @@ Edit the constructor `__init__` (around line 650). Add the two new params after 
         self._coordinator = None  # Phase 1b/2 wires TeamRolloutCoordinator
 ```
 
-(Do NOT add the dispatch in `arun_episode` yet — that's Phase 1b/2. For now, `multica_dag_enabled` is accepted but ignored; the single-agent path runs unchanged.)
+(Do NOT add the dispatch in `arun_episode` yet — that's Phase 1b/2. For now,
+`multica_dag_enabled` is accepted but ignored; the single-agent path runs unchanged.)
 
 - [ ] **Step 5: Run the workflow integration tests**
 
@@ -2701,15 +2840,19 @@ multica_dag_enabled + multica_dag_client params (Phase 1b/2 will wire
 the coordinator dispatch)."
 ```
 
----
+______________________________________________________________________
 
 ## Task 9: Update remaining test files — rename AgentRunNode → SuperNode
 
-**Why:** `test_dag_backup.py`, `test_session_map.py`, and `test_e2e_critic_gae.py` still import and construct `AgentRunNode`. After Task 1, that name is gone. Pure rename.
+**Why:** `test_dag_backup.py`, `test_session_map.py`, and `test_e2e_critic_gae.py` still
+import and construct `AgentRunNode`. After Task 1, that name is gone. Pure rename.
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tests/test_dag_backup.py`
+
 - Modify: `customized_areal/tree_search/tests/test_session_map.py`
+
 - Modify: `customized_areal/tree_search/tests/test_e2e_critic_gae.py`
 
 - [ ] **Step 1: Update test_dag_backup.py**
@@ -2738,7 +2881,8 @@ def _node(node_id: str) -> SuperNode:
 
 - [ ] **Step 2: Update test_session_map.py**
 
-Edit `customized_areal/tree_search/tests/test_session_map.py`. Replace imports and `_run`:
+Edit `customized_areal/tree_search/tests/test_session_map.py`. Replace imports and
+`_run`:
 
 ```python
 from customized_areal.tree_search.agents.execution_dag import (
@@ -2760,7 +2904,9 @@ def _run(node_id: str, *, session_id: str | None = None) -> SuperNode:
 
 - [ ] **Step 3: Update test_e2e_critic_gae.py**
 
-Edit `customized_areal/tree_search/tests/test_e2e_critic_gae.py`. Replace the `AgentRunNode` import with `SuperNode`, and replace the two construction sites (lines 59-60):
+Edit `customized_areal/tree_search/tests/test_e2e_critic_gae.py`. Replace the
+`AgentRunNode` import with `SuperNode`, and replace the two construction sites (lines
+59-60):
 
 ```python
 from customized_areal.tree_search.agents.execution_dag import (
@@ -2774,7 +2920,8 @@ from customized_areal.tree_search.agents.execution_dag import (
 
 - [ ] **Step 4: Run all three test files**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_dag_backup.py customized_areal/tree_search/tests/test_session_map.py customized_areal/tree_search/tests/test_e2e_critic_gae.py -v`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_dag_backup.py customized_areal/tree_search/tests/test_session_map.py customized_areal/tree_search/tests/test_e2e_critic_gae.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -2787,18 +2934,23 @@ Pure rename; logic unchanged. These tests construct SuperNodes directly
 (or via the codec) and exercise the same DAG / session-map / e2e behavior."
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Update agents/__init__.py exports
 
-**Why:** `agents/__init__.py` exports `Event`, `AgentRunNode`, `dag_to_events`, `events_to_dag` — all gone after Tasks 1-3. Update to export `SuperNode`, `dag_to_supernodes`, `supernodes_to_dag`, `SuperNodeAssembler`, `SegmentSpec`, `EdgeSpec`, `TeamEnvSnapshot`, `DagResult`.
+**Why:** `agents/__init__.py` exports `Event`, `AgentRunNode`, `dag_to_events`,
+`events_to_dag` — all gone after Tasks 1-3. Update to export `SuperNode`,
+`dag_to_supernodes`, `supernodes_to_dag`, `SuperNodeAssembler`, `SegmentSpec`,
+`EdgeSpec`, `TeamEnvSnapshot`, `DagResult`.
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/__init__.py`
 
 - [ ] **Step 1: Write the failing test — public exports**
 
-Append to `customized_areal/tree_search/tests/test_event_codec.py` (or create `customized_areal/tree_search/tests/test_agents_exports.py`):
+Append to `customized_areal/tree_search/tests/test_event_codec.py` (or create
+`customized_areal/tree_search/tests/test_agents_exports.py`):
 
 ```python
 def test_agents_package_exports_supernode_api():
@@ -2833,12 +2985,14 @@ def test_agents_package_does_not_export_old_names():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_agents_exports.py -v` (or `test_event_codec.py::test_agents_package_exports_supernode_api`)
-Expected: FAIL — `SuperNodeAssembler`, `SegmentSpec`, etc. not in `__all__`.
+Run: `uv run pytest customized_areal/tree_search/tests/test_agents_exports.py -v` (or
+`test_event_codec.py::test_agents_package_exports_supernode_api`) Expected: FAIL —
+`SuperNodeAssembler`, `SegmentSpec`, etc. not in `__all__`.
 
 - [ ] **Step 3: Update agents/__init__.py exports**
 
-Edit `customized_areal/tree_search/agents/__init__.py`. Replace the `event_codec` and `event_model` imports:
+Edit `customized_areal/tree_search/agents/__init__.py`. Replace the `event_codec` and
+`event_model` imports:
 
 ```python
 from customized_areal.tree_search.agents.event_codec import (
@@ -2894,7 +3048,10 @@ __all__ = [
     # ... (keep all other existing exports: environment, verifier, etc.)
 ```
 
-Remove `Event`, `AgentRunNode`, `dag_to_events`, `events_to_dag` from `__all__`. Keep every other existing export (environment, verifier, agentic_verifier, harvest, critic_observation, gae, branch_selection, dag_advantage, rl_session, integration) unchanged.
+Remove `Event`, `AgentRunNode`, `dag_to_events`, `events_to_dag` from `__all__`. Keep
+every other existing export (environment, verifier, agentic_verifier, harvest,
+critic_observation, gae, branch_selection, dag_advantage, rl_session, integration)
+unchanged.
 
 - [ ] **Step 4: Run the exports test**
 
@@ -2903,7 +3060,8 @@ Expected: PASS
 
 - [ ] **Step 5: Run the full agents/ test suite to verify no import breakage**
 
-Run: `uv run pytest customized_areal/tree_search/tests/ -v -k "not slow" --ignore=customized_areal/tree_search/tests/test_scale_check.py`
+Run:
+`uv run pytest customized_areal/tree_search/tests/ -v -k "not slow" --ignore=customized_areal/tree_search/tests/test_scale_check.py`
 Expected: PASS — all Phase 1a tests green.
 
 - [ ] **Step 6: Commit**
@@ -2917,13 +3075,19 @@ dag_to_supernodes, supernodes_to_dag, SuperNodeAssembler, SegmentSpec,
 EdgeSpec, TeamEnvSnapshot, DagResult. All other exports unchanged."
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: End-to-end smoke test — SuperNode round-trip through the unified store
 
-**Why:** Tasks 1-10 each verify one slice. This task adds one end-to-end test that exercises the full Phase 1a data flow: build a 3-segment DAG via `SuperNodeAssembler`, insert into `MCTSTreeStore`, run `backup_episode_terminal` from the root terminal, and verify credit flows along the unified `parent_node_id` chain across all three segments (planner → worker → synthesizer). This is the test that would have caught a regression in the cross-boundary parent linkage or the backup walk.
+**Why:** Tasks 1-10 each verify one slice. This task adds one end-to-end test that
+exercises the full Phase 1a data flow: build a 3-segment DAG via `SuperNodeAssembler`,
+insert into `MCTSTreeStore`, run `backup_episode_terminal` from the root terminal, and
+verify credit flows along the unified `parent_node_id` chain across all three segments
+(planner → worker → synthesizer). This is the test that would have caught a regression
+in the cross-boundary parent linkage or the backup walk.
 
 **Files:**
+
 - Create: `customized_areal/tree_search/tests/test_supernode_e2e.py`
 
 - [ ] **Step 1: Write the e2e test**
@@ -3078,33 +3242,41 @@ along the unified parent_node_id chain across all three segments
 cross-boundary parent linkage or the backup walk."
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: Full-suite regression run + Phase 1a wrap
 
-**Why:** Verify nothing else broke. The agents/ test suite has many tests that transitively import `execution_dag` / `event_model` / `event_codec` / `tree_store` — any rename miss will surface here.
+**Why:** Verify nothing else broke. The agents/ test suite has many tests that
+transitively import `execution_dag` / `event_model` / `event_codec` / `tree_store` — any
+rename miss will surface here.
 
 **Files:** None (verification only).
 
 - [ ] **Step 1: Run the full agents/ + tree_search test suite**
 
-Run: `uv run pytest customized_areal/tree_search/ -v --ignore=customized_areal/tree_search/tests/test_scale_check.py -x`
-Expected: PASS — all tests green. If any test fails on an `AgentRunNode` / `Event` / `dag_to_events` / `events_to_dag` / `insert_batch` reference, grep for the stale name and update it:
+Run:
+`uv run pytest customized_areal/tree_search/ -v --ignore=customized_areal/tree_search/tests/test_scale_check.py -x`
+Expected: PASS — all tests green. If any test fails on an `AgentRunNode` / `Event` /
+`dag_to_events` / `events_to_dag` / `insert_batch` reference, grep for the stale name
+and update it:
 
 ```bash
 grep -rnE "AgentRunNode|dag_to_events|events_to_dag|\bEvent\b|insert_batch" customized_areal/tree_search/ --include="*.py"
 ```
 
-Update each stale reference (the rename is mechanical; use the same patterns as Tasks 1-9).
+Update each stale reference (the rename is mechanical; use the same patterns as Tasks
+1-9).
 
 - [ ] **Step 2: Run ruff on the modified files**
 
-Run: `uv run ruff check customized_areal/tree_search/agents/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/`
+Run:
+`uv run ruff check customized_areal/tree_search/agents/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/`
 Expected: no errors. Fix any lint findings (unused imports, line length).
 
 - [ ] **Step 3: Run ruff format**
 
-Run: `uv run ruff format customized_areal/tree_search/agents/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/`
+Run:
+`uv run ruff format customized_areal/tree_search/agents/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/`
 Expected: files formatted.
 
 - [ ] **Step 4: Final commit (if any cleanup was needed)**
@@ -3119,35 +3291,42 @@ git commit -m "chore: Phase 1a cleanup — fix stale references + format"
 - [ ] **Step 5: Verify the Phase 1a scope is complete**
 
 Checklist (all should be true after Tasks 1-12):
+
 - `Event` class is gone; `SuperNode` is the single type for linear-log + DAG-node views.
 - `AgentRunNode` is gone; `ExecutionDAG` holds `SuperNode`s.
 - `Node` is torch-lazy; `agents/` imports cleanly without torch.
-- `MCTSTreeStore.trajectories: dict[str, list[SuperNode]]`; `insert_super_batch` + dual indices.
+- `MCTSTreeStore.trajectories: dict[str, list[SuperNode]]`; `insert_super_batch` + dual
+  indices.
 - `backup_episode_terminal` walks `parent_node_id` across SuperNode/agent boundaries.
 - `SuperNodeAssembler.assemble` implements the 6-step algorithm from spec §5.4.
 - `agents/__init__.py` exports the new API; old names removed.
 - Single-agent workflow path wraps Nodes in a leaf SuperNode; behavior unchanged.
-- `multica_dag_enabled` + `multica_dag_client` params declared (Phase 1b/2 will wire the dispatch).
+- `multica_dag_enabled` + `multica_dag_client` params declared (Phase 1b/2 will wire the
+  dispatch).
 - All tests green.
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage (Phase 1a scope only — Phase 1b/2 is a separate plan):**
+
 - §4.1 SuperNode dataclass → Task 1 ✓
 - §4.2 Serialization (`to_dict`/`from_dict`) → Task 3 Step 4 ✓
 - §4.3 Node torch-lazy → Task 0 ✓
 - §4.4 Unified MCTSTreeStore → Task 6 ✓
-- §5.1 Multica data structures (SegmentSpec/EdgeSpec/TeamEnvSnapshot/DagResult) → Task 5 ✓
+- §5.1 Multica data structures (SegmentSpec/EdgeSpec/TeamEnvSnapshot/DagResult) → Task 5
+  ✓
 - §5.2 + §5.4 SuperNodeAssembler.assemble → Task 5 ✓
 - §5.5 Validation summary → Task 5 (every `DAGError` condition in §5.5 has a test) ✓
-- §11 Phase 1a test items (existing tests updated; new SuperNodeAssembler unit tests) → Tasks 5, 11 ✓
+- §11 Phase 1a test items (existing tests updated; new SuperNodeAssembler unit tests) →
+  Tasks 5, 11 ✓
 - §11 Phase 1a "update single-agent path to wrap Nodes in a leaf SuperNode" → Task 8 ✓
 - §11 Phase 1a "agents/__init__.py update exports" → Task 10 ✓
 - §11 Phase 1a "gae.py rename" → Task 4 ✓
 
 **Out of scope (Phase 1b/2, separate plan):**
+
 - `MulticaDagClient` (Protocol + HTTP impl)
 - `TeamRolloutCoordinator`
 - `RLSessionRewardWriter` concrete adapter
@@ -3156,14 +3335,25 @@ Checklist (all should be true after Tasks 1-12):
 - End-to-end multi-agent test with a fake `MulticaDagClient`
 
 **Type consistency check:**
-- `SuperNode.node_id: str` (UUID4 in assembly; user-supplied in tests) — consistent across Tasks 1, 5, 6, 11.
-- `SuperNode.nodes: list` (typed loose to avoid torch import; holds `Node` at runtime) — consistent.
-- `SuperNode.terminal_node` / `branch_node_id` properties — defined in Task 1, used in Tasks 5, 11.
-- `SuperNode.to_dict` / `from_dict` / `_coerce_edges` / `_coerce_edge_type` — defined in Task 3 Step 4, used in Task 3 test.
-- `SuperNodeAssembler.assemble(sessions_nodes, dag_result) -> (list[SuperNode], ExecutionDAG, str)` — signature matches across Task 5 (impl) and Task 11 (e2e).
-- `MCTSTreeStore.insert_super_batch(supers, backup, query_id)` — consistent across Tasks 6, 7, 8, 11.
-- `MCTSTreeStore.get_super_node(uuid)` / `get_node(node_id)` — consistent across Tasks 6, 11.
-- `dag_to_supernodes` / `supernodes_to_dag` / `replay_prefix_for` — consistent across Tasks 3, 10.
-- `SegmentSpec` / `EdgeSpec` / `TeamEnvSnapshot` / `DagResult` — consistent across Tasks 5, 11.
 
-**Placeholder scan:** No TBD/TODO/FIXME. Every code step shows the actual code. No "similar to Task N" — each task repeats the code the engineer needs.
+- `SuperNode.node_id: str` (UUID4 in assembly; user-supplied in tests) — consistent
+  across Tasks 1, 5, 6, 11.
+- `SuperNode.nodes: list` (typed loose to avoid torch import; holds `Node` at runtime) —
+  consistent.
+- `SuperNode.terminal_node` / `branch_node_id` properties — defined in Task 1, used in
+  Tasks 5, 11.
+- `SuperNode.to_dict` / `from_dict` / `_coerce_edges` / `_coerce_edge_type` — defined in
+  Task 3 Step 4, used in Task 3 test.
+- `SuperNodeAssembler.assemble(sessions_nodes, dag_result) -> (list[SuperNode], ExecutionDAG, str)`
+  — signature matches across Task 5 (impl) and Task 11 (e2e).
+- `MCTSTreeStore.insert_super_batch(supers, backup, query_id)` — consistent across Tasks
+  6, 7, 8, 11.
+- `MCTSTreeStore.get_super_node(uuid)` / `get_node(node_id)` — consistent across Tasks
+  6, 11.
+- `dag_to_supernodes` / `supernodes_to_dag` / `replay_prefix_for` — consistent across
+  Tasks 3, 10.
+- `SegmentSpec` / `EdgeSpec` / `TeamEnvSnapshot` / `DagResult` — consistent across Tasks
+  5, 11.
+
+**Placeholder scan:** No TBD/TODO/FIXME. Every code step shows the actual code. No
+"similar to Task N" — each task repeats the code the engineer needs.

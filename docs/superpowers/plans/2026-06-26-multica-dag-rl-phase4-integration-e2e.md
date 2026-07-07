@@ -1,42 +1,66 @@
 # Phase 4: Integration + Lazy Branching + E2E — Implementation Plan (Python)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wire the DAG RL components together — bridge/session wiring, verifier-driven reward replacing the constant `1.0`, lazy branching on candidate selection, branch cleanup, and end-to-end validation at `group_size=2` plus a separate scale check.
+**Goal:** Wire the DAG RL components together — bridge/session wiring, verifier-driven
+reward replacing the constant `1.0`, lazy branching on candidate selection, branch
+cleanup, and end-to-end validation at `group_size=2` plus a separate scale check.
 
-**Architecture:** The `customized_grouped_workflow.py` already has `_run_fresh_episode`, `select_branch_candidate`, `_prepare_branch_task`, and `_cleanup_branch`. This phase extends them: `_prepare_branch_task` calls `ForkableEnvironment.snapshot` + `ForkIssueSubtree` (via HTTP) + `agent_start_branch` with transcript-prefix replay and no `PriorSessionID`. A new verifier-driven reward path replaces the constant `1.0` — the verifier runs at run finalization and the result is written to the RL session via `rl_set_reward` before `rl_end_session`. `_cleanup_branch` deletes the forked Multica issue + sandbox in addition to the existing sandbox cleanup.
+**Architecture:** The `customized_grouped_workflow.py` already has `_run_fresh_episode`,
+`select_branch_candidate`, `_prepare_branch_task`, and `_cleanup_branch`. This phase
+extends them: `_prepare_branch_task` calls `ForkableEnvironment.snapshot` +
+`ForkIssueSubtree` (via HTTP) + `agent_start_branch` with transcript-prefix replay and
+no `PriorSessionID`. A new verifier-driven reward path replaces the constant `1.0` — the
+verifier runs at run finalization and the result is written to the RL session via
+`rl_set_reward` before `rl_end_session`. `_cleanup_branch` deletes the forked Multica
+issue + sandbox in addition to the existing sandbox cleanup.
 
-**Tech Stack:** Python 3.12+ · `httpx` (for the Multica fork HTTP call) · `pytest` + `pytest-asyncio` · existing `customized_areal` workflow + db_bridge channels
+**Tech Stack:** Python 3.12+ · `httpx` (for the Multica fork HTTP call) · `pytest` +
+`pytest-asyncio` · existing `customized_areal` workflow + db_bridge channels
 
-**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.1 (snapshot-at-frontier), §3.3 (concurrency semaphore), §5 Phase 4, §6 (e2e at group_size=2)
+**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.1
+(snapshot-at-frontier), §3.3 (concurrency semaphore), §5 Phase 4, §6 (e2e at
+group_size=2)
 
-**Project rules:** `backend/areal/CLAUDE.md`, `AGENTS.md`. `.claude/rules/code-quality.md` — "Paired operations stay together" (snapshot + fork + branch must all succeed or all roll back).
+**Project rules:** `backend/areal/CLAUDE.md`, `AGENTS.md`.
+`.claude/rules/code-quality.md` — "Paired operations stay together" (snapshot + fork +
+branch must all succeed or all roll back).
 
-**Dependencies:** Phases 0, 1, 2, 3 complete. The Multica fork HTTP endpoint (`POST /api/issues/{id}/fork`) and Fleet snapshot/fork endpoints from Phase 1 must be live.
+**Dependencies:** Phases 0, 1, 2, 3 complete. The Multica fork HTTP endpoint
+(`POST /api/issues/{id}/fork`) and Fleet snapshot/fork endpoints from Phase 1 must be
+live.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `customized_areal/tree_search/dag/integration.py` (create) | `MulticaIssueForker` — HTTP client for `POST /api/issues/{id}/fork` + `DELETE`; `BranchMaterializer` — orchestrates snapshot + fork + agent_start_branch |
-| `customized_areal/tree_search/dag/rl_session.py` (create) | `RLSessionRewardWriter` — writes verifier-driven reward to the RL session via `rl_set_reward` before `rl_end_session` |
-| `customized_areal/tree_search/core/customized_grouped_workflow.py` (modify) | Wire `BranchMaterializer` into `_prepare_branch_task`; extend `_cleanup_branch` to delete forked issue; call verifier at finalization |
-| `customized_areal/tree_search/dag/test_integration.py` (create) | Tests for `MulticaIssueForker` (mocked httpx) and `BranchMaterializer` (fake env + fake forker) |
-| `customized_areal/tree_search/dag/test_rl_session.py` (create) | Tests for `RLSessionRewardWriter` (mocked bridge) |
-| `customized_areal/tree_search/dag/test_workflow_integration.py` (create) | Tests for the extended `_prepare_branch_task` and `_cleanup_branch` |
-| `customized_areal/tree_search/dag/__init__.py` (modify) | Export new types |
+| File                                                                        | Responsibility                                                                                                                                           |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `customized_areal/tree_search/dag/integration.py` (create)                  | `MulticaIssueForker` — HTTP client for `POST /api/issues/{id}/fork` + `DELETE`; `BranchMaterializer` — orchestrates snapshot + fork + agent_start_branch |
+| `customized_areal/tree_search/dag/rl_session.py` (create)                   | `RLSessionRewardWriter` — writes verifier-driven reward to the RL session via `rl_set_reward` before `rl_end_session`                                    |
+| `customized_areal/tree_search/core/customized_grouped_workflow.py` (modify) | Wire `BranchMaterializer` into `_prepare_branch_task`; extend `_cleanup_branch` to delete forked issue; call verifier at finalization                    |
+| `customized_areal/tree_search/dag/test_integration.py` (create)             | Tests for `MulticaIssueForker` (mocked httpx) and `BranchMaterializer` (fake env + fake forker)                                                          |
+| `customized_areal/tree_search/dag/test_rl_session.py` (create)              | Tests for `RLSessionRewardWriter` (mocked bridge)                                                                                                        |
+| `customized_areal/tree_search/dag/test_workflow_integration.py` (create)    | Tests for the extended `_prepare_branch_task` and `_cleanup_branch`                                                                                      |
+| `customized_areal/tree_search/dag/__init__.py` (modify)                     | Export new types                                                                                                                                         |
 
----
+______________________________________________________________________
 
 ## Task 11: Bridge/session wiring — agent custom_env routes LLM via db_bridge
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/rl_session.py`
 - Create: `customized_areal/tree_search/dag/test_rl_session.py`
 
-**Rationale:** Per the design §4, the agent's `custom_env` must route LLM calls through `db_bridge` (`proxy_base_url` / `proxy_api_key`), and the agent run must map to an RL session (`rl_start_session` / `rl_set_reward` / `rl_end_session`). This task ships the `RLSessionRewardWriter` that writes the verifier-driven reward at session end. The actual `set_reward(1.0)` call site lives in le-agent (out of this repo); this writer is what le-agent's finalizer calls into, replacing the constant `1.0`.
+**Rationale:** Per the design §4, the agent's `custom_env` must route LLM calls through
+`db_bridge` (`proxy_base_url` / `proxy_api_key`), and the agent run must map to an RL
+session (`rl_start_session` / `rl_set_reward` / `rl_end_session`). This task ships the
+`RLSessionRewardWriter` that writes the verifier-driven reward at session end. The
+actual `set_reward(1.0)` call site lives in le-agent (out of this repo); this writer is
+what le-agent's finalizer calls into, replacing the constant `1.0`.
 
 - [ ] **Step 1: Write the failing test for RLSessionRewardWriter**
 
@@ -106,7 +130,8 @@ async def test_rl_session_writer_skips_end_on_set_reward_failure() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_rl_session.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_rl_session.py -v`
 Expected: FAIL — `RLSessionRewardWriter` undefined.
 
 - [ ] **Step 3: Implement RLSessionRewardWriter**
@@ -181,8 +206,8 @@ class RLSessionRewardWriter:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_rl_session.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_rl_session.py -v` Expected:
+PASS
 
 - [ ] **Step 5: Commit**
 
@@ -191,14 +216,21 @@ git add customized_areal/tree_search/dag/rl_session.py customized_areal/tree_sea
 git commit -m "feat(dag): add RLSessionRewardWriter — verifier-driven reward replaces constant 1.0"
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: Replace constant set_reward(1.0) with verifier-driven reward
 
 **Files:**
-- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py` (the finalization path)
 
-**Rationale:** The actual `set_reward(1.0)` call site is in le-agent (out of this repo). What this repo controls is the AReaL-side executor that handles `rl_set_reward` — and the verifier result must be computed and made available at the right point. This task adds a `_finalize_with_verifier` hook to the workflow that runs the verifier at run finalization and writes the reward via `RLSessionRewardWriter`. The le-agent side calls into this path instead of hardcoding `1.0`.
+- Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py` (the
+  finalization path)
+
+**Rationale:** The actual `set_reward(1.0)` call site is in le-agent (out of this repo).
+What this repo controls is the AReaL-side executor that handles `rl_set_reward` — and
+the verifier result must be computed and made available at the right point. This task
+adds a `_finalize_with_verifier` hook to the workflow that runs the verifier at run
+finalization and writes the reward via `RLSessionRewardWriter`. The le-agent side calls
+into this path instead of hardcoding `1.0`.
 
 - [ ] **Step 1: Write the failing test for the verifier-driven finalization hook**
 
@@ -260,12 +292,15 @@ async def test_workflow_finalization_writes_verifier_reward() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_workflow_finalization_writes_verifier_reward -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_workflow_finalization_writes_verifier_reward -v`
 Expected: FAIL — `TreeSearchGroupedWorkflow._finalize_with_verifier` does not exist.
 
-- [ ] **Step 3: Add the _finalize_with_verifier static method**
+- [ ] **Step 3: Add the \_finalize_with_verifier static method**
 
-In `customized_grouped_workflow.py`, add a new static method to `TreeSearchGroupedWorkflow` (place it near the other helper methods, e.g. after `_cleanup_branch`):
+In `customized_grouped_workflow.py`, add a new static method to
+`TreeSearchGroupedWorkflow` (place it near the other helper methods, e.g. after
+`_cleanup_branch`):
 
 ```python
     @staticmethod
@@ -290,7 +325,8 @@ Add `from typing import Any` if not already imported (it is, per the existing fi
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_workflow_finalization_writes_verifier_reward -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_workflow_finalization_writes_verifier_reward -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -300,15 +336,21 @@ git add customized_areal/tree_search/core/customized_grouped_workflow.py customi
 git commit -m "feat(tree-search): add verifier-driven finalization hook replacing constant set_reward(1.0)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 13: Lazy branch on candidate selection — BranchMaterializer
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/integration.py`
 - Create: `customized_areal/tree_search/dag/test_integration.py`
 
-**Rationale:** Per design §3.1, when `select_branch_candidate` returns a node, the workflow triggers `ForkableEnvironment.snapshot` + `ForkIssueSubtree` + `agent_start_branch`. Per §3.3, fork calls are gated by the concurrency semaphore (already on `FleetSandboxProvider` from Phase 0 Task 6). The `BranchMaterializer` orchestrates the three steps; if any fails, the others must roll back (paired operations stay together).
+**Rationale:** Per design §3.1, when `select_branch_candidate` returns a node, the
+workflow triggers `ForkableEnvironment.snapshot` + `ForkIssueSubtree` +
+`agent_start_branch`. Per §3.3, fork calls are gated by the concurrency semaphore
+(already on `FleetSandboxProvider` from Phase 0 Task 6). The `BranchMaterializer`
+orchestrates the three steps; if any fails, the others must roll back (paired operations
+stay together).
 
 - [ ] **Step 1: Write the failing test for MulticaIssueForker (HTTP client)**
 
@@ -382,8 +424,8 @@ async def test_multica_issue_forker_delete_calls_endpoint() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_integration.py -v`
-Expected: FAIL — `MulticaIssueForker`, `BranchMaterializer` undefined.
+Run: `uv run pytest customized_areal/tree_search/dag/test_integration.py -v` Expected:
+FAIL — `MulticaIssueForker`, `BranchMaterializer` undefined.
 
 - [ ] **Step 3: Implement MulticaIssueForker**
 
@@ -473,7 +515,8 @@ class MulticaIssueForker:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_integration.py -k "multica_issue_forker" -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_integration.py -k "multica_issue_forker" -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -483,12 +526,14 @@ git add customized_areal/tree_search/dag/integration.py customized_areal/tree_se
 git commit -m "feat(dag): add MulticaIssueForker HTTP client for issue fork endpoints"
 ```
 
----
+______________________________________________________________________
 
 ## Task 14: BranchMaterializer — orchestrate snapshot + fork + agent_start_branch
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/integration.py`
+
 - Modify: `customized_areal/tree_search/dag/test_integration.py`
 
 - [ ] **Step 1: Write the failing test for BranchMaterializer**
@@ -594,7 +639,8 @@ async def test_branch_materializer_rolls_back_on_start_branch_failure() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_integration.py -k "branch_materializer" -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_integration.py -k "branch_materializer" -v`
 Expected: FAIL — `BranchMaterializer` undefined.
 
 - [ ] **Step 3: Implement BranchMaterializer**
@@ -699,7 +745,8 @@ class BranchMaterializer:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_integration.py -k "branch_materializer" -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_integration.py -k "branch_materializer" -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -709,14 +756,15 @@ git add customized_areal/tree_search/dag/integration.py customized_areal/tree_se
 git commit -m "feat(dag): add BranchMaterializer with rollback on partial failure"
 ```
 
----
+______________________________________________________________________
 
-## Task 15: Wire BranchMaterializer into _prepare_branch_task + extend _cleanup_branch
+## Task 15: Wire BranchMaterializer into \_prepare_branch_task + extend \_cleanup_branch
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py:1143-1191`
 
-- [ ] **Step 1: Write the failing test for the extended _prepare_branch_task**
+- [ ] **Step 1: Write the failing test for the extended \_prepare_branch_task**
 
 ```python
 # customized_areal/tree_search/dag/test_workflow_integration.py (append)
@@ -765,12 +813,14 @@ async def test_prepare_branch_task_calls_branch_materializer() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_prepare_branch_task_calls_branch_materializer -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_prepare_branch_task_calls_branch_materializer -v`
 Expected: FAIL — `_materialize_cloud_branch` undefined.
 
-- [ ] **Step 3: Add the dispatch helper + extend _cleanup_branch**
+- [ ] **Step 3: Add the dispatch helper + extend \_cleanup_branch**
 
-In `customized_grouped_workflow.py`, add a new static method and modify `_cleanup_branch`:
+In `customized_grouped_workflow.py`, add a new static method and modify
+`_cleanup_branch`:
 
 ```python
     @staticmethod
@@ -798,7 +848,8 @@ In `customized_grouped_workflow.py`, add a new static method and modify `_cleanu
         return result.branch_run_id
 ```
 
-And extend `_cleanup_branch` to also delete the forked Multica issue + forked sandbox when the candidate is a cloud-env branch:
+And extend `_cleanup_branch` to also delete the forked Multica issue + forked sandbox
+when the candidate is a cloud-env branch:
 
 ```python
     async def _cleanup_branch(self, candidate: Node) -> None:
@@ -830,7 +881,8 @@ And extend `_cleanup_branch` to also delete the forked Multica issue + forked sa
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_prepare_branch_task_calls_branch_materializer -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_workflow_integration.py::test_prepare_branch_task_calls_branch_materializer -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -840,14 +892,19 @@ git add customized_areal/tree_search/core/customized_grouped_workflow.py customi
 git commit -m "feat(tree-search): wire BranchMaterializer into _prepare_branch_task and extend _cleanup_branch"
 ```
 
----
+______________________________________________________________________
 
 ## Task 16: End-to-end validation at group_size=2
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/test_e2e_branch_lifecycle.py`
 
-**Rationale:** Per design §3.3 and §6, end-to-end validation runs at `group_size=2` first against a real Multica + cloud sandbox stack. This is an integration test — it requires a live Multica server with the Phase 1 migration applied and a live Fleet proxy with snapshot/fork endpoints. The test is skipped when the env vars aren't set (per `backend/areal/CLAUDE.md` — explain skips when hardware unavailable).
+**Rationale:** Per design §3.3 and §6, end-to-end validation runs at `group_size=2`
+first against a real Multica + cloud sandbox stack. This is an integration test — it
+requires a live Multica server with the Phase 1 migration applied and a live Fleet proxy
+with snapshot/fork endpoints. The test is skipped when the env vars aren't set (per
+`backend/areal/CLAUDE.md` — explain skips when hardware unavailable).
 
 - [ ] **Step 1: Write the e2e test (skips when env not configured)**
 
@@ -939,14 +996,17 @@ git add customized_areal/tree_search/dag/test_e2e_branch_lifecycle.py
 git commit -m "test(dag): add e2e branch lifecycle smoke test at group_size=2"
 ```
 
----
+______________________________________________________________________
 
 ## Task 17: Scale check at higher group_size
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/test_scale_check.py`
 
-**Rationale:** Per design §3.3, after the e2e at `group_size=2` passes, a separate scale check runs at higher `group_size` to verify the concurrency semaphore bounds fork-storms. This is also skipped when env vars aren't set.
+**Rationale:** Per design §3.3, after the e2e at `group_size=2` passes, a separate scale
+check runs at higher `group_size` to verify the concurrency semaphore bounds
+fork-storms. This is also skipped when env vars aren't set.
 
 - [ ] **Step 1: Write the scale-check test**
 
@@ -995,8 +1055,8 @@ async def test_concurrency_semaphore_caps_forks_at_group_size_8() -> None:
 
 - [ ] **Step 2: Run the scale-check test (will skip without env)**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_scale_check.py -v`
-Expected: SKIPPED.
+Run: `uv run pytest customized_areal/tree_search/dag/test_scale_check.py -v` Expected:
+SKIPPED.
 
 - [ ] **Step 3: Commit**
 
@@ -1005,7 +1065,7 @@ git add customized_areal/tree_search/dag/test_scale_check.py
 git commit -m "test(dag): add scale check for concurrency semaphore at higher group_size"
 ```
 
----
+______________________________________________________________________
 
 ## Task 18: Full suite run + pre-commit + lint
 
@@ -1013,23 +1073,26 @@ git commit -m "test(dag): add scale check for concurrency semaphore at higher gr
 
 - [ ] **Step 1: Run the full DAG test suite**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/ -v`
-Expected: All unit tests PASS. The two e2e tests (test_e2e_branch_lifecycle, test_scale_check) SKIP.
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/ -v`
+Expected: All unit tests PASS. The two e2e tests (test_e2e_branch_lifecycle,
+test_scale_check) SKIP.
 
 - [ ] **Step 2: Run the full tree_search test suite to verify no regression**
 
-Run: `uv run pytest customized_areal/tree_search/ -v`
-Expected: All tests PASS (or SKIP for e2e).
+Run: `uv run pytest customized_areal/tree_search/ -v` Expected: All tests PASS (or SKIP
+for e2e).
 
 - [ ] **Step 3: Run ruff check on all new + modified files**
 
-Run: `uv run ruff check customized_areal/tree_search/dag/ customized_areal/tree_search/core/customized_grouped_workflow.py`
+Run:
+`uv run ruff check customized_areal/tree_search/dag/ customized_areal/tree_search/core/customized_grouped_workflow.py`
 Expected: No errors.
 
 - [ ] **Step 4: Run ruff format check**
 
-Run: `uv run ruff format --check customized_areal/tree_search/`
-Expected: No reformatting needed.
+Run: `uv run ruff format --check customized_areal/tree_search/` Expected: No
+reformatting needed.
 
 - [ ] **Step 5: Commit any fixes**
 
@@ -1038,28 +1101,42 @@ git add -A
 git commit -m "chore(dag): ruff fixes for Phase 4 integration + e2e"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage:**
+
 - Design §5 Phase 4 Task 11 (bridge/session wiring) → Task 11
 - Design §5 Phase 4 Task 12 (replace set_reward(1.0)) → Task 12
 - Design §5 Phase 4 Task 13 (lazy branch on candidate selection) → Tasks 13, 14, 15
-- Design §5 Phase 4 Task 14 (branch cleanup) → Task 15 (extends _cleanup_branch)
+- Design §5 Phase 4 Task 14 (branch cleanup) → Task 15 (extends \_cleanup_branch)
 - Design §5 Phase 4 Task 15 (e2e validation at group_size=2) → Task 16
-- Design §3.1 (snapshot-at-frontier + transcript replay) → Task 14 (BranchMaterializer passes replay_messages, drop_prior_session_id=True)
+- Design §3.1 (snapshot-at-frontier + transcript replay) → Task 14 (BranchMaterializer
+  passes replay_messages, drop_prior_session_id=True)
 - Design §3.3 (concurrency semaphore + e2e at group_size=2 + scale check) → Tasks 16, 17
-- Design §6 (e2e validation; integration tests skipped when hardware unavailable) → Tasks 16, 17
-- `.claude/rules/code-quality.md` "Paired operations stay together" → Task 14 (rollback on partial failure)
+- Design §6 (e2e validation; integration tests skipped when hardware unavailable) →
+  Tasks 16, 17
+- `.claude/rules/code-quality.md` "Paired operations stay together" → Task 14 (rollback
+  on partial failure)
 
 **Placeholder scan:**
-- Task 16 references `e2e_fixtures.py` "added in a follow-up" — this is a documented v1 limitation, not a placeholder. The test is a smoke check for v1; the fixtures module is a Phase 4 follow-up. The comment explicitly says so.
-- Task 12's note that `set_reward(1.0)` lives in le-agent (out of this repo) is a scoping note, not a placeholder — the AReaL-side hook is the integration point this repo controls.
+
+- Task 16 references `e2e_fixtures.py` "added in a follow-up" — this is a documented v1
+  limitation, not a placeholder. The test is a smoke check for v1; the fixtures module
+  is a Phase 4 follow-up. The comment explicitly says so.
+- Task 12's note that `set_reward(1.0)` lives in le-agent (out of this repo) is a
+  scoping note, not a placeholder — the AReaL-side hook is the integration point this
+  repo controls.
 
 **Type consistency:**
-- `RLBridgeClient` Protocol (`set_reward`, `end_session`) in Task 11 matches the `_RecordingBridge` / `_FakeBridgeClient` test doubles.
-- `BranchMaterializationResult(branch_run_id, forked_sandbox_id, forked_issue_id, snapshot_id)` in Task 14 matches the test assertions.
-- `BranchMaterializer.__init__(env, forker, starter)` signature consistent across Tasks 14, 15.
+
+- `RLBridgeClient` Protocol (`set_reward`, `end_session`) in Task 11 matches the
+  `_RecordingBridge` / `_FakeBridgeClient` test doubles.
+- `BranchMaterializationResult(branch_run_id, forked_sandbox_id, forked_issue_id, snapshot_id)`
+  in Task 14 matches the test assertions.
+- `BranchMaterializer.__init__(env, forker, starter)` signature consistent across Tasks
+  14, 15.
 - `_materialize_cloud_branch` static method in Task 15 matches the test call signature.
-- The extended `_cleanup_branch` reads `candidate.branch_issue_id` (added in Phase 3 Task 9) — cross-phase type consistency verified.
+- The extended `_cleanup_branch` reads `candidate.branch_issue_id` (added in Phase 3
+  Task 9) — cross-phase type consistency verified.

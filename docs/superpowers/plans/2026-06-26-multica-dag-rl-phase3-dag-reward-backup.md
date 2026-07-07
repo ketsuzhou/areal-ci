@@ -1,39 +1,57 @@
 # Phase 3: DAG Reward Backup + Advantage — Implementation Plan (Python)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the training `Node` with `process_reward` and DAG edge refs, fix `select_branch_candidate` so cloud-env nodes are selectable, and ship a DAG-aware hybrid reward backup that distributes the terminal reward along DAG edges with process signals shaping intermediate steps. The existing `TreeAdvantageComputer` is extended (not replaced) to consume per-node credit.
+**Goal:** Extend the training `Node` with `process_reward` and DAG edge refs, fix
+`select_branch_candidate` so cloud-env nodes are selectable, and ship a DAG-aware hybrid
+reward backup that distributes the terminal reward along DAG edges with process signals
+shaping intermediate steps. The existing `TreeAdvantageComputer` is extended (not
+replaced) to consume per-node credit.
 
-**Architecture:** `Node` gets three new fields: `process_reward: float`, `branch_issue_id: str`, `branch_env_snapshot_id: str`. A new `DAGBackupComputer` walks the execution DAG in topological order, distributing the terminal outcome reward along edges (weighted by per-node credit from Phase 2's `CreditAssigner`) and adding per-step process signals. The existing `TreeAdvantageComputer` GRPO normalization is preserved — the DAG backup runs first to populate `Node.process_reward`, then `TreeAdvantageComputer.compute()` includes it in the per-episode reward.
+**Architecture:** `Node` gets three new fields: `process_reward: float`,
+`branch_issue_id: str`, `branch_env_snapshot_id: str`. A new `DAGBackupComputer` walks
+the execution DAG in topological order, distributing the terminal outcome reward along
+edges (weighted by per-node credit from Phase 2's `CreditAssigner`) and adding per-step
+process signals. The existing `TreeAdvantageComputer` GRPO normalization is preserved —
+the DAG backup runs first to populate `Node.process_reward`, then
+`TreeAdvantageComputer.compute()` includes it in the per-episode reward.
 
 **Tech Stack:** Python 3.12+ · PyTorch (for tensors on `Node`) · `pytest`
 
-**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §2 decisions 6 & 8, §4 (backup.py), §5 Phase 3, §6 Testing
+**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §2
+decisions 6 & 8, §4 (backup.py), §5 Phase 3, §6 Testing
 
-**Project rules:** `backend/areal/CLAUDE.md`, `AGENTS.md`. State-machine-before-patches (from `.claude/rules/code-quality.md`) — draw the backup lifecycle before coding.
+**Project rules:** `backend/areal/CLAUDE.md`, `AGENTS.md`. State-machine-before-patches
+(from `.claude/rules/code-quality.md`) — draw the backup lifecycle before coding.
 
-**Dependencies:** Phase 0 (`ForkableEnvironment`), Phase 2 (`Verifier`, `CreditAssigner`) complete.
+**Dependencies:** Phase 0 (`ForkableEnvironment`), Phase 2 (`Verifier`,
+`CreditAssigner`) complete.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `customized_areal/tree_search/core/tree_store.py` (modify) | Extend `Node` dataclass with `process_reward`, DAG edge refs (`parent_run_ids`, `child_run_ids`), `branch_issue_id`, `branch_env_snapshot_id` |
-| `customized_areal/tree_search/core/checkpoint.py` (modify) | Serialize/deserialize the new Node fields |
-| `customized_areal/tree_search/core/customized_grouped_workflow.py` (modify) | Fix `select_branch_candidate` to accept cloud-env nodes (use `branch_env_snapshot_id` when `branch_sandbox_id` is unset) |
-| `customized_areal/tree_search/dag/backup.py` (create) | `DAGBackupComputer` — topological-order distribution of terminal reward + process signals |
-| `customized_areal/tree_search/dag/test_backup.py` (create) | Tests: structural backup over multi-node DAG, process-signal shaping, select_branch_candidate fix |
-| `customized_areal/tree_search/dag/__init__.py` (modify) | Export `DAGBackupComputer` |
+| File                                                                        | Responsibility                                                                                                                                |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `customized_areal/tree_search/core/tree_store.py` (modify)                  | Extend `Node` dataclass with `process_reward`, DAG edge refs (`parent_run_ids`, `child_run_ids`), `branch_issue_id`, `branch_env_snapshot_id` |
+| `customized_areal/tree_search/core/checkpoint.py` (modify)                  | Serialize/deserialize the new Node fields                                                                                                     |
+| `customized_areal/tree_search/core/customized_grouped_workflow.py` (modify) | Fix `select_branch_candidate` to accept cloud-env nodes (use `branch_env_snapshot_id` when `branch_sandbox_id` is unset)                      |
+| `customized_areal/tree_search/dag/backup.py` (create)                       | `DAGBackupComputer` — topological-order distribution of terminal reward + process signals                                                     |
+| `customized_areal/tree_search/dag/test_backup.py` (create)                  | Tests: structural backup over multi-node DAG, process-signal shaping, select_branch_candidate fix                                             |
+| `customized_areal/tree_search/dag/__init__.py` (modify)                     | Export `DAGBackupComputer`                                                                                                                    |
 
----
+______________________________________________________________________
 
 ## Task 9: Extend Node with process_reward + DAG edge refs + branch provenance
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/tree_store.py:24-67` (the `Node` dataclass)
-- Modify: `customized_areal/tree_search/core/checkpoint.py:183-237` (serialize/deserialize)
+
+- Modify: `customized_areal/tree_search/core/checkpoint.py:183-237`
+  (serialize/deserialize)
 
 - [ ] **Step 1: Write the failing test for the new Node fields**
 
@@ -74,12 +92,15 @@ def test_node_has_branch_provenance_fields() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_node_extensions.py -v`
-Expected: FAIL — `process_reward`, `parent_run_ids`, `child_run_ids`, `branch_issue_id`, `branch_env_snapshot_id` not on `Node`.
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_node_extensions.py -v`
+Expected: FAIL — `process_reward`, `parent_run_ids`, `child_run_ids`, `branch_issue_id`,
+`branch_env_snapshot_id` not on `Node`.
 
 - [ ] **Step 3: Add the new fields to Node**
 
-In `tree_store.py`, modify the `Node` dataclass — add after the existing `branch_sandbox_id` field (line 54):
+In `tree_store.py`, modify the `Node` dataclass — add after the existing
+`branch_sandbox_id` field (line 54):
 
 ```python
     # DAG reward backup (Phase 3)
@@ -96,7 +117,8 @@ In `tree_store.py`, modify the `Node` dataclass — add after the existing `bran
     branch_env_snapshot_id: str | None = None
 ```
 
-Add `from dataclasses import dataclass, field` — change the existing import to include `field`.
+Add `from dataclasses import dataclass, field` — change the existing import to include
+`field`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -110,11 +132,12 @@ git add customized_areal/tree_search/core/tree_store.py customized_areal/tree_se
 git commit -m "feat(tree-store): extend Node with process_reward, DAG edge refs, and branch provenance"
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Checkpoint serialization for new Node fields
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/checkpoint.py:183-237`
 
 - [ ] **Step 1: Write the failing test for round-trip serialization**
@@ -144,8 +167,10 @@ def test_checkpoint_round_trips_new_node_fields(tmp_path) -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_node_extensions.py::test_checkpoint_round_trips_new_node_fields -v`
-Expected: FAIL — the serialized dict doesn't include the new fields, so deserialized values default.
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_node_extensions.py::test_checkpoint_round_trips_new_node_fields -v`
+Expected: FAIL — the serialized dict doesn't include the new fields, so deserialized
+values default.
 
 - [ ] **Step 3: Add the new fields to serialize/deserialize**
 
@@ -171,13 +196,14 @@ And modify `_deserialize_record` — add the corresponding reads:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_node_extensions.py::test_checkpoint_round_trips_new_node_fields -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_node_extensions.py::test_checkpoint_round_trips_new_node_fields -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the existing checkpoint tests to verify no regression**
 
-Run: `uv run pytest customized_areal/tree_search/ -k "checkpoint" -v`
-Expected: All existing checkpoint tests still PASS.
+Run: `uv run pytest customized_areal/tree_search/ -k "checkpoint" -v` Expected: All
+existing checkpoint tests still PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -186,14 +212,18 @@ git add customized_areal/tree_search/core/checkpoint.py customized_areal/tree_se
 git commit -m "feat(checkpoint): serialize/deserialize Node DAG backup fields"
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: Fix select_branch_candidate for cloud-env nodes
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py:201-212`
 
-**Rationale:** Today `select_branch_candidate` filters on `bool(node.branch_sandbox_id)`, which is wrong for cloud-env nodes that use `branch_env_snapshot_id` instead. A cloud-env node with a snapshot but no sandbox_id is incorrectly filtered out.
+**Rationale:** Today `select_branch_candidate` filters on
+`bool(node.branch_sandbox_id)`, which is wrong for cloud-env nodes that use
+`branch_env_snapshot_id` instead. A cloud-env node with a snapshot but no sandbox_id is
+incorrectly filtered out.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -254,7 +284,8 @@ def test_select_branch_candidate_skips_node_with_no_branch_env() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest customized_areal/tree_search/dag/test_branch_candidate.py -v`
-Expected: FAIL — `test_select_branch_candidate_picks_cloud_env_node_with_snapshot_only` fails because the current code requires `bool(node.branch_sandbox_id)`.
+Expected: FAIL — `test_select_branch_candidate_picks_cloud_env_node_with_snapshot_only`
+fails because the current code requires `bool(node.branch_sandbox_id)`.
 
 - [ ] **Step 3: Fix select_branch_candidate**
 
@@ -287,12 +318,14 @@ git add customized_areal/tree_search/core/customized_grouped_workflow.py customi
 git commit -m "fix(tree-search): select_branch_candidate accepts cloud-env nodes with branch_env_snapshot_id"
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: DAGBackupComputer — structural backup over the execution DAG
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/backup.py`
+
 - Create: `customized_areal/tree_search/dag/test_backup.py`
 
 - [ ] **Step 1: Write the failing test for structural backup**
@@ -358,8 +391,8 @@ def test_dag_backup_distributes_terminal_reward_along_linear_chain() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py -v`
-Expected: FAIL — `DAGBackupComputer` undefined.
+Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py -v` Expected: FAIL —
+`DAGBackupComputer` undefined.
 
 - [ ] **Step 3: Implement DAGBackupComputer**
 
@@ -446,8 +479,7 @@ class DAGBackupComputer:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py -v` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -456,12 +488,14 @@ git add customized_areal/tree_search/dag/backup.py customized_areal/tree_search/
 git commit -m "feat(dag): add DAGBackupComputer for structural reward backup over the DAG"
 ```
 
----
+______________________________________________________________________
 
 ## Task 13: DAGBackupComputer — fan-in join distribution
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/backup.py`
+
 - Modify: `customized_areal/tree_search/dag/test_backup.py`
 
 - [ ] **Step 1: Write the failing test for fan-in distribution**
@@ -497,12 +531,17 @@ def test_dag_backup_distributes_terminal_reward_at_fan_in_join() -> None:
     assert dag.get("join").process_reward == pytest.approx(1.0)
 ```
 
-- [ ] **Step 2: Run test to verify it passes (should already pass from Task 12 implementation)**
+- [ ] **Step 2: Run test to verify it passes (should already pass from Task 12
+  implementation)**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_backup_distributes_terminal_reward_at_fan_in_join -v`
-Expected: PASS — the `compute()` method already reads from the credit dict, which `CreditAssigner` populated with the fan-in distribution.
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_backup_distributes_terminal_reward_at_fan_in_join -v`
+Expected: PASS — the `compute()` method already reads from the credit dict, which
+`CreditAssigner` populated with the fan-in distribution.
 
-If it FAILS, revisit Task 12 Step 3 — the `compute()` method must use `credit.get(node.node_id, own_reward)` rather than recomputing the distribution. Fix inline and re-run.
+If it FAILS, revisit Task 12 Step 3 — the `compute()` method must use
+`credit.get(node.node_id, own_reward)` rather than recomputing the distribution. Fix
+inline and re-run.
 
 - [ ] **Step 3: Commit (test addition only — implementation already correct)**
 
@@ -511,14 +550,19 @@ git add customized_areal/tree_search/dag/test_backup.py
 git commit -m "test(dag): add fan-in join distribution test for DAGBackupComputer"
 ```
 
----
+______________________________________________________________________
 
 ## Task 14: Extend TreeAdvantageComputer to consume per-node credit
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/advantage.py:35-92`
 
-**Rationale:** The existing `TreeAdvantageComputer.compute()` GRPO-normalizes one reward per episode (`outcome_reward`) and broadcasts it to all turns. The DAG backup populates `Node.process_reward`; the advantage computer must include it in the per-episode reward before GRPO normalization. Per the design, the existing computer is **extended, not replaced**.
+**Rationale:** The existing `TreeAdvantageComputer.compute()` GRPO-normalizes one reward
+per episode (`outcome_reward`) and broadcasts it to all turns. The DAG backup populates
+`Node.process_reward`; the advantage computer must include it in the per-episode reward
+before GRPO normalization. Per the design, the existing computer is **extended, not
+replaced**.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -580,7 +624,9 @@ def test_advantage_computer_includes_process_reward_in_episode_reward() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest customized_areal/tree_search/dag/test_advantage_extension.py -v`
-Expected: FAIL — the existing `TreeAdvantageComputer.compute()` only reads `outcome_reward`, ignoring `process_reward`. Both episodes have `outcome_reward=0.5`, so they normalize to 0.0 (zero variance), not +1.0 / -1.0.
+Expected: FAIL — the existing `TreeAdvantageComputer.compute()` only reads
+`outcome_reward`, ignoring `process_reward`. Both episodes have `outcome_reward=0.5`, so
+they normalize to 0.0 (zero variance), not +1.0 / -1.0.
 
 - [ ] **Step 3: Extend TreeAdvantageComputer.compute() to include process_reward**
 
@@ -611,12 +657,14 @@ In `advantage.py`, modify the `compute()` method — change the episode reward c
 Run: `uv run pytest customized_areal/tree_search/dag/test_advantage_extension.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Add `import pytest` to `test_advantage_extension.py` if not already present.**
+- [ ] **Step 5: Add `import pytest` to `test_advantage_extension.py` if not already
+  present.**
 
 - [ ] **Step 6: Run the existing advantage tests to verify no regression**
 
-Run: `uv run pytest customized_areal/tree_search/ -k "advantage" -v`
-Expected: All existing advantage tests still PASS (for non-DAG runs, `process_reward` defaults to 0.0, so `outcome_reward + 0.0 == outcome_reward` — behavior unchanged for the legacy path).
+Run: `uv run pytest customized_areal/tree_search/ -k "advantage" -v` Expected: All
+existing advantage tests still PASS (for non-DAG runs, `process_reward` defaults to 0.0,
+so `outcome_reward + 0.0 == outcome_reward` — behavior unchanged for the legacy path).
 
 - [ ] **Step 7: Commit**
 
@@ -625,11 +673,12 @@ git add customized_areal/tree_search/core/advantage.py customized_areal/tree_sea
 git commit -m "feat(advantage): extend TreeAdvantageComputer to include Node.process_reward in episode reward"
 ```
 
----
+______________________________________________________________________
 
 ## Task 15: Export from dag/__init__.py + full suite run
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/__init__.py`
 
 - [ ] **Step 1: Write the failing test for the export**
@@ -643,7 +692,8 @@ def test_dag_package_exports_backup_type() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_package_exports_backup_type -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_package_exports_backup_type -v`
 Expected: FAIL — `ImportError`.
 
 - [ ] **Step 3: Add the export**
@@ -663,13 +713,15 @@ And extend `__all__`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_package_exports_backup_type -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_backup.py::test_dag_package_exports_backup_type -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full DAG + tree_search test suite**
 
-Run: `uv run pytest customized_areal/tree_search/ -v`
-Expected: All tests PASS — execution_dag, environment, verifier, credit, backup, node_extensions, branch_candidate, advantage_extension, and the existing tree_search tests.
+Run: `uv run pytest customized_areal/tree_search/ -v` Expected: All tests PASS —
+execution_dag, environment, verifier, credit, backup, node_extensions, branch_candidate,
+advantage_extension, and the existing tree_search tests.
 
 - [ ] **Step 6: Commit**
 
@@ -678,7 +730,7 @@ git add customized_areal/tree_search/dag/__init__.py
 git commit -m "feat(dag): export DAGBackupComputer from dag package"
 ```
 
----
+______________________________________________________________________
 
 ## Task 16: Pre-commit + lint
 
@@ -686,13 +738,14 @@ git commit -m "feat(dag): export DAGBackupComputer from dag package"
 
 - [ ] **Step 1: Run ruff check**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/checkpoint.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/core/advantage.py`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/ customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/checkpoint.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/core/advantage.py`
 Expected: No errors.
 
 - [ ] **Step 2: Run ruff format check**
 
-Run: `uv run ruff format --check customized_areal/tree_search/`
-Expected: No reformatting needed.
+Run: `uv run ruff format --check customized_areal/tree_search/` Expected: No
+reformatting needed.
 
 - [ ] **Step 3: Commit any fixes**
 
@@ -701,22 +754,35 @@ git add -A
 git commit -m "chore(dag): ruff fixes for Phase 3 DAG reward backup"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage:**
-- Design §5 Phase 3 Task 9 (Extend Node with process_reward, DAG edge refs, branch_issue_id/branch_env_snapshot_id; checkpoint serialization; fix select_branch_candidate) → Tasks 9, 10, 11
-- Design §5 Phase 3 Task 10 (DAG-aware hybrid backup + advantage computer; extend TreeAdvantageComputer, not replace) → Tasks 12, 13, 14
-- Design §6 Testing (DAG backup tests: structural backup, process-signal shaping, select_branch_candidate fix) → Tasks 11, 12, 13
+
+- Design §5 Phase 3 Task 9 (Extend Node with process_reward, DAG edge refs,
+  branch_issue_id/branch_env_snapshot_id; checkpoint serialization; fix
+  select_branch_candidate) → Tasks 9, 10, 11
+- Design §5 Phase 3 Task 10 (DAG-aware hybrid backup + advantage computer; extend
+  TreeAdvantageComputer, not replace) → Tasks 12, 13, 14
+- Design §6 Testing (DAG backup tests: structural backup, process-signal shaping,
+  select_branch_candidate fix) → Tasks 11, 12, 13
 - Design §2 decision 6 (Reward is hybrid — terminal + process signals) → Tasks 9, 12, 14
-- `.claude/rules/code-quality.md` "State machines before patches" → backup.py module docstring draws the backup lifecycle
+- `.claude/rules/code-quality.md` "State machines before patches" → backup.py module
+  docstring draws the backup lifecycle
 
 **Placeholder scan:** None. Every step has concrete code or commands.
 
 **Type consistency:**
+
 - `Node.process_reward: float = 0.0` — added in Task 9, read in Tasks 12, 14.
-- `Node.parent_run_ids: list[str]` and `Node.child_run_ids: list[str]` — added in Task 9 with `field(default_factory=list)`.
-- `Node.branch_issue_id: str | None = None` and `Node.branch_env_snapshot_id: str | None = None` — added in Task 9, read in Task 11 (`select_branch_candidate`).
-- `DAGBackupComputer.compute(dag, verifier_results, credit) -> dict[str, float]` — signature consistent across Tasks 12, 13.
-- `TreeAdvantageComputer` extension reads `getattr(traj, "process_reward", 0.0)` — the `getattr` default keeps backward compat with any Node that lacks the field (defensive, but the field is added in Task 9 so always present).
+- `Node.parent_run_ids: list[str]` and `Node.child_run_ids: list[str]` — added in Task 9
+  with `field(default_factory=list)`.
+- `Node.branch_issue_id: str | None = None` and
+  `Node.branch_env_snapshot_id: str | None = None` — added in Task 9, read in Task 11
+  (`select_branch_candidate`).
+- `DAGBackupComputer.compute(dag, verifier_results, credit) -> dict[str, float]` —
+  signature consistent across Tasks 12, 13.
+- `TreeAdvantageComputer` extension reads `getattr(traj, "process_reward", 0.0)` — the
+  `getattr` default keeps backward compat with any Node that lacks the field (defensive,
+  but the field is added in Task 9 so always present).

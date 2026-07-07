@@ -34,7 +34,7 @@ def test_distribute_reward_over_linear_chain():
     dag = _dag_linear()
     credit = distribute_reward_over_dag(dag, terminal_reward=1.0, terminal_node_id="c2")
     # The terminal reward backs up along edges: c2 gets 1.0, c1 and root
-    # each get the propagated share (default: full pass-through, backup_decay=1.0).
+    # each get the full pass-through (no attenuation).
     assert credit["c2"] == pytest.approx(1.0)
     assert credit["c1"] > 0.0
     assert credit["root"] > 0.0

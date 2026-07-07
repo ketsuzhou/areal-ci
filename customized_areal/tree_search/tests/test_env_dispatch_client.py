@@ -31,21 +31,44 @@ def test_create_env_dispatch_scratch_swe_lego():
         assert body["group_size"] == 2
         return httpx.Response(
             201,
-            json={"rollouts": [
-                {"env_id": "e1", "project_id": "p1", "issue_id": "i1", "agent_run_id": "r1"},
-                {"env_id": "e2", "project_id": "p2", "issue_id": "i2", "agent_run_id": "r2"},
-            ]},
+            json={
+                "rollouts": [
+                    {
+                        "env_id": "e1",
+                        "project_id": "p1",
+                        "issue_id": "i1",
+                        "agent_run_id": "r1",
+                    },
+                    {
+                        "env_id": "e2",
+                        "project_id": "p2",
+                        "issue_id": "i2",
+                        "agent_run_id": "r2",
+                    },
+                ]
+            },
         )
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     issue = SweLegoIssue(
-        repo_url="r", base_commit="c", issue_date="d", issue_text="x", issue_title="t",
-        acceptance_criteria="a", fail_to_pass=["f"], pass_to_pass=["p"],
+        repo_url="r",
+        base_commit="c",
+        issue_date="d",
+        issue_text="x",
+        issue_title="t",
+        acceptance_criteria="a",
+        fail_to_pass=["f"],
+        pass_to_pass=["p"],
     )
     setup = asyncio.run(
         c.create_env_dispatch(
-            mode="scratch", env_id="base", dispatch_type="issue",
-            agent_id="ag", group_size=2, domain="swe_lego", issue=issue,
+            mode="scratch",
+            env_id="base",
+            dispatch_type="issue",
+            agent_id="ag",
+            group_size=2,
+            domain="swe_lego",
+            issue=issue,
         )
     )
     assert len(setup.rollouts) == 2
@@ -78,16 +101,33 @@ def test_create_env_dispatch_squad_omits_agent_and_env():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"rollouts": [
-            {"env_id": "e1", "project_id": "p1", "chat_session_id": "c1", "agent_run_id": "r1"},
-        ]})
+        return httpx.Response(
+            201,
+            json={
+                "rollouts": [
+                    {
+                        "env_id": "e1",
+                        "project_id": "p1",
+                        "chat_session_id": "c1",
+                        "agent_run_id": "r1",
+                    },
+                ]
+            },
+        )
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    asyncio.run(c.create_env_dispatch(
-        mode="scratch", env_id=None, dispatch_type="message",
-        agent_id=None, squad_id="sq-1", group_size=1,
-        domain="self_play", message="hi",
-    ))
+    asyncio.run(
+        c.create_env_dispatch(
+            mode="scratch",
+            env_id=None,
+            dispatch_type="message",
+            agent_id=None,
+            squad_id="sq-1",
+            group_size=1,
+            domain="self_play",
+            message="hi",
+        )
+    )
     assert "env_id" not in seen["body"]
     assert "agent_id" not in seen["body"]
     assert seen["body"]["squad_id"] == "sq-1"
@@ -99,13 +139,29 @@ def test_create_env_dispatch_resume_mode_passthrough():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"rollouts": [
-            {"env_id": "e1", "project_id": "p1", "issue_id": "i1", "agent_run_id": "r1"},
-        ]})
+        return httpx.Response(
+            201,
+            json={
+                "rollouts": [
+                    {
+                        "env_id": "e1",
+                        "project_id": "p1",
+                        "issue_id": "i1",
+                        "agent_run_id": "r1",
+                    },
+                ]
+            },
+        )
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    asyncio.run(c.create_env_dispatch(
-        mode="resume", env_id="src", dispatch_type="issue",
-        agent_id="ag", group_size=1, domain="swe_lego",
-    ))
+    asyncio.run(
+        c.create_env_dispatch(
+            mode="resume",
+            env_id="src",
+            dispatch_type="issue",
+            agent_id="ag",
+            group_size=1,
+            domain="swe_lego",
+        )
+    )
     assert seen["body"]["mode"] == "resume"

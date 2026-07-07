@@ -1,7 +1,6 @@
 # Multi-Port Failover for proxy-rollout ↔ db_bridge
 
-**Date:** 2026-06-24
-**Target files:**
+**Date:** 2026-06-24 **Target files:**
 
 - `areal/infra/scheduler/local.py` (AReaL)
 - `areal/utils/network.py` (AReaL, pre-existing `preferred_ports` support)
@@ -15,48 +14,45 @@
 
 ## Goal
 
-Replace the single pinned port (`AREAL_PROXY_ROLLOUT_PORT=17727`) with a candidate
-port pool + automatic failover, so that db_bridge can deterministically reach
-proxy-rollout even when the primary port is occupied by a stale process, a
-parallel training run, or another service on the shared host.
+Replace the single pinned port (`AREAL_PROXY_ROLLOUT_PORT=17727`) with a candidate port
+pool + automatic failover, so that db_bridge can deterministically reach proxy-rollout
+even when the primary port is occupied by a stale process, a parallel training run, or
+another service on the shared host.
 
-The previous design pinned proxy-rollout to a single port. If that port was
-taken, AReaL silently fell back to a random port, and db_bridge kept
-connecting to the pinned URL — a silent-fail that was hard to diagnose. This
-spec upgrades both sides to a multi-candidate model with active probing and
-connection-level failover.
+The previous design pinned proxy-rollout to a single port. If that port was taken, AReaL
+silently fell back to a random port, and db_bridge kept connecting to the pinned URL — a
+silent-fail that was hard to diagnose. This spec upgrades both sides to a
+multi-candidate model with active probing and connection-level failover.
 
 ## Approach
 
 **Candidate pool + dual-side independent decision (coordination-free):**
 
 - AReaL tries each candidate port in order and binds the first free one.
-- db_bridge probes each candidate URL via `/health` at startup and fails over
-  on connection-level errors at forward time.
-- Both sides share the same candidate list (configured in their respective
-  `.env` files) but never coordinate at runtime — eventual consistency is
-  achieved through probing.
+- db_bridge probes each candidate URL via `/health` at startup and fails over on
+  connection-level errors at forward time.
+- Both sides share the same candidate list (configured in their respective `.env` files)
+  but never coordinate at runtime — eventual consistency is achieved through probing.
 
-This avoids any runtime signaling channel between AReaL and db_bridge
-(which live in separate repos and processes) while eliminating the single-port
-failure mode.
+This avoids any runtime signaling channel between AReaL and db_bridge (which live in
+separate repos and processes) while eliminating the single-port failure mode.
 
 ## Design decisions (confirmed with user)
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Candidate pool size | 5 scattered ports (`17727, 17737, 17747, 17757, 17767`, interval 10) | Scattered ports resist contiguous-block occupation by a single service |
-| Probe endpoint | `GET /health` (already exists on proxy-rollout, no auth) | Zero AReaL server change needed; `proxy_rollout_server.py:216-218` returns `{"status":"ok"}` |
-| Background reprobe | No — failover triggered only by forward failures | Simpler; db_bridge is request-driven (Supabase queue), so "retry on next forward" is equivalent to on-demand reprobe |
+| Decision            | Choice                                                               | Rationale                                                                                                            |
+| ------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Candidate pool size | 5 scattered ports (`17727, 17737, 17747, 17757, 17767`, interval 10) | Scattered ports resist contiguous-block occupation by a single service                                               |
+| Probe endpoint      | `GET /health` (already exists on proxy-rollout, no auth)             | Zero AReaL server change needed; `proxy_rollout_server.py:216-218` returns `{"status":"ok"}`                         |
+| Background reprobe  | No — failover triggered only by forward failures                     | Simpler; db_bridge is request-driven (Supabase queue), so "retry on next forward" is equivalent to on-demand reprobe |
 
 ## Changes
 
 ### 1. AReaL: `areal/infra/scheduler/local.py` (lines 323-344)
 
 The env parsing for `AREAL_PROXY_ROLLOUT_PORT` was changed from single-int to
-comma-separated list. `find_free_ports` (in `areal/utils/network.py`) already
-supported `preferred_ports: list[int]` and tries each in order, returning the
-first free one — **zero change needed in network.py or guard/app.py**.
+comma-separated list. `find_free_ports` (in `areal/utils/network.py`) already supported
+`preferred_ports: list[int]` and tries each in order, returning the first free one —
+**zero change needed in network.py or guard/app.py**.
 
 ```python
 alloc_payload: dict[str, object] = {"count": 1}
@@ -88,8 +84,8 @@ if role == "proxy-rollout":
 AREAL_PROXY_ROLLOUT_PORT=17727,17737,17747,17757,17767
 ```
 
-Comment updated to describe the candidate-pool semantics and the matching
-requirement with `db_bridge/.env.areal`.
+Comment updated to describe the candidate-pool semantics and the matching requirement
+with `db_bridge/.env.areal`.
 
 ### 3. db_bridge: `db_bridge/config.py`
 
@@ -141,10 +137,9 @@ def upstream_for_group(self, group: Group) -> str:
 
 **`connect()` — startup probe:**
 
-After building the httpx client, if this is the areal side and no active
-upstream is set yet, call `_probe_upstreams()` and pin the first URL that
-returns HTTP 200 from `/health`. If all probes fail, log a warning — the
-first forward will retry.
+After building the httpx client, if this is the areal side and no active upstream is set
+yet, call `_probe_upstreams()` and pin the first URL that returns HTTP 200 from
+`/health`. If all probes fail, log a warning — the first forward will retry.
 
 **New `_probe_upstreams`:**
 
@@ -162,8 +157,7 @@ async def _probe_upstreams(self) -> str | None:
     return None
 ```
 
-**New `_candidate_urls`** — active URL first, remaining candidates in original
-order:
+**New `_candidate_urls`** — active URL first, remaining candidates in original order:
 
 ```python
 def _candidate_urls(self, channel: Channel) -> list[str]:
@@ -178,10 +172,10 @@ def _candidate_urls(self, channel: Channel) -> list[str]:
 
 **`_forward()` — failover loop:**
 
-Replaced the single-URL forward with a loop over `_candidate_urls`. On
-connection-level failure, log and continue to the next candidate. On success
-(any HTTP response, including 4xx/5xx), pin the URL as active and return.
-If all candidates fail, raise the last transport exception.
+Replaced the single-URL forward with a loop over `_candidate_urls`. On connection-level
+failure, log and continue to the next candidate. On success (any HTTP response,
+including 4xx/5xx), pin the URL as active and return. If all candidates fail, raise the
+last transport exception.
 
 **Failover-triggering exceptions** (intentionally narrow):
 
@@ -191,9 +185,8 @@ If all candidates fail, raise the last transport exception.
 - `httpx.ReadError` — read failure mid-response (conservatively treated as
   connection-level; service may be dying)
 
-**Non-triggering:** HTTP 4xx/5xx responses, `httpx.ReadTimeout` (service may
-be slow but is up), `httpx.HTTPStatusError` (not raised — code never calls
-`raise_for_status()`).
+**Non-triggering:** HTTP 4xx/5xx responses, `httpx.ReadTimeout` (service may be slow but
+is up), `httpx.HTTPStatusError` (not raised — code never calls `raise_for_status()`).
 
 ```python
 last_exc: Exception | None = None
@@ -225,27 +218,39 @@ BRIDGE_GATEWAY_UPSTREAM_URLS=http://127.0.0.1:17727,http://127.0.0.1:17737,http:
 
 ## What was NOT changed
 
-| File | Reason |
-|------|--------|
-| `areal/utils/network.py` | `find_free_ports` already supports `preferred_ports: list[int]` (lines 145-157), tries in order, returns first free |
-| `areal/infra/rpc/guard/app.py` | `/alloc_ports` already accepts and passes through `preferred_ports` field |
-| `areal/experimental/openai/proxy/proxy_rollout_server.py` | `GET /health` already exists (line 216-218), no auth, returns `{"status":"ok","initialized":bool}` |
+| File                                                      | Reason                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `areal/utils/network.py`                                  | `find_free_ports` already supports `preferred_ports: list[int]` (lines 145-157), tries in order, returns first free |
+| `areal/infra/rpc/guard/app.py`                            | `/alloc_ports` already accepts and passes through `preferred_ports` field                                           |
+| `areal/experimental/openai/proxy/proxy_rollout_server.py` | `GET /health` already exists (line 216-218), no auth, returns `{"status":"ok","initialized":bool}`                  |
 
 ## Verification
 
 ### Unit (performed during implementation)
 
-1. **AReaL env parsing** — `AREAL_PROXY_ROLLOUT_PORT=17727,17737` → `alloc_payload["preferred_ports"] == [17727, 17737]`; single value `17727` → `[17727]` (backward compat). Verified via `py_compile` + manual trace.
-2. **db_bridge config parsing** — `BRIDGE_GATEWAY_UPSTREAM_URLS=u1,u2` → `gateway_upstream_urls == [u1, u2]`; legacy `BRIDGE_GATEWAY_UPSTREAM_URL=u1` → `[u1]`; empty `URLS=` env → falls back to legacy. Verified by running `BridgeConfig.from_env()` with synthetic env.
-3. **Port consistency** — AReaL `.env` ports `17727,17737,17747,17757,17767` exactly match db_bridge `.env.areal.example` ports. Verified via shell comparison.
-4. **Syntax** — `py_compile` passes on `local.py`, `config.py`, `executor.py`.
+1. **AReaL env parsing** — `AREAL_PROXY_ROLLOUT_PORT=17727,17737` →
+   `alloc_payload["preferred_ports"] == [17727, 17737]`; single value `17727` →
+   `[17727]` (backward compat). Verified via `py_compile` + manual trace.
+1. **db_bridge config parsing** — `BRIDGE_GATEWAY_UPSTREAM_URLS=u1,u2` →
+   `gateway_upstream_urls == [u1, u2]`; legacy `BRIDGE_GATEWAY_UPSTREAM_URL=u1` →
+   `[u1]`; empty `URLS=` env → falls back to legacy. Verified by running
+   `BridgeConfig.from_env()` with synthetic env.
+1. **Port consistency** — AReaL `.env` ports `17727,17737,17747,17757,17767` exactly
+   match db_bridge `.env.areal.example` ports. Verified via shell comparison.
+1. **Syntax** — `py_compile` passes on `local.py`, `config.py`, `executor.py`.
 
 ### End-to-end (requires real GPU + supabase env — not run during implementation)
 
-1. **Port-occupation resilience:** `python -m http.server 17727 &` → start AReaL → check `ss -tlnp` shows proxy-rollout bound to 17737 (next candidate) → check RolloutController log line `Proxy servers initialized. Addresses: [...]`.
-2. **db_bridge startup probe:** start db_bridge executor → log should show `upstream probe OK: http://127.0.0.1:17737` (skipping the occupied 17727).
-3. **Forward success:** send a test request through db_bridge → should succeed against 17737.
-4. **Runtime failover:** `kill <proxy-rollout pid>` (simulating crash) → next forward should fail over to 17747 if AReaL rebound there, or exhaust candidates and record the row as failed.
+1. **Port-occupation resilience:** `python -m http.server 17727 &` → start AReaL → check
+   `ss -tlnp` shows proxy-rollout bound to 17737 (next candidate) → check
+   RolloutController log line `Proxy servers initialized. Addresses: [...]`.
+1. **db_bridge startup probe:** start db_bridge executor → log should show
+   `upstream probe OK: http://127.0.0.1:17737` (skipping the occupied 17727).
+1. **Forward success:** send a test request through db_bridge → should succeed against
+   17737\.
+1. **Runtime failover:** `kill <proxy-rollout pid>` (simulating crash) → next forward
+   should fail over to 17747 if AReaL rebound there, or exhaust candidates and record
+   the row as failed.
 
 ### Manual checks
 
@@ -259,29 +264,30 @@ grep "upstream probe" <executor log>
 
 ## Risks and edge cases
 
-1. **TOCTOU between probe and forward:** `/health` probe succeeds, but the port
-   gets occupied between probe and forward. Probability is low and the forward
-   failover loop covers it.
-2. **All candidates exhausted:** `_forward` raises the last transport exception;
-   `process_one` records the row as failed. No infinite retry — matches the
-   "no background reprobe" design decision.
-3. **Active stuck on 5xx:** If the active URL persistently returns HTTP 5xx
-   (business error, not connection failure), no failover occurs. This is
-   intentional — business errors are not port problems, switching is useless
-   and would mask the real issue.
-4. **Multi-rollout-worker scenario:** Each rollout worker binds its own port
-   independently. db_bridge only talks to one (rank 0). If rank 0's
-   proxy-rollout dies, db_bridge does not fail over to rank 1 — that requires
-   the proxy gateway aggregator (`rollout_controller.py:437 start_proxy_gateway`),
-   which is out of scope for this change.
-5. **`active_gateway_upstream` mutability:** The field is runtime-mutable on a
-   dataclass that otherwise holds config. This is a deliberate trade-off:
-   keeping active state in config lets `_candidate_urls` read it directly
-   without extra plumbing. If future separation of config vs. runtime state is
-   needed, move `active_gateway_upstream` to an `Executor` instance attribute.
+1. **TOCTOU between probe and forward:** `/health` probe succeeds, but the port gets
+   occupied between probe and forward. Probability is low and the forward failover loop
+   covers it.
+1. **All candidates exhausted:** `_forward` raises the last transport exception;
+   `process_one` records the row as failed. No infinite retry — matches the "no
+   background reprobe" design decision.
+1. **Active stuck on 5xx:** If the active URL persistently returns HTTP 5xx (business
+   error, not connection failure), no failover occurs. This is intentional — business
+   errors are not port problems, switching is useless and would mask the real issue.
+1. **Multi-rollout-worker scenario:** Each rollout worker binds its own port
+   independently. db_bridge only talks to one (rank 0). If rank 0's proxy-rollout dies,
+   db_bridge does not fail over to rank 1 — that requires the proxy gateway aggregator
+   (`rollout_controller.py:437 start_proxy_gateway`), which is out of scope for this
+   change.
+1. **`active_gateway_upstream` mutability:** The field is runtime-mutable on a dataclass
+   that otherwise holds config. This is a deliberate trade-off: keeping active state in
+   config lets `_candidate_urls` read it directly without extra plumbing. If future
+   separation of config vs. runtime state is needed, move `active_gateway_upstream` to
+   an `Executor` instance attribute.
 
 ## File locations
 
-- AReaL worktree: `/dfs/share-groups/letrain/zhoujie/AReaL-main/.claude/worktrees/multi-port-failover-v2/`
-- db_bridge (in-place edits, uncommitted): `/dfs/share-groups/letrain/zhoujie/le-agent-dev_new/db_bridge/`
+- AReaL worktree:
+  `/dfs/share-groups/letrain/zhoujie/AReaL-main/.claude/worktrees/multi-port-failover-v2/`
+- db_bridge (in-place edits, uncommitted):
+  `/dfs/share-groups/letrain/zhoujie/le-agent-dev_new/db_bridge/`
 - Plan file: `/dfs/share-groups/letrain/zhoujie/.claude/plans/proud-riding-pie.md`

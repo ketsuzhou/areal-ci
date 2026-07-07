@@ -20,8 +20,6 @@ def test_tree_store_imports_without_torch(monkeypatch):
     for mod in list(sys.modules):
         if mod.startswith("customized_areal.tree_search.core.tree_store"):
             del sys.modules[mod]
-    tree_store = importlib.import_module(
-        "customized_areal.tree_search.core.tree_store"
-    )
+    tree_store = importlib.import_module("customized_areal.tree_search.core.tree_store")
     assert hasattr(tree_store, "Node")
     assert hasattr(tree_store, "MCTSTreeStore")

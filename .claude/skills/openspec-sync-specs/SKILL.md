@@ -11,34 +11,43 @@ metadata:
 
 Sync delta specs from a change to main specs.
 
-This is an **agent-driven** operation - you will read delta specs and directly edit main specs to apply the changes. This allows intelligent merging (e.g., adding a scenario without copying the entire requirement).
+This is an **agent-driven** operation - you will read delta specs and directly edit main
+specs to apply the changes. This allows intelligent merging (e.g., adding a scenario
+without copying the entire requirement).
 
-**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
+**Input**: Optionally specify a change name. If omitted, check if it can be inferred
+from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
 **Steps**
 
 1. **If no change name provided, prompt for selection**
 
-   Run `openspec list --json` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run `openspec list --json` to get available changes. Use the **AskUserQuestion tool**
+   to let the user select.
 
    Show changes that have delta specs (under `specs/` directory).
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
 
-2. **Resolve change context**
+1. **Resolve change context**
 
    Run:
+
    ```bash
    openspec status --change "<name>" --json
    ```
 
-   If status reports `actionContext.mode: "workspace-planning"`, explain that workspace spec sync is not supported in this slice and STOP. Do not fall back to repo-local paths or edit linked repos.
+   If status reports `actionContext.mode: "workspace-planning"`, explain that workspace
+   spec sync is not supported in this slice and STOP. Do not fall back to repo-local
+   paths or edit linked repos.
 
-3. **Find delta specs**
+1. **Find delta specs**
 
-   Use `artifactPaths.specs.existingOutputPaths` from the status JSON as the list of delta spec files.
+   Use `artifactPaths.specs.existingOutputPaths` from the status JSON as the list of
+   delta spec files.
 
    Each delta spec file contains sections like:
+
    - `## ADDED Requirements` - New requirements to add
    - `## MODIFIED Requirements` - Changes to existing requirements
    - `## REMOVED Requirements` - Requirements to remove
@@ -46,42 +55,49 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
    If no delta specs found, inform user and stop.
 
-4. **For each delta spec, apply changes to main specs**
+1. **For each delta spec, apply changes to main specs**
 
    For each repo-local capability delta spec path returned by the CLI:
 
    a. **Read the delta spec** to understand the intended changes
 
-   b. **Read the main spec** at `openspec/specs/<capability>/spec.md` (may not exist yet)
+   b. **Read the main spec** at `openspec/specs/<capability>/spec.md` (may not exist
+   yet)
 
    c. **Apply changes intelligently**:
 
-      **ADDED Requirements:**
-      - If requirement doesn't exist in main spec → add it
-      - If requirement already exists → update it to match (treat as implicit MODIFIED)
+   **ADDED Requirements:**
 
-      **MODIFIED Requirements:**
-      - Find the requirement in main spec
-      - Apply the changes - this can be:
-        - Adding new scenarios (don't need to copy existing ones)
-        - Modifying existing scenarios
-        - Changing the requirement description
-      - Preserve scenarios/content not mentioned in the delta
+   - If requirement doesn't exist in main spec → add it
+   - If requirement already exists → update it to match (treat as implicit MODIFIED)
 
-      **REMOVED Requirements:**
-      - Remove the entire requirement block from main spec
+   **MODIFIED Requirements:**
 
-      **RENAMED Requirements:**
-      - Find the FROM requirement, rename to TO
+   - Find the requirement in main spec
+   - Apply the changes - this can be:
+     - Adding new scenarios (don't need to copy existing ones)
+     - Modifying existing scenarios
+     - Changing the requirement description
+   - Preserve scenarios/content not mentioned in the delta
+
+   **REMOVED Requirements:**
+
+   - Remove the entire requirement block from main spec
+
+   **RENAMED Requirements:**
+
+   - Find the FROM requirement, rename to TO
 
    d. **Create new main spec** if capability doesn't exist yet:
-      - Create `openspec/specs/<capability>/spec.md`
-      - Add Purpose section (can be brief, mark as TBD)
-      - Add Requirements section with the ADDED requirements
 
-5. **Show summary**
+   - Create `openspec/specs/<capability>/spec.md`
+   - Add Purpose section (can be brief, mark as TBD)
+   - Add Requirements section with the ADDED requirements
+
+1. **Show summary**
 
    After applying all changes, summarize:
+
    - Which capabilities were updated
    - What changes were made (requirements added/modified/removed/renamed)
 
@@ -117,7 +133,9 @@ The system SHALL do something new.
 **Key Principle: Intelligent Merging**
 
 Unlike programmatic merging, you can apply **partial updates**:
-- To add a scenario, just include that scenario under MODIFIED - don't copy existing scenarios
+
+- To add a scenario, just include that scenario under MODIFIED - don't copy existing
+  scenarios
 - The delta represents *intent*, not a wholesale replacement
 - Use your judgment to merge changes sensibly
 
@@ -140,6 +158,7 @@ Main specs are now updated. The change remains active - archive when implementat
 ```
 
 **Guardrails**
+
 - Read both delta and main specs before making changes
 - Preserve existing content not mentioned in delta
 - If something is unclear, ask for clarification

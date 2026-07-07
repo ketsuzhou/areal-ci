@@ -32,9 +32,13 @@ class MulticaEnvDispatchClient:
         timeout: float = 120.0,
         api_key: str | None = None,
     ) -> None:
-        self._base_url = (base_url or os.environ.get("MULTICA_BASE_URL") or "").rstrip("/")
+        self._base_url = (base_url or os.environ.get("MULTICA_BASE_URL") or "").rstrip(
+            "/"
+        )
         if not self._base_url:
-            raise ValueError("MulticaEnvDispatchClient requires base_url or MULTICA_BASE_URL")
+            raise ValueError(
+                "MulticaEnvDispatchClient requires base_url or MULTICA_BASE_URL"
+            )
         self._api_key = api_key or os.environ.get("MULTICA_API_KEY")
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=timeout, transport=transport
@@ -101,7 +105,9 @@ class MulticaEnvDispatchClient:
             payload["issue"] = {
                 "title": issue.issue_title,
                 "description": issue.issue_text,
-                "acceptance_criteria": [issue.acceptance_criteria] if issue.acceptance_criteria else [],
+                "acceptance_criteria": [issue.acceptance_criteria]
+                if issue.acceptance_criteria
+                else [],
                 "fail_to_pass": list(issue.fail_to_pass),
                 "pass_to_pass": list(issue.pass_to_pass),
             }

@@ -4,10 +4,13 @@ from dataclasses import dataclass, field
 import pytest
 
 from customized_areal.tree_search.agents.reward.swe_lego_types import (
-    SweLegoRollout, SweLegoSetup,
+    SweLegoRollout,
+    SweLegoSetup,
 )
 from customized_areal.tree_search.agents.self_play_runner import (
-    run_self_play, SelfPlayQuery, SelfPlayResult,
+    SelfPlayQuery,
+    SelfPlayResult,
+    run_self_play,
 )
 from customized_areal.tree_search.agents.verifier import VerifierResult
 
@@ -18,11 +21,25 @@ class FakeMulticaClient:
     cleanup_calls: list = field(default_factory=list)
     cleanup_raises: bool = False
 
-    async def create_env_dispatch(self, *, mode, env_id, dispatch_type, agent_id,
-                                  group_size, domain=None, issue=None, message=None):
+    async def create_env_dispatch(
+        self,
+        *,
+        mode,
+        env_id,
+        dispatch_type,
+        agent_id,
+        group_size,
+        domain=None,
+        issue=None,
+        message=None,
+    ):
         rollouts = [
-            SweLegoRollout(env_id=f"env-{i}", project_id=f"proj-{i}",
-                           chat_session_id=f"sess-{i}", agent_run_id=f"r{i+1}")
+            SweLegoRollout(
+                env_id=f"env-{i}",
+                project_id=f"proj-{i}",
+                chat_session_id=f"sess-{i}",
+                agent_run_id=f"r{i + 1}",
+            )
             for i in range(group_size)
         ]
         self.rollouts = rollouts
@@ -69,8 +86,14 @@ def test_run_self_play_happy_path():
     driver = FakeBranchDriver()
     result = asyncio.run(
         run_self_play(
-            query=_query(), group_size=2, agent_id="ag", base_env_id="base",
-            multica=multica, rl_session=rl, verifier=verifier, branch_driver=driver,
+            query=_query(),
+            group_size=2,
+            agent_id="ag",
+            base_env_id="base",
+            multica=multica,
+            rl_session=rl,
+            verifier=verifier,
+            branch_driver=driver,
         )
     )
     assert isinstance(result, SelfPlayResult)
@@ -93,8 +116,13 @@ def test_run_self_play_cleans_up_on_verifier_failure():
     with pytest.raises(RuntimeError, match="verifier crashed"):
         asyncio.run(
             run_self_play(
-                query=_query(), group_size=2, agent_id="ag", base_env_id="base",
-                multica=multica, rl_session=rl, verifier=RaisingVerifier(),
+                query=_query(),
+                group_size=2,
+                agent_id="ag",
+                base_env_id="base",
+                multica=multica,
+                rl_session=rl,
+                verifier=RaisingVerifier(),
                 branch_driver=FakeBranchDriver(),
             )
         )
@@ -110,12 +138,20 @@ def test_run_self_play_accepts_env_dispatch_branch_driver():
 
     multica = FakeMulticaClient()
     driver = EnvDispatchBranchDriver(
-        multica=multica, domain="self_play", dispatch_type="message", agent_id="ag",
+        multica=multica,
+        domain="self_play",
+        dispatch_type="message",
+        agent_id="ag",
     )
     result = asyncio.run(
         run_self_play(
-            query=_query(), group_size=2, agent_id="ag", base_env_id="base",
-            multica=multica, rl_session=FakeRlSession(), verifier=FakeVerifier(),
+            query=_query(),
+            group_size=2,
+            agent_id="ag",
+            base_env_id="base",
+            multica=multica,
+            rl_session=FakeRlSession(),
+            verifier=FakeVerifier(),
             branch_driver=driver,
         )
     )

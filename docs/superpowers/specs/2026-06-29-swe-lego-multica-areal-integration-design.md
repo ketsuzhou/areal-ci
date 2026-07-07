@@ -1,56 +1,59 @@
 # SWE-Lego Docker × Multica Remote Mode × AReaL RL — Design
 
-**Date:** 2026-06-29
-**Status:** Approved design — ready for implementation planning
-**Builds on:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` (the approved cloud-only DAG-RL design)
-**Research basis:** `customized_areal/tree_search/agents/reward/swe_data_pipeline_comparison.md`
+**Date:** 2026-06-29 **Status:** Approved design — ready for implementation planning
+**Builds on:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` (the
+approved cloud-only DAG-RL design) **Research basis:**
+`customized_areal/tree_search/agents/reward/swe_data_pipeline_comparison.md`
 
 ## 1. Goal
 
 Enable AReaL to train RL over SWE issues using **SWE-Lego docker containers** as agent
-environments, launched via **multica remote mode**, with a hybrid **SWE-Lego verifier** producing
-the reward. For each issue:
+environments, launched via **multica remote mode**, with a hybrid **SWE-Lego verifier**
+producing the reward. For each issue:
 
-1. AReal calls one atomic multica API that creates a fresh multica project and forks the repo's
-   git history **before the issue** into it (SWE-Lego anti-hacking: history after the issue date
-   is deleted).
-2. Multica boots `group_size` daemon-in-docker sandboxes from a SWE-Lego image and starts one
-   agent run per sandbox (remote mode).
-3. AReal drives the existing DAG-RL branching machinery within each lane (snapshot + issue fork +
-   `agent_start_branch` at `(task_id, seq)`).
-4. When each lane's terminal run finishes, the hybrid verifier produces a reward, which is backed
-   up through the lane's delegation DAG and **actually shapes training** (Phase 3 is load-bearing,
-   not deferred).
+1. AReal calls one atomic multica API that creates a fresh multica project and forks the
+   repo's git history **before the issue** into it (SWE-Lego anti-hacking: history after
+   the issue date is deleted).
+1. Multica boots `group_size` daemon-in-docker sandboxes from a SWE-Lego image and
+   starts one agent run per sandbox (remote mode).
+1. AReal drives the existing DAG-RL branching machinery within each lane (snapshot +
+   issue fork + `agent_start_branch` at `(task_id, seq)`).
+1. When each lane's terminal run finishes, the hybrid verifier produces a reward, which
+   is backed up through the lane's delegation DAG and **actually shapes training**
+   (Phase 3 is load-bearing, not deferred).
 
 ## 2. Locked decisions
 
-1. **Scope = per-issue rollout + mid-run branching.** The full `multica-dag-rl` machinery applies
-   (snapshot-at-frontier, `ForkIssueSubtree` at `task_message.seq`, DAG credit backup), retargeted
-   to SWE-Lego docker containers.
-2. **Multi-agent = group_size parallel root agents + delegation DAG.** `group_size` independent
-   root agents per issue form the GRPO rollout group; each root may spawn a multica delegation
-   DAG (`issue.parent_issue_id`); branching happens within each lane.
-3. **Multica owns docker.** AReal never calls docker directly; it calls one atomic multica endpoint
-   plus the existing cloud-runtime sandbox endpoints.
-4. **Daemon-in-docker (model A).** Each SWE-Lego container runs a multica daemon inside it. The
-   daemon spawns the agent CLI, parses stdout, and POSTs `task_message` batches — producing the
-   `seq` that mid-run `(task_id, seq)` branching cuts at.
-5. **SWE-Lego anti-hacking fork.** The repo is checked out at `base_commit` and git history after
-   `issue_date` is **deleted** via `git filter-repo --commit-cutoff`, so an agent cannot `git log`
-   or `git blame` its way to the future fix. Enforced once at image-build time, inherited by every
-   forked sandbox.
-6. **Hybrid verifier + reward.** `ObjectiveVerifier` runs `FAIL_TO_PASS` / `PASS_TO_PASS` tests
-   (Skywork-SWE empty-vs-gold two-run model) for a binary pass/fail; `AgenticVerifier` generative
-   critic (yes/no token probability) covers what tests cannot; SWE-Lego semi-resolved partial
-   credit (located the bug but did not fully fix) provides a dense signal. Reward = weighted blend.
-7. **One atomic multica endpoint.** `POST /api/v1/swe-lego/issues` composes project creation + SWE-Lego
-   image build + base sandbox boot + `group_size` forks + agent-run enqueue. AReal is thin.
-8. **Image build runs on a Fleet node** via the existing `/api/v1/nodes` exec path. The multica
-   server never shells out to `docker build` locally.
-9. **Phase 3 DAG credit backup is load-bearing in v1.** The terminal verifier reward is distributed
-   along DAG edges so sub-agent runs that contributed to a successful root get credit; the existing
-   `TreeAdvantageComputer` is extended (not replaced) to consume per-node credit. This is in-scope
-   and ships in v1 — it is not deferred, not merely logged.
+1. **Scope = per-issue rollout + mid-run branching.** The full `multica-dag-rl`
+   machinery applies (snapshot-at-frontier, `ForkIssueSubtree` at `task_message.seq`,
+   DAG credit backup), retargeted to SWE-Lego docker containers.
+1. **Multi-agent = group_size parallel root agents + delegation DAG.** `group_size`
+   independent root agents per issue form the GRPO rollout group; each root may spawn a
+   multica delegation DAG (`issue.parent_issue_id`); branching happens within each lane.
+1. **Multica owns docker.** AReal never calls docker directly; it calls one atomic
+   multica endpoint plus the existing cloud-runtime sandbox endpoints.
+1. **Daemon-in-docker (model A).** Each SWE-Lego container runs a multica daemon inside
+   it. The daemon spawns the agent CLI, parses stdout, and POSTs `task_message` batches
+   — producing the `seq` that mid-run `(task_id, seq)` branching cuts at.
+1. **SWE-Lego anti-hacking fork.** The repo is checked out at `base_commit` and git
+   history after `issue_date` is **deleted** via `git filter-repo --commit-cutoff`, so
+   an agent cannot `git log` or `git blame` its way to the future fix. Enforced once at
+   image-build time, inherited by every forked sandbox.
+1. **Hybrid verifier + reward.** `ObjectiveVerifier` runs `FAIL_TO_PASS` /
+   `PASS_TO_PASS` tests (Skywork-SWE empty-vs-gold two-run model) for a binary
+   pass/fail; `AgenticVerifier` generative critic (yes/no token probability) covers what
+   tests cannot; SWE-Lego semi-resolved partial credit (located the bug but did not
+   fully fix) provides a dense signal. Reward = weighted blend.
+1. **One atomic multica endpoint.** `POST /api/v1/swe-lego/issues` composes project
+   creation + SWE-Lego image build + base sandbox boot + `group_size` forks + agent-run
+   enqueue. AReal is thin.
+1. **Image build runs on a Fleet node** via the existing `/api/v1/nodes` exec path. The
+   multica server never shells out to `docker build` locally.
+1. **Phase 3 DAG credit backup is load-bearing in v1.** The terminal verifier reward is
+   distributed along DAG edges so sub-agent runs that contributed to a successful root
+   get credit; the existing `TreeAdvantageComputer` is extended (not replaced) to
+   consume per-node credit. This is in-scope and ships in v1 — it is not deferred, not
+   merely logged.
 
 ## 3. Architecture
 
@@ -101,16 +104,17 @@ db_bridge:
 
 ### Key invariants
 
-1. **One multica project per issue.** All `group_size` agents and their delegation DAGs live in the
-   same project, against the same forked-issue root.
-2. **Docker ownership stays in multica.** AReal never calls docker directly; it calls the one
-   `POST /api/v1/swe-lego/issues` endpoint plus the existing sandbox snapshot/fork endpoints.
-3. **The `ForkableEnvironment` seam is the only thing areal's branching code sees.** Swapping
-   `FleetSandboxProvider` → `MulticaSweLegoProvider` is the entire env-side change; `BranchMaterializer`
-   is untouched.
-4. **Anti-hacking is enforced at image-build time.** Git history after `issue_date` is deleted once,
-   when the SWE-Lego image is built on the Fleet build-node — not at fork time. Every forked sandbox
-   inherits the truncated history.
+1. **One multica project per issue.** All `group_size` agents and their delegation DAGs
+   live in the same project, against the same forked-issue root.
+1. **Docker ownership stays in multica.** AReal never calls docker directly; it calls
+   the one `POST /api/v1/swe-lego/issues` endpoint plus the existing sandbox
+   snapshot/fork endpoints.
+1. **The `ForkableEnvironment` seam is the only thing areal's branching code sees.**
+   Swapping `FleetSandboxProvider` → `MulticaSweLegoProvider` is the entire env-side
+   change; `BranchMaterializer` is untouched.
+1. **Anti-hacking is enforced at image-build time.** Git history after `issue_date` is
+   deleted once, when the SWE-Lego image is built on the Fleet build-node — not at fork
+   time. Every forked sandbox inherits the truncated history.
 
 ## 4. Multica side
 
@@ -138,6 +142,7 @@ Content-Type: application/json
 ```
 
 **Response (201):**
+
 ```json
 {
   "project_id":              "<uuid>",
@@ -150,14 +155,15 @@ Content-Type: application/json
 }
 ```
 
-**Atomicity contract.** The endpoint either returns 201 with all `group_size` agent runs enqueued,
-or it rolls back: deletes the base sandbox, deletes the project, and leaves the built image in the
-build-node cache for reuse (image build is the expensive step; rebuilding across retries is wasteful).
-The areal side treats any non-201 as "this issue did not start" and does not proceed to
-branching/verifier.
+**Atomicity contract.** The endpoint either returns 201 with all `group_size` agent runs
+enqueued, or it rolls back: deletes the base sandbox, deletes the project, and leaves
+the built image in the build-node cache for reuse (image build is the expensive step;
+rebuilding across retries is wasteful). The areal side treats any non-201 as "this issue
+did not start" and does not proceed to branching/verifier.
 
-**Auth.** Reuses the existing workspace + bearer-token model that `cloud_runtime.go` and `issue.go`
-already enforce. The areal caller carries a service-key PAT scoped to the training workspace.
+**Auth.** Reuses the existing workspace + bearer-token model that `cloud_runtime.go` and
+`issue.go` already enforce. The areal caller carries a service-key PAT scoped to the
+training workspace.
 
 ### 4.2 Endpoint sequence
 
@@ -178,16 +184,17 @@ already enforce. The areal caller carries a service-key PAT scoped to the traini
 6. return 201 with all IDs
 ```
 
-Step 5 forks the **base sandbox** (not a snapshot of a running agent) so all `group_size` agents start
-from identical, pristine, history-truncated state — matching SWE-bench/Skywork-SWE rollout-group
-semantics. The base sandbox stays alive as the fork source for the lifetime of the issue's training
-episode; it's deleted at episode end.
+Step 5 forks the **base sandbox** (not a snapshot of a running agent) so all
+`group_size` agents start from identical, pristine, history-truncated state — matching
+SWE-bench/Skywork-SWE rollout-group semantics. The base sandbox stays alive as the fork
+source for the lifetime of the issue's training episode; it's deleted at episode end.
 
 ### 4.3 SWE-Lego image builder + history truncation
 
 New file `internal/service/swe_lego_image.go`. The build is **idempotent and cached** by
-`(repo_url, base_commit, issue_date, base_image)` — repeated issues against the same triple reuse
-the image. The build runs **on a Fleet build-node**, not on the multica server host.
+`(repo_url, base_commit, issue_date, base_image)` — repeated issues against the same
+triple reuse the image. The build runs **on a Fleet build-node**, not on the multica
+server host.
 
 ```
 BuildOrReuse(repo_url, base_commit, issue_date, base_image):
@@ -212,19 +219,21 @@ BuildOrReuse(repo_url, base_commit, issue_date, base_image):
   return image_ref("swe-lego:"+cache_key, node)
 ```
 
-**Why `git filter-repo --commit-cutoff` (not `git checkout` alone).** A plain checkout of
-`base_commit` leaves the full reflog and all future commits reachable from `.git/refs/*` and
-`ORIG_HEAD`/`FETCH_HEAD`. SWE-Lego's anti-hacking rule requires the *history itself* to be gone,
-so an agent that runs `git log` or `git blame` cannot see the future fix.
-`git filter-repo --commit-cutoff` is the supported way to physically delete commits and rewrite
-refs. `filter-repo` is preferred over the legacy `git filter-branch`.
+**Why `git filter-repo --commit-cutoff` (not `git checkout` alone).** A plain checkout
+of `base_commit` leaves the full reflog and all future commits reachable from
+`.git/refs/*` and `ORIG_HEAD`/`FETCH_HEAD`. SWE-Lego's anti-hacking rule requires the
+*history itself* to be gone, so an agent that runs `git log` or `git blame` cannot see
+the future fix. `git filter-repo --commit-cutoff` is the supported way to physically
+delete commits and rewrite refs. `filter-repo` is preferred over the legacy
+`git filter-branch`.
 
-**Image locality.** The built image lives **on the build node's docker daemon**, not in a registry.
-Step 4 of §4.2 must boot the base sandbox **on the same node** that built the image. The endpoint
-records `build_node_id` in the response so step 4 targets it. A registry-backed pull is a future
-concern (deferred for v1).
+**Image locality.** The built image lives **on the build node's docker daemon**, not in
+a registry. Step 4 of §4.2 must boot the base sandbox **on the same node** that built
+the image. The endpoint records `build_node_id` in the response so step 4 targets it. A
+registry-backed pull is a future concern (deferred for v1).
 
-**Dockerfile skeleton** (`multica/server/internal/service/swe_lego_image.Dockerfile.tmpl`):
+**Dockerfile skeleton**
+(`multica/server/internal/service/swe_lego_image.Dockerfile.tmpl`):
 
 ```dockerfile
 FROM <base_image>                      # e.g. swe-lego/python:3.11
@@ -236,42 +245,46 @@ ENV MULTICA_DAEMON_AUTO_REGISTER=1
 CMD ["multica-daemon", "run"]           # daemon self-registers, then claims tasks
 ```
 
-The daemon binary is built from the existing multica daemon source and copied in at image-build
-time — it's the same binary that runs locally today, just inside the container.
+The daemon binary is built from the existing multica daemon source and copied in at
+image-build time — it's the same binary that runs locally today, just inside the
+container.
 
 ### 4.4 Build-node lifecycle
 
-`pick_build_node()` reuses the existing Fleet `/api/v1/nodes` path — `cloud_runtime.go` already
-proxies `CreateCloudRuntimeNode` / `ExecCloudRuntimeNode`. A node is picked by the
-`swe-lego-build` tag. For v1, one tagged build-node is assumed; multi-node scheduling is a future
-concern.
+`pick_build_node()` reuses the existing Fleet `/api/v1/nodes` path — `cloud_runtime.go`
+already proxies `CreateCloudRuntimeNode` / `ExecCloudRuntimeNode`. A node is picked by
+the `swe-lego-build` tag. For v1, one tagged build-node is assumed; multi-node
+scheduling is a future concern.
 
-**Failure handling.** If the exec build fails (clone fails, filter-repo fails, docker build fails),
-the endpoint returns 502 with a structured error and does **not** create the project/issue — the
-build is the first expensive step, so failing fast before project creation keeps the rollback
-surface small. The build-node's docker image cache retains any partial artifacts for diagnosis;
-they are not promoted to the cache key on failure.
+**Failure handling.** If the exec build fails (clone fails, filter-repo fails, docker
+build fails), the endpoint returns 502 with a structured error and does **not** create
+the project/issue — the build is the first expensive step, so failing fast before
+project creation keeps the rollback surface small. The build-node's docker image cache
+retains any partial artifacts for diagnosis; they are not promoted to the cache key on
+failure.
 
 ### 4.5 Existing endpoints reused as-is
 
-- `POST /api/projects` (`server/internal/handler/project.go:221`) — create the per-issue project.
-- `POST /api/issues` (`server/internal/handler/issue.go:2070`) — create the root issue, with
-  `acceptance_criteria` and `fail_to_pass`/`pass_to_pass` stored as issue metadata.
-- `POST /api/issues/{id}/fork` + `DELETE /api/issues/{id}/fork` (Phase 1 `ForkIssueSubtree`) — the
-  issue-subtree fork at `(task_id, seq)`, used by mid-run branching.
+- `POST /api/projects` (`server/internal/handler/project.go:221`) — create the per-issue
+  project.
+- `POST /api/issues` (`server/internal/handler/issue.go:2070`) — create the root issue,
+  with `acceptance_criteria` and `fail_to_pass`/`pass_to_pass` stored as issue metadata.
+- `POST /api/issues/{id}/fork` + `DELETE /api/issues/{id}/fork` (Phase 1
+  `ForkIssueSubtree`) — the issue-subtree fork at `(task_id, seq)`, used by mid-run
+  branching.
 - `POST /api/v1/sandboxes/{id}/snapshot` + `POST /api/v1/sandboxes/fork` + `DELETE`
-  (`server/internal/handler/cloud_runtime.go:108-127`) — the sandbox snapshot/fork/cleanup the
-  areal-side `MulticaSweLegoProvider` calls.
-- `ClaimTaskByRuntime` / `ReportTaskMessages` (`server/internal/handler/daemon.go`) — the daemon's
-  claim-and-report loop, unchanged; the daemon inside the SWE-Lego container uses these exactly as
-  a local daemon does today.
+  (`server/internal/handler/cloud_runtime.go:108-127`) — the sandbox
+  snapshot/fork/cleanup the areal-side `MulticaSweLegoProvider` calls.
+- `ClaimTaskByRuntime` / `ReportTaskMessages` (`server/internal/handler/daemon.go`) —
+  the daemon's claim-and-report loop, unchanged; the daemon inside the SWE-Lego
+  container uses these exactly as a local daemon does today.
 
 ## 5. AReal side
 
 ### 5.1 Per-issue orchestration loop
 
-New file `customized_areal/tree_search/agents/swe_lego_issue_runner.py`. Top-level entry called by
-the training episode loop, once per issue:
+New file `customized_areal/tree_search/agents/swe_lego_issue_runner.py`. Top-level entry
+called by the training episode loop, once per issue:
 
 ```python
 async def run_swe_lego_issue(
@@ -324,17 +337,19 @@ async def run_swe_lego_issue(
     return SweLegoIssueResult(per_agent=results, ...)
 ```
 
-**Branching within a lane.** Step 3 is where the existing DAG-RL branching machinery engages.
-`select_branch_candidate` picks a `(task_id, seq)` within a lane; `BranchMaterializer.materialize`
-(unchanged) does snapshot → `ForkIssueSubtree` → `agent_start_branch`. The only difference from the
-approved design is that `env` is `MulticaSweLegoProvider`, not `FleetSandboxProvider`. The verifier
-runs once per *terminal* agent run (the leaf of each lane's branch tree), and rewards back up
-through the DAG via the existing credit/backup path.
+**Branching within a lane.** Step 3 is where the existing DAG-RL branching machinery
+engages. `select_branch_candidate` picks a `(task_id, seq)` within a lane;
+`BranchMaterializer.materialize` (unchanged) does snapshot → `ForkIssueSubtree` →
+`agent_start_branch`. The only difference from the approved design is that `env` is
+`MulticaSweLegoProvider`, not `FleetSandboxProvider`. The verifier runs once per
+*terminal* agent run (the leaf of each lane's branch tree), and rewards back up through
+the DAG via the existing credit/backup path.
 
 ### 5.2 `MulticaSweLegoProvider` — the retargeted `ForkableEnvironment`
 
 New class in `customized_areal/tree_search/agents/environment.py`, sibling to
-`FleetSandboxProvider`. Same Protocol (`snapshot`/`fork`/`restore`/`cleanup`), different backend:
+`FleetSandboxProvider`. Same Protocol (`snapshot`/`fork`/`restore`/`cleanup`), different
+backend:
 
 ```python
 class MulticaSweLegoProvider:
@@ -357,16 +372,16 @@ class MulticaSweLegoProvider:
     async def cleanup(self, sandbox_id: str) -> None: ...
 ```
 
-**Why a new class instead of reusing `FleetSandboxProvider`.** The endpoints are the *same shape*
-but the *base URL and auth* differ (multica proxy vs. Fleet direct). Keeping two classes makes the
-boundary explicit and lets each carry its own config/env without runtime branching. The Protocol
-(`ForkableEnvironment`) is the only thing `BranchMaterializer` sees, so injecting either is a
-one-line change at the call site.
+**Why a new class instead of reusing `FleetSandboxProvider`.** The endpoints are the
+*same shape* but the *base URL and auth* differ (multica proxy vs. Fleet direct).
+Keeping two classes makes the boundary explicit and lets each carry its own config/env
+without runtime branching. The Protocol (`ForkableEnvironment`) is the only thing
+`BranchMaterializer` sees, so injecting either is a one-line change at the call site.
 
 ### 5.3 Hybrid SWE-Lego verifier
 
-New file `customized_areal/tree_search/agents/reward/swe_lego_verifier.py`. Composes three layers,
-matching the SWE-Lego/R2E-Gym hybrid recipe from the research doc:
+New file `customized_areal/tree_search/agents/reward/swe_lego_verifier.py`. Composes
+three layers, matching the SWE-Lego/R2E-Gym hybrid recipe from the research doc:
 
 ```python
 class SweLegoVerifier:
@@ -399,51 +414,55 @@ class SweLegoVerifier:
         )
 ```
 
-**Anti-cheating discipline.** The verifier reads only the test results and the agent transcript —
-never the gold patch, never git history (which is already truncated at image-build time). The
-objective check executes tests in a way that does not leak the `test_patch` to the agent's
-environment.
+**Anti-cheating discipline.** The verifier reads only the test results and the agent
+transcript — never the gold patch, never git history (which is already truncated at
+image-build time). The objective check executes tests in a way that does not leak the
+`test_patch` to the agent's environment.
 
 **Reward blending.** The objective layer short-circuits when it is decisive:
-`FAIL_TO_PASS` fully passes → reward `1.0` (regardless of critic/semi-resolved); `FAIL_TO_PASS`
-fully fails AND no failing-test-count reduction → reward `0.0`. In the mixed middle (some
-`FAIL_TO_PASS` pass, or failing-test count reduced but not to zero), the blend is
-`0.7 * objective + 0.2 * generative + 0.1 * semi_resolved`. Weights are configurable; the
-short-circuit thresholds are not (they are the anti-cheating anchor).
+`FAIL_TO_PASS` fully passes → reward `1.0` (regardless of critic/semi-resolved);
+`FAIL_TO_PASS` fully fails AND no failing-test-count reduction → reward `0.0`. In the
+mixed middle (some `FAIL_TO_PASS` pass, or failing-test count reduced but not to zero),
+the blend is `0.7 * objective + 0.2 * generative + 0.1 * semi_resolved`. Weights are
+configurable; the short-circuit thresholds are not (they are the anti-cheating anchor).
 
 ### 5.4 DAG credit backup — load-bearing in v1
 
-Decision 9 commits v1 to actually training on DAG-distributed credit, not just logging it. This
-means:
+Decision 9 commits v1 to actually training on DAG-distributed credit, not just logging
+it. This means:
 
-1. **The Phase 3 work from `multica-dag-rl-design.md` is in-scope.** DAG-aware hybrid reward backup
-   + advantage computer (`customized_areal/tree_search/dag/backup.py` + `credit.py`), per-node
-   credit at fan-in joins. Task 10 of the approved design.
-2. **`TreeAdvantageComputer` is extended, not replaced.** It keeps its GRPO-normalize-one-reward-
-   per-episode behavior but is extended to consume the per-node credit from `credit.py` instead of
-   broadcasting a flat episode reward to all turns.
-3. **The verifier's terminal reward is distributed along DAG edges** (delegation / mention /
-   completion) so sub-agent runs that contributed to a successful root get credit, and ones that
-   didn't get less. Fan-in joins: the verifier assigns per-agent credit explicitly (decision 8 of
-   the approved design) — no fixed sum/mean/max aggregation.
-4. **The generative critic's `per_step_signals` shape intermediate steps**, distinct from the
-   terminal backup. This is the dense signal that turns a sparse terminal reward into per-step
-   credit.
-5. **Training export carries per-node credit.** `/export_trajectories` returns tensor data whose
-   per-token advantage / lossmask reflects DAG-distributed credit, not a flat episode reward. This
-   is where "shapes training" becomes concrete.
+1. **The Phase 3 work from `multica-dag-rl-design.md` is in-scope.** DAG-aware hybrid
+   reward backup
+   - advantage computer (`customized_areal/tree_search/dag/backup.py` + `credit.py`),
+     per-node credit at fan-in joins. Task 10 of the approved design.
+1. **`TreeAdvantageComputer` is extended, not replaced.** It keeps its
+   GRPO-normalize-one-reward- per-episode behavior but is extended to consume the
+   per-node credit from `credit.py` instead of broadcasting a flat episode reward to all
+   turns.
+1. **The verifier's terminal reward is distributed along DAG edges** (delegation /
+   mention / completion) so sub-agent runs that contributed to a successful root get
+   credit, and ones that didn't get less. Fan-in joins: the verifier assigns per-agent
+   credit explicitly (decision 8 of the approved design) — no fixed sum/mean/max
+   aggregation.
+1. **The generative critic's `per_step_signals` shape intermediate steps**, distinct
+   from the terminal backup. This is the dense signal that turns a sparse terminal
+   reward into per-step credit.
+1. **Training export carries per-node credit.** `/export_trajectories` returns tensor
+   data whose per-token advantage / lossmask reflects DAG-distributed credit, not a flat
+   episode reward. This is where "shapes training" becomes concrete.
 
 ### 5.5 What stays unchanged
 
-- `BranchMaterializer` (`integration.py`) — snapshot + `ForkIssueSubtree` + `agent_start_branch`
-  orchestration, with rollback. Untouched.
-- `MulticaIssueForker` (`integration.py`) — the `POST /api/issues/{id}/fork` client. Untouched (the
-  Phase 1 endpoint already exists).
-- `db_bridge` RL session channels (`rl_start_session` / `rl_set_reward` / `rl_end_session` /
-  `agent_start_branch`). Untouched.
-- DAG model, `execution_dag.py`, GAE, advantage, harvest — the Phase 0-2 machinery. Untouched.
-- The `Verifier` Protocol and `ObjectiveVerifier` base (`verifier.py`). Untouched; `SweLegoVerifier`
-  composes them.
+- `BranchMaterializer` (`integration.py`) — snapshot + `ForkIssueSubtree` +
+  `agent_start_branch` orchestration, with rollback. Untouched.
+- `MulticaIssueForker` (`integration.py`) — the `POST /api/issues/{id}/fork` client.
+  Untouched (the Phase 1 endpoint already exists).
+- `db_bridge` RL session channels (`rl_start_session` / `rl_set_reward` /
+  `rl_end_session` / `agent_start_branch`). Untouched.
+- DAG model, `execution_dag.py`, GAE, advantage, harvest — the Phase 0-2 machinery.
+  Untouched.
+- The `Verifier` Protocol and `ObjectiveVerifier` base (`verifier.py`). Untouched;
+  `SweLegoVerifier` composes them.
 
 ## 6. Data flow — end to end
 
@@ -489,93 +508,109 @@ Training episode loop (per issue)
 
 ## 7. Error handling
 
-- **Image build failure** (clone/filter-repo/docker build) → endpoint returns 502, no project
-  created. Build-node cache retains partial artifacts for diagnosis; nothing promoted to the cache
-  key.
-- **Base sandbox boot failure** → endpoint rolls back the project (and the image stays cached for
-  retry). Returns 503.
-- **Fork failure** (one of `group_size`) → endpoint rolls back the successfully-forked sandboxes
-  and the base sandbox, deletes the project. Returns 503. The image stays cached.
+- **Image build failure** (clone/filter-repo/docker build) → endpoint returns 502, no
+  project created. Build-node cache retains partial artifacts for diagnosis; nothing
+  promoted to the cache key.
+- **Base sandbox boot failure** → endpoint rolls back the project (and the image stays
+  cached for retry). Returns 503.
+- **Fork failure** (one of `group_size`) → endpoint rolls back the successfully-forked
+  sandboxes and the base sandbox, deletes the project. Returns 503. The image stays
+  cached.
 - **Agent run enqueue failure** → same rollback as fork failure.
-- **Mid-run branching failure** → `BranchMaterializer` rolls back per its existing contract
-  (`integration.py`): cleans up the forked sandbox and the forked issue, logs, and the lane
-  continues without that branch. Other lanes are unaffected.
-- **Verifier failure** (test execution crash, critic LLM error) → `SweLegoVerifier` falls back to a
-  neutral reward (0.0) with `source="default"` and a rationale, never crashing the episode. This
-  matches the existing `ObjectiveVerifier` exception-to-failure contract.
-- **Reward write failure** (`rl_set_reward`) → logged; the trajectory is still exported with the
-  verifier-computed reward attached, so a downstream re-run of the PPO step can recover.
+- **Mid-run branching failure** → `BranchMaterializer` rolls back per its existing
+  contract (`integration.py`): cleans up the forked sandbox and the forked issue, logs,
+  and the lane continues without that branch. Other lanes are unaffected.
+- **Verifier failure** (test execution crash, critic LLM error) → `SweLegoVerifier`
+  falls back to a neutral reward (0.0) with `source="default"` and a rationale, never
+  crashing the episode. This matches the existing `ObjectiveVerifier`
+  exception-to-failure contract.
+- **Reward write failure** (`rl_set_reward`) → logged; the trajectory is still exported
+  with the verifier-computed reward attached, so a downstream re-run of the PPO step can
+  recover.
 
 ## 8. Security and anti-cheating
 
-- **Git history truncation** is enforced once at image-build time via `git filter-repo
-  --commit-cutoff`. Every forked sandbox inherits the truncated history. An agent running `git log`
-  or `git blame` cannot reach the future fix.
-- **Verifier read discipline.** The verifier reads only test results and the agent transcript —
-  never the gold patch, never `test_patch` source beyond the test names needed to run them.
-- **Test execution isolation.** Tests run in the agent's sandbox but the `test_patch` (the gold
-  tests that define `FAIL_TO_PASS`) is applied by the verifier in a way that does not leave it
-  readable in the agent's working tree during the agent's run. (The empty-vs-gold two-run model
-  applies `test_patch` only for the gold run, after the agent has finished.)
-- **API key scope.** The areal-side service key is scoped to the training workspace; it cannot
-  touch other workspaces' projects or sandboxes. Reuses the existing multica workspace authz.
-- **No secrets in images.** The SWE-Lego image contains only the repo, the daemon binary, and the
-  test runner. No API keys are baked in; the daemon receives its `MULTICA_TOKEN` at runtime via the
-  existing daemon-bootstrap path.
+- **Git history truncation** is enforced once at image-build time via
+  `git filter-repo --commit-cutoff`. Every forked sandbox inherits the truncated
+  history. An agent running `git log` or `git blame` cannot reach the future fix.
+- **Verifier read discipline.** The verifier reads only test results and the agent
+  transcript — never the gold patch, never `test_patch` source beyond the test names
+  needed to run them.
+- **Test execution isolation.** Tests run in the agent's sandbox but the `test_patch`
+  (the gold tests that define `FAIL_TO_PASS`) is applied by the verifier in a way that
+  does not leave it readable in the agent's working tree during the agent's run. (The
+  empty-vs-gold two-run model applies `test_patch` only for the gold run, after the
+  agent has finished.)
+- **API key scope.** The areal-side service key is scoped to the training workspace; it
+  cannot touch other workspaces' projects or sandboxes. Reuses the existing multica
+  workspace authz.
+- **No secrets in images.** The SWE-Lego image contains only the repo, the daemon
+  binary, and the test runner. No API keys are baked in; the daemon receives its
+  `MULTICA_TOKEN` at runtime via the existing daemon-bootstrap path.
 
 ## 9. Testing strategy
 
 - **`MulticaSweLegoProvider` contract tests** — fake httpx transport exercises
-  snapshot/fork/restore/cleanup ordering, error paths, and the concurrency semaphore, without
-  touching a real multica or Fleet. Mirrors the existing `FleetSandboxProvider` contract tests.
-- **`swe_lego_image.BuildOrReuse` Go tests** — fake build-node exec asserts: cache hit short-
-  circuits; cache miss runs clone → filter-repo → docker build in order; `--commit-cutoff` is
-  computed from `issue_date`; a second call with the same triple reuses the image. History-
-  truncation is asserted by inspecting the script shipped to the node (no real git operations in
-  unit tests).
-- **`swe_lego_issue` handler Go tests** — mock the service layer: happy path returns 201 with all
-  IDs; image-build failure returns 502 with no project; fork failure rolls back; auth/workspace
-  checks enforce. Follows the `parseUUIDOrBadRequest` / loader convention from `multica/CLAUDE.md`.
-- **`SweLegoVerifier` Python tests** — mock `ObjectiveVerifier` and `AgenticVerifier`: objective
-  fully passes → reward 1.0, short-circuit; objective fully fails → reward 0.0; mixed → blend;
-  critic raises → neutral fallback. Semi-resolved credit asserted on a fixture where failing-test
-  count drops but not to zero.
-- **DAG credit backup tests** — extend the existing `test_backup.py` to assert that a multi-node
-  DAG distributes the terminal reward along edges and that `TreeAdvantageComputer` produces
-  per-token advantage reflecting per-node credit (not a flat broadcast). Fan-in join credit is
-  explicit per the approved design.
-- **End-to-end** — one issue at `group_size=2` against a real multica + Fleet build-node + cloud
-  sandbox stack. Asserts: image built with truncated history; two daemon-in-docker sandboxes
-  boot; agents run; verifier produces a reward; `/export_trajectories` returns DAG-credit-shaped
-  tensors. Integration tests requiring multi-node hardware are skipped with an explanation when
-  unavailable (per `backend/areal/CLAUDE.md`).
-- **Anti-cheating test** — a canary agent run that attempts `git log --after=<issue_date>` in the
-  sandbox asserts the history is unreachable. This is a regression guard on the truncation.
+  snapshot/fork/restore/cleanup ordering, error paths, and the concurrency semaphore,
+  without touching a real multica or Fleet. Mirrors the existing `FleetSandboxProvider`
+  contract tests.
+- **`swe_lego_image.BuildOrReuse` Go tests** — fake build-node exec asserts: cache hit
+  short- circuits; cache miss runs clone → filter-repo → docker build in order;
+  `--commit-cutoff` is computed from `issue_date`; a second call with the same triple
+  reuses the image. History- truncation is asserted by inspecting the script shipped to
+  the node (no real git operations in unit tests).
+- **`swe_lego_issue` handler Go tests** — mock the service layer: happy path returns 201
+  with all IDs; image-build failure returns 502 with no project; fork failure rolls
+  back; auth/workspace checks enforce. Follows the `parseUUIDOrBadRequest` / loader
+  convention from `multica/CLAUDE.md`.
+- **`SweLegoVerifier` Python tests** — mock `ObjectiveVerifier` and `AgenticVerifier`:
+  objective fully passes → reward 1.0, short-circuit; objective fully fails → reward
+  0.0; mixed → blend; critic raises → neutral fallback. Semi-resolved credit asserted on
+  a fixture where failing-test count drops but not to zero.
+- **DAG credit backup tests** — extend the existing `test_backup.py` to assert that a
+  multi-node DAG distributes the terminal reward along edges and that
+  `TreeAdvantageComputer` produces per-token advantage reflecting per-node credit (not a
+  flat broadcast). Fan-in join credit is explicit per the approved design.
+- **End-to-end** — one issue at `group_size=2` against a real multica + Fleet build-node
+  \+ cloud sandbox stack. Asserts: image built with truncated history; two
+  daemon-in-docker sandboxes boot; agents run; verifier produces a reward;
+  `/export_trajectories` returns DAG-credit-shaped tensors. Integration tests requiring
+  multi-node hardware are skipped with an explanation when unavailable (per
+  `backend/areal/CLAUDE.md`).
+- **Anti-cheating test** — a canary agent run that attempts
+  `git log --after=<issue_date>` in the sandbox asserts the history is unreachable. This
+  is a regression guard on the truncation.
 
 ## 10. Out of scope (v1)
 
-- **Registry-backed image distribution.** The built image lives on the build node's docker daemon.
-  A registry pull so sandboxes can boot on any node is deferred.
+- **Registry-backed image distribution.** The built image lives on the build node's
+  docker daemon. A registry pull so sandboxes can boot on any node is deferred.
 - **Multi-node build scheduling.** One `swe-lego-build` tagged node is assumed.
-- **Non-Python repos.** SWE-Lego docker images are Python-first in v1 (matching the research doc
-  baseline). Multi-language support is a future concern.
-- **Streaming critic.** The generative critic returns one score per terminal run; streaming
-  per-step critic scores during the run is deferred.
-- **Daemonless (thin docker) path.** Out of scope — decision 4 commits to daemon-in-docker.
+- **Non-Python repos.** SWE-Lego docker images are Python-first in v1 (matching the
+  research doc baseline). Multi-language support is a future concern.
+- **Streaming critic.** The generative critic returns one score per terminal run;
+  streaming per-step critic scores during the run is deferred.
+- **Daemonless (thin docker) path.** Out of scope — decision 4 commits to
+  daemon-in-docker.
 
 ## 11. References
 
 ### AReaL
+
 - Approved DAG-RL design: `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md`
 - DAG event codec design: `docs/superpowers/specs/2026-06-29-dag-event-codec-design.md`
-- Event branch selection design: `docs/superpowers/specs/2026-06-29-event-branch-selection-design.md`
+- Event branch selection design:
+  `docs/superpowers/specs/2026-06-29-event-branch-selection-design.md`
 - OpenRouter remote rollout proxy design:
   `docs/superpowers/specs/2026-06-29-openrouter-remote-rollout-proxy-design.md`
-- DAG RL package: `customized_areal/tree_search/agents/` (`environment.py`, `integration.py`,
-  `verifier.py`, `branch_selection.py`, `execution_dag.py`, `agentic_verifier.py`)
-- SWE data pipeline research: `customized_areal/tree_search/agents/reward/swe_data_pipeline_comparison.md`
+- DAG RL package: `customized_areal/tree_search/agents/` (`environment.py`,
+  `integration.py`, `verifier.py`, `branch_selection.py`, `execution_dag.py`,
+  `agentic_verifier.py`)
+- SWE data pipeline research:
+  `customized_areal/tree_search/agents/reward/swe_data_pipeline_comparison.md`
 
 ### Multica
+
 - Cloud-runtime proxy: `server/internal/handler/cloud_runtime.go:108-127`
 - Project / issue handlers: `server/internal/handler/project.go:221`,
   `server/internal/handler/issue.go:2070`
@@ -586,7 +621,8 @@ Training episode loop (per issue)
 - Conventions: `multica/CLAUDE.md`
 
 ### Project rules
+
 - Backend boundary: `.claude/rules/backend.md` ("Boundary Normalization Rule")
-- Sandbox-layer types: `.claude/rules/code-quality.md` ("Sandbox-layer types stay behind the
-  wrapper")
+- Sandbox-layer types: `.claude/rules/code-quality.md` ("Sandbox-layer types stay behind
+  the wrapper")
 - Multi-tenancy: `.claude/rules/multi-tenancy.md`

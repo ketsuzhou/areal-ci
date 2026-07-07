@@ -577,7 +577,12 @@ def _is_logprobs_unsupported(exc: Exception) -> bool:
         return False
     return any(
         phrase in msg
-        for phrase in ("not supported", "unsupported", "unrecognized", "unknown argument")
+        for phrase in (
+            "not supported",
+            "unsupported",
+            "unrecognized",
+            "unknown argument",
+        )
     )
 
 

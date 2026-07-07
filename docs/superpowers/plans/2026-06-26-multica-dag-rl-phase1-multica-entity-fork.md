@@ -1,42 +1,60 @@
 # Phase 1: Multica Entity Fork — Implementation Plan (Go)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `ForkIssueSubtree` (a Go service that forks an issue's entity subtree at a past `seq`, reconstructing overwritten fields from the activity log), expose it via `POST /api/issues/{id}/fork` + `DELETE`, and add generic Fleet snapshot/fork endpoints that dispatch to the underlying sandbox vendor.
+**Goal:** Ship `ForkIssueSubtree` (a Go service that forks an issue's entity subtree at
+a past `seq`, reconstructing overwritten fields from the activity log), expose it via
+`POST /api/issues/{id}/fork` + `DELETE`, and add generic Fleet snapshot/fork endpoints
+that dispatch to the underlying sandbox vendor.
 
-**Architecture:** A new migration adds fork provenance columns (`forked_from_issue_id`, `forked_at_seq`, `forked_at_task_id`) to `issue`. A new `IssueForkService` in `internal/service/issue_fork.go` copies the issue + append-only data (comments, sub-issues, task_messages) cut at `seq`, reconstructing overwritten `issue` fields from `activity_log`. A new handler exposes the fork over HTTP. Separately, Fleet snapshot/fork endpoints are added to `internal/handler/cloud_runtime.go`, dispatching to Daytona (the current vendor) via the existing `cloudruntime.Client`.
+**Architecture:** A new migration adds fork provenance columns (`forked_from_issue_id`,
+`forked_at_seq`, `forked_at_task_id`) to `issue`. A new `IssueForkService` in
+`internal/service/issue_fork.go` copies the issue + append-only data (comments,
+sub-issues, task_messages) cut at `seq`, reconstructing overwritten `issue` fields from
+`activity_log`. A new handler exposes the fork over HTTP. Separately, Fleet
+snapshot/fork endpoints are added to `internal/handler/cloud_runtime.go`, dispatching to
+Daytona (the current vendor) via the existing `cloudruntime.Client`.
 
-**Tech Stack:** Go 1.26 · Chi router · sqlc for DB · `github.com/jackc/pgx/v5` · `make sqlc` to regenerate · `make test` for Go tests · `make migrate-up` for migrations
+**Tech Stack:** Go 1.26 · Chi router · sqlc for DB · `github.com/jackc/pgx/v5` ·
+`make sqlc` to regenerate · `make test` for Go tests · `make migrate-up` for migrations
 
-**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.2 (activity-log reconstruction), §3.4 (generic Fleet endpoints), §4 (Architecture), §5 Phase 1
+**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.2
+(activity-log reconstruction), §3.4 (generic Fleet endpoints), §4 (Architecture), §5
+Phase 1
 
-**Project rules:** `multica/CLAUDE.md` (UUID parsing convention, parse-don't-cast, route categories, atomic commits). Read `multica/CLAUDE.md` before starting.
+**Project rules:** `multica/CLAUDE.md` (UUID parsing convention, parse-don't-cast, route
+categories, atomic commits). Read `multica/CLAUDE.md` before starting.
 
-**Dependencies:** Phase 0 must be complete (the Python `FleetSandboxProvider` calls the endpoints added in Task 5 of this plan).
+**Dependencies:** Phase 0 must be complete (the Python `FleetSandboxProvider` calls the
+endpoints added in Task 5 of this plan).
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `multica/server/migrations/122_issue_fork_provenance.up.sql` (create) | Add `forked_from_issue_id`, `forked_at_seq`, `forked_at_task_id` columns + partial index |
-| `multica/server/migrations/122_issue_fork_provenance.down.sql` (create) | Drop the columns + index |
-| `multica/server/pkg/db/queries/issue_fork.sql` (create) | sqlc queries: create forked issue, list comments/sub-issues/task_messages at seq, activity log lookup |
-| `multica/server/internal/service/issue_fork.go` (create) | `IssueForkService.ForkIssueSubtree(ctx, sourceIssueID, taskID, seq)` — the core fork logic with activity-log reconstruction |
-| `multica/server/internal/service/issue_fork_test.go` (create) | Per-field activity-log reconstruction tests + coverage check test |
-| `multica/server/internal/handler/issue_fork.go` (create) | `POST /api/issues/{id}/fork` + `DELETE /api/issues/{id}/fork` handlers |
-| `multica/server/internal/handler/issue_fork_test.go` (create) | Handler tests: UUID parsing, loader usage, 404 on missing issue |
-| `multica/server/internal/handler/cloud_runtime.go` (modify) | Add `SnapshotCloudRuntimeSandbox`, `ForkCloudRuntimeSandbox` handlers |
-| `multica/server/internal/handler/cloud_runtime_test.go` (modify) | Tests for the two new handlers |
-| `multica/server/cmd/server/router.go` (modify) | Register the new routes |
+| File                                                                    | Responsibility                                                                                                              |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `multica/server/migrations/122_issue_fork_provenance.up.sql` (create)   | Add `forked_from_issue_id`, `forked_at_seq`, `forked_at_task_id` columns + partial index                                    |
+| `multica/server/migrations/122_issue_fork_provenance.down.sql` (create) | Drop the columns + index                                                                                                    |
+| `multica/server/pkg/db/queries/issue_fork.sql` (create)                 | sqlc queries: create forked issue, list comments/sub-issues/task_messages at seq, activity log lookup                       |
+| `multica/server/internal/service/issue_fork.go` (create)                | `IssueForkService.ForkIssueSubtree(ctx, sourceIssueID, taskID, seq)` — the core fork logic with activity-log reconstruction |
+| `multica/server/internal/service/issue_fork_test.go` (create)           | Per-field activity-log reconstruction tests + coverage check test                                                           |
+| `multica/server/internal/handler/issue_fork.go` (create)                | `POST /api/issues/{id}/fork` + `DELETE /api/issues/{id}/fork` handlers                                                      |
+| `multica/server/internal/handler/issue_fork_test.go` (create)           | Handler tests: UUID parsing, loader usage, 404 on missing issue                                                             |
+| `multica/server/internal/handler/cloud_runtime.go` (modify)             | Add `SnapshotCloudRuntimeSandbox`, `ForkCloudRuntimeSandbox` handlers                                                       |
+| `multica/server/internal/handler/cloud_runtime_test.go` (modify)        | Tests for the two new handlers                                                                                              |
+| `multica/server/cmd/server/router.go` (modify)                          | Register the new routes                                                                                                     |
 
----
+______________________________________________________________________
 
 ## Task 3: Migration — fork provenance columns on `issue`
 
 **Files:**
+
 - Create: `multica/server/migrations/122_issue_fork_provenance.up.sql`
+
 - Create: `multica/server/migrations/122_issue_fork_provenance.down.sql`
 
 - [ ] **Step 1: Write the up migration**
@@ -74,13 +92,13 @@ ALTER TABLE issue
 
 - [ ] **Step 3: Run the migration to verify it applies cleanly**
 
-Run: `cd /workspaces/leagent/backend/areal/multica && make migrate-up`
-Expected: migration 122 applies with no errors.
+Run: `cd /workspaces/leagent/backend/areal/multica && make migrate-up` Expected:
+migration 122 applies with no errors.
 
 - [ ] **Step 4: Verify rollback works**
 
-Run: `make migrate-down` (then `make migrate-up` to restore)
-Expected: down migration drops the columns cleanly; re-applying up works.
+Run: `make migrate-down` (then `make migrate-up` to restore) Expected: down migration
+drops the columns cleanly; re-applying up works.
 
 - [ ] **Step 5: Commit**
 
@@ -89,12 +107,14 @@ git add multica/server/migrations/122_issue_fork_provenance.up.sql multica/serve
 git commit -m "feat(db): add issue fork provenance columns (forked_from_issue_id, forked_at_seq, forked_at_task_id)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: sqlc queries for issue fork
 
 **Files:**
+
 - Create: `multica/server/pkg/db/queries/issue_fork.sql`
+
 - Modify: `multica/server/pkg/db/generated/` (auto-generated by `make sqlc`)
 
 - [ ] **Step 1: Write the sqlc queries**
@@ -165,13 +185,12 @@ WHERE id = @id
 
 - [ ] **Step 2: Regenerate sqlc code**
 
-Run: `cd /workspaces/leagent/backend/areal/multica && make sqlc`
-Expected: no errors; new functions appear in `multica/server/pkg/db/generated/`.
+Run: `cd /workspaces/leagent/backend/areal/multica && make sqlc` Expected: no errors;
+new functions appear in `multica/server/pkg/db/generated/`.
 
 - [ ] **Step 3: Verify the generated code compiles**
 
-Run: `cd multica/server && go build ./...`
-Expected: compiles cleanly.
+Run: `cd multica/server && go build ./...` Expected: compiles cleanly.
 
 - [ ] **Step 4: Commit**
 
@@ -180,15 +199,19 @@ git add multica/server/pkg/db/queries/issue_fork.sql multica/server/pkg/db/gener
 git commit -m "feat(db): add sqlc queries for issue fork (create forked issue, list at seq, activity log)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: Activity-log coverage check
 
 **Files:**
-- Create: `multica/server/internal/service/issue_fork.go` (skeleton + coverage check only)
+
+- Create: `multica/server/internal/service/issue_fork.go` (skeleton + coverage check
+  only)
 - Create: `multica/server/internal/service/issue_fork_test.go`
 
-**Rationale:** Per design §3.2, before implementing replay logic we must verify that `activity_log` captures every overwritten `issue` field. This test encodes that contract — it fails the build if a field is added to `issue` without being logged.
+**Rationale:** Per design §3.2, before implementing replay logic we must verify that
+`activity_log` captures every overwritten `issue` field. This test encodes that contract
+— it fails the build if a field is added to `issue` without being logged.
 
 - [ ] **Step 1: Write the failing coverage test**
 
@@ -245,8 +268,10 @@ var _ = db.Issue{}
 
 - [ ] **Step 2: Run test to verify it compiles but the contract is self-consistent**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/service/ -run TestActivityLogCoversOverwritableIssueFields -v`
-Expected: PASS (the test is a self-consistency check; it fails only if a field is removed from `covered` without being removed from `overwritable`).
+Run:
+`cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/service/ -run TestActivityLogCoversOverwritableIssueFields -v`
+Expected: PASS (the test is a self-consistency check; it fails only if a field is
+removed from `covered` without being removed from `overwritable`).
 
 - [ ] **Step 3: Commit**
 
@@ -255,12 +280,14 @@ git add multica/server/internal/service/issue_fork_test.go
 git commit -m "test(issue-fork): add activity-log coverage contract test for overwritable issue fields"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: IssueForkService — core fork with activity-log reconstruction
 
 **Files:**
+
 - Modify: `multica/server/internal/service/issue_fork.go`
+
 - Modify: `multica/server/internal/service/issue_fork_test.go`
 
 - [ ] **Step 1: Write the failing test for ForkIssueSubtree**
@@ -392,7 +419,8 @@ func TestForkIssueSubtree_ReconstructsOverwrittenStatusFromActivityLog(t *testin
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsOverwrittenStatusFromActivityLog -v`
+Run:
+`cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsOverwrittenStatusFromActivityLog -v`
 Expected: FAIL — `NewIssueForkService` undefined, `ForkIssueSubtree` undefined.
 
 - [ ] **Step 3: Implement IssueForkService**
@@ -643,7 +671,8 @@ Add `import "time"` to the imports.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsOverwrittenStatusFromActivityLog -v`
+Run:
+`go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsOverwrittenStatusFromActivityLog -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -653,11 +682,12 @@ git add multica/server/internal/service/issue_fork.go multica/server/internal/se
 git commit -m "feat(service): add IssueForkService.ForkIssueSubtree with activity-log reconstruction"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: Per-field activity-log reconstruction tests
 
 **Files:**
+
 - Modify: `multica/server/internal/service/issue_fork_test.go`
 
 - [ ] **Step 1: Write the per-field tests (table-driven)**
@@ -757,7 +787,8 @@ func TestForkIssueSubtree_ReconstructsEachOverwritableField(t *testing.T) {
 
 - [ ] **Step 2: Run tests to verify they pass**
 
-Run: `go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsEachOverwritableField -v`
+Run:
+`go test ./internal/service/ -run TestForkIssueSubtree_ReconstructsEachOverwritableField -v`
 Expected: PASS for all subtests
 
 - [ ] **Step 3: Commit**
@@ -767,12 +798,14 @@ git add multica/server/internal/service/issue_fork_test.go
 git commit -m "test(service): add per-field activity-log reconstruction tests for issue fork"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: HTTP handler — POST /api/issues/{id}/fork
 
 **Files:**
+
 - Create: `multica/server/internal/handler/issue_fork.go`
+
 - Create: `multica/server/internal/handler/issue_fork_test.go`
 
 - [ ] **Step 1: Write the failing handler test**
@@ -823,7 +856,8 @@ func TestForkIssue_Handler_MissingTaskID(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/handler/ -run TestForkIssue -v`
+Run:
+`cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/handler/ -run TestForkIssue -v`
 Expected: FAIL — `h.ForkIssue` undefined.
 
 - [ ] **Step 3: Implement the handler**
@@ -925,12 +959,15 @@ func uuidToString(u pgtype.UUID) string {
 }
 ```
 
-Note: `pgUUIDToString` is the existing project helper — grep for it in `handler/` and use the actual function name. If no helper exists, use `fmt.Sprintf("%x-%x-%x-%x-%x", ...)`. Run `grep -rn "func uuidToString\|func pgUUIDToString\|func.*UUID.*string" internal/handler/` to find the existing one.
+Note: `pgUUIDToString` is the existing project helper — grep for it in `handler/` and
+use the actual function name. If no helper exists, use
+`fmt.Sprintf("%x-%x-%x-%x-%x", ...)`. Run
+`grep -rn "func uuidToString\|func pgUUIDToString\|func.*UUID.*string" internal/handler/`
+to find the existing one.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./internal/handler/ -run TestForkIssue -v`
-Expected: PASS
+Run: `go test ./internal/handler/ -run TestForkIssue -v` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -939,12 +976,14 @@ git add multica/server/internal/handler/issue_fork.go multica/server/internal/ha
 git commit -m "feat(handler): add POST /api/issues/{id}/fork and DELETE fork cleanup"
 ```
 
----
+______________________________________________________________________
 
 ## Task 9: Fleet snapshot/fork endpoints (cloud-runtime proxy extensions)
 
 **Files:**
+
 - Modify: `multica/server/internal/handler/cloud_runtime.go`
+
 - Modify: `multica/server/internal/handler/cloud_runtime_test.go`
 
 - [ ] **Step 1: Write the failing handler tests**
@@ -990,8 +1029,10 @@ func TestForkCloudRuntimeSandbox_ProxiesToPostFork(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/handler/ -run "TestSnapshotCloudRuntimeSandbox|TestForkCloudRuntimeSandbox" -v`
-Expected: FAIL — the handler methods don't exist; `newTestHandlerWithFleetRecorder` may need to be added to test helpers.
+Run:
+`go test ./internal/handler/ -run "TestSnapshotCloudRuntimeSandbox|TestForkCloudRuntimeSandbox" -v`
+Expected: FAIL — the handler methods don't exist; `newTestHandlerWithFleetRecorder` may
+need to be added to test helpers.
 
 - [ ] **Step 3: Implement the two handlers**
 
@@ -1025,7 +1066,8 @@ func (h *Handler) ForkCloudRuntimeSandbox(w http.ResponseWriter, r *http.Request
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./internal/handler/ -run "TestSnapshotCloudRuntimeSandbox|TestForkCloudRuntimeSandbox" -v`
+Run:
+`go test ./internal/handler/ -run "TestSnapshotCloudRuntimeSandbox|TestForkCloudRuntimeSandbox" -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1035,11 +1077,12 @@ git add multica/server/internal/handler/cloud_runtime.go multica/server/internal
 git commit -m "feat(handler): add Fleet sandbox snapshot and fork proxy endpoints"
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Register routes in router.go
 
 **Files:**
+
 - Modify: `multica/server/cmd/server/router.go`
 
 - [ ] **Step 1: Write the failing test that asserts the routes exist**
@@ -1069,8 +1112,8 @@ func TestRouterHasIssueForkRoutes(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./cmd/server/ -run TestRouterHasIssueForkRoutes -v`
-Expected: FAIL — routes not registered; all four return 404.
+Run: `go test ./cmd/server/ -run TestRouterHasIssueForkRoutes -v` Expected: FAIL —
+routes not registered; all four return 404.
 
 - [ ] **Step 3: Register the routes**
 
@@ -1081,7 +1124,8 @@ r.Post("/sandboxes/{sandboxID}/snapshot", h.SnapshotCloudRuntimeSandbox)
 r.Post("/sandboxes/fork", h.ForkCloudRuntimeSandbox)
 ```
 
-And find the existing issues route group (likely `r.Route("/api/issues", ...)` or inline) and add:
+And find the existing issues route group (likely `r.Route("/api/issues", ...)` or
+inline) and add:
 
 ```go
 r.Post("/{id}/fork", h.ForkIssue)
@@ -1090,8 +1134,7 @@ r.Delete("/{id}/fork", h.DeleteForkedIssue)
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./cmd/server/ -run TestRouterHasIssueForkRoutes -v`
-Expected: PASS
+Run: `go test ./cmd/server/ -run TestRouterHasIssueForkRoutes -v` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -1100,7 +1143,7 @@ git add multica/server/cmd/server/router.go multica/server/cmd/server/router_tes
 git commit -m "feat(router): register issue fork and sandbox snapshot/fork routes"
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: Run full Go test suite + pre-commit
 
@@ -1108,18 +1151,16 @@ git commit -m "feat(router): register issue fork and sandbox snapshot/fork route
 
 - [ ] **Step 1: Run all Go tests**
 
-Run: `cd /workspaces/leagent/backend/areal/multica && make test`
-Expected: All tests pass.
+Run: `cd /workspaces/leagent/backend/areal/multica && make test` Expected: All tests
+pass.
 
 - [ ] **Step 2: Run go vet**
 
-Run: `cd server && go vet ./...`
-Expected: No issues.
+Run: `cd server && go vet ./...` Expected: No issues.
 
 - [ ] **Step 3: Verify migrations apply cleanly from scratch**
 
-Run: `make db-reset && make migrate-up`
-Expected: All migrations apply including 122.
+Run: `make db-reset && make migrate-up` Expected: All migrations apply including 122.
 
 - [ ] **Step 4: Commit any remaining fixes**
 
@@ -1128,23 +1169,35 @@ git add -A
 git commit -m "chore: phase 1 verification — all Go tests pass"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage:**
+
 - Design §3.2 (activity-log reconstruction) → Tasks 5, 6, 7
 - Design §3.4 (generic Fleet endpoints dispatching to vendor) → Tasks 9, 10
-- Design §4 Architecture (Multica side: migration, ForkIssueSubtree, Fleet endpoints, HTTP handler) → Tasks 3, 4, 6, 8, 9
+- Design §4 Architecture (Multica side: migration, ForkIssueSubtree, Fleet endpoints,
+  HTTP handler) → Tasks 3, 4, 6, 8, 9
 - Design §5 Phase 1 (Tasks 3, 4, 5) → all tasks
-- Design §6 Testing strategy (Go tests with activity-log fixtures, coverage check as separate test) → Tasks 5, 7
+- Design §6 Testing strategy (Go tests with activity-log fixtures, coverage check as
+  separate test) → Tasks 5, 7
 - `multica/CLAUDE.md` UUID convention (parseUUIDOrBadRequest + loader) → Task 8
 
 **Placeholder scan:**
-- Task 6 has two `TODO`-adjacent notes about comment-trigger-correct copy and task_message copy being Phase 4 concerns. These are documented v1 limitations, not placeholders — the behavior is intentional and the design spec explicitly defers comment-trigger wiring. They are labeled as such in the code comments.
-- `pgUUIDToString` reference in Task 8 Step 3 — the note explains to grep for the existing helper. This is a discovery step, not a placeholder; the function exists in the codebase (confirmed via the `uuidToString` reference at `issue.go:1585` area).
+
+- Task 6 has two `TODO`-adjacent notes about comment-trigger-correct copy and
+  task_message copy being Phase 4 concerns. These are documented v1 limitations, not
+  placeholders — the behavior is intentional and the design spec explicitly defers
+  comment-trigger wiring. They are labeled as such in the code comments.
+- `pgUUIDToString` reference in Task 8 Step 3 — the note explains to grep for the
+  existing helper. This is a discovery step, not a placeholder; the function exists in
+  the codebase (confirmed via the `uuidToString` reference at `issue.go:1585` area).
 
 **Type consistency:**
+
 - `IssueForkQueries` interface in Task 6 matches the sqlc query signatures in Task 4.
-- `ForkIssueResponse{ ForkedIssueID string }` in Task 8 matches the handler test assertions.
-- The `fakeQueries` test double in Task 6 implements every method of `IssueForkQueries` (verified by the interface compile check).
+- `ForkIssueResponse{ ForkedIssueID string }` in Task 8 matches the handler test
+  assertions.
+- The `fakeQueries` test double in Task 6 implements every method of `IssueForkQueries`
+  (verified by the interface compile check).

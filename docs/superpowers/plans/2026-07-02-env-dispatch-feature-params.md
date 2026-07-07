@@ -1,37 +1,79 @@
 # env-dispatch feature params (default env, squad_id, resume) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add three additive params to `POST /api/v1/env-dispatch` — `mode=resume` (alias for branch), optional `env_id` resolving a per-workspace default self-play env, and `squad_id` team dispatch (both domains) — without changing existing behavior when they are absent.
+**Goal:** Add three additive params to `POST /api/v1/env-dispatch` — `mode=resume`
+(alias for branch), optional `env_id` resolving a per-workspace default self-play env,
+and `squad_id` team dispatch (both domains) — without changing existing behavior when
+they are absent.
 
-**Architecture:** All server work is in the `multica` repo (Go, sqlc, chi). The handler relaxes validation and threads new fields into the service; the service normalizes `resume→branch`, enforces the new conditional-required rules, resolves the default env via a new dep, and threads `squad_id` through the enqueue seam. The adapter resolves the squad leader and applies multica's existing leader signals (`is_leader_task` on the issue path; a `squad_id` task-context hint on the chat path, consumed by a new daemon branch). A migration adds `workspace.default_self_play_env_id`. The AReaL Python client gains the optional params.
+**Architecture:** All server work is in the `multica` repo (Go, sqlc, chi). The handler
+relaxes validation and threads new fields into the service; the service normalizes
+`resume→branch`, enforces the new conditional-required rules, resolves the default env
+via a new dep, and threads `squad_id` through the enqueue seam. The adapter resolves the
+squad leader and applies multica's existing leader signals (`is_leader_task` on the
+issue path; a `squad_id` task-context hint on the chat path, consumed by a new daemon
+branch). A migration adds `workspace.default_self_play_env_id`. The AReaL Python client
+gains the optional params.
 
-**Tech Stack:** Go 1.x, sqlc (`make sqlc`), chi router, pgx/pgtype, Postgres; Go `testing` (fake-deps unit tests + `testPool` DB-backed handler/daemon tests); Python 3.12 + httpx + pytest (AReaL client).
+**Tech Stack:** Go 1.x, sqlc (`make sqlc`), chi router, pgx/pgtype, Postgres; Go
+`testing` (fake-deps unit tests + `testPool` DB-backed handler/daemon tests); Python
+3.12 + httpx + pytest (AReaL client).
 
 ## Global Constraints
 
-- Impl repo: `multica/` (commit to `main`, per project decision). AReaL client changes are in the `areal` repo working tree.
-- Existing scratch/branch/swe_lego/self_play behavior MUST be unchanged when the new params are absent.
-- `mode=resume` normalizes to `branch` at the service edge — one code path; no new `EnvMode` beyond accepting the string.
-- `env_id` empty is valid ONLY for `mode=scratch` + `domain=self_play`; otherwise 400. self_play scratch with empty `env_id` and no configured default → 400 (`validation_failed`).
-- Exactly one of `agent_id` / `squad_id` (neither or both → 400). `squad_id` present → `agent_id` forbidden; the squad leader is resolved server-side.
-- `squad_id` supported for BOTH domains. Squad dispatch MUST use leader signals: issue → `assignee_type=squad` + enqueue leader with `is_leader_task=true`; chat → enqueue leader + `squad_id` task-context hint + daemon briefing injection. A plain leader enqueue without a leader signal is NOT acceptable.
-- Migration is `141_workspace_default_self_play_env` (next after `140_environment_state`). Column: `default_self_play_env_id UUID NULL REFERENCES environment(id) ON DELETE SET NULL`.
-- After ANY change under `server/pkg/db/queries/*.sql`: **DO NOT run `sqlc generate`** — it is not runnable in this repo (a clean run rewrites unrelated files and creates `agent_skill_suggestion.sql.go`/`evolution.sql.go` that redeclare symbols in hand-maintained `*_manual.sql.go` companions, breaking the build). Instead, add the query to `queries/*.sql` as source-of-truth AND **hand-write the corresponding generated Go** (function + `Params` struct + any `models.go` field) by appending to the existing `generated/<file>.sql.go`, mirroring sqlc's exact style for a sibling query in the same file. Verify with `go build` + the DB-backed test.
-- Run `cd server && go build ./internal/handler/ ./internal/service/ ./cmd/migrate/... && go vet ./internal/handler/ ./internal/service/` before each server commit; `gofmt` all Go. (Do NOT use `go build ./...`: `internal/service/webpush/webpush.go:180` has a pre-existing, unrelated build failure on go 1.26 — `constant 4096 overflows byte` — that is out of scope for B.)
+- Impl repo: `multica/` (commit to `main`, per project decision). AReaL client changes
+  are in the `areal` repo working tree.
+- Existing scratch/branch/swe_lego/self_play behavior MUST be unchanged when the new
+  params are absent.
+- `mode=resume` normalizes to `branch` at the service edge — one code path; no new
+  `EnvMode` beyond accepting the string.
+- `env_id` empty is valid ONLY for `mode=scratch` + `domain=self_play`; otherwise 400.
+  self_play scratch with empty `env_id` and no configured default → 400
+  (`validation_failed`).
+- Exactly one of `agent_id` / `squad_id` (neither or both → 400). `squad_id` present →
+  `agent_id` forbidden; the squad leader is resolved server-side.
+- `squad_id` supported for BOTH domains. Squad dispatch MUST use leader signals: issue →
+  `assignee_type=squad` + enqueue leader with `is_leader_task=true`; chat → enqueue
+  leader + `squad_id` task-context hint + daemon briefing injection. A plain leader
+  enqueue without a leader signal is NOT acceptable.
+- Migration is `141_workspace_default_self_play_env` (next after
+  `140_environment_state`). Column:
+  `default_self_play_env_id UUID NULL REFERENCES environment(id) ON DELETE SET NULL`.
+- After ANY change under `server/pkg/db/queries/*.sql`: **DO NOT run `sqlc generate`** —
+  it is not runnable in this repo (a clean run rewrites unrelated files and creates
+  `agent_skill_suggestion.sql.go`/`evolution.sql.go` that redeclare symbols in
+  hand-maintained `*_manual.sql.go` companions, breaking the build). Instead, add the
+  query to `queries/*.sql` as source-of-truth AND **hand-write the corresponding
+  generated Go** (function + `Params` struct + any `models.go` field) by appending to
+  the existing `generated/<file>.sql.go`, mirroring sqlc's exact style for a sibling
+  query in the same file. Verify with `go build` + the DB-backed test.
+- Run
+  `cd server && go build ./internal/handler/ ./internal/service/ ./cmd/migrate/... && go vet ./internal/handler/ ./internal/service/`
+  before each server commit; `gofmt` all Go. (Do NOT use `go build ./...`:
+  `internal/service/webpush/webpush.go:180` has a pre-existing, unrelated build failure
+  on go 1.26 — `constant 4096 overflows byte` — that is out of scope for B.)
 - No wildcard imports (Go or Python). Follow existing patterns in each file.
 
----
+______________________________________________________________________
 
 ### Task 1: Migration — workspace.default_self_play_env_id
 
 **Files:**
+
 - Create: `server/migrations/141_workspace_default_self_play_env.up.sql`
 - Create: `server/migrations/141_workspace_default_self_play_env.down.sql`
-- Test: `server/migrations/migrations_test.go` (add a case if the suite is table-driven) OR a new `server/internal/handler/env_dispatch_default_env_migration_test.go` DB-backed check. Use whichever the repo already uses for migration structural checks; if none, add the DB-backed test below.
+- Test: `server/migrations/migrations_test.go` (add a case if the suite is table-driven)
+  OR a new `server/internal/handler/env_dispatch_default_env_migration_test.go`
+  DB-backed check. Use whichever the repo already uses for migration structural checks;
+  if none, add the DB-backed test below.
 
 **Interfaces:**
-- Produces: `workspace.default_self_play_env_id` column (nullable, FK → `environment(id)`, `ON DELETE SET NULL`).
+
+- Produces: `workspace.default_self_play_env_id` column (nullable, FK →
+  `environment(id)`, `ON DELETE SET NULL`).
 
 - [ ] **Step 1: Write the up/down migrations**
 
@@ -56,7 +98,8 @@ ALTER TABLE workspace DROP COLUMN IF EXISTS default_self_play_env_id;
 
 - [ ] **Step 2: Add a DB-backed test that the column exists and is nullable**
 
-Add `server/internal/handler/default_self_play_env_migration_test.go` (mirror an existing DB-backed test's package + `testPool` setup):
+Add `server/internal/handler/default_self_play_env_migration_test.go` (mirror an
+existing DB-backed test's package + `testPool` setup):
 
 ```go
 package handler
@@ -91,8 +134,10 @@ func TestWorkspaceDefaultSelfPlayEnvColumn(t *testing.T) {
 
 - [ ] **Step 3: Apply migrations and run the test**
 
-Run: `cd server && make migrate-up && go test ./internal/handler/ -run TestWorkspaceDefaultSelfPlayEnvColumn -v`
-Expected: PASS. (If the DB is not reachable in this environment, note it and defer to CI, per AGENTS.md — but the migration files must still be committed.)
+Run:
+`cd server && make migrate-up && go test ./internal/handler/ -run TestWorkspaceDefaultSelfPlayEnvColumn -v`
+Expected: PASS. (If the DB is not reachable in this environment, note it and defer to
+CI, per AGENTS.md — but the migration files must still be committed.)
 
 - [ ] **Step 4: Commit**
 
@@ -102,25 +147,34 @@ git add server/migrations/141_workspace_default_self_play_env.up.sql server/migr
 git commit -m "feat(env-dispatch): add workspace.default_self_play_env_id (migration 141)"
 ```
 
----
+______________________________________________________________________
 
 ### Task 2: Service — resume, exactly-one, default-env resolution
 
 **Files:**
+
 - Modify: `server/internal/service/env_dispatch.go`
 - Test: `server/internal/service/env_dispatch_test.go`
 
 **Interfaces:**
-- Consumes: existing `EnvDispatchInput`, `EnvDispatchService`, `EnvDispatchDeps`, `fakeEnvDispatchDeps`.
+
+- Consumes: existing `EnvDispatchInput`, `EnvDispatchService`, `EnvDispatchDeps`,
+  `fakeEnvDispatchDeps`.
+
 - Produces:
+
   - `EnvDispatchInput.SquadID string` (new field).
-  - `EnvDispatchDeps.GetDefaultSelfPlayEnv(ctx context.Context, workspaceID string) (envID string, err error)` (new dep method).
-  - `EnvDispatchDeps.EnqueueAgentRun(ctx, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID string, idx int) (runID string, err error)` (extended signature — adds `squadID` after `agentID`).
-  - Service normalizes `mode=="resume"` → `EnvModeBranch`; `validate()` enforces exactly-one agent/squad and conditional `env_id`.
+  - `EnvDispatchDeps.GetDefaultSelfPlayEnv(ctx context.Context, workspaceID string) (envID string, err error)`
+    (new dep method).
+  - `EnvDispatchDeps.EnqueueAgentRun(ctx, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID string, idx int) (runID string, err error)`
+    (extended signature — adds `squadID` after `agentID`).
+  - Service normalizes `mode=="resume"` → `EnvModeBranch`; `validate()` enforces
+    exactly-one agent/squad and conditional `env_id`.
 
 - [ ] **Step 1: Write failing service tests**
 
-Add to `server/internal/service/env_dispatch_test.go` (extend `fakeEnvDispatchDeps` with the new methods first — see Step 3 for the shapes), then:
+Add to `server/internal/service/env_dispatch_test.go` (extend `fakeEnvDispatchDeps` with
+the new methods first — see Step 3 for the shapes), then:
 
 ```go
 func TestDispatch_ResumeNormalizesToBranch(t *testing.T) {
@@ -205,12 +259,16 @@ func TestValidate_EmptyEnvIDRejectedForSweLegoAndUnconfigured(t *testing.T) {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd server && go test ./internal/service/ -run 'TestDispatch_Resume|TestValidate_ExactlyOne|TestDispatch_EmptyEnvID|TestValidate_EmptyEnvID' -v`
-Expected: compile failure (new fields/methods missing), then test failures once it compiles.
+Run:
+`cd server && go test ./internal/service/ -run 'TestDispatch_Resume|TestValidate_ExactlyOne|TestDispatch_EmptyEnvID|TestValidate_EmptyEnvID' -v`
+Expected: compile failure (new fields/methods missing), then test failures once it
+compiles.
 
 - [ ] **Step 3: Extend the fake deps**
 
-In `env_dispatch_test.go`, add to `fakeEnvDispatchDeps`: a `defaultSelfPlayEnv string` field; update the `EnqueueAgentRun` method signature to include `squadID string`; and add:
+In `env_dispatch_test.go`, add to `fakeEnvDispatchDeps`: a `defaultSelfPlayEnv string`
+field; update the `EnqueueAgentRun` method signature to include `squadID string`; and
+add:
 
 ```go
 func (f *fakeEnvDispatchDeps) GetDefaultSelfPlayEnv(_ context.Context, _ string) (string, error) {
@@ -223,7 +281,8 @@ func (f *fakeEnvDispatchDeps) GetDefaultSelfPlayEnv(_ context.Context, _ string)
 }
 ```
 
-Update the existing `EnqueueAgentRun` fake to the new signature (keep its counter behavior), e.g.:
+Update the existing `EnqueueAgentRun` fake to the new signature (keep its counter
+behavior), e.g.:
 
 ```go
 func (f *fakeEnvDispatchDeps) EnqueueAgentRun(_ context.Context, _, agentID, squadID, issueID, chatSessionID, _ string, _ int) (string, error) {
@@ -244,8 +303,11 @@ func (f *fakeEnvDispatchDeps) EnqueueAgentRun(_ context.Context, _, agentID, squ
 In `server/internal/service/env_dispatch.go`:
 
 1. Add `SquadID string` to `EnvDispatchInput`.
-2. Add to the `EnvDispatchDeps` interface: `GetDefaultSelfPlayEnv(ctx context.Context, workspaceID string) (string, error)` and change `EnqueueAgentRun` to `EnqueueAgentRun(ctx context.Context, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID string, idx int) (string, error)`.
-3. At the top of `Dispatch`, before `validate`, normalize resume:
+1. Add to the `EnvDispatchDeps` interface:
+   `GetDefaultSelfPlayEnv(ctx context.Context, workspaceID string) (string, error)` and
+   change `EnqueueAgentRun` to
+   `EnqueueAgentRun(ctx context.Context, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID string, idx int) (string, error)`.
+1. At the top of `Dispatch`, before `validate`, normalize resume:
 
 ```go
 if in.Mode == "resume" {
@@ -287,12 +349,13 @@ if in.EnvID == "" {
 }
 ```
 
-7. Update every `s.deps.EnqueueAgentRun(...)` call in `dispatchOne` to pass `in.SquadID` as the new second-id argument (both the issue and message branches).
+7. Update every `s.deps.EnqueueAgentRun(...)` call in `dispatchOne` to pass `in.SquadID`
+   as the new second-id argument (both the issue and message branches).
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd server && go build ./... && go test ./internal/service/ -v`
-Expected: PASS (new tests green; existing service tests still green).
+Run: `cd server && go build ./... && go test ./internal/service/ -v` Expected: PASS (new
+tests green; existing service tests still green).
 
 - [ ] **Step 6: Commit**
 
@@ -302,19 +365,26 @@ git add server/internal/service/env_dispatch.go server/internal/service/env_disp
 git commit -m "feat(env-dispatch): resume alias, exactly-one agent/squad, default self_play env"
 ```
 
----
+______________________________________________________________________
 
 ### Task 3: Adapter + handler — GetDefaultSelfPlayEnv, squad_id parse, relaxed validation
 
 **Files:**
+
 - Modify: `server/internal/handler/env_dispatch.go`
-- Create query: `server/pkg/db/queries/environment.sql` (add `GetDefaultSelfPlayEnv`) — or `workspace.sql` if that's where workspace reads live; match the repo's file layout.
+- Create query: `server/pkg/db/queries/environment.sql` (add `GetDefaultSelfPlayEnv`) —
+  or `workspace.sql` if that's where workspace reads live; match the repo's file layout.
 - Regen: `server/pkg/db/generated/*` via `make sqlc`.
 - Test: `server/internal/handler/env_dispatch_test.go` (validation cases).
 
 **Interfaces:**
-- Consumes: Task 2's `EnvDispatchInput.SquadID`, `GetDefaultSelfPlayEnv` dep, extended `EnqueueAgentRun`.
-- Produces: `EnvDispatchRequest.SquadID` (JSON `squad_id`); handler accepts empty `env_id`/`agent_id` and `mode=resume`; adapter implements `GetDefaultSelfPlayEnv` and the new `EnqueueAgentRun` signature (squad branch added in Task 4/5).
+
+- Consumes: Task 2's `EnvDispatchInput.SquadID`, `GetDefaultSelfPlayEnv` dep, extended
+  `EnqueueAgentRun`.
+
+- Produces: `EnvDispatchRequest.SquadID` (JSON `squad_id`); handler accepts empty
+  `env_id`/`agent_id` and `mode=resume`; adapter implements `GetDefaultSelfPlayEnv` and
+  the new `EnqueueAgentRun` signature (squad branch added in Task 4/5).
 
 - [ ] **Step 1: Add the sqlc query**
 
@@ -327,11 +397,14 @@ SELECT default_self_play_env_id
  WHERE id = $1;
 ```
 
-Run: `cd server && make sqlc` and confirm `GetDefaultSelfPlayEnv` appears in `server/pkg/db/generated/`.
+Run: `cd server && make sqlc` and confirm `GetDefaultSelfPlayEnv` appears in
+`server/pkg/db/generated/`.
 
 - [ ] **Step 2: Write failing handler validation tests**
 
-Add to `server/internal/handler/env_dispatch_test.go` (mirror the existing validation-test style; these hit `EnvDispatch` with a stub deps handler so no DB is needed for pure validation):
+Add to `server/internal/handler/env_dispatch_test.go` (mirror the existing
+validation-test style; these hit `EnvDispatch` with a stub deps handler so no DB is
+needed for pure validation):
 
 ```go
 func TestEnvDispatch_RejectsBothAgentAndSquad(t *testing.T) {
@@ -360,19 +433,23 @@ func TestEnvDispatch_AcceptsResumeMode(t *testing.T) {
 }
 ```
 
-If a `doEnvDispatch`/`validUUID` helper does not already exist in the test file, add a minimal one that constructs an `httptest` request with a workspace+user context and calls `h.EnvDispatch`, mirroring the existing handler validation tests.
+If a `doEnvDispatch`/`validUUID` helper does not already exist in the test file, add a
+minimal one that constructs an `httptest` request with a workspace+user context and
+calls `h.EnvDispatch`, mirroring the existing handler validation tests.
 
 - [ ] **Step 2b: Run to verify failure**
 
-Run: `cd server && go test ./internal/handler/ -run 'TestEnvDispatch_RejectsBoth|TestEnvDispatch_AcceptsEmptyEnvID|TestEnvDispatch_AcceptsResume' -v`
+Run:
+`cd server && go test ./internal/handler/ -run 'TestEnvDispatch_RejectsBoth|TestEnvDispatch_AcceptsEmptyEnvID|TestEnvDispatch_AcceptsResume' -v`
 Expected: FAIL (squad_id field/relaxed validation not present yet).
 
 - [ ] **Step 3: Implement handler changes**
 
 In `server/internal/handler/env_dispatch.go`:
 
-1. Add `SquadID string \`json:"squad_id,omitempty"\`` to `EnvDispatchRequest`.
-2. Relax the UUID gates: only parse `EnvID` when non-empty; only parse `AgentID` when non-empty; parse `SquadID` when non-empty:
+1. Add `SquadID string \`json:"squad_id,omitempty"\``to`EnvDispatchRequest\`.
+1. Relax the UUID gates: only parse `EnvID` when non-empty; only parse `AgentID` when
+   non-empty; parse `SquadID` when non-empty:
 
 ```go
 if req.EnvID != "" {
@@ -392,7 +469,9 @@ if req.SquadID != "" {
 }
 ```
 
-3. Pass `SquadID: req.SquadID` into `service.EnvDispatchInput`. (Do NOT normalize `resume` here — the service does it. The handler passes `Mode: service.EnvMode(req.Mode)` unchanged, which already forwards "resume".)
+3. Pass `SquadID: req.SquadID` into `service.EnvDispatchInput`. (Do NOT normalize
+   `resume` here — the service does it. The handler passes
+   `Mode: service.EnvMode(req.Mode)` unchanged, which already forwards "resume".)
 
 - [ ] **Step 4: Implement the adapter dep methods**
 
@@ -413,11 +492,15 @@ func (a *envDispatchDepsAdapter) GetDefaultSelfPlayEnv(ctx context.Context, work
 }
 ```
 
-2. Update the adapter `EnqueueAgentRun` signature to add `squadID string` (the squad branches are implemented in Tasks 4 & 5; for now, when `squadID == ""`, keep today's behavior exactly). Also update `stubEnvDispatchDeps.EnqueueAgentRun` and add `stubEnvDispatchDeps.GetDefaultSelfPlayEnv` returning `("stub-env", nil)`.
+2. Update the adapter `EnqueueAgentRun` signature to add `squadID string` (the squad
+   branches are implemented in Tasks 4 & 5; for now, when `squadID == ""`, keep today's
+   behavior exactly). Also update `stubEnvDispatchDeps.EnqueueAgentRun` and add
+   `stubEnvDispatchDeps.GetDefaultSelfPlayEnv` returning `("stub-env", nil)`.
 
 - [ ] **Step 5: Run tests + build**
 
-Run: `cd server && go build ./... && go test ./internal/handler/ -run 'TestEnvDispatch_' -v`
+Run:
+`cd server && go build ./... && go test ./internal/handler/ -run 'TestEnvDispatch_' -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -428,19 +511,27 @@ git add server/pkg/db/queries server/pkg/db/generated server/internal/handler/en
 git commit -m "feat(env-dispatch): squad_id field, relaxed validation, default-env adapter"
 ```
 
----
+______________________________________________________________________
 
 ### Task 4: Issue-path squad dispatch (assignee=squad + leader task)
 
 **Files:**
-- Create query: `server/pkg/db/queries/issue.sql` add `SetIssueAssignee`; `server/pkg/db/queries/squad.sql` reuse existing `GetSquad`/`GetSquadInWorkspace`.
+
+- Create query: `server/pkg/db/queries/issue.sql` add `SetIssueAssignee`;
+  `server/pkg/db/queries/squad.sql` reuse existing `GetSquad`/`GetSquadInWorkspace`.
 - Regen: `make sqlc`.
-- Modify: `server/internal/handler/env_dispatch.go` (`EnqueueAgentRun` issue+squad branch).
-- Test: `server/internal/handler/env_dispatch_squad_issue_test.go` (DB-backed, `testPool`).
+- Modify: `server/internal/handler/env_dispatch.go` (`EnqueueAgentRun` issue+squad
+  branch).
+- Test: `server/internal/handler/env_dispatch_squad_issue_test.go` (DB-backed,
+  `testPool`).
 
 **Interfaces:**
+
 - Consumes: extended `EnqueueAgentRun(…, squadID, issueID, …)`.
-- Produces: when `squadID != "" && issueID != ""`, the issue is set to `assignee_type='squad'`/`assignee_id=squadID` and a leader `CreateAgentTask` is enqueued with `IsLeaderTask=true`.
+
+- Produces: when `squadID != "" && issueID != ""`, the issue is set to
+  `assignee_type='squad'`/`assignee_id=squadID` and a leader `CreateAgentTask` is
+  enqueued with `IsLeaderTask=true`.
 
 - [ ] **Step 1: Add the SetIssueAssignee query**
 
@@ -455,11 +546,22 @@ UPDATE issue
 
 Run `cd server && make sqlc`.
 
-> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global Constraints). Instead: add the `SetIssueAssignee :exec` query to `queries/issue.sql` as source-of-truth, then hand-write `func (q *Queries) SetIssueAssignee(ctx, arg SetIssueAssigneeParams) error` + the `SetIssueAssigneeParams` struct in `generated/issue.sql.go`, mirroring the style of an existing `:exec` query in that file (e.g. an existing `UPDATE issue ... :exec`). Verify with `go build`.
+> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global
+> Constraints). Instead: add the `SetIssueAssignee :exec` query to `queries/issue.sql`
+> as source-of-truth, then hand-write
+> `func (q *Queries) SetIssueAssignee(ctx, arg SetIssueAssigneeParams) error` + the
+> `SetIssueAssigneeParams` struct in `generated/issue.sql.go`, mirroring the style of an
+> existing `:exec` query in that file (e.g. an existing `UPDATE issue ... :exec`).
+> Verify with `go build`.
 
 - [ ] **Step 2: Write the DB-backed test**
 
-Create `server/internal/handler/env_dispatch_squad_issue_test.go` following the existing DB-backed squad test fixtures (`squad_assign_trigger_test.go`): create a workspace agent as leader, a squad with that leader, a project+issue, then call the adapter's `EnqueueAgentRun` with `squadID` set and `issueID` set; assert (a) the issue's `assignee_type='squad'` and `assignee_id=squad`, and (b) the created `agent_task_queue` row has `is_leader_task=true` and `agent_id=leader`.
+Create `server/internal/handler/env_dispatch_squad_issue_test.go` following the existing
+DB-backed squad test fixtures (`squad_assign_trigger_test.go`): create a workspace agent
+as leader, a squad with that leader, a project+issue, then call the adapter's
+`EnqueueAgentRun` with `squadID` set and `issueID` set; assert (a) the issue's
+`assignee_type='squad'` and `assignee_id=squad`, and (b) the created `agent_task_queue`
+row has `is_leader_task=true` and `agent_id=leader`.
 
 ```go
 package handler
@@ -510,7 +612,9 @@ func TestEnqueueAgentRun_IssueSquad_SetsAssigneeAndLeaderTask(t *testing.T) {
 }
 ```
 
-Write `setupSquadIssueFixture` using `testPool` inserts (workspace agent, squad with `leader_id`, project, issue) mirroring `squad_assign_trigger_test.go` / `handler_test.go`.
+Write `setupSquadIssueFixture` using `testPool` inserts (workspace agent, squad with
+`leader_id`, project, issue) mirroring `squad_assign_trigger_test.go` /
+`handler_test.go`.
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -519,7 +623,8 @@ Expected: FAIL (squad branch not implemented; today the issue path ignores squad
 
 - [ ] **Step 4: Implement the issue+squad branch**
 
-In the adapter's `EnqueueAgentRun`, in the `issueID != ""` case, before creating the task:
+In the adapter's `EnqueueAgentRun`, in the `issueID != ""` case, before creating the
+task:
 
 ```go
 if squadID != "" {
@@ -542,11 +647,15 @@ if squadID != "" {
 }
 ```
 
-Then, in the `CreateAgentTask` call for this branch, set `IsLeaderTask: pgtype.Bool{Bool: true, Valid: true}` when `squadID != ""`. Resolve the leader's `RuntimeID` via `GetAgentInWorkspace` on `squad.LeaderID` (the existing code already fetches the agent for `RuntimeID` — pass the leader's UUID).
+Then, in the `CreateAgentTask` call for this branch, set
+`IsLeaderTask: pgtype.Bool{Bool: true, Valid: true}` when `squadID != ""`. Resolve the
+leader's `RuntimeID` via `GetAgentInWorkspace` on `squad.LeaderID` (the existing code
+already fetches the agent for `RuntimeID` — pass the leader's UUID).
 
 - [ ] **Step 5: Run + build**
 
-Run: `cd server && go build ./... && go test ./internal/handler/ -run TestEnqueueAgentRun_IssueSquad -v`
+Run:
+`cd server && go build ./... && go test ./internal/handler/ -run TestEnqueueAgentRun_IssueSquad -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -557,25 +666,41 @@ git add server/pkg/db/queries server/pkg/db/generated server/internal/handler/en
 git commit -m "feat(env-dispatch): issue-path squad dispatch (assignee=squad + leader task)"
 ```
 
----
+______________________________________________________________________
 
 ### Task 5: Chat-path squad dispatch (context hint + daemon briefing)
 
 **Files:**
-- Modify query: `server/pkg/db/queries/chat.sql` (`CreateChatTask` gains a `context` column write).
+
+- Modify query: `server/pkg/db/queries/chat.sql` (`CreateChatTask` gains a `context`
+  column write).
 - Regen: `make sqlc`.
-- Modify: `server/internal/handler/env_dispatch.go` (`EnqueueAgentRun` chat+squad branch), `server/internal/handler/daemon.go` (chat-task squad briefing injection).
-- Test: `server/internal/handler/env_dispatch_squad_chat_test.go` and a daemon injection test (DB-backed).
+- Modify: `server/internal/handler/env_dispatch.go` (`EnqueueAgentRun` chat+squad
+  branch), `server/internal/handler/daemon.go` (chat-task squad briefing injection).
+- Test: `server/internal/handler/env_dispatch_squad_chat_test.go` and a daemon injection
+  test (DB-backed).
 
 **Interfaces:**
+
 - Consumes: extended `EnqueueAgentRun`.
-- Produces: when `squadID != "" && chatSessionID != ""`, the chat task is created with `context` JSONB `{"squad_id":"…"}` and `agent_id=leader`; the daemon claim handler injects the squad-leader briefing when a chat task carries `context.squad_id` and the claiming agent is the squad leader.
+
+- Produces: when `squadID != "" && chatSessionID != ""`, the chat task is created with
+  `context` JSONB `{"squad_id":"…"}` and `agent_id=leader`; the daemon claim handler
+  injects the squad-leader briefing when a chat task carries `context.squad_id` and the
+  claiming agent is the squad leader.
 
 - [ ] **Step 1: Extend CreateChatTask with a context param**
 
-In `server/pkg/db/queries/chat.sql`, change the `CreateChatTask` insert to also write `context` (add `context` to the column list and a `$N` param).
+In `server/pkg/db/queries/chat.sql`, change the `CreateChatTask` insert to also write
+`context` (add `context` to the column list and a `$N` param).
 
-> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global Constraints). Instead, hand-edit `generated/chat.sql.go` `CreateChatTask`: add the `context` column + `$N` placeholder to the `createChatTask` SQL const, add a `Context []byte` field to `CreateChatTaskParams` (mirror how another generated query passes a JSONB/`[]byte` context param — e.g. `CreateAgentTask` if it has one), and pass `arg.Context` in the `q.db.QueryRow` arg list at the matching position. Verify `CreateChatTaskParams` has the `Context` field and `go build` passes.
+> **NOTE (execution finding):** `sqlc generate` is NOT runnable here (see Global
+> Constraints). Instead, hand-edit `generated/chat.sql.go` `CreateChatTask`: add the
+> `context` column + `$N` placeholder to the `createChatTask` SQL const, add a
+> `Context []byte` field to `CreateChatTaskParams` (mirror how another generated query
+> passes a JSONB/`[]byte` context param — e.g. `CreateAgentTask` if it has one), and
+> pass `arg.Context` in the `q.db.QueryRow` arg list at the matching position. Verify
+> `CreateChatTaskParams` has the `Context` field and `go build` passes.
 
 - [ ] **Step 2: Write the DB-backed tests (chat task hint + daemon injection)**
 
@@ -618,17 +743,31 @@ func TestEnqueueAgentRun_ChatSquad_StampsSquadHint(t *testing.T) {
 }
 ```
 
-For the daemon injection, add a test that builds a claim response for a chat task carrying `context.squad_id` where the claiming agent is the leader, and asserts the leader briefing is appended to `resp.Agent.Instructions` (mirror the quick-create injection test in `daemon`/`prompt_test.go`; assert `resp.Agent.Instructions` contains a distinctive line from `squadOperatingProtocol`).
+For the daemon injection, add a test that builds a claim response for a chat task
+carrying `context.squad_id` where the claiming agent is the leader, and asserts the
+leader briefing is appended to `resp.Agent.Instructions` (mirror the quick-create
+injection test in `daemon`/`prompt_test.go`; assert `resp.Agent.Instructions` contains a
+distinctive line from `squadOperatingProtocol`).
 
 - [ ] **Step 3: Run to verify failure**
 
-Run: `cd server && go test ./internal/handler/ -run 'TestEnqueueAgentRun_ChatSquad|TestDaemon.*ChatSquad' -v`
+Run:
+`cd server && go test ./internal/handler/ -run 'TestEnqueueAgentRun_ChatSquad|TestDaemon.*ChatSquad' -v`
 Expected: FAIL.
 
 - [ ] **Step 4: Implement the chat+squad branch + daemon injection**
 
-1. Adapter `EnqueueAgentRun`, `chatSessionID != ""` case: when `squadID != ""`, resolve the squad (`GetSquadInWorkspace`), set `agentUUID = squad.LeaderID`, and pass `Context` = `json.Marshal(map[string]string{"squad_id": squadID})` into `CreateChatTaskParams`. When `squadID == ""`, pass `Context` nil (unchanged behavior).
-2. `daemon.go`: in the chat-task claim path (the branch handling `task.ChatSessionID.Valid` / no issue), add a squad-briefing injection mirroring the quick-create block (lines ~1625-1650): parse `task.Context` for `squad_id`; if present, `GetSquadInWorkspace`; if `squad.LeaderID == resp.Agent.ID`, append `buildSquadLeaderBriefing(...)` to `resp.Agent.Instructions` and set `resp.SquadID`/`resp.SquadName`.
+1. Adapter `EnqueueAgentRun`, `chatSessionID != ""` case: when `squadID != ""`, resolve
+   the squad (`GetSquadInWorkspace`), set `agentUUID = squad.LeaderID`, and pass
+   `Context` = `json.Marshal(map[string]string{"squad_id": squadID})` into
+   `CreateChatTaskParams`. When `squadID == ""`, pass `Context` nil (unchanged
+   behavior).
+1. `daemon.go`: in the chat-task claim path (the branch handling
+   `task.ChatSessionID.Valid` / no issue), add a squad-briefing injection mirroring the
+   quick-create block (lines ~1625-1650): parse `task.Context` for `squad_id`; if
+   present, `GetSquadInWorkspace`; if `squad.LeaderID == resp.Agent.ID`, append
+   `buildSquadLeaderBriefing(...)` to `resp.Agent.Instructions` and set
+   `resp.SquadID`/`resp.SquadName`.
 
 - [ ] **Step 5: Run + build**
 
@@ -643,17 +782,24 @@ git add server/pkg/db/queries server/pkg/db/generated server/internal/handler/en
 git commit -m "feat(env-dispatch): self_play squad dispatch (chat context hint + daemon briefing)"
 ```
 
----
+______________________________________________________________________
 
 ### Task 6: AReaL client — optional squad_id / env_id / agent_id, resume
 
 **Files:**
-- Modify: `customized_areal/tree_search/agents/swe_lego_client.py` (in the `areal` repo working tree)
+
+- Modify: `customized_areal/tree_search/agents/swe_lego_client.py` (in the `areal` repo
+  working tree)
 - Test: `customized_areal/tree_search/tests/test_env_dispatch_client.py`
 
 **Interfaces:**
+
 - Consumes: nothing from the server tasks (payload-only).
-- Produces: `create_env_dispatch(..., env_id: str | None = None, agent_id: str | None = None, squad_id: str | None = None, mode: str = "scratch")` — omits `env_id`/`agent_id`/`squad_id` from the JSON when falsy; forwards `mode` verbatim (incl. `"resume"`).
+
+- Produces:
+  `create_env_dispatch(..., env_id: str | None = None, agent_id: str | None = None, squad_id: str | None = None, mode: str = "scratch")`
+  — omits `env_id`/`agent_id`/`squad_id` from the JSON when falsy; forwards `mode`
+  verbatim (incl. `"resume"`).
 
 - [ ] **Step 1: Write failing client tests**
 
@@ -700,12 +846,16 @@ def test_create_env_dispatch_resume_mode_passthrough():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -k 'squad or resume' -v`
-Expected: FAIL (`create_env_dispatch` has no `squad_id`; `env_id`/`agent_id` are required positional/keyword).
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -k 'squad or resume' -v`
+Expected: FAIL (`create_env_dispatch` has no `squad_id`; `env_id`/`agent_id` are
+required positional/keyword).
 
 - [ ] **Step 3: Implement the client change**
 
-In `swe_lego_client.py::create_env_dispatch`, change the signature to make `env_id: str | None = None` and `agent_id: str | None = None`, add `squad_id: str | None = None`, and build the payload conditionally:
+In `swe_lego_client.py::create_env_dispatch`, change the signature to make
+`env_id: str | None = None` and `agent_id: str | None = None`, add
+`squad_id: str | None = None`, and build the payload conditionally:
 
 ```python
 payload: dict = {
@@ -728,7 +878,8 @@ Keep the existing `issue`/`message` handling and response parsing unchanged.
 
 - [ ] **Step 4: Run to verify pass + no regression**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
 Expected: PASS (new + existing client tests green).
 
 - [ ] **Step 5: Commit**
@@ -739,7 +890,7 @@ git add customized_areal/tree_search/agents/swe_lego_client.py customized_areal/
 git commit -m "feat(areal): env-dispatch client optional env_id/agent_id, squad_id, resume"
 ```
 
----
+______________________________________________________________________
 
 ### Task 7: Full-suite regression + codegen verification
 
@@ -747,31 +898,51 @@ git commit -m "feat(areal): env-dispatch client optional env_id/agent_id, squad_
 
 - [ ] **Step 1: Verify generated code builds (sqlc no-drift gate is N/A)**
 
-`sqlc generate` is not runnable in this repo (see Global Constraints), so the drift gate is replaced by a build check of the hand-written generated code:
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go build ./pkg/db/generated/`
+`sqlc generate` is not runnable in this repo (see Global Constraints), so the drift gate
+is replaced by a build check of the hand-written generated code: Run:
+`cd /workspaces/leagent/backend/areal/multica/server && go build ./pkg/db/generated/`
 Expected: exit 0 (all hand-written query functions compile).
 
 - [ ] **Step 2: Build + vet + full server test suite**
 
-Run: `cd /workspaces/leagent/backend/areal/multica/server && go build ./internal/service/ ./internal/handler/ ./cmd/migrate/... && go vet ./internal/service/ ./internal/handler/ && DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable go test ./internal/service/ ./internal/handler/`
-Expected: PASS. (Do NOT run `go build ./...` / `go test ./...` — the pre-existing `webpush.go:180` failure is unrelated to B; note it explicitly rather than treating it as a regression.)
+Run:
+`cd /workspaces/leagent/backend/areal/multica/server && go build ./internal/service/ ./internal/handler/ ./cmd/migrate/... && go vet ./internal/service/ ./internal/handler/ && DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable go test ./internal/service/ ./internal/handler/`
+Expected: PASS. (Do NOT run `go build ./...` / `go test ./...` — the pre-existing
+`webpush.go:180` failure is unrelated to B; note it explicitly rather than treating it
+as a regression.)
 
 - [ ] **Step 3: AReaL client suite**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
 Expected: PASS.
 
 - [ ] **Step 4: Confirm no unrelated files changed**
 
-Run: `git -C /workspaces/leagent/backend/areal/multica status --short`
-Expected: only the intended env-dispatch/migration/daemon/query files across the task commits.
+Run: `git -C /workspaces/leagent/backend/areal/multica status --short` Expected: only
+the intended env-dispatch/migration/daemon/query files across the task commits.
 
----
+______________________________________________________________________
 
 ## Self-Review
 
-**Spec coverage:** D1 resume→branch → Task 2 (normalize) + Task 3 (handler accepts) + Task 6 (client). D2/D3 optional env_id + default env → Task 1 (migration) + Task 2 (resolution/validation) + Task 3 (adapter/query). D4 exactly-one agent/squad → Task 2 (validate) + Task 3 (handler parse). D5/D6 squad both domains via leader signals → Task 4 (issue) + Task 5 (chat + daemon). §6 migration → Task 1. §8 layers → Tasks 2-5. §9 tests → each task's tests + Task 7 regression. AReaL client (§8) → Task 6.
+**Spec coverage:** D1 resume→branch → Task 2 (normalize) + Task 3 (handler accepts) +
+Task 6 (client). D2/D3 optional env_id + default env → Task 1 (migration) + Task 2
+(resolution/validation) + Task 3 (adapter/query). D4 exactly-one agent/squad → Task 2
+(validate) + Task 3 (handler parse). D5/D6 squad both domains via leader signals → Task
+4 (issue) + Task 5 (chat + daemon). §6 migration → Task 1. §8 layers → Tasks 2-5. §9
+tests → each task's tests + Task 7 regression. AReaL client (§8) → Task 6.
 
-**Placeholder scan:** No TBD/TODO. sqlc/DB steps name the exact query SQL and the `make sqlc` regen; DB-backed tests name the columns asserted and the fixtures to mirror (`squad_assign_trigger_test.go`). Where a test helper may not exist (`doEnvDispatch`, `setupSquadIssueFixture`), the step says to add it and which existing test to mirror — not "write a test."
+**Placeholder scan:** No TBD/TODO. sqlc/DB steps name the exact query SQL and the
+`make sqlc` regen; DB-backed tests name the columns asserted and the fixtures to mirror
+(`squad_assign_trigger_test.go`). Where a test helper may not exist (`doEnvDispatch`,
+`setupSquadIssueFixture`), the step says to add it and which existing test to mirror —
+not "write a test."
 
-**Type consistency:** `GetDefaultSelfPlayEnv(ctx, workspaceID) (string, error)` and `EnqueueAgentRun(ctx, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID, idx)` are identical across the interface (Task 2), the fake (Task 2 Step 3), the stub + adapter (Task 3), and the squad branches (Tasks 4-5). `EnvDispatchInput.SquadID` / `EnvDispatchRequest.SquadID` (`json:"squad_id"`) match. Migration column `default_self_play_env_id` and query `GetDefaultSelfPlayEnv` names match across Tasks 1/3.
+**Type consistency:** `GetDefaultSelfPlayEnv(ctx, workspaceID) (string, error)` and
+`EnqueueAgentRun(ctx, workspaceID, agentID, squadID, issueID, chatSessionID, sandboxID, idx)`
+are identical across the interface (Task 2), the fake (Task 2 Step 3), the stub +
+adapter (Task 3), and the squad branches (Tasks 4-5). `EnvDispatchInput.SquadID` /
+`EnvDispatchRequest.SquadID` (`json:"squad_id"`) match. Migration column
+`default_self_play_env_id` and query `GetDefaultSelfPlayEnv` names match across Tasks
+1/3.

@@ -36,9 +36,16 @@ class SelfPlayResult:
 
 class _MulticaClient(Protocol):
     async def create_env_dispatch(
-        self, *, mode: str, env_id: str, dispatch_type: str,
-        agent_id: str, group_size: int = ..., domain: str | None = ...,
-        issue=None, message: str | None = ...,
+        self,
+        *,
+        mode: str,
+        env_id: str,
+        dispatch_type: str,
+        agent_id: str,
+        group_size: int = ...,
+        domain: str | None = ...,
+        issue=None,
+        message: str | None = ...,
     ) -> SweLegoSetup: ...
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None: ...
 
@@ -49,13 +56,20 @@ class _RlSession(Protocol):
 
 class _Verifier(Protocol):
     async def verify_and_reward(
-        self, *, agent_run_id: str, sandbox_id: str, session_id: str,
-        transcript: str, answer: str,
+        self,
+        *,
+        agent_run_id: str,
+        sandbox_id: str,
+        session_id: str,
+        transcript: str,
+        answer: str,
     ) -> VerifierResult: ...
 
 
 class _BranchDriver(Protocol):
-    async def drive_lane(self, *, agent_run_id: str, sandbox_id: str, session_id: str) -> str: ...
+    async def drive_lane(
+        self, *, agent_run_id: str, sandbox_id: str, session_id: str
+    ) -> str: ...
 
 
 async def run_self_play(
@@ -70,31 +84,46 @@ async def run_self_play(
     branch_driver: _BranchDriver,
 ) -> SelfPlayResult:
     setup = await multica.create_env_dispatch(
-        mode="scratch", env_id=base_env_id, dispatch_type="message",
-        agent_id=agent_id, group_size=group_size,
-        domain="self_play", message=query.content,
+        mode="scratch",
+        env_id=base_env_id,
+        dispatch_type="message",
+        agent_id=agent_id,
+        group_size=group_size,
+        domain="self_play",
+        message=query.content,
     )
 
     try:
-        sessions = list(await asyncio.gather(*[
-            rl_session.start(agent_run_id=r.agent_run_id, issue_id="")
-            for r in setup.rollouts
-        ]))
-
-        terminal_env_ids = await asyncio.gather(*[
-            branch_driver.drive_lane(
-                agent_run_id=r.agent_run_id, sandbox_id=r.env_id, session_id=sid
+        sessions = list(
+            await asyncio.gather(
+                *[
+                    rl_session.start(agent_run_id=r.agent_run_id, issue_id="")
+                    for r in setup.rollouts
+                ]
             )
-            for r, sid in zip(setup.rollouts, sessions)
-        ])
+        )
 
-        results = await asyncio.gather(*[
-            verifier.verify_and_reward(
-                agent_run_id=r.agent_run_id, sandbox_id=eid, session_id=sid,
-                transcript="...", answer=query.answer,
-            )
-            for r, eid, sid in zip(setup.rollouts, terminal_env_ids, sessions)
-        ])
+        terminal_env_ids = await asyncio.gather(
+            *[
+                branch_driver.drive_lane(
+                    agent_run_id=r.agent_run_id, sandbox_id=r.env_id, session_id=sid
+                )
+                for r, sid in zip(setup.rollouts, sessions)
+            ]
+        )
+
+        results = await asyncio.gather(
+            *[
+                verifier.verify_and_reward(
+                    agent_run_id=r.agent_run_id,
+                    sandbox_id=eid,
+                    session_id=sid,
+                    transcript="...",
+                    answer=query.answer,
+                )
+                for r, eid, sid in zip(setup.rollouts, terminal_env_ids, sessions)
+            ]
+        )
         return SelfPlayResult(
             per_agent_rewards=[r.reward for r in results],
             per_agent_success=[r.success for r in results],

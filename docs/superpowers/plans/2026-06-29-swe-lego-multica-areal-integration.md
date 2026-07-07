@@ -1,63 +1,127 @@
 # SWE-Lego Docker × Multica Remote Mode × AReaL RL — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Retarget the approved `multica-dag-rl` design from Fleet/Daytona cloud sandboxes to SWE-Lego docker containers, add one atomic per-issue multica endpoint that forks git history before the issue and boots `group_size` daemon-in-docker sandboxes, add a hybrid SWE-Lego verifier, and wire DAG credit backup so it actually shapes training.
+**Goal:** Retarget the approved `multica-dag-rl` design from Fleet/Daytona cloud
+sandboxes to SWE-Lego docker containers, add one atomic per-issue multica endpoint that
+forks git history before the issue and boots `group_size` daemon-in-docker sandboxes,
+add a hybrid SWE-Lego verifier, and wire DAG credit backup so it actually shapes
+training.
 
-**Architecture:** Multica owns all docker — a new `POST /api/v1/swe-lego/issues` endpoint composes project creation + SWE-Lego image build (on a Fleet build-node, history truncated via `git filter-repo`) + base sandbox boot + `group_size` forks + agent-run enqueue. AReal calls only that endpoint plus the existing cloud-runtime `snapshot`/`fork`/`DELETE` endpoints (via a new `MulticaSweLegoProvider` that is a drop-in for the existing `FleetSandboxProvider`). The existing `BranchMaterializer`, `ForkIssueSubtree`, `db_bridge`, and DAG model are unchanged. A hybrid `SweLegoVerifier` (objective tests + generative critic + semi-resolved) produces the terminal reward, which is distributed along DAG edges by an extended `TreeAdvantageComputer`.
+**Architecture:** Multica owns all docker — a new `POST /api/v1/swe-lego/issues`
+endpoint composes project creation + SWE-Lego image build (on a Fleet build-node,
+history truncated via `git filter-repo`) + base sandbox boot + `group_size` forks +
+agent-run enqueue. AReal calls only that endpoint plus the existing cloud-runtime
+`snapshot`/`fork`/`DELETE` endpoints (via a new `MulticaSweLegoProvider` that is a
+drop-in for the existing `FleetSandboxProvider`). The existing `BranchMaterializer`,
+`ForkIssueSubtree`, `db_bridge`, and DAG model are unchanged. A hybrid `SweLegoVerifier`
+(objective tests + generative critic + semi-resolved) produces the terminal reward,
+which is distributed along DAG edges by an extended `TreeAdvantageComputer`.
 
-**Tech Stack:** Python 3.12+ (areal), Go 1.26 (multica server), httpx (areal HTTP), pytest (areal tests), `go test` (multica tests), Docker (SWE-Lego images), `git filter-repo` (history truncation), multica cloud-runtime Fleet proxy (`/api/v1/nodes`, `/api/v1/sandboxes/*`).
+**Tech Stack:** Python 3.12+ (areal), Go 1.26 (multica server), httpx (areal HTTP),
+pytest (areal tests), `go test` (multica tests), Docker (SWE-Lego images),
+`git filter-repo` (history truncation), multica cloud-runtime Fleet proxy
+(`/api/v1/nodes`, `/api/v1/sandboxes/*`).
 
----
+______________________________________________________________________
 
 ## File Structure
 
 ### Multica side (Go) — `multica/server/`
 
-- **Create `internal/service/swe_lego_image.go`** — SWE-Lego image builder. `BuildOrReuse` picks a build-node, checks its docker image cache, and ships a build script via `/api/v1/nodes/exec`. Owns the `git filter-repo --commit-cutoff` history-truncation logic and the cache-key derivation.
-- **Create `internal/service/swe_lego_image_test.go`** — unit tests for cache-key derivation, build-script generation (asserts `--commit-cutoff` is computed from `issue_date`), cache-hit short-circuit. Uses a fake node-exec interface; no real git/docker.
-- **Create `internal/service/swe_lego_build_node.go`** — `pick_build_node()` reuses the existing `cloudRuntimeProxy` to select a `swe-lego-build` tagged node. Thin.
-- **Create `internal/handler/swe_lego_issue.go`** — the atomic `POST /api/v1/swe-lego/issues` handler. Composes `CreateProject` → `CreateIssue` → `swe_lego_image.BuildOrReuse` → boot base sandbox on the build node → fork × `group_size` → enqueue agent tasks. Rollback on failure.
-- **Create `internal/handler/swe_lego_issue_test.go`** — handler tests with a mocked service layer (happy path 201, image-build failure 502, fork failure rollback, auth checks).
-- **Modify `cmd/server/router.go`** — register `POST /api/v1/swe-lego/issues` next to the existing cloud-runtime routes (after the `sandboxes/fork` line at `:970`).
+- **Create `internal/service/swe_lego_image.go`** — SWE-Lego image builder.
+  `BuildOrReuse` picks a build-node, checks its docker image cache, and ships a build
+  script via `/api/v1/nodes/exec`. Owns the `git filter-repo --commit-cutoff`
+  history-truncation logic and the cache-key derivation.
+- **Create `internal/service/swe_lego_image_test.go`** — unit tests for cache-key
+  derivation, build-script generation (asserts `--commit-cutoff` is computed from
+  `issue_date`), cache-hit short-circuit. Uses a fake node-exec interface; no real
+  git/docker.
+- **Create `internal/service/swe_lego_build_node.go`** — `pick_build_node()` reuses the
+  existing `cloudRuntimeProxy` to select a `swe-lego-build` tagged node. Thin.
+- **Create `internal/handler/swe_lego_issue.go`** — the atomic
+  `POST /api/v1/swe-lego/issues` handler. Composes `CreateProject` → `CreateIssue` →
+  `swe_lego_image.BuildOrReuse` → boot base sandbox on the build node → fork ×
+  `group_size` → enqueue agent tasks. Rollback on failure.
+- **Create `internal/handler/swe_lego_issue_test.go`** — handler tests with a mocked
+  service layer (happy path 201, image-build failure 502, fork failure rollback, auth
+  checks).
+- **Modify `cmd/server/router.go`** — register `POST /api/v1/swe-lego/issues` next to
+  the existing cloud-runtime routes (after the `sandboxes/fork` line at `:970`).
 
 ### AReal side (Python) — `backend/areal/customized_areal/tree_search/`
 
-- **Modify `agents/environment.py`** — add `MulticaSweLegoProvider` class, sibling to `FleetSandboxProvider`. Same `ForkableEnvironment` Protocol surface, different backend (multica cloud-runtime proxy at `/api/v1/sandboxes/*`).
-- **Modify `tests/test_environment.py`** — add `MulticaSweLegoProvider` contract tests mirroring the existing `FleetSandboxProvider` tests (snapshot/fork/restore/cleanup, error paths, 404 idempotency, semaphore).
-- **Create `agents/reward/swe_lego_verifier.py`** — `SweLegoVerifier` composing `ObjectiveVerifier` (test execution via node exec) + `AgenticVerifier` (generative critic) + semi-resolved partial credit. `verify_and_reward` writes reward via `rl_set_reward`.
-- **Create `agents/reward/test_swe_lego_verifier.py`** — unit tests for the blend/short-circuit logic with mocked sub-verifiers.
-- **Create `agents/swe_lego_issue_runner.py`** — the per-issue orchestration loop: call `create_swe_lego_issue` → open RL sessions → drive branching → verify+reward → cleanup. Owns the `MulticaSweLegoClient` HTTP client.
-- **Create `tests/test_swe_lego_issue_runner.py`** — integration-flavored unit test with mocked multica client, env, materializer, verifier, rl_session.
-- **Modify `agents/integration.py`** — no structural change; confirm `BranchMaterializer` accepts `MulticaSweLegoProvider` via the injected `env` (it already does, since it depends on the `ForkableEnvironment` Protocol). Add a smoke test asserting the materializer works with a `MulticaSweLegoProvider` instance.
-- **Create `agents/reward/swe_lego_types.py`** — `SweLegoIssue`, `SweLegoIssueResult`, `SweLegoSetup` dataclasses shared between runner and verifier.
+- **Modify `agents/environment.py`** — add `MulticaSweLegoProvider` class, sibling to
+  `FleetSandboxProvider`. Same `ForkableEnvironment` Protocol surface, different backend
+  (multica cloud-runtime proxy at `/api/v1/sandboxes/*`).
+- **Modify `tests/test_environment.py`** — add `MulticaSweLegoProvider` contract tests
+  mirroring the existing `FleetSandboxProvider` tests (snapshot/fork/restore/cleanup,
+  error paths, 404 idempotency, semaphore).
+- **Create `agents/reward/swe_lego_verifier.py`** — `SweLegoVerifier` composing
+  `ObjectiveVerifier` (test execution via node exec) + `AgenticVerifier` (generative
+  critic) + semi-resolved partial credit. `verify_and_reward` writes reward via
+  `rl_set_reward`.
+- **Create `agents/reward/test_swe_lego_verifier.py`** — unit tests for the
+  blend/short-circuit logic with mocked sub-verifiers.
+- **Create `agents/swe_lego_issue_runner.py`** — the per-issue orchestration loop: call
+  `create_swe_lego_issue` → open RL sessions → drive branching → verify+reward →
+  cleanup. Owns the `MulticaSweLegoClient` HTTP client.
+- **Create `tests/test_swe_lego_issue_runner.py`** — integration-flavored unit test with
+  mocked multica client, env, materializer, verifier, rl_session.
+- **Modify `agents/integration.py`** — no structural change; confirm
+  `BranchMaterializer` accepts `MulticaSweLegoProvider` via the injected `env` (it
+  already does, since it depends on the `ForkableEnvironment` Protocol). Add a smoke
+  test asserting the materializer works with a `MulticaSweLegoProvider` instance.
+- **Create `agents/reward/swe_lego_types.py`** — `SweLegoIssue`, `SweLegoIssueResult`,
+  `SweLegoSetup` dataclasses shared between runner and verifier.
 
 ### DAG credit backup (Phase 3, load-bearing) — `customized_areal/tree_search/`
 
-- **Create `agents/dag_backup.py`** — `distribute_reward_over_dag(dag, terminal_reward, credit_fn)` distributes the terminal reward along DAG edges; `assign_fan_in_credit` does explicit per-agent credit at fan-in joins (no sum/mean/max).
-- **Create `tests/test_dag_backup.py`** — multi-node DAG distributes reward along edges; fan-in join credit is explicit; per-step signals shape intermediate nodes.
-- **Modify `agents/advantage.py` (or wherever `TreeAdvantageComputer` lives)** — extend to consume per-node credit from `dag_backup` instead of broadcasting a flat episode reward. Add a `credit_by_node` argument.
-- **Modify the corresponding advantage test** — assert per-token advantage reflects per-node credit, not a flat broadcast.
+- **Create `agents/dag_backup.py`** —
+  `distribute_reward_over_dag(dag, terminal_reward, credit_fn)` distributes the terminal
+  reward along DAG edges; `assign_fan_in_credit` does explicit per-agent credit at
+  fan-in joins (no sum/mean/max).
+- **Create `tests/test_dag_backup.py`** — multi-node DAG distributes reward along edges;
+  fan-in join credit is explicit; per-step signals shape intermediate nodes.
+- **Modify `agents/advantage.py` (or wherever `TreeAdvantageComputer` lives)** — extend
+  to consume per-node credit from `dag_backup` instead of broadcasting a flat episode
+  reward. Add a `credit_by_node` argument.
+- **Modify the corresponding advantage test** — assert per-token advantage reflects
+  per-node credit, not a flat broadcast.
 
 ### Build / image assets
 
-- **Create `internal/service/swe_lego_image.Dockerfile.tmpl`** — the Dockerfile template baked into each SWE-Lego image (base image + truncated repo + `pip install -e .` + daemon binary + `CMD ["multica-daemon", "run"]`).
+- **Create `internal/service/swe_lego_image.Dockerfile.tmpl`** — the Dockerfile template
+  baked into each SWE-Lego image (base image + truncated repo + `pip install -e .` +
+  daemon binary + `CMD ["multica-daemon", "run"]`).
 
----
+______________________________________________________________________
 
 ## Conventions
 
-- **Multica Go**: follow `multica/CLAUDE.md`. Thin handlers, `parseUUIDOrBadRequest` / `loadIssueForUser` for UUID inputs, `writeError`/`writeJSON` for responses, `math.MaxInt32` bounds on parsed ints. Test files live next to source as `*_test.go`. Run `make test` from `multica/`.
-- **AReal Python**: follow `backend/areal/CLAUDE.md`. `async def`, type hints, stdlib `logging` (not `areal.utils.logging`) so the `agents` package stays importable without torch. Tests under `customized_areal/tree_search/tests/` use `httpx.MockTransport` and pytest. Run `uv run pytest <path>` from `backend/areal/`.
-- **Commits**: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`), imperative voice, ~72 char subject. Squash WIP before MR.
-- **TDD**: write the failing test first, run it to see it fail, implement minimal code, run to see it pass, commit.
+- **Multica Go**: follow `multica/CLAUDE.md`. Thin handlers, `parseUUIDOrBadRequest` /
+  `loadIssueForUser` for UUID inputs, `writeError`/`writeJSON` for responses,
+  `math.MaxInt32` bounds on parsed ints. Test files live next to source as `*_test.go`.
+  Run `make test` from `multica/`.
+- **AReal Python**: follow `backend/areal/CLAUDE.md`. `async def`, type hints, stdlib
+  `logging` (not `areal.utils.logging`) so the `agents` package stays importable without
+  torch. Tests under `customized_areal/tree_search/tests/` use `httpx.MockTransport` and
+  pytest. Run `uv run pytest <path>` from `backend/areal/`.
+- **Commits**: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`), imperative
+  voice, ~72 char subject. Squash WIP before MR.
+- **TDD**: write the failing test first, run it to see it fail, implement minimal code,
+  run to see it pass, commit.
 
----
+______________________________________________________________________
 
 ## Task 1: SWE-Lego cache-key derivation (multica, Go)
 
 **Files:**
+
 - Create: `multica/server/internal/service/swe_lego_image.go`
+
 - Test: `multica/server/internal/service/swe_lego_image_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -145,12 +209,14 @@ git add internal/service/swe_lego_image.go internal/service/swe_lego_image_test.
 git commit -m "feat(swe-lego): add SWE-Lego image cache-key derivation"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: Build-script generation with `git filter-repo --commit-cutoff` (multica, Go)
 
 **Files:**
+
 - Modify: `multica/server/internal/service/swe_lego_image.go`
+
 - Test: `multica/server/internal/service/swe_lego_image_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -298,13 +364,16 @@ git add internal/service/swe_lego_image.go internal/service/swe_lego_image_test.
 git commit -m "feat(swe-lego): generate build script with git filter-repo history truncation"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: Build-node exec interface + `BuildOrReuse` (multica, Go)
 
 **Files:**
+
 - Create: `multica/server/internal/service/swe_lego_build_node.go`
+
 - Modify: `multica/server/internal/service/swe_lego_image.go`
+
 - Test: `multica/server/internal/service/swe_lego_image_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -395,7 +464,11 @@ func TestBuildOrReuse_BuildFailureReturnsError(t *testing.T) {
 }
 ```
 
-Add `"context"` and `"fmt"` to the test file's imports. The cache-miss tests pass a valid RFC3339 `issueDate` (`"2025-03-14T09:30:00Z"`) because Task 2's `SweLegoBuildScript` parses `issueDate` and returns an error on invalid input; using `"d"` would short-circuit the build path at script generation rather than exercising the actual build execution.
+Add `"context"` and `"fmt"` to the test file's imports. The cache-miss tests pass a
+valid RFC3339 `issueDate` (`"2025-03-14T09:30:00Z"`) because Task 2's
+`SweLegoBuildScript` parses `issueDate` and returns an error on invalid input; using
+`"d"` would short-circuit the build path at script generation rather than exercising the
+actual build execution.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -428,7 +501,11 @@ type NodeExec interface {
 
 Append to `swe_lego_image.go`:
 
-Merge `"context"` and `"errors"` into the existing import block in `swe_lego_image.go` (alphabetical order: `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`). Do NOT add a second `import (...)` block — Go does not allow multiple import blocks in the same file, and the existing block from Tasks 1 and 2 already contains `crypto/sha256`, `encoding/hex`, `fmt`, `strings`, and `time`.
+Merge `"context"` and `"errors"` into the existing import block in `swe_lego_image.go`
+(alphabetical order: `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`,
+`strings`, `time`). Do NOT add a second `import (...)` block — Go does not allow
+multiple import blocks in the same file, and the existing block from Tasks 1 and 2
+already contains `crypto/sha256`, `encoding/hex`, `fmt`, `strings`, and `time`.
 
 ```go
 // ErrSweLegoBuildFailed is returned when the build script exits non-zero.
@@ -474,7 +551,8 @@ func BuildOrReuse(ctx context.Context, exec NodeExec, repoURL, baseCommit, issue
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd multica/server && go test ./internal/service/ -run "TestBuildOrReuse|TestSweLegoCacheKey|TestSweLegoBuildScript" -v`
+Run:
+`cd multica/server && go test ./internal/service/ -run "TestBuildOrReuse|TestSweLegoCacheKey|TestSweLegoBuildScript" -v`
 Expected: PASS (all tests in the file).
 
 - [ ] **Step 5: Commit**
@@ -485,12 +563,14 @@ git add internal/service/swe_lego_build_node.go internal/service/swe_lego_image.
 git commit -m "feat(swe-lego): add BuildOrReuse with node-exec seam and cache short-circuit"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: Dockerfile template (multica)
 
 **Files:**
+
 - Create: `multica/server/internal/service/swe_lego_image.Dockerfile.tmpl`
+
 - Test: `multica/server/internal/service/swe_lego_image_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -515,14 +595,19 @@ func TestSweLegoDockerfileTemplate(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd multica/server && go test ./internal/service/ -run TestSweLegoDockerfileTemplate -v`
+Run:
+`cd multica/server && go test ./internal/service/ -run TestSweLegoDockerfileTemplate -v`
 Expected: FAIL with "undefined: SweLegoDockerfile".
 
 - [ ] **Step 3: Write minimal implementation**
 
-The build script from Task 2 writes a `Dockerfile` at `/tmp/swe-lego-build/Dockerfile` before `docker build`. Append to `swe_lego_image.go`:
+The build script from Task 2 writes a `Dockerfile` at `/tmp/swe-lego-build/Dockerfile`
+before `docker build`. Append to `swe_lego_image.go`:
 
-> **Merge `"text/template"` into the existing import block** — Go does not allow multiple import blocks in the same file. The existing `swe_lego_image.go` already has `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`; add `"text/template"` in alphabetical order (after `"strings"`, before `"time"`).
+> **Merge `"text/template"` into the existing import block** — Go does not allow
+> multiple import blocks in the same file. The existing `swe_lego_image.go` already has
+> `context`, `crypto/sha256`, `encoding/hex`, `errors`, `fmt`, `strings`, `time`; add
+> `"text/template"` in alphabetical order (after `"strings"`, before `"time"`).
 
 ```go
 // sweLegoDockerfileTmpl is the Dockerfile baked into each SWE-Lego image.
@@ -554,7 +639,8 @@ func SweLegoDockerfile(baseImage string) (string, error) {
 }
 ```
 
-Also update `SweLegoBuildScript` to write the Dockerfile before `docker build`. In `SweLegoBuildScript`, replace the `docker build` line with:
+Also update `SweLegoBuildScript` to write the Dockerfile before `docker build`. In
+`SweLegoBuildScript`, replace the `docker build` line with:
 
 ```go
 	// Write the Dockerfile, then build.
@@ -566,9 +652,15 @@ Also update `SweLegoBuildScript` to write the Dockerfile before `docker build`. 
 	fmt.Fprintf(&b, "docker build -t %s -f /tmp/swe-lego-build/Dockerfile .\n", shellQuote(imageRef))
 ```
 
-> Propagate the `SweLegoDockerfile` error instead of swallowing it with `dockerfile, _ :=`. `SweLegoBuildScript` already returns `(string, error)`, so a template parse/render failure should bubble up as `render dockerfile: %w`. The `:=` reuses the existing `err` variable in scope (from `issueTime, err := time.Parse(...)` at the top of the function) since `dockerfile` is new on the left-hand side — valid Go.
+> Propagate the `SweLegoDockerfile` error instead of swallowing it with
+> `dockerfile, _ :=`. `SweLegoBuildScript` already returns `(string, error)`, so a
+> template parse/render failure should bubble up as `render dockerfile: %w`. The `:=`
+> reuses the existing `err` variable in scope (from `issueTime, err := time.Parse(...)`
+> at the top of the function) since `dockerfile` is new on the left-hand side — valid
+> Go.
 
-And create the template file on disk for documentation/reference (Go embeds it via the const above, but committing the `.tmpl` makes the asset discoverable):
+And create the template file on disk for documentation/reference (Go embeds it via the
+const above, but committing the `.tmpl` makes the asset discoverable):
 
 ```dockerfile
 FROM {{.BaseImage}}
@@ -582,7 +674,8 @@ CMD ["multica-daemon", "run"]
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd multica/server && go test ./internal/service/ -run TestSweLegoDockerfileTemplate -v`
+Run:
+`cd multica/server && go test ./internal/service/ -run TestSweLegoDockerfileTemplate -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -593,17 +686,28 @@ git add internal/service/swe_lego_image.go internal/service/swe_lego_image_test.
 git commit -m "feat(swe-lego): add Dockerfile template for daemon-in-docker image"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: `MulticaSweLegoProvider` — retargeted `ForkableEnvironment` (areal, Python)
 
 **Files:**
+
 - Modify: `backend/areal/customized_areal/tree_search/agents/environment.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_environment.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests, but pointing at the multica cloud-runtime proxy paths and `MULTICA_BASE_URL`/`MULTICA_API_KEY` env). The existing test file already imports `FleetSandboxProvider`, `ForkableEnvironment`, `ForkResult`, `SnapshotResult` at the top and aliases the environment module as `env_mod` — **add `MulticaSweLegoProvider` to that existing import (alphabetical order, between `ForkResult` and `SnapshotResult`) and use the `env_mod.` prefix for the error types** (`env_mod.SnapshotError`, `env_mod.ForkError`) instead of introducing a separate mid-file import block. Match the existing test file's `@pytest.mark.asyncio` + `async def` + `await` style rather than `asyncio.run(...)`:
+Append to `tests/test_environment.py` (mirror the existing `FleetSandboxProvider` tests,
+but pointing at the multica cloud-runtime proxy paths and
+`MULTICA_BASE_URL`/`MULTICA_API_KEY` env). The existing test file already imports
+`FleetSandboxProvider`, `ForkableEnvironment`, `ForkResult`, `SnapshotResult` at the top
+and aliases the environment module as `env_mod` — **add `MulticaSweLegoProvider` to that
+existing import (alphabetical order, between `ForkResult` and `SnapshotResult`) and use
+the `env_mod.` prefix for the error types** (`env_mod.SnapshotError`,
+`env_mod.ForkError`) instead of introducing a separate mid-file import block. Match the
+existing test file's `@pytest.mark.asyncio` + `async def` + `await` style rather than
+`asyncio.run(...)`:
 
 ```python
 # -- MulticaSweLegoProvider -------------------------------------------------
@@ -703,7 +807,8 @@ def test_multica_provider_satisfies_forkable_environment_protocol():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_environment.py -k multica_provider -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_environment.py -k multica_provider -v`
 Expected: FAIL with ImportError on `MulticaSweLegoProvider`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -845,7 +950,8 @@ class MulticaSweLegoProvider:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_environment.py -k multica_provider -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_environment.py -k multica_provider -v`
 Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
@@ -856,12 +962,14 @@ git add customized_areal/tree_search/agents/environment.py customized_areal/tree
 git commit -m "feat(dag): add MulticaSweLegoProvider ForkableEnvironment implementation"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: SWE-Lego issue dataclasses (areal, Python)
 
 **Files:**
+
 - Create: `backend/areal/customized_areal/tree_search/agents/reward/swe_lego_types.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_swe_lego_types.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -909,7 +1017,8 @@ def test_swe_lego_issue_result_collects_per_agent_rewards():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_types.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_types.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -968,7 +1077,8 @@ class SweLegoIssueResult:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_types.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_types.py -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
@@ -979,12 +1089,14 @@ git add customized_areal/tree_search/agents/reward/swe_lego_types.py customized_
 git commit -m "feat(swe-lego): add SweLegoIssue/Setup/Result dataclasses"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: `MulticaSweLegoClient` — the atomic-endpoint HTTP client (areal, Python)
 
 **Files:**
+
 - Create: `backend/areal/customized_areal/tree_search/agents/swe_lego_client.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_swe_lego_client.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1095,7 +1207,8 @@ def test_cleanup_swe_lego_issue_posts_to_cleanup_endpoint():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_client.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_client.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1207,7 +1320,8 @@ class MulticaSweLegoClient:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_client.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_client.py -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
@@ -1218,13 +1332,16 @@ git add customized_areal/tree_search/agents/swe_lego_client.py customized_areal/
 git commit -m "feat(swe-lego): add MulticaSweLegoClient HTTP client for atomic endpoint"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: The atomic multica endpoint — handler skeleton (multica, Go)
 
 **Files:**
+
 - Create: `multica/server/internal/handler/swe_lego_issue.go`
+
 - Test: `multica/server/internal/handler/swe_lego_issue_test.go`
+
 - Modify: `multica/server/cmd/server/router.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -1264,7 +1381,11 @@ func TestCreateSweLegoIssue_RejectsMalformedBody(t *testing.T) {
 }
 ```
 
-(If `newTestHandler` does not already exist in the handler test package, define a minimal one in `swe_lego_issue_test.go` that constructs a `*Handler` with nil deps — mirroring the smallest existing handler test. Inspect `internal/handler/activity_test.go` for the exact helper name; if the package already has a `newTestHandler` or `setupTestHandler`, reuse it.)
+(If `newTestHandler` does not already exist in the handler test package, define a
+minimal one in `swe_lego_issue_test.go` that constructs a `*Handler` with nil deps —
+mirroring the smallest existing handler test. Inspect
+`internal/handler/activity_test.go` for the exact helper name; if the package already
+has a `newTestHandler` or `setupTestHandler`, reuse it.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1347,7 +1468,8 @@ func (h *Handler) CreateSweLegoIssue(w http.ResponseWriter, r *http.Request) {
 var _ = json.Valid
 ```
 
-Register the route in `cmd/server/router.go`, after the `sandboxes/fork` line (around line 970):
+Register the route in `cmd/server/router.go`, after the `sandboxes/fork` line (around
+line 970):
 
 ```go
 				r.Post("/sandboxes/fork", h.ForkCloudRuntimeSandbox)
@@ -1356,7 +1478,8 @@ Register the route in `cmd/server/router.go`, after the `sandboxes/fork` line (a
 			})
 ```
 
-(The exact indentation/brace nesting depends on the surrounding block — match the `sandboxes/fork` line's level.)
+(The exact indentation/brace nesting depends on the surrounding block — match the
+`sandboxes/fork` line's level.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1371,13 +1494,16 @@ git add internal/handler/swe_lego_issue.go internal/handler/swe_lego_issue_test.
 git commit -m "feat(swe-lego): register POST /api/v1/swe-lego/issues route with validation"
 ```
 
----
+______________________________________________________________________
 
 ## Task 9: SWE-Lego issue service — orchestration + rollback (multica, Go)
 
 **Files:**
+
 - Create: `multica/server/internal/service/swe_lego_issue.go`
+
 - Create: `multica/server/internal/service/swe_lego_issue_test.go`
+
 - Modify: `multica/server/internal/handler/swe_lego_issue.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -1698,7 +1824,8 @@ git commit -m "feat(swe-lego): add issue orchestration service with rollback"
 
 - [ ] **Step 6: Wire the service into the handler**
 
-Replace the `writeError(w, http.StatusNotImplemented, ...)` body in `CreateSweLegoIssue` (Task 8) with a call to the service. The handler becomes:
+Replace the `writeError(w, http.StatusNotImplemented, ...)` body in `CreateSweLegoIssue`
+(Task 8) with a call to the service. The handler becomes:
 
 ```go
 func (h *Handler) CreateSweLegoIssue(w http.ResponseWriter, r *http.Request) {
@@ -1747,7 +1874,9 @@ func (h *Handler) CreateSweLegoIssue(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`newSweLegoDepsAdapter(h)` returns a concrete `*sweLegoDepsAdapter` that wraps `h.Queries` + `h.CloudRuntime` and implements `service.SweLegoDeps`. Define it in `internal/handler/swe_lego_issue.go`:
+`newSweLegoDepsAdapter(h)` returns a concrete `*sweLegoDepsAdapter` that wraps
+`h.Queries` + `h.CloudRuntime` and implements `service.SweLegoDeps`. Define it in
+`internal/handler/swe_lego_issue.go`:
 
 ```go
 // sweLegoDepsAdapter bridges the *Handler (queries + cloud-runtime proxy) to
@@ -1770,13 +1899,16 @@ func (a *sweLegoDepsAdapter) CreateProject(ctx context.Context, name string) (st
 // replaces them with real queries + cloud-runtime calls.)
 ```
 
-(For Task 9, ship the stubs so the handler compiles and the route works end-to-end against a stub. Task 10 replaces the stubs.)
+(For Task 9, ship the stubs so the handler compiles and the route works end-to-end
+against a stub. Task 10 replaces the stubs.)
 
-Add `"strings"` and `"github.com/multica-ai/multica/server/internal/service"` to the handler file imports.
+Add `"strings"` and `"github.com/multica-ai/multica/server/internal/service"` to the
+handler file imports.
 
 - [ ] **Step 7: Run all swe-lego tests**
 
-Run: `cd multica/server && go test ./internal/handler/ ./internal/service/ -run "SweLego|swe_lego" -v`
+Run:
+`cd multica/server && go test ./internal/handler/ ./internal/service/ -run "SweLego|swe_lego" -v`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -1787,30 +1919,58 @@ git add internal/handler/swe_lego_issue.go internal/handler/swe_lego_issue_test.
 git commit -m "feat(swe-lego): wire orchestration service into handler with status mapping"
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Wire the service deps to real queries + cloud runtime (multica, Go)
 
-> **STATUS: Deferred to Task 17 (e2e).** Investigation during execution found that the plan's pseudo-code can't be implemented cleanly in the dev environment:
+> **STATUS: Deferred to Task 17 (e2e).** Investigation during execution found that the
+> plan's pseudo-code can't be implemented cleanly in the dev environment:
 >
-> 1. **WorkspaceID threading**: `CreateProjectParams` requires `WorkspaceID` (`pkg/db/generated/project.sql.go:36`), but the stub adapter has no request context. The handler has `resolveWorkspaceID(r)` (`internal/handler/handler.go:440`) but the adapter is constructed inside the handler without it.
-> 2. **Agent runtime binding**: `TaskService.EnqueueTaskForIssue` (`internal/service/task.go:432`) requires the issue to have `AssigneeID` (agent) and the agent to have `RuntimeID`. Forking a sandbox doesn't bind it to an agent's runtime — that requires a daemon self-registration step that needs a running cloud runtime.
-> 3. **No "boot sandbox" endpoint**: The cloud-runtime proxy (`internal/cloudruntime/client.go`) has fork/snapshot/restore/delete but no "create sandbox from image on node" endpoint. Booting requires either a new server-side endpoint or `docker run` via NodeExec against a real node.
-> 4. **Handler test breaks**: `newTestHandler(Config{})` (`internal/handler/auth_signup_test.go:13`) produces nil `Queries` and nil `CloudRuntime`. Replacing stubs with real queries panics on nil pointer.
-> 5. **Plan's test is `t.Skip(...)`** — acknowledges no unit-test verification; real verification is e2e in Task 17.
+> 1. **WorkspaceID threading**: `CreateProjectParams` requires `WorkspaceID`
+>    (`pkg/db/generated/project.sql.go:36`), but the stub adapter has no request
+>    context. The handler has `resolveWorkspaceID(r)`
+>    (`internal/handler/handler.go:440`) but the adapter is constructed inside the
+>    handler without it.
+> 1. **Agent runtime binding**: `TaskService.EnqueueTaskForIssue`
+>    (`internal/service/task.go:432`) requires the issue to have `AssigneeID` (agent)
+>    and the agent to have `RuntimeID`. Forking a sandbox doesn't bind it to an agent's
+>    runtime — that requires a daemon self-registration step that needs a running cloud
+>    runtime.
+> 1. **No "boot sandbox" endpoint**: The cloud-runtime proxy
+>    (`internal/cloudruntime/client.go`) has fork/snapshot/restore/delete but no "create
+>    sandbox from image on node" endpoint. Booting requires either a new server-side
+>    endpoint or `docker run` via NodeExec against a real node.
+> 1. **Handler test breaks**: `newTestHandler(Config{})`
+>    (`internal/handler/auth_signup_test.go:13`) produces nil `Queries` and nil
+>    `CloudRuntime`. Replacing stubs with real queries panics on nil pointer.
+> 1. **Plan's test is `t.Skip(...)`** — acknowledges no unit-test verification; real
+>    verification is e2e in Task 17.
 >
-> The stubs from Task 9 are retained. Tasks 11–16 (areal Python side) proceed against the stub endpoint contract. Task 17 (e2e) requires a real multica deployment with cloud runtime + DB, at which point the stub adapter methods are replaced with real implementations informed by actual e2e testing. The real DB query signatures are documented below for the Task 17 implementer:
+> The stubs from Task 9 are retained. Tasks 11–16 (areal Python side) proceed against
+> the stub endpoint contract. Task 17 (e2e) requires a real multica deployment with
+> cloud runtime + DB, at which point the stub adapter methods are replaced with real
+> implementations informed by actual e2e testing. The real DB query signatures are
+> documented below for the Task 17 implementer:
 >
-> - `CreateProject(ctx, CreateProjectParams{WorkspaceID, Title, Status, Priority, ...}) (Project, error)` — `project.sql.go:46`
-> - `DeleteProject(ctx, DeleteProjectParams{ID, WorkspaceID}) error` — `project.sql.go:84` (tenant guard)
-> - `CreateIssue(ctx, CreateIssueParams{WorkspaceID, Title, ProjectID, CreatorType, CreatorID, ...}) (Issue, error)` — `issue.sql.go:201`
-> - `SetIssueMetadataKey(ctx, SetIssueMetadataKeyParams{Key, Value []byte, ID, WorkspaceID}) (Issue, error)` — `issue.sql.go:1115`
-> - `TaskService.EnqueueTaskForIssue(ctx, issue db.Issue, triggerCommentID ...pgtype.UUID) (AgentTaskQueue, error)` — `task.go:432` (requires `issue.AssigneeID.Valid` + `agent.RuntimeID.Valid`)
-> - `cloudruntime.Request{Method, Path, Query, Body, UserID, RequestID, Op, Headers}` → `Response{StatusCode, Header, Body}` — `internal/cloudruntime/client.go:42,69`
+> - `CreateProject(ctx, CreateProjectParams{WorkspaceID, Title, Status, Priority, ...}) (Project, error)`
+>   — `project.sql.go:46`
+> - `DeleteProject(ctx, DeleteProjectParams{ID, WorkspaceID}) error` —
+>   `project.sql.go:84` (tenant guard)
+> - `CreateIssue(ctx, CreateIssueParams{WorkspaceID, Title, ProjectID, CreatorType, CreatorID, ...}) (Issue, error)`
+>   — `issue.sql.go:201`
+> - `SetIssueMetadataKey(ctx, SetIssueMetadataKeyParams{Key, Value []byte, ID, WorkspaceID}) (Issue, error)`
+>   — `issue.sql.go:1115`
+> - `TaskService.EnqueueTaskForIssue(ctx, issue db.Issue, triggerCommentID ...pgtype.UUID) (AgentTaskQueue, error)`
+>   — `task.go:432` (requires `issue.AssigneeID.Valid` + `agent.RuntimeID.Valid`)
+> - `cloudruntime.Request{Method, Path, Query, Body, UserID, RequestID, Op, Headers}` →
+>   `Response{StatusCode, Header, Body}` — `internal/cloudruntime/client.go:42,69`
 
 - [ ] **Step 1: Write the failing test**
 
-This task replaces the stub adapter methods with real calls. Add an integration-flavored test that mocks only the cloud-runtime proxy (not the DB) — or, if a test DB is available in CI, a full-stack test. For a unit test that verifies the adapter wiring without a DB:
+This task replaces the stub adapter methods with real calls. Add an integration-flavored
+test that mocks only the cloud-runtime proxy (not the DB) — or, if a test DB is
+available in CI, a full-stack test. For a unit test that verifies the adapter wiring
+without a DB:
 
 ```go
 func TestSweLegoDepsAdapter_BuildImageCallsNodeExec(t *testing.T) {
@@ -1821,11 +1981,14 @@ func TestSweLegoDepsAdapter_BuildImageCallsNodeExec(t *testing.T) {
 }
 ```
 
-(The real verification for this task is the e2e in Task 17. The unit-level guarantee — that the adapter calls `BuildOrReuse` — is a thin pass-through that is best verified by reading the code + the e2e.)
+(The real verification for this task is the e2e in Task 17. The unit-level guarantee —
+that the adapter calls `BuildOrReuse` — is a thin pass-through that is best verified by
+reading the code + the e2e.)
 
 - [ ] **Step 2: Replace the stub adapter methods with real calls**
 
-In `internal/handler/swe_lego_issue.go`, replace each stub method on `sweLegoDepsAdapter`:
+In `internal/handler/swe_lego_issue.go`, replace each stub method on
+`sweLegoDepsAdapter`:
 
 ```go
 func (a *sweLegoDepsAdapter) CreateProject(ctx context.Context, name string) (string, error) {
@@ -1918,11 +2081,16 @@ func (a *sweLegoDepsAdapter) DeleteProject(ctx context.Context, projectID string
 }
 ```
 
-Helper functions `bootSandboxOnNode`, `enqueueAgentTaskOnSandbox`, `newCloudRuntimeNodeExec` go in the same file. They wrap existing cloud-runtime / task-service calls — the exact signatures depend on the existing `cloudruntime.Client.Do` and `TaskService` shapes; mirror the patterns in `cloud_runtime.go` and `task.go`.
+Helper functions `bootSandboxOnNode`, `enqueueAgentTaskOnSandbox`,
+`newCloudRuntimeNodeExec` go in the same file. They wrap existing cloud-runtime /
+task-service calls — the exact signatures depend on the existing
+`cloudruntime.Client.Do` and `TaskService` shapes; mirror the patterns in
+`cloud_runtime.go` and `task.go`.
 
 - [ ] **Step 3: Run tests + `go build`**
 
-Run: `cd multica/server && go build ./... && go test ./internal/handler/ ./internal/service/ -run "SweLego|swe_lego" -v`
+Run:
+`cd multica/server && go build ./... && go test ./internal/handler/ ./internal/service/ -run "SweLego|swe_lego" -v`
 Expected: PASS. The skipped integration test is fine.
 
 - [ ] **Step 4: Commit**
@@ -1933,12 +2101,15 @@ git add internal/handler/swe_lego_issue.go internal/handler/swe_lego_issue_test.
 git commit -m "feat(swe-lego): wire service deps to real queries + cloud runtime"
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: `SweLegoVerifier` — hybrid reward blend (areal, Python)
 
 **Files:**
-- Create: `backend/areal/customized_areal/tree_search/agents/reward/swe_lego_verifier.py`
+
+- Create:
+  `backend/areal/customized_areal/tree_search/agents/reward/swe_lego_verifier.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_swe_lego_verifier.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2077,7 +2248,8 @@ def test_verifier_critic_failure_falls_back_neutral():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_verifier.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_verifier.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -2204,7 +2376,8 @@ class SweLegoVerifier:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_verifier.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_verifier.py -v`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
@@ -2215,12 +2388,14 @@ git add customized_areal/tree_search/agents/reward/swe_lego_verifier.py customiz
 git commit -m "feat(swe-lego): add hybrid SweLegoVerifier with blend/short-circuit"
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: DAG reward backup — distribute over edges + fan-in credit (areal, Python)
 
 **Files:**
+
 - Create: `backend/areal/customized_areal/tree_search/agents/dag_backup.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_dag_backup.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2308,7 +2483,8 @@ def test_fan_in_credit_is_explicit_not_aggregated():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_dag_backup.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_dag_backup.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -2399,7 +2575,8 @@ def distribute_reward_over_dag(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_dag_backup.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_dag_backup.py -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
@@ -2410,18 +2587,24 @@ git add customized_areal/tree_search/agents/dag_backup.py customized_areal/tree_
 git commit -m "feat(dag): add reward backup over edges with explicit fan-in credit"
 ```
 
----
+______________________________________________________________________
 
 ## Task 13: Extend `TreeAdvantageComputer` to consume per-node credit (areal, Python)
 
 **Files:**
-- Modify: `backend/areal/customized_areal/tree_search/agents/advantage.py` (or the file owning `TreeAdvantageComputer`; locate it first)
+
+- Modify: `backend/areal/customized_areal/tree_search/agents/advantage.py` (or the file
+  owning `TreeAdvantageComputer`; locate it first)
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_advantage.py` (extend)
 
 - [ ] **Step 0: Locate `TreeAdvantageComputer`**
 
-Run: `cd backend/areal && grep -rn "class TreeAdvantageComputer\|TreeAdvantageComputer" customized_areal/`
-If it lives in `customized_areal/tree_search/core/advantage.py` (per the design spec reference), that is the file. If the file is missing or the class is elsewhere, adjust the paths below.
+Run:
+`cd backend/areal && grep -rn "class TreeAdvantageComputer\|TreeAdvantageComputer" customized_areal/`
+If it lives in `customized_areal/tree_search/core/advantage.py` (per the design spec
+reference), that is the file. If the file is missing or the class is elsewhere, adjust
+the paths below.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2463,12 +2646,15 @@ def test_advantage_flat_broadcast_when_no_credit():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_advantage.py -k "per_node_credit or flat_broadcast_when_no_credit" -v`
-Expected: FAIL (the existing `compute` does not accept a `credit` field, or the signature mismatches).
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_advantage.py -k "per_node_credit or flat_broadcast_when_no_credit" -v`
+Expected: FAIL (the existing `compute` does not accept a `credit` field, or the
+signature mismatches).
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `advantage.py`, extend `TreeAdvantageComputer.compute` to accept per-node `credit`. The exact change depends on the current signature; the pattern is:
+In `advantage.py`, extend `TreeAdvantageComputer.compute` to accept per-node `credit`.
+The exact change depends on the current signature; the pattern is:
 
 ```python
 class TreeAdvantageComputer:
@@ -2490,11 +2676,13 @@ class TreeAdvantageComputer:
         return AdvantageResult(advantages=normalized, ...)
 ```
 
-(Read the existing `compute` body and graft the `has_credit` branch at the top, leaving the existing normalization math intact. Do not rewrite the normalization.)
+(Read the existing `compute` body and graft the `has_credit` branch at the top, leaving
+the existing normalization math intact. Do not rewrite the normalization.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_advantage.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_advantage.py -v`
 Expected: PASS (all advantage tests, including pre-existing ones).
 
 - [ ] **Step 5: Commit**
@@ -2505,12 +2693,14 @@ git add customized_areal/tree_search/agents/advantage.py customized_areal/tree_s
 git commit -m "feat(dag): extend TreeAdvantageComputer to consume per-node credit"
 ```
 
----
+______________________________________________________________________
 
 ## Task 14: Per-issue orchestration loop — `run_swe_lego_issue` (areal, Python)
 
 **Files:**
+
 - Create: `backend/areal/customized_areal/tree_search/agents/swe_lego_issue_runner.py`
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_swe_lego_issue_runner.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2638,7 +2828,8 @@ def test_run_swe_lego_issue_does_not_cleanup_on_verifier_failure(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -2739,7 +2930,8 @@ async def run_swe_lego_issue(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
@@ -2750,11 +2942,12 @@ git add customized_areal/tree_search/agents/swe_lego_issue_runner.py customized_
 git commit -m "feat(swe-lego): add per-issue orchestration loop with guaranteed cleanup"
 ```
 
----
+______________________________________________________________________
 
 ## Task 15: `BranchMaterializer` smoke test with `MulticaSweLegoProvider` (areal, Python)
 
 **Files:**
+
 - Test: `backend/areal/customized_areal/tree_search/tests/test_integration_multica.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2823,14 +3016,19 @@ def test_branch_materializer_works_with_multica_provider():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_integration_multica.py -v`
-Expected: may FAIL with import errors if `dataclass` import is missing, or PASS if the materializer already accepts the provider via Protocol (which it does — `integration.py` injects `env: ForkableEnvironment`).
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_integration_multica.py -v`
+Expected: may FAIL with import errors if `dataclass` import is missing, or PASS if the
+materializer already accepts the provider via Protocol (which it does — `integration.py`
+injects `env: ForkableEnvironment`).
 
-If it PASSES immediately, that confirms the spec's invariant 3 ("`BranchMaterializer` is untouched") — commit the test as a regression guard and move on.
+If it PASSES immediately, that confirms the spec's invariant 3 ("`BranchMaterializer` is
+untouched") — commit the test as a regression guard and move on.
 
 - [ ] **Step 3: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_integration_multica.py -v`
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_integration_multica.py -v`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
@@ -2841,16 +3039,21 @@ git add customized_areal/tree_search/tests/test_integration_multica.py
 git commit -m "test(dag): smoke-test BranchMaterializer with MulticaSweLegoProvider"
 ```
 
----
+______________________________________________________________________
 
 ## Task 16: Anti-cheating canary test (areal, Python)
 
 **Files:**
-- Create: `backend/areal/customized_areal/tree_search/tests/test_swe_lego_anti_hacking.py`
+
+- Create:
+  `backend/areal/customized_areal/tree_search/tests/test_swe_lego_anti_hacking.py`
 
 - [ ] **Step 1: Write the failing test**
 
-This test is a regression guard on the git-history-truncation contract. It does not run real git; it asserts that the build script (shipped to the build node by the multica side) contains the `--commit-cutoff` directive, and that the areal-side `SweLegoIssue` carries the `issue_date` that drives it.
+This test is a regression guard on the git-history-truncation contract. It does not run
+real git; it asserts that the build script (shipped to the build node by the multica
+side) contains the `--commit-cutoff` directive, and that the areal-side `SweLegoIssue`
+carries the `issue_date` that drives it.
 
 ```python
 """Anti-cheating canary: assert SWE-Lego anti-hacking is enforced.
@@ -2885,8 +3088,10 @@ def test_swe_lego_issue_carries_issue_date_for_truncation():
 
 - [ ] **Step 2: Run test to verify it passes**
 
-Run: `cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_anti_hacking.py -v`
-Expected: PASS (this test guards an existing contract; it should pass immediately given Task 6).
+Run:
+`cd backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_anti_hacking.py -v`
+Expected: PASS (this test guards an existing contract; it should pass immediately given
+Task 6).
 
 - [ ] **Step 3: Commit**
 
@@ -2896,18 +3101,23 @@ git add customized_areal/tree_search/tests/test_swe_lego_anti_hacking.py
 git commit -m "test(swe-lego): add anti-hacking canary on issue_date/base_commit"
 ```
 
----
+______________________________________________________________________
 
 ## Task 17: End-to-end validation (multica + areal)
 
 **Files:**
+
 - No new files; this is a manual/integration validation task.
 
 - [ ] **Step 1: Confirm hardware availability**
 
-Run: `python -c "import torch; print('GPU available:', torch.cuda.is_available())"` (areal side) and confirm a Fleet build-node tagged `swe-lego-build` is reachable from the multica server.
+Run: `python -c "import torch; print('GPU available:', torch.cuda.is_available())"`
+(areal side) and confirm a Fleet build-node tagged `swe-lego-build` is reachable from
+the multica server.
 
-If either is unavailable, document the skip per `backend/areal/CLAUDE.md` ("Integration tests requiring multi-node hardware are skipped with an explanation when unavailable") and stop here — the unit tests in Tasks 1-16 are the v1 acceptance gate.
+If either is unavailable, document the skip per `backend/areal/CLAUDE.md` ("Integration
+tests requiring multi-node hardware are skipped with an explanation when unavailable")
+and stop here — the unit tests in Tasks 1-16 are the v1 acceptance gate.
 
 - [ ] **Step 2: Run the e2e at `group_size=2`**
 
@@ -2928,11 +3138,18 @@ from customized_areal.tree_search.agents.swe_lego_client import MulticaSweLegoCl
 ```
 
 Assert:
+
 - The multica endpoint returns 201 with `agent_run_ids` of length 2.
+
 - The build node's docker cache contains `swe-lego:<cache_key>` after the build.
+
 - Two daemon-in-docker sandboxes boot and the daemons register their runtimes.
-- Agents run and POST `task_message` batches (visible in the multica UI or via `GET /api/tasks/{taskId}/messages`).
+
+- Agents run and POST `task_message` batches (visible in the multica UI or via
+  `GET /api/tasks/{taskId}/messages`).
+
 - The verifier produces a non-`None` reward per agent.
+
 - `cleanup_swe_lego_issue` deletes the project and sandboxes.
 
 - [ ] **Step 3: Run the anti-cheating canary live**
@@ -2943,11 +3160,15 @@ In one of the forked sandboxes, after the agent finishes but before cleanup:
 docker exec <forked-sandbox> git -C /workspace/repo log --after=2025-03-14
 ```
 
-Assert: no commits after `issue_date` are reachable (empty output, or an error indicating the range is invalid). This confirms the `git filter-repo --commit-cutoff` actually deleted the future history.
+Assert: no commits after `issue_date` are reachable (empty output, or an error
+indicating the range is invalid). This confirms the `git filter-repo --commit-cutoff`
+actually deleted the future history.
 
 - [ ] **Step 4: Document the run**
 
-Record the run details (repo, base_commit, group_size, rewards, any failures) in the commit message of the e2e validation commit. If issues are found, file them as follow-up tasks rather than expanding this plan.
+Record the run details (repo, base_commit, group_size, rewards, any failures) in the
+commit message of the e2e validation commit. If issues are found, file them as follow-up
+tasks rather than expanding this plan.
 
 - [ ] **Step 5: Commit (validation record only)**
 
@@ -2957,18 +3178,24 @@ git add --allow-empty docs/superpowers/plans/2026-06-29-swe-lego-multica-areal-i
 git commit -m "test(swe-lego): e2e validation at group_size=2 (record)"
 ```
 
-(If your workflow does not allow empty commits, instead commit a short validation-notes file at `docs/superpowers/plans/2026-06-29-swe-lego-e2e-validation.md` with the run details.)
+(If your workflow does not allow empty commits, instead commit a short validation-notes
+file at `docs/superpowers/plans/2026-06-29-swe-lego-e2e-validation.md` with the run
+details.)
 
----
+______________________________________________________________________
 
 ## Self-Review
 
 **1. Spec coverage:**
-- §2 decision 1 (per-issue + mid-run branching) → Tasks 5, 14, 15 (provider + runner + materializer smoke).
-- §2 decision 2 (group_size + DAG) → Tasks 14, 12 (runner drives group_size lanes; DAG backup).
+
+- §2 decision 1 (per-issue + mid-run branching) → Tasks 5, 14, 15 (provider + runner +
+  materializer smoke).
+- §2 decision 2 (group_size + DAG) → Tasks 14, 12 (runner drives group_size lanes; DAG
+  backup).
 - §2 decision 3 (multica owns docker) → Tasks 8-10 (multica endpoint + service).
 - §2 decision 4 (daemon-in-docker) → Task 4 (Dockerfile with `multica-daemon` CMD).
-- §2 decision 5 (anti-hacking) → Tasks 2, 16 (build script with `--commit-cutoff` + canary).
+- §2 decision 5 (anti-hacking) → Tasks 2, 16 (build script with `--commit-cutoff` +
+  canary).
 - §2 decision 6 (hybrid verifier) → Task 11.
 - §2 decision 7 (atomic endpoint) → Tasks 8-10.
 - §2 decision 8 (build on Fleet node) → Tasks 3, 10 (NodeExec + adapter wiring).
@@ -2976,19 +3203,29 @@ git commit -m "test(swe-lego): e2e validation at group_size=2 (record)"
 - §4 (multica side) → Tasks 1-4, 8-10.
 - §5 (areal side) → Tasks 5-7, 11, 14.
 - §6 (data flow) → Task 14 (runner) + Task 17 (e2e).
-- §7 (error handling) → Tasks 9 (rollback), 11 (critic fallback), 14 (cleanup-on-failure).
+- §7 (error handling) → Tasks 9 (rollback), 11 (critic fallback), 14
+  (cleanup-on-failure).
 - §8 (security/anti-cheating) → Tasks 2, 16, 17.
 - §9 (testing strategy) → each task's test + Task 17 (e2e).
 - §10 (out of scope) → no tasks; respected.
 
-**2. Placeholder scan:** No "TBD" or "implement later." Task 9 Step 6 uses stub adapter methods explicitly, replaced in Task 10 Step 2 — that is intentional sequencing, not a placeholder. Task 13 Step 0 has a "locate `TreeAdvantageComputer`" instruction because its file location is not pinned in the spec; the grep command resolves it concretely. Task 17 is a manual validation task with explicit run commands.
+**2. Placeholder scan:** No "TBD" or "implement later." Task 9 Step 6 uses stub adapter
+methods explicitly, replaced in Task 10 Step 2 — that is intentional sequencing, not a
+placeholder. Task 13 Step 0 has a "locate `TreeAdvantageComputer`" instruction because
+its file location is not pinned in the spec; the grep command resolves it concretely.
+Task 17 is a manual validation task with explicit run commands.
 
 **3. Type consistency:**
-- `SweLegoIssue` / `SweLegoSetup` / `SweLegoIssueResult` defined in Task 6, used in Tasks 7, 11, 14.
+
+- `SweLegoIssue` / `SweLegoSetup` / `SweLegoIssueResult` defined in Task 6, used in
+  Tasks 7, 11, 14.
 - `MulticaSweLegoProvider` defined in Task 5, used in Task 15.
-- `MulticaSweLegoClient.create_swe_lego_issue` / `cleanup_swe_lego_issue` defined in Task 7, used in Task 14.
+- `MulticaSweLegoClient.create_swe_lego_issue` / `cleanup_swe_lego_issue` defined in
+  Task 7, used in Task 14.
 - `SweLegoVerifier.verify_and_reward` signature consistent across Tasks 11 and 14.
-- Go: `SweLegoCacheKey`, `SweLegoBuildScript`, `BuildOrReuse`, `NewSweLegoIssueService`, `SweLegoIssueInput`/`Result`, `SweLegoDeps` — names match across Tasks 1-3, 8-10.
-- `ObjectiveOutcome` fields (`fully_passes`, `f2p_passed`, `f2p_total`, `failing_count_reduced`) consistent between Task 11 impl and test.
+- Go: `SweLegoCacheKey`, `SweLegoBuildScript`, `BuildOrReuse`, `NewSweLegoIssueService`,
+  `SweLegoIssueInput`/`Result`, `SweLegoDeps` — names match across Tasks 1-3, 8-10.
+- `ObjectiveOutcome` fields (`fully_passes`, `f2p_passed`, `f2p_total`,
+  `failing_count_reduced`) consistent between Task 11 impl and test.
 
 No type drift found.

@@ -254,9 +254,7 @@ def select_branch_candidate(
     candidates = [
         node
         for node in nodes
-        if node.query_id == query_id
-        and node.need_branch
-        and bool(node.task_id)
+        if node.query_id == query_id and node.need_branch and bool(node.task_id)
     ]
     if not candidates:
         return None

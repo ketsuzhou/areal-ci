@@ -1,35 +1,50 @@
 # Phase 0: Abstraction + DAG Contract — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the `ForkableEnvironment` abstraction and a Fleet-backed sandbox provider so the rest of the DAG RL work has a stable, vendor-agnostic environment seam.
+**Goal:** Ship the `ForkableEnvironment` abstraction and a Fleet-backed sandbox provider
+so the rest of the DAG RL work has a stable, vendor-agnostic environment seam.
 
-**Architecture:** A Python Protocol (`ForkableEnvironment`) defines four operations — `snapshot`, `fork`, `restore`, `cleanup` — on cloud sandboxes. A `FleetSandboxProvider` implements the Protocol by calling generic Fleet HTTP endpoints (`POST /sandboxes/{id}/snapshot`, `POST /sandboxes/{id}/fork`). The DAG model (`execution_dag.py`, Task 1) is already implemented; this phase only adds the environment sibling.
+**Architecture:** A Python Protocol (`ForkableEnvironment`) defines four operations —
+`snapshot`, `fork`, `restore`, `cleanup` — on cloud sandboxes. A `FleetSandboxProvider`
+implements the Protocol by calling generic Fleet HTTP endpoints
+(`POST /sandboxes/{id}/snapshot`, `POST /sandboxes/{id}/fork`). The DAG model
+(`execution_dag.py`, Task 1) is already implemented; this phase only adds the
+environment sibling.
 
-**Tech Stack:** Python 3.12+ · `httpx` (already a dependency via `customized_areal/db_service/sandbox.py`) · `typing.Protocol` for the abstraction · `pytest` for tests
+**Tech Stack:** Python 3.12+ · `httpx` (already a dependency via
+`customized_areal/db_service/sandbox.py`) · `typing.Protocol` for the abstraction ·
+`pytest` for tests
 
-**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.4 (Provider portability), §4 (Architecture), §6 (Testing strategy)
+**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §3.4
+(Provider portability), §4 (Architecture), §6 (Testing strategy)
 
-**Project rules:** `backend/areal/CLAUDE.md` (Python conventions), `AGENTS.md` (no backward-compat scaffolding, no vendor SDK leakage)
+**Project rules:** `backend/areal/CLAUDE.md` (Python conventions), `AGENTS.md` (no
+backward-compat scaffolding, no vendor SDK leakage)
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `customized_areal/tree_search/dag/environment.py` (create) | `ForkableEnvironment` Protocol + `FleetSandboxProvider` implementation + concurrency semaphore |
+| File                                                            | Responsibility                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `customized_areal/tree_search/dag/environment.py` (create)      | `ForkableEnvironment` Protocol + `FleetSandboxProvider` implementation + concurrency semaphore                |
 | `customized_areal/tree_search/dag/test_environment.py` (create) | Contract tests: fake provider exercises snapshot→fork→restore→cleanup ordering, error paths, semaphore gating |
-| `customized_areal/tree_search/dag/__init__.py` (modify) | Export `ForkableEnvironment`, `FleetSandboxProvider` |
+| `customized_areal/tree_search/dag/__init__.py` (modify)         | Export `ForkableEnvironment`, `FleetSandboxProvider`                                                          |
 
-The DAG model at `customized_areal/tree_search/dag/execution_dag.py` (Task 1) is already done — this phase does not touch it.
+The DAG model at `customized_areal/tree_search/dag/execution_dag.py` (Task 1) is already
+done — this phase does not touch it.
 
----
+______________________________________________________________________
 
 ## Task 1: ForkableEnvironment Protocol + SnapshotResult/ForkResult types
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/environment.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing test for the Protocol shape**
@@ -101,8 +116,10 @@ async def test_protocol_has_four_operations() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_environment.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'customized_areal.tree_search.dag.environment'`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_environment.py -v`
+Expected: FAIL with
+`ModuleNotFoundError: No module named 'customized_areal.tree_search.dag.environment'`
 
 - [ ] **Step 3: Write the minimal Protocol + dataclasses**
 
@@ -164,7 +181,8 @@ class ForkableEnvironment(Protocol):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_environment.py::test_protocol_has_four_operations -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_environment.py::test_protocol_has_four_operations -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -174,12 +192,14 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): add ForkableEnvironment Protocol + snapshot/fork result types"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: ForkableEnvironment error types
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/environment.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing test for error types**
@@ -204,7 +224,8 @@ def test_error_types_exist() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_error_types_exist -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_error_types_exist -v`
 Expected: FAIL with `AttributeError: module ... has no attribute 'EnvironmentError'`
 
 - [ ] **Step 3: Add the error types to environment.py**
@@ -226,7 +247,8 @@ class ForkError(EnvironmentError):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_error_types_exist -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_error_types_exist -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -236,12 +258,14 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): add typed EnvironmentError hierarchy for ForkableEnvironment"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: FleetSandboxProvider — snapshot() via Fleet HTTP endpoint
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/environment.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing test for snapshot()**
@@ -281,7 +305,8 @@ async def test_fleet_provider_snapshot_calls_endpoint() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_snapshot_calls_endpoint -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_snapshot_calls_endpoint -v`
 Expected: FAIL — `FleetSandboxProvider` does not exist
 
 - [ ] **Step 3: Implement FleetSandboxProvider.snapshot()**
@@ -345,7 +370,8 @@ class FleetSandboxProvider:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_snapshot_calls_endpoint -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_snapshot_calls_endpoint -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -355,12 +381,14 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): add FleetSandboxProvider.snapshot via POST /sandboxes/{id}/snapshot"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: FleetSandboxProvider — fork() via Fleet HTTP endpoint
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/environment.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing test for fork()**
@@ -394,7 +422,8 @@ async def test_fleet_provider_fork_requires_source_or_snapshot() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_from_snapshot -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_from_snapshot -v`
 Expected: FAIL — `AttributeError: 'FleetSandboxProvider' object has no attribute 'fork'`
 
 - [ ] **Step 3: Implement fork()**
@@ -436,7 +465,8 @@ Add to `FleetSandboxProvider`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_from_snapshot customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_requires_source_or_snapshot -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_from_snapshot customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_requires_source_or_snapshot -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -446,12 +476,14 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): add FleetSandboxProvider.fork via POST /sandboxes/fork"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: FleetSandboxProvider — restore() + cleanup()
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/environment.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing tests for restore() and cleanup()**
@@ -503,7 +535,8 @@ async def test_fleet_provider_cleanup_raises_on_5xx() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py -k "restore_or_cleanup" -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py -k "restore_or_cleanup" -v`
 Expected: FAIL — `restore`/`cleanup` methods missing
 
 - [ ] **Step 3: Implement restore() and cleanup()**
@@ -541,7 +574,8 @@ Add to `FleetSandboxProvider`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py -k "restore_or_cleanup" -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py -k "restore_or_cleanup" -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -551,15 +585,18 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): add FleetSandboxProvider.restore and idempotent cleanup"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: Concurrency semaphore on fork calls
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/environment.py`
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
-**Rationale:** Per design §3.3, a concurrency semaphore gates fork calls to prevent fork-storms at high `group_size`. Default sized to `group_size` (configurable via env var).
+**Rationale:** Per design §3.3, a concurrency semaphore gates fork calls to prevent
+fork-storms at high `group_size`. Default sized to `group_size` (configurable via env
+var).
 
 - [ ] **Step 1: Write the failing test for semaphore gating**
 
@@ -599,8 +636,10 @@ async def test_fleet_provider_fork_semaphore_gates_concurrency() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_semaphore_gates_concurrency -v`
-Expected: FAIL — `max_concurrent_forks` parameter not accepted; concurrency unbounded so `max_observed > 2`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_semaphore_gates_concurrency -v`
+Expected: FAIL — `max_concurrent_forks` parameter not accepted; concurrency unbounded so
+`max_observed > 2`
 
 - [ ] **Step 3: Add the semaphore to FleetSandboxProvider**
 
@@ -672,7 +711,8 @@ Add `import asyncio` to the imports at the top of `environment.py`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_semaphore_gates_concurrency -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_fleet_provider_fork_semaphore_gates_concurrency -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -682,12 +722,14 @@ git add customized_areal/tree_search/dag/environment.py customized_areal/tree_se
 git commit -m "feat(dag): gate FleetSandboxProvider.fork with a concurrency semaphore"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: Export from dag/__init__.py
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/__init__.py`
+
 - Test: `customized_areal/tree_search/dag/test_environment.py`
 
 - [ ] **Step 1: Write the failing test for the export**
@@ -706,12 +748,15 @@ def test_dag_package_exports_environment_types() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_dag_package_exports_environment_types -v`
-Expected: FAIL — `ImportError: cannot import name 'ForkableEnvironment' from 'customized_areal.tree_search.dag'`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_dag_package_exports_environment_types -v`
+Expected: FAIL —
+`ImportError: cannot import name 'ForkableEnvironment' from 'customized_areal.tree_search.dag'`
 
 - [ ] **Step 3: Add the exports**
 
-Modify `customized_areal/tree_search/dag/__init__.py` — extend the existing import block:
+Modify `customized_areal/tree_search/dag/__init__.py` — extend the existing import
+block:
 
 ```python
 from customized_areal.tree_search.dag.environment import (
@@ -748,13 +793,14 @@ __all__ = [
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py::test_dag_package_exports_environment_types -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_environment.py::test_dag_package_exports_environment_types -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full environment test suite**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py -v`
-Expected: All tests PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_environment.py -v` Expected:
+All tests PASS
 
 - [ ] **Step 6: Commit**
 
@@ -763,7 +809,7 @@ git add customized_areal/tree_search/dag/__init__.py customized_areal/tree_searc
 git commit -m "feat(dag): export ForkableEnvironment and FleetSandboxProvider from dag package"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: Pre-commit + lint check
 
@@ -771,18 +817,21 @@ git commit -m "feat(dag): export ForkableEnvironment and FleetSandboxProvider fr
 
 - [ ] **Step 1: Run ruff on the new files**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/environment.py customized_areal/tree_search/dag/test_environment.py customized_areal/tree_search/dag/__init__.py`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/environment.py customized_areal/tree_search/dag/test_environment.py customized_areal/tree_search/dag/__init__.py`
 Expected: No errors. If errors appear, fix them inline before proceeding.
 
 - [ ] **Step 2: Run ruff format check**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run ruff format --check customized_areal/tree_search/dag/`
-Expected: No reformatting needed. If files need formatting, run `uv run ruff format customized_areal/tree_search/dag/` and commit the result.
+Run:
+`cd /workspaces/leagent/backend/areal && uv run ruff format --check customized_areal/tree_search/dag/`
+Expected: No reformatting needed. If files need formatting, run
+`uv run ruff format customized_areal/tree_search/dag/` and commit the result.
 
 - [ ] **Step 3: Run the full DAG test suite to confirm no regression**
 
-Run: `uv run pytest customized_areal/tree_search/dag/ -v`
-Expected: All tests PASS — both the existing `execution_dag` tests and the new `environment` tests.
+Run: `uv run pytest customized_areal/tree_search/dag/ -v` Expected: All tests PASS —
+both the existing `execution_dag` tests and the new `environment` tests.
 
 - [ ] **Step 4: If any fixes were needed, commit them**
 
@@ -791,17 +840,23 @@ git add -A
 git commit -m "chore(dag): ruff fixes for ForkableEnvironment module"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage:**
+
 - Design §3.4 (Provider portability → generic Fleet endpoints) → Tasks 3–5
 - Design §3.3 (Cost → concurrency semaphore) → Task 6
 - Design §4 Architecture (`environment.py` new file) → Tasks 1–7
-- Design §6 Testing strategy (ForkableEnvironment contract tests with fake provider) → Tasks 1, 3–6
-- Design §5 Phase 0 Task 2 (`ForkableEnvironment` abstraction + Fleet sandbox provider) → all tasks
+- Design §6 Testing strategy (ForkableEnvironment contract tests with fake provider) →
+  Tasks 1, 3–6
+- Design §5 Phase 0 Task 2 (`ForkableEnvironment` abstraction + Fleet sandbox provider)
+  → all tasks
 
 **Placeholder scan:** None. Every step has concrete code or commands.
 
-**Type consistency:** `SnapshotResult(snapshot_id, source_sandbox_id)` and `ForkResult(sandbox_id)` are used consistently in Tasks 1, 3, 4. `FleetSandboxProvider.__init__` signature is consistent across Tasks 3, 4, 5, 6 — Task 6 extends it with `max_concurrent_forks` only.
+**Type consistency:** `SnapshotResult(snapshot_id, source_sandbox_id)` and
+`ForkResult(sandbox_id)` are used consistently in Tasks 1, 3, 4.
+`FleetSandboxProvider.__init__` signature is consistent across Tasks 3, 4, 5, 6 — Task 6
+extends it with `max_concurrent_forks` only.

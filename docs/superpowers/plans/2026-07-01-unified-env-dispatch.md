@@ -1,67 +1,103 @@
 # Unified env-dispatch API Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the SWE-Lego-only `POST /api/v1/swe-lego/issues` endpoint with a unified `POST /api/v1/env-dispatch` (plus `POST /api/v1/env` and `DELETE /api/v1/env/{envID}`) covering scratch/branch × swe_lego/self_play × issue/message × group_size=N, and update the AReaL caller to the new shape.
+**Goal:** Replace the SWE-Lego-only `POST /api/v1/swe-lego/issues` endpoint with a
+unified `POST /api/v1/env-dispatch` (plus `POST /api/v1/env` and
+`DELETE /api/v1/env/{envID}`) covering scratch/branch × swe_lego/self_play ×
+issue/message × group_size=N, and update the AReaL caller to the new shape.
 
-**Architecture:** Multica owns `sandbox_id` ↔ `env_id`; areal stores `env_id` per DAG state. Migration 127 adds an `environment` table and `project.env_id` FK. A new `EnvDispatchService` with a `Deps` seam (mirroring `SweLegoDeps`) orchestrates per-rollout concurrent reset + best-effort dispatch. The old `SweLegoIssueService`/`CreateSweLegoIssue` handler and `/api/v1/swe-lego` route group are deleted; AReaL's `MulticaSweLegoClient` becomes `MulticaEnvDispatchClient`, `SweLegoSetup` becomes a `rollouts[]` shape, and a new `self_play_runner.py` mirrors the SWE-Lego runner for self-play training.
+**Architecture:** Multica owns `sandbox_id` ↔ `env_id`; areal stores `env_id` per DAG
+state. Migration 127 adds an `environment` table and `project.env_id` FK. A new
+`EnvDispatchService` with a `Deps` seam (mirroring `SweLegoDeps`) orchestrates
+per-rollout concurrent reset + best-effort dispatch. The old
+`SweLegoIssueService`/`CreateSweLegoIssue` handler and `/api/v1/swe-lego` route group
+are deleted; AReaL's `MulticaSweLegoClient` becomes `MulticaEnvDispatchClient`,
+`SweLegoSetup` becomes a `rollouts[]` shape, and a new `self_play_runner.py` mirrors the
+SWE-Lego runner for self-play training.
 
-**Tech Stack:** Go 1.26 (Chi router, sqlc), PostgreSQL 17, Python 3.12+ (httpx, pytest, asyncio).
+**Tech Stack:** Go 1.26 (Chi router, sqlc), PostgreSQL 17, Python 3.12+ (httpx, pytest,
+asyncio).
 
 **Spec:** `docs/superpowers/specs/2026-07-01-unified-env-dispatch-design.md`
 
-> **Design-revision sync (2026-07-01):** This plan tracks the revised design. Key
-> points baked into the tasks below: (1) branch **always forks** — no N=1 sandbox
-> reuse; `project.env_id` is 1:1 (partial UNIQUE index) and `ON DELETE RESTRICT`;
-> (2) one `rollouts[]` response shape for success/partial/all-failed, with the
-> status rule 201 (≥1 dispatched) / 500 (all failed) / 503 (reset failed);
-> (3) branch+self_play **appends** to the copied chat session; (4) the agent field
-> is `agent_id` (first-class agent; there is no `agent_config`), and `creator_id`
-> is the authed user; (5) `domain` is **required** (swe_lego⇒issue, self_play⇒message);
-> (6) service resolves the branch source project via `GetProjectByEnvID`;
-> (7) optional `idempotency_key` + `env_dispatch_request` ledger for retry-safe replay.
+> **Design-revision sync (2026-07-01):** This plan tracks the revised design. Key points
+> baked into the tasks below: (1) branch **always forks** — no N=1 sandbox reuse;
+> `project.env_id` is 1:1 (partial UNIQUE index) and `ON DELETE RESTRICT`; (2) one
+> `rollouts[]` response shape for success/partial/all-failed, with the status rule 201
+> (≥1 dispatched) / 500 (all failed) / 503 (reset failed); (3) branch+self_play
+> **appends** to the copied chat session; (4) the agent field is `agent_id` (first-class
+> agent; there is no `agent_config`), and `creator_id` is the authed user; (5) `domain`
+> is **required** (swe_lego⇒issue, self_play⇒message); (6) service resolves the branch
+> source project via `GetProjectByEnvID`; (7) optional `idempotency_key` +
+> `env_dispatch_request` ledger for retry-safe replay.
 
----
+______________________________________________________________________
 
 ## File Structure
 
 ### multica server (Go)
 
-- **Create:** `multica/server/migrations/127_environment_state.up.sql` — new `environment` table + `project.env_id` column.
+- **Create:** `multica/server/migrations/127_environment_state.up.sql` — new
+  `environment` table + `project.env_id` column.
 - **Create:** `multica/server/migrations/127_environment_state.down.sql` — rollback.
-- **Create:** `multica/server/pkg/db/queries/environment.sql` — sqlc queries for `environment` table.
-- **Modify:** `multica/server/pkg/db/queries/project.sql` — add `SetProjectEnvID`, `CreateProjectWithEnv` queries.
-- **Modify:** `multica/server/pkg/db/queries/issue.sql` — add `ListIssuesByProject`, `CreateSweLegoIssue` (project-scoped, with f2p/p2p/acceptance_criteria metadata).
-- **Modify:** `multica/server/pkg/db/queries/chat.sql` — add `CreateChatSessionForProject` (chat sessions currently have project_id? confirm; if not, add column or use existing project linkage).
-- **Create:** `multica/server/internal/service/env_dispatch.go` — `EnvDispatchService`, `EnvDispatchDeps` interface, `EnvDispatchInput`/`EnvDispatchResult` types.
-- **Create:** `multica/server/internal/service/env_dispatch_test.go` — fake deps + matrix tests.
-- **Create:** `multica/server/internal/handler/env.go` — `CreateEnv`, `DeleteEnv` handlers.
+- **Create:** `multica/server/pkg/db/queries/environment.sql` — sqlc queries for
+  `environment` table.
+- **Modify:** `multica/server/pkg/db/queries/project.sql` — add `SetProjectEnvID`,
+  `CreateProjectWithEnv` queries.
+- **Modify:** `multica/server/pkg/db/queries/issue.sql` — add `ListIssuesByProject`,
+  `CreateSweLegoIssue` (project-scoped, with f2p/p2p/acceptance_criteria metadata).
+- **Modify:** `multica/server/pkg/db/queries/chat.sql` — add
+  `CreateChatSessionForProject` (chat sessions currently have project_id? confirm; if
+  not, add column or use existing project linkage).
+- **Create:** `multica/server/internal/service/env_dispatch.go` — `EnvDispatchService`,
+  `EnvDispatchDeps` interface, `EnvDispatchInput`/`EnvDispatchResult` types.
+- **Create:** `multica/server/internal/service/env_dispatch_test.go` — fake deps +
+  matrix tests.
+- **Create:** `multica/server/internal/handler/env.go` — `CreateEnv`, `DeleteEnv`
+  handlers.
 - **Create:** `multica/server/internal/handler/env_test.go` — env handler tests.
-- **Create:** `multica/server/internal/handler/env_dispatch.go` — `EnvDispatch`, `DeleteEnvDispatchProject` handlers + `envDispatchDepsAdapter`.
-- **Create:** `multica/server/internal/handler/env_dispatch_test.go` — validation + status-code tests.
+- **Create:** `multica/server/internal/handler/env_dispatch.go` — `EnvDispatch`,
+  `DeleteEnvDispatchProject` handlers + `envDispatchDepsAdapter`.
+- **Create:** `multica/server/internal/handler/env_dispatch_test.go` — validation +
+  status-code tests.
 - **Delete:** `multica/server/internal/handler/swe_lego_issue.go`
 - **Delete:** `multica/server/internal/handler/swe_lego_issue_test.go`
 - **Delete:** `multica/server/internal/service/swe_lego_issue.go`
 - **Delete:** `multica/server/internal/service/swe_lego_issue_test.go`
-- **Modify:** `multica/server/cmd/server/router.go` — remove `/api/v1/swe-lego` group, add `/api/v1/env*` + `/api/v1/env-dispatch*` routes.
+- **Modify:** `multica/server/cmd/server/router.go` — remove `/api/v1/swe-lego` group,
+  add `/api/v1/env*` + `/api/v1/env-dispatch*` routes.
 
 ### areal (Python)
 
-- **Modify:** `customized_areal/tree_search/agents/reward/swe_lego_types.py` — `SweLegoSetup` becomes `{rollouts: [SweLegoRollout]}`.
-- **Rewrite:** `customized_areal/tree_search/agents/swe_lego_client.py` → rename class `MulticaSweLegoClient` → `MulticaEnvDispatchClient`; new methods `create_base_env`, `create_env_dispatch`, `delete_env`, updated `cleanup_swe_lego_issue`.
-- **Modify:** `customized_areal/tree_search/agents/swe_lego_issue_runner.py` — iterate `setup.rollouts`.
-- **Create:** `customized_areal/tree_search/agents/self_play_runner.py` — mirror `swe_lego_issue_runner.py` for self-play.
-- **Modify:** `customized_areal/tree_search/tests/test_swe_lego_issue_runner.py` — update fixtures to new shape.
-- **Modify:** `customized_areal/tree_search/tests/test_swe_lego_client.py` — update fixtures + assertions.
-- **Create:** `customized_areal/tree_search/tests/test_self_play_runner.py` — self-play runner tests.
-- **Create:** `customized_areal/tree_search/tests/test_env_dispatch_client.py` — covers `create_base_env`, `create_env_dispatch`, `delete_env`, `cleanup`.
+- **Modify:** `customized_areal/tree_search/agents/reward/swe_lego_types.py` —
+  `SweLegoSetup` becomes `{rollouts: [SweLegoRollout]}`.
+- **Rewrite:** `customized_areal/tree_search/agents/swe_lego_client.py` → rename class
+  `MulticaSweLegoClient` → `MulticaEnvDispatchClient`; new methods `create_base_env`,
+  `create_env_dispatch`, `delete_env`, updated `cleanup_swe_lego_issue`.
+- **Modify:** `customized_areal/tree_search/agents/swe_lego_issue_runner.py` — iterate
+  `setup.rollouts`.
+- **Create:** `customized_areal/tree_search/agents/self_play_runner.py` — mirror
+  `swe_lego_issue_runner.py` for self-play.
+- **Modify:** `customized_areal/tree_search/tests/test_swe_lego_issue_runner.py` —
+  update fixtures to new shape.
+- **Modify:** `customized_areal/tree_search/tests/test_swe_lego_client.py` — update
+  fixtures + assertions.
+- **Create:** `customized_areal/tree_search/tests/test_self_play_runner.py` — self-play
+  runner tests.
+- **Create:** `customized_areal/tree_search/tests/test_env_dispatch_client.py` — covers
+  `create_base_env`, `create_env_dispatch`, `delete_env`, `cleanup`.
 
----
+______________________________________________________________________
 
 ## Task 1: Migration 127 — `environment` table + `project.env_id`
 
 **Files:**
+
 - Create: `multica/server/migrations/127_environment_state.up.sql`
+
 - Create: `multica/server/migrations/127_environment_state.down.sql`
 
 - [ ] **Step 1: Write the up migration**
@@ -128,13 +164,14 @@ DROP TABLE IF EXISTS environment;
 
 - [ ] **Step 3: Apply the migration locally and verify**
 
-Run: `cd multica/server && make migrate-up`
-Expected: migration 127 applies cleanly; `psql -d multica -c "\d environment"` shows the table; `psql -d multica -c "\d project"` shows the new `env_id` column.
+Run: `cd multica/server && make migrate-up` Expected: migration 127 applies cleanly;
+`psql -d multica -c "\d environment"` shows the table; `psql -d multica -c "\d project"`
+shows the new `env_id` column.
 
 - [ ] **Step 4: Round-trip the down migration**
 
-Run: `cd multica/server && make migrate-down`
-Expected: 127 rolls back; `\d environment` reports "Does not exist"; `\d project` no longer shows `env_id`.
+Run: `cd multica/server && make migrate-down` Expected: 127 rolls back; `\d environment`
+reports "Does not exist"; `\d project` no longer shows `env_id`.
 
 Re-apply: `cd multica/server && make migrate-up`
 
@@ -145,14 +182,18 @@ git add multica/server/migrations/127_environment_state.up.sql multica/server/mi
 git commit -m "feat(multica): migration 127 — environment table + project.env_id"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: sqlc queries — `environment.sql` + project/issue/chat extensions
 
 **Files:**
+
 - Create: `multica/server/pkg/db/queries/environment.sql`
+
 - Modify: `multica/server/pkg/db/queries/project.sql`
+
 - Modify: `multica/server/pkg/db/queries/issue.sql`
+
 - Modify: `multica/server/pkg/db/queries/chat.sql`
 
 - [ ] **Step 1: Write `environment.sql`**
@@ -201,7 +242,9 @@ ORDER BY created_at ASC;
 
 - [ ] **Step 4: Add chat-session-with-project query**
 
-Inspect `multica/server/pkg/db/queries/chat.sql` line 1 — `CreateChatSession` currently inserts `(workspace_id, agent_id, creator_id, title, runtime_id)` with no `project_id`. Confirm `chat_session` has a `project_id` column.
+Inspect `multica/server/pkg/db/queries/chat.sql` line 1 — `CreateChatSession` currently
+inserts `(workspace_id, agent_id, creator_id, title, runtime_id)` with no `project_id`.
+Confirm `chat_session` has a `project_id` column.
 
 Run: `psql -d multica -c "\d chat_session" | grep project_id`
 
@@ -214,17 +257,19 @@ VALUES ($1, $2, $3, $4, $5, (SELECT runtime_id FROM agent WHERE id = $3))
 RETURNING *;
 ```
 
-If `chat_session.project_id` does NOT exist, stop and ask the user before adding a column — that's a schema decision beyond this plan's scope.
+If `chat_session.project_id` does NOT exist, stop and ask the user before adding a
+column — that's a schema decision beyond this plan's scope.
 
 - [ ] **Step 5: Regenerate sqlc code**
 
-Run: `cd multica/server && make sqlc`
-Expected: `pkg/db/db.go` (or equivalent) now contains `Queries.CreateEnvironment`, `GetEnvironment`, `DeleteEnvironment`, `CreateProjectWithEnv`, `SetProjectEnvID`, `ListIssuesByProject`, `CreateChatSessionForProject`.
+Run: `cd multica/server && make sqlc` Expected: `pkg/db/db.go` (or equivalent) now
+contains `Queries.CreateEnvironment`, `GetEnvironment`, `DeleteEnvironment`,
+`CreateProjectWithEnv`, `SetProjectEnvID`, `ListIssuesByProject`,
+`CreateChatSessionForProject`.
 
 - [ ] **Step 6: Verify build**
 
-Run: `cd multica/server && go build ./...`
-Expected: no errors.
+Run: `cd multica/server && go build ./...` Expected: no errors.
 
 - [ ] **Step 7: Commit**
 
@@ -233,11 +278,12 @@ git add multica/server/pkg/db/queries/environment.sql multica/server/pkg/db/quer
 git commit -m "feat(multica): sqlc queries for environment + project.env_id + project-scoped chat"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: `EnvDispatchDeps` interface + service skeleton
 
 **Files:**
+
 - Create: `multica/server/internal/service/env_dispatch.go`
 
 - [ ] **Step 1: Write the service skeleton (no tests yet — interface + types only)**
@@ -666,7 +712,9 @@ func (s *EnvDispatchService) rollbackRollout(ctx context.Context, workspaceID st
 }
 ```
 
-The `EnvDispatchInput.SourceProjectID` and `IdempotencyKey` fields are already declared in the struct above. Two idempotency methods must be added to the `EnvDispatchDeps` interface (implemented by the fake in Task 4 and the adapter in Task 8):
+The `EnvDispatchInput.SourceProjectID` and `IdempotencyKey` fields are already declared
+in the struct above. Two idempotency methods must be added to the `EnvDispatchDeps`
+interface (implemented by the fake in Task 4 and the adapter in Task 8):
 
 ```go
 	// Idempotency ledger (spec §7.7)
@@ -676,8 +724,7 @@ The `EnvDispatchInput.SourceProjectID` and `IdempotencyKey` fields are already d
 
 - [ ] **Step 2: Verify it compiles (tests not yet written)**
 
-Run: `cd multica/server && go build ./internal/service/`
-Expected: no errors.
+Run: `cd multica/server && go build ./internal/service/` Expected: no errors.
 
 - [ ] **Step 3: Commit**
 
@@ -686,16 +733,18 @@ git add multica/server/internal/service/env_dispatch.go
 git commit -m "feat(multica): EnvDispatchService skeleton with Deps seam"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: Service unit tests — combination matrix + rejected combinations
 
 **Files:**
+
 - Create: `multica/server/internal/service/env_dispatch_test.go`
 
 - [ ] **Step 1: Write a fake `EnvDispatchDeps` + happy-path tests for each matrix cell**
 
-Create `multica/server/internal/service/env_dispatch_test.go`. The fake records calls and returns configurable results.
+Create `multica/server/internal/service/env_dispatch_test.go`. The fake records calls
+and returns configurable results.
 
 ```go
 package service
@@ -926,8 +975,8 @@ func TestDispatch_BranchSelfPlayMessage_N2(t *testing.T) {
 
 - [ ] **Step 2: Run the matrix tests**
 
-Run: `cd multica/server && go test ./internal/service/ -run TestDispatch_ -v`
-Expected: all 4 pass.
+Run: `cd multica/server && go test ./internal/service/ -run TestDispatch_ -v` Expected:
+all 4 pass.
 
 - [ ] **Step 3: Write rejected-combination tests**
 
@@ -987,11 +1036,12 @@ git add multica/server/internal/service/env_dispatch_test.go
 git commit -m "test(multica): EnvDispatchService matrix + rejected combinations"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: Service tests — rollback on reset failure + partial dispatch failure
 
 **Files:**
+
 - Modify: `multica/server/internal/service/env_dispatch_test.go`
 
 - [ ] **Step 1: Add rollback test (fork fails on rollout 1 of 2)**
@@ -1070,7 +1120,8 @@ func TestDispatch_IdempotencyReplay(t *testing.T) {
 
 - [ ] **Step 4: Run it**
 
-Run: `cd multica/server && go test ./internal/service/ -run 'TestDispatch_AllDispatchFail|TestDispatch_IdempotencyReplay' -v`
+Run:
+`cd multica/server && go test ./internal/service/ -run 'TestDispatch_AllDispatchFail|TestDispatch_IdempotencyReplay' -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1080,12 +1131,14 @@ git add multica/server/internal/service/env_dispatch_test.go
 git commit -m "test(multica): EnvDispatchService rollback + partial-dispatch semantics"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: Handler — `POST /api/v1/env` + `DELETE /api/v1/env/{envID}`
 
 **Files:**
+
 - Create: `multica/server/internal/handler/env.go`
+
 - Create: `multica/server/internal/handler/env_test.go`
 
 - [ ] **Step 1: Write the env handler**
@@ -1284,7 +1337,8 @@ func TestDeleteEnv_RequiresEnvID(t *testing.T) {
 
 - [ ] **Step 4: Run env handler tests**
 
-Run: `cd multica/server && go test ./internal/handler/ -run TestCreateEnv_ -v && go test ./internal/handler/ -run TestDeleteEnv_ -v`
+Run:
+`cd multica/server && go test ./internal/handler/ -run TestCreateEnv_ -v && go test ./internal/handler/ -run TestDeleteEnv_ -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1294,12 +1348,14 @@ git add multica/server/internal/handler/env.go multica/server/internal/handler/e
 git commit -m "feat(multica): POST /api/v1/env + DELETE /api/v1/env/{envID} handlers"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: Handler — `POST /api/v1/env-dispatch` + `DELETE /api/v1/env-dispatch/{projectID}`
 
 **Files:**
+
 - Create: `multica/server/internal/handler/env_dispatch.go`
+
 - Create: `multica/server/internal/handler/env_dispatch_test.go`
 
 - [ ] **Step 1: Write the env-dispatch handler + adapter skeleton**
@@ -1625,7 +1681,8 @@ func TestDeleteEnvDispatchProject_RequiresProjectID(t *testing.T) {
 
 - [ ] **Step 3: Run handler tests**
 
-Run: `cd multica/server && go test ./internal/handler/ -run TestEnvDispatch_ -v && go test ./internal/handler/ -run TestDeleteEnvDispatchProject -v`
+Run:
+`cd multica/server && go test ./internal/handler/ -run TestEnvDispatch_ -v && go test ./internal/handler/ -run TestDeleteEnvDispatchProject -v`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
@@ -1635,14 +1692,19 @@ git add multica/server/internal/handler/env_dispatch.go multica/server/internal/
 git commit -m "feat(multica): POST /api/v1/env-dispatch + DELETE /api/v1/env-dispatch/{projectID} handlers"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: Production adapter wiring — real queries + cloud-runtime calls
 
 **Files:**
-- Modify: `multica/server/internal/handler/env_dispatch.go` (replace stub `envDispatchDepsAdapter` methods)
+
+- Modify: `multica/server/internal/handler/env_dispatch.go` (replace stub
+  `envDispatchDepsAdapter` methods)
+
 - Modify: `multica/server/pkg/db/queries/project.sql` (add `GetProjectByEnvID`)
-- Modify: `multica/server/pkg/db/queries/environment.sql` (add `GetEnvDispatchRequest`, `CreateEnvDispatchRequest`)
+
+- Modify: `multica/server/pkg/db/queries/environment.sql` (add `GetEnvDispatchRequest`,
+  `CreateEnvDispatchRequest`)
 
 - [ ] **Step 1: Add source-resolution + idempotency queries**
 
@@ -1669,11 +1731,16 @@ VALUES ($1, $2, $3);
 
 Run: `cd multica/server && make sqlc`
 
-> Import note: `env_dispatch.go`'s adapter now uses `github.com/jackc/pgx/v5/pgconn` (FK-violation code `23503` → `ErrEnvInUse`) and `github.com/jackc/pgx/v5` (`pgx.ErrNoRows` for the idempotency lookup) in addition to `errors`. Add them to the import block.
+> Import note: `env_dispatch.go`'s adapter now uses `github.com/jackc/pgx/v5/pgconn`
+> (FK-violation code `23503` → `ErrEnvInUse`) and `github.com/jackc/pgx/v5`
+> (`pgx.ErrNoRows` for the idempotency lookup) in addition to `errors`. Add them to the
+> import block.
 
 - [ ] **Step 2: Wire the adapter to real queries**
 
-In `multica/server/internal/handler/env_dispatch.go`, replace the stub `envDispatchDepsAdapter` methods with real implementations. Each method uses `a.h.Queries.<Query>` (db.Queries from sqlc) and `a.h.CloudRuntime` for sandbox ops.
+In `multica/server/internal/handler/env_dispatch.go`, replace the stub
+`envDispatchDepsAdapter` methods with real implementations. Each method uses
+`a.h.Queries.<Query>` (db.Queries from sqlc) and `a.h.CloudRuntime` for sandbox ops.
 
 ```go
 func (a *envDispatchDepsAdapter) GetEnv(ctx context.Context, envID, workspaceID string) (service.Env, error) {
@@ -1831,22 +1898,36 @@ func (a *envDispatchDepsAdapter) EnqueueAgentRun(ctx context.Context, workspaceI
 }
 ```
 
-Source resolution no longer lives in the handler: the service resolves the branch source project via `Deps.GetProjectByEnvID` (§7.2 step 0), backed by the `GetProjectByEnvID` query added in Step 1. Delete the placeholder `resolveSourceProjectID` method from Task 7 — it is no longer called.
+Source resolution no longer lives in the handler: the service resolves the branch source
+project via `Deps.GetProjectByEnvID` (§7.2 step 0), backed by the `GetProjectByEnvID`
+query added in Step 1. Delete the placeholder `resolveSourceProjectID` method from Task
+7 — it is no longer called.
 
 - [ ] **Step 3: Implement `CopyProjectSubtree` and `EnqueueAgentRun`**
 
-For `CopyProjectSubtree`: read source project via `GetProjectInWorkspace`; list issues via `ListIssuesByProject`; create new project via `CreateProjectWithEnv`; for each source issue call `CreateForkedIssue` (already exists in `issue_fork.sql`) with `forked_from_issue_id` set. Return `map[source_issue_id]new_issue_id`.
+For `CopyProjectSubtree`: read source project via `GetProjectInWorkspace`; list issues
+via `ListIssuesByProject`; create new project via `CreateProjectWithEnv`; for each
+source issue call `CreateForkedIssue` (already exists in `issue_fork.sql`) with
+`forked_from_issue_id` set. Return `map[source_issue_id]new_issue_id`.
 
-For `EnqueueAgentRun`: use the existing `CreateChatTask` query for chat-session-bound runs (issue_id=NULL, chat_session_id set); for issue-bound runs, use the existing issue-task queue path (look at `agent_task_queue` inserts in `task.sql`).
+For `EnqueueAgentRun`: use the existing `CreateChatTask` query for chat-session-bound
+runs (issue_id=NULL, chat_session_id set); for issue-bound runs, use the existing
+issue-task queue path (look at `agent_task_queue` inserts in `task.sql`).
 
-If either of these turns out to require more than the existing queries, add new sqlc queries rather than inlining raw SQL.
+If either of these turns out to require more than the existing queries, add new sqlc
+queries rather than inlining raw SQL.
 
 - [ ] **Step 4: Build and run all server tests**
 
-Run: `cd multica/server && go build ./... && go test ./...`
-Expected: all tests pass (service unit tests use the fake, not the wired adapter; handler tests use the stub-returning adapter until Step 2 replaced it — but handler tests don't exercise real DB, so they should still pass with the wired adapter hitting nil `Queries`).
+Run: `cd multica/server && go build ./... && go test ./...` Expected: all tests pass
+(service unit tests use the fake, not the wired adapter; handler tests use the
+stub-returning adapter until Step 2 replaced it — but handler tests don't exercise real
+DB, so they should still pass with the wired adapter hitting nil `Queries`).
 
-If the handler tests break because `Queries` is nil in `newTestHandler(Config{})`, keep a `stubEnvDispatchDeps` for tests and inject it: add a `Config.EnvDispatchDeps` field, or use a package-level override. Simplest: keep the stub adapter as a fallback inside `newEnvDispatchDepsAdapter` when `h.Queries == nil`.
+If the handler tests break because `Queries` is nil in `newTestHandler(Config{})`, keep
+a `stubEnvDispatchDeps` for tests and inject it: add a `Config.EnvDispatchDeps` field,
+or use a package-level override. Simplest: keep the stub adapter as a fallback inside
+`newEnvDispatchDepsAdapter` when `h.Queries == nil`.
 
 - [ ] **Step 5: Commit**
 
@@ -1855,16 +1936,18 @@ git add multica/server/internal/handler/env_dispatch.go multica/server/pkg/db/qu
 git commit -m "feat(multica): wire EnvDispatchDeps adapter to real queries + cloud-runtime"
 ```
 
----
+______________________________________________________________________
 
 ## Task 9: Route registration in `router.go`
 
 **Files:**
+
 - Modify: `multica/server/cmd/server/router.go`
 
 - [ ] **Step 1: Remove the `/api/v1/swe-lego` route group**
 
-In `multica/server/cmd/server/router.go`, delete lines 952–960 (the `r.Route("/api/v1/swe-lego", ...)` block and its comment).
+In `multica/server/cmd/server/router.go`, delete lines 952–960 (the
+`r.Route("/api/v1/swe-lego", ...)` block and its comment).
 
 - [ ] **Step 2: Add the new routes in the same `RequireWorkspaceMember` group**
 
@@ -1880,12 +1963,13 @@ r.Delete("/api/v1/env-dispatch/{projectID}", h.DeleteEnvDispatchProject)
 
 - [ ] **Step 3: Build and verify routes**
 
-Run: `cd multica/server && go build ./cmd/server/`
-Expected: no errors.
+Run: `cd multica/server && go build ./cmd/server/` Expected: no errors.
 
 - [ ] **Step 4: Smoke-test routes (manual)**
 
-Run: `cd multica/server && make server &` then `curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/env-dispatch -H "X-User-ID: u" -H "X-Workspace-ID: ws"` (expect 400 — missing body fields, but route exists, not 404).
+Run: `cd multica/server && make server &` then
+`curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/env-dispatch -H "X-User-ID: u" -H "X-Workspace-ID: ws"`
+(expect 400 — missing body fields, but route exists, not 404).
 
 Kill the server.
 
@@ -1896,29 +1980,34 @@ git add multica/server/cmd/server/router.go
 git commit -m "feat(multica): register /api/v1/env* and /api/v1/env-dispatch* routes"
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Remove old SWE-Lego handler + service
 
 **Files:**
+
 - Delete: `multica/server/internal/handler/swe_lego_issue.go`
+
 - Delete: `multica/server/internal/handler/swe_lego_issue_test.go`
+
 - Delete: `multica/server/internal/service/swe_lego_issue.go`
+
 - Delete: `multica/server/internal/service/swe_lego_issue_test.go`
 
 - [ ] **Step 1: Delete the four files**
 
-Run: `cd multica/server && rm internal/handler/swe_lego_issue.go internal/handler/swe_lego_issue_test.go internal/service/swe_lego_issue.go internal/service/swe_lego_issue_test.go`
+Run:
+`cd multica/server && rm internal/handler/swe_lego_issue.go internal/handler/swe_lego_issue_test.go internal/service/swe_lego_issue.go internal/service/swe_lego_issue_test.go`
 
 - [ ] **Step 2: Verify build (no references remain)**
 
-Run: `cd multica/server && go build ./...`
-Expected: no errors. If errors mention `SweLegoIssueService` or `CreateSweLegoIssue`, grep for stale references: `grep -rn "SweLegoIssue\|CreateSweLegoIssue\|swe-lego" server/` and fix or remove.
+Run: `cd multica/server && go build ./...` Expected: no errors. If errors mention
+`SweLegoIssueService` or `CreateSweLegoIssue`, grep for stale references:
+`grep -rn "SweLegoIssue\|CreateSweLegoIssue\|swe-lego" server/` and fix or remove.
 
 - [ ] **Step 3: Run all server tests**
 
-Run: `cd multica/server && go test ./...`
-Expected: all pass.
+Run: `cd multica/server && go test ./...` Expected: all pass.
 
 - [ ] **Step 4: Commit**
 
@@ -1927,17 +2016,20 @@ git add -A multica/server/internal/handler/ multica/server/internal/service/
 git commit -m "refactor(multica): remove SweLegoIssueService + CreateSweLegoIssue (folded into EnvDispatchService)"
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: AReaL — rewrite `MulticaSweLegoClient` → `MulticaEnvDispatchClient`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/swe_lego_client.py` (rewrite + rename)
+
 - Create: `customized_areal/tree_search/tests/test_env_dispatch_client.py`
 
 - [ ] **Step 1: Update `SweLegoSetup` shape first (other files depend on it)**
 
-Edit `customized_areal/tree_search/agents/reward/swe_lego_types.py`. Replace the `SweLegoSetup` dataclass with:
+Edit `customized_areal/tree_search/agents/reward/swe_lego_types.py`. Replace the
+`SweLegoSetup` dataclass with:
 
 ```python
 @dataclass(frozen=True)
@@ -1958,7 +2050,8 @@ class SweLegoSetup:
     rollouts: list[SweLegoRollout]
 ```
 
-Remove the old fields (`project_id`, `issue_id`, `image_id`, `build_node_id`, `base_sandbox_id`, `base_sandbox_runtime_id`, `agent_run_ids`).
+Remove the old fields (`project_id`, `issue_id`, `image_id`, `build_node_id`,
+`base_sandbox_id`, `base_sandbox_runtime_id`, `agent_run_ids`).
 
 - [ ] **Step 2: Rewrite the client**
 
@@ -2105,7 +2198,9 @@ class MulticaEnvDispatchClient:
         await self.cleanup_env_dispatch(project_id=project_id)
 ```
 
-Keep the old module path (`swe_lego_client.py`) so imports don't break, but the class name changes. Update any import of `MulticaSweLegoClient`: `grep -rn "MulticaSweLegoClient" customized_areal/`.
+Keep the old module path (`swe_lego_client.py`) so imports don't break, but the class
+name changes. Update any import of `MulticaSweLegoClient`:
+`grep -rn "MulticaSweLegoClient" customized_areal/`.
 
 - [ ] **Step 3: Write client tests**
 
@@ -2189,7 +2284,8 @@ def test_delete_env_idempotent_on_404():
 
 - [ ] **Step 4: Run client tests**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py -v`
 Expected: all 4 pass.
 
 - [ ] **Step 5: Commit**
@@ -2199,17 +2295,20 @@ git add customized_areal/tree_search/agents/swe_lego_client.py customized_areal/
 git commit -m "feat(areal): MulticaEnvDispatchClient + SweLegoSetup.rollouts shape"
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: AReaL — update `swe_lego_issue_runner.py` + its tests
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/agents/swe_lego_issue_runner.py`
+
 - Modify: `customized_areal/tree_search/tests/test_swe_lego_issue_runner.py`
 
 - [ ] **Step 1: Update the runner to iterate `setup.rollouts`**
 
-In `customized_areal/tree_search/agents/swe_lego_issue_runner.py`, replace the body of `run_swe_lego_issue` (lines 59–110) with:
+In `customized_areal/tree_search/agents/swe_lego_issue_runner.py`, replace the body of
+`run_swe_lego_issue` (lines 59–110) with:
 
 ```python
 async def run_swe_lego_issue(
@@ -2289,7 +2388,8 @@ Drop the `base_image` parameter (image build is out-of-band per spec §3).
 
 - [ ] **Step 2: Update `test_swe_lego_issue_runner.py` fixtures**
 
-Edit `customized_areal/tree_search/tests/test_swe_lego_issue_runner.py`. Replace `FakeMulticaClient` and `_setup()`:
+Edit `customized_areal/tree_search/tests/test_swe_lego_issue_runner.py`. Replace
+`FakeMulticaClient` and `_setup()`:
 
 ```python
 @dataclass
@@ -2314,16 +2414,22 @@ class FakeMulticaClient:
             raise RuntimeError("cleanup crashed")
 ```
 
-Add the import: `from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoRollout`.
+Add the import:
+`from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoRollout`.
 
-Update every test call to `run_swe_lego_issue(...)` to pass `base_env_id="base-env-1"` instead of `base_image=...`. Update assertions:
+Update every test call to `run_swe_lego_issue(...)` to pass `base_env_id="base-env-1"`
+instead of `base_image=...`. Update assertions:
+
 - `multica.create_calls[0][1] == 2` → `len(multica.rollouts) == 2`
+
 - `len(rl.sessions) == 2` stays
+
 - `multica.cleanup_calls == ["p1"]` → `multica.cleanup_calls == ["proj-0", "proj-1"]`
 
 - [ ] **Step 3: Run the runner tests**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_swe_lego_issue_runner.py -v`
 Expected: all 4 pass.
 
 - [ ] **Step 4: Commit**
@@ -2333,12 +2439,14 @@ git add customized_areal/tree_search/agents/swe_lego_issue_runner.py customized_
 git commit -m "refactor(areal): swe_lego_issue_runner iterates setup.rollouts, passes env_id"
 ```
 
----
+______________________________________________________________________
 
 ## Task 13: AReaL — new `self_play_runner.py` + tests
 
 **Files:**
+
 - Create: `customized_areal/tree_search/agents/self_play_runner.py`
+
 - Create: `customized_areal/tree_search/tests/test_self_play_runner.py`
 
 - [ ] **Step 1: Write the self-play runner**
@@ -2565,7 +2673,8 @@ def test_run_self_play_cleans_up_on_verifier_failure():
 
 - [ ] **Step 3: Run the self-play tests**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_self_play_runner.py -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/test_self_play_runner.py -v`
 Expected: both pass.
 
 - [ ] **Step 4: Commit**
@@ -2575,34 +2684,44 @@ git add customized_areal/tree_search/agents/self_play_runner.py customized_areal
 git commit -m "feat(areal): self_play_runner for query_bank-driven env-dispatch"
 ```
 
----
+______________________________________________________________________
 
 ## Task 14: Update areal integration tests
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/tests/test_swe_lego_client.py` (if present)
+
 - Modify: `customized_areal/tree_search/tests/test_integration_multica.py` (if present)
 
 - [ ] **Step 1: Find integration tests that reference the old endpoint**
 
-Run: `cd /workspaces/leagent/backend/areal && grep -rln "swe-lego\|swe_lego_issue\|MulticaSweLegoClient\|SweLegoSetup" customized_areal/tree_search/tests/`
+Run:
+`cd /workspaces/leagent/backend/areal && grep -rln "swe-lego\|swe_lego_issue\|MulticaSweLegoClient\|SweLegoSetup" customized_areal/tree_search/tests/`
 
 - [ ] **Step 2: Update each found test to the new shape**
 
 For each file found, update:
+
 - URL `/api/v1/swe-lego/issues` → `/api/v1/env-dispatch`
 - URL `/api/v1/swe-lego/issues/{projectID}` → `/api/v1/env-dispatch/{projectID}`
-- Request body: old flat shape → new discriminated shape (`mode`, `env_id`, `domain`, `dispatch_type`, `group_size`, `agent_id`, `issue`/`message` sub-objects)
-- Response body: old flat shape → `{"rollouts": [{env_id, project_id, issue_id?, chat_session_id?, agent_run_id?}]}`
-- `SweLegoSetup(project_id=..., agent_run_ids=[...])` → `SweLegoSetup(rollouts=[SweLegoRollout(...), ...])`
+- Request body: old flat shape → new discriminated shape (`mode`, `env_id`, `domain`,
+  `dispatch_type`, `group_size`, `agent_id`, `issue`/`message` sub-objects)
+- Response body: old flat shape →
+  `{"rollouts": [{env_id, project_id, issue_id?, chat_session_id?, agent_run_id?}]}`
+- `SweLegoSetup(project_id=..., agent_run_ids=[...])` →
+  `SweLegoSetup(rollouts=[SweLegoRollout(...), ...])`
 - `MulticaSweLegoClient` → `MulticaEnvDispatchClient`
-- `create_swe_lego_issue(...)` → `create_env_dispatch(mode="scratch", env_id=..., dispatch_type="issue", domain="swe_lego", group_size=..., agent_id=..., issue=...)`
+- `create_swe_lego_issue(...)` →
+  `create_env_dispatch(mode="scratch", env_id=..., dispatch_type="issue", domain="swe_lego", group_size=..., agent_id=..., issue=...)`
 
-If a test file is purely a client-shape test (no live server), port it onto `test_env_dispatch_client.py` (already done in Task 11) and delete the old file.
+If a test file is purely a client-shape test (no live server), port it onto
+`test_env_dispatch_client.py` (already done in Task 11) and delete the old file.
 
 - [ ] **Step 3: Run all areal tree_search tests**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/ -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/ -v`
 Expected: all pass.
 
 - [ ] **Step 4: Commit**
@@ -2612,7 +2731,7 @@ git add customized_areal/tree_search/tests/
 git commit -m "test(areal): port integration tests to env-dispatch shape"
 ```
 
----
+______________________________________________________________________
 
 ## Task 15: End-to-end smoke + final verification
 
@@ -2620,12 +2739,12 @@ git commit -m "test(areal): port integration tests to env-dispatch shape"
 
 - [ ] **Step 1: Run all multica server tests**
 
-Run: `cd multica/server && go test ./...`
-Expected: all pass.
+Run: `cd multica/server && go test ./...` Expected: all pass.
 
 - [ ] **Step 2: Run all areal tree_search tests**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/ -v`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/tests/ -v`
 Expected: all pass.
 
 - [ ] **Step 3: Apply migration 127 on a clean DB and run a smoke request**
@@ -2662,12 +2781,23 @@ Kill the server.
 
 - [ ] **Step 4: Final commit (if any cleanup surfaced)**
 
-If Steps 1–3 surfaced any issues, fix them with atomic commits per fix. Otherwise no commit.
+If Steps 1–3 surfaced any issues, fix them with atomic commits per fix. Otherwise no
+commit.
 
----
+______________________________________________________________________
 
 ## Self-review notes
 
-- **Spec coverage:** Every §4.2 matrix cell has a service test (Task 4). Every §6.3 validation row has either a service test (Task 4 rejected-combo tests) or a handler test (Task 7). Migration 127 + sqlc queries (Task 1, 2). Env handlers (Task 6). Env-dispatch handler (Task 7). Adapter wiring (Task 8). Route registration (Task 9). Old code removal (Task 10). Areal client + shape (Task 11). Runner update (Task 12). Self-play runner (Task 13). Integration tests (Task 14). E2E smoke (Task 15).
-- **Placeholder scan:** Task 8 Step 3 has explicit TODOs for `CopyProjectSubtree` and `EnqueueAgentRun` real wiring — these are real implementation work, not placeholders, and are required to complete. No "TBD", "fill in later", or hand-waved steps.
-- **Type consistency:** `EnvRollout` (service) ↔ `EnvRolloutResponse` (handler) ↔ `SweLegoRollout` (areal) all share field names (`env_id`, `project_id`, `issue_id`, `chat_session_id`, `agent_run_id`). `EnvDispatchInput` fields match what the handler constructs. `SweLegoSetup.rollouts` is used by both runners.
+- **Spec coverage:** Every §4.2 matrix cell has a service test (Task 4). Every §6.3
+  validation row has either a service test (Task 4 rejected-combo tests) or a handler
+  test (Task 7). Migration 127 + sqlc queries (Task 1, 2). Env handlers (Task 6).
+  Env-dispatch handler (Task 7). Adapter wiring (Task 8). Route registration (Task 9).
+  Old code removal (Task 10). Areal client + shape (Task 11). Runner update (Task 12).
+  Self-play runner (Task 13). Integration tests (Task 14). E2E smoke (Task 15).
+- **Placeholder scan:** Task 8 Step 3 has explicit TODOs for `CopyProjectSubtree` and
+  `EnqueueAgentRun` real wiring — these are real implementation work, not placeholders,
+  and are required to complete. No "TBD", "fill in later", or hand-waved steps.
+- **Type consistency:** `EnvRollout` (service) ↔ `EnvRolloutResponse` (handler) ↔
+  `SweLegoRollout` (areal) all share field names (`env_id`, `project_id`, `issue_id`,
+  `chat_session_id`, `agent_run_id`). `EnvDispatchInput` fields match what the handler
+  constructs. `SweLegoSetup.rollouts` is used by both runners.

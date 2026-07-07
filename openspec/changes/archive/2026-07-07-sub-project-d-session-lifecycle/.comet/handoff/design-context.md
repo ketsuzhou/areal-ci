@@ -7,7 +7,8 @@
 
 Generated-by: comet-handoff.sh
 
-OpenSpec remains the canonical capability spec. This handoff is a deterministic, source-traceable context pack, not an agent-authored summary.
+OpenSpec remains the canonical capability spec. This handoff is a deterministic,
+source-traceable context pack, not an agent-authored summary.
 
 ## openspec/changes/sub-project-d-session-lifecycle/proposal.md
 
@@ -84,7 +85,7 @@ spec in this repo.)
 - Lines: 1-146
 - SHA256: f7fa270ca2a6cead51e57019cb7bf2da2d99062d1ab6ec8d69241f6dae5574b9
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 # Design — sub-project-d-session-lifecycle
@@ -151,23 +152,16 @@ Served ONLY by `areal/experimental/openai/proxy/proxy_gateway.py` +
 ### T7: Session-close hook
 
 ```
-   task terminal transition (service/task.go)
-   ┌────────────────────────────────────────────────┐
-   │  CompleteTask  │  FailTask  │  CancelTask      │
-   └────────────────┴───────────┴───────────────────┘
-                       │
-                       ▼
-            maybeCloseTrainingSession(ctx, task)
-                       │
-       ┌───────────────┼────────────────────────┐
-       ▼               ▼                        ▼
-  has context.   default_reward         SetReward(proxy_key, default)
-  areal_proxy?   from training_dispatch       │
-       │           (fallback config)          ▼
-       │               │              EndSession(proxy_key)
-       ▼               │                      │
-     skip ◀── no ──────┘                      ▼
-```
+
+task terminal transition (service/task.go)
+┌────────────────────────────────────────────────┐ │ CompleteTask │ FailTask │
+CancelTask │ └────────────────┴───────────┴───────────────────┘ │ ▼
+maybeCloseTrainingSession(ctx, task) │ ┌───────────────┼────────────────────────┐ ▼ ▼ ▼
+has context. default_reward SetReward(proxy_key, default) areal_proxy? from
+training_dispatch │ │ (fallback config) ▼ │ │ EndSession(proxy_key) ▼ │ │ skip ◀── no
+──────┘ ▼
+
+````
 
 Full source: openspec/changes/sub-project-d-session-lifecycle/design.md
 
@@ -260,17 +254,18 @@ provider config), docs.
   queries.
 - db_bridge (if touched): `cd multica/db_bridge && uv run pytest -q`.
 - Commit each task to multica `main`; record commit hash in
-```
+````
 
 Full source: openspec/changes/sub-project-d-session-lifecycle/tasks.md
 
 ## openspec/changes/sub-project-d-session-lifecycle/specs/training-session-lifecycle/spec.md
 
-- Source: openspec/changes/sub-project-d-session-lifecycle/specs/training-session-lifecycle/spec.md
+- Source:
+  openspec/changes/sub-project-d-session-lifecycle/specs/training-session-lifecycle/spec.md
 - Lines: 1-132
 - SHA256: 0845592fda0130ee90ce339e17ff5a841451b7f9f281a7338890ba11793f0053
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 ## ADDED Requirements
@@ -355,5 +350,5 @@ The session-close hook SHALL:
   `TRAINING_DEFAULT_REWARD` config, default 1.0);
 ```
 
-Full source: openspec/changes/sub-project-d-session-lifecycle/specs/training-session-lifecycle/spec.md
-
+Full source:
+openspec/changes/sub-project-d-session-lifecycle/specs/training-session-lifecycle/spec.md

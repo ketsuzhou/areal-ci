@@ -334,9 +334,7 @@ class LocalScheduler(Scheduler):
                         )
                     else:
                         alloc_payload["preferred_ports"] = preferred
-                        logger.info(
-                            f"proxy-rollout/{idx} preferred ports: {preferred}"
-                        )
+                        logger.info(f"proxy-rollout/{idx} preferred ports: {preferred}")
                 except ValueError as e:
                     logger.warning(
                         f"Ignoring invalid AREAL_PROXY_ROLLOUT_PORT={pinned_raw!r}: {e}"

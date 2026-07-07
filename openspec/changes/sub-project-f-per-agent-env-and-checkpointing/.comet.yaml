@@ -1,0 +1,17 @@
+workflow: full
+phase: design
+build_mode: null
+build_pause: null
+isolation: null
+verify_mode: null
+base_ref: 88779b1da4c6f2490a5e299fb0977db922ea3fbe
+design_doc: null
+plan: null
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-07
+verified_at: null
+archived: false
+handoff_context: openspec/changes/sub-project-f-per-agent-env-and-checkpointing/.comet/handoff/design-context.json
+handoff_hash: da6e37ca5874df46bd4fd61bf5bccf3d2ff825be2eda826d1c65d82174820e2c

@@ -35,14 +35,12 @@ def distribute_reward_over_dag(
     terminal_reward: float,
     terminal_node_id: str,
     fan_in_credit: CreditAssignment | None = None,
-    backup_decay: float = 1.0,
 ) -> dict[str, float]:
     """Distribute ``terminal_reward`` backward along DAG edges.
 
     Returns a ``{node_id: credit}`` map. The terminal node gets the full
-    reward; each ancestor along an incoming edge gets ``backup_decay`` of
-    its child's credit (so credit attenuates with distance from the outcome
-    when ``backup_decay < 1.0``). Fan-in joins (multiple parents) consume
+    reward; each ancestor along an incoming edge gets its child's full credit
+    (no attenuation). Fan-in joins (multiple parents) consume
     ``fan_in_credit`` if provided — each parent's credit is set to its
     explicit share multiplied by the node's credit; otherwise the node's
     reward is split equally among parents as a default.
@@ -71,8 +69,8 @@ def distribute_reward_over_dag(
                 share = fan_in_credit.per_node.get(p, 0.0)
                 credit[p] = max(credit[p], share * credit[nid])
         else:
-            # Single parent or no explicit fan-in credit: split with decay.
-            share = credit[nid] * backup_decay / len(parents)
+            # Single parent or no explicit fan-in credit: split equally.
+            share = credit[nid] / len(parents)
             for p in parents:
                 credit[p] += share
         queue.extend(parents)

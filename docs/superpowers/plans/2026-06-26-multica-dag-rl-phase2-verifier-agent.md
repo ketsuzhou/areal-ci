@@ -1,38 +1,56 @@
 # Phase 2: Verifier Agent — Implementation Plan (Python)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the constant `set_reward(1.0)` with a real verifier that judges task success via objective checks (where available) plus an LLM-judge fallback over `issue.acceptance_criteria`, and assign per-agent + per-step credit at fan-in joins.
+**Goal:** Replace the constant `set_reward(1.0)` with a real verifier that judges task
+success via objective checks (where available) plus an LLM-judge fallback over
+`issue.acceptance_criteria`, and assign per-agent + per-step credit at fan-in joins.
 
-**Architecture:** A `Verifier` Protocol with `verify(run) -> VerifierResult` is the seam. `ObjectiveVerifier` runs deterministic checks (test pass/fail, build status, lint) when a check spec is supplied. `LLMJudgeVerifier` is the fallback when objective checks are unavailable or inconclusive, using the existing `verify_answer_llm_simpleqa` / `compute_reward` templates. `CreditAssigner` assigns per-agent credit at fan-in joins explicitly (no fixed sum/mean/max aggregation rule, per design decision 8).
+**Architecture:** A `Verifier` Protocol with `verify(run) -> VerifierResult` is the
+seam. `ObjectiveVerifier` runs deterministic checks (test pass/fail, build status, lint)
+when a check spec is supplied. `LLMJudgeVerifier` is the fallback when objective checks
+are unavailable or inconclusive, using the existing `verify_answer_llm_simpleqa` /
+`compute_reward` templates. `CreditAssigner` assigns per-agent credit at fan-in joins
+explicitly (no fixed sum/mean/max aggregation rule, per design decision 8).
 
-**Tech Stack:** Python 3.12+ · `openai.AsyncOpenAI` (already a dep) · `typing.Protocol` · `pytest` + `pytest-asyncio`
+**Tech Stack:** Python 3.12+ · `openai.AsyncOpenAI` (already a dep) · `typing.Protocol`
+· `pytest` + `pytest-asyncio`
 
-**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §2 decisions 7–8, §4 (verifier.py, credit.py), §5 Phase 2, §6 Testing
+**Design reference:** `docs/superpowers/specs/2026-06-26-multica-dag-rl-design.md` §2
+decisions 7–8, §4 (verifier.py, credit.py), §5 Phase 2, §6 Testing
 
-**Project rules:** `backend/areal/CLAUDE.md` (Python conventions, no vendor SDK leakage, structured logging), `AGENTS.md` (no premature abstraction)
+**Project rules:** `backend/areal/CLAUDE.md` (Python conventions, no vendor SDK leakage,
+structured logging), `AGENTS.md` (no premature abstraction)
 
-**Dependencies:** Phase 0 (`ForkableEnvironment`) complete. This phase is pure Python — no Go dependency.
+**Dependencies:** Phase 0 (`ForkableEnvironment`) complete. This phase is pure Python —
+no Go dependency.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `customized_areal/tree_search/dag/verifier.py` (create) | `Verifier` Protocol, `VerifierResult` dataclass, `ObjectiveVerifier`, `LLMJudgeVerifier` |
-| `customized_areal/tree_search/dag/credit.py` (create) | `CreditAssigner` — assigns per-agent + per-step credit at fan-in joins |
-| `customized_areal/tree_search/dag/test_verifier.py` (create) | Tests: objective-check success/failure, LLM-judge fallback (mocked), credit at fan-in |
-| `customized_areal/tree_search/dag/__init__.py` (modify) | Export verifier + credit types |
+| File                                                         | Responsibility                                                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `customized_areal/tree_search/dag/verifier.py` (create)      | `Verifier` Protocol, `VerifierResult` dataclass, `ObjectiveVerifier`, `LLMJudgeVerifier` |
+| `customized_areal/tree_search/dag/credit.py` (create)        | `CreditAssigner` — assigns per-agent + per-step credit at fan-in joins                   |
+| `customized_areal/tree_search/dag/test_verifier.py` (create) | Tests: objective-check success/failure, LLM-judge fallback (mocked), credit at fan-in    |
+| `customized_areal/tree_search/dag/__init__.py` (modify)      | Export verifier + credit types                                                           |
 
-Reference patterns (do NOT modify): `customized_areal/tpfc/eval_utils.py::verify_answer_llm_simpleqa` (LLM-judge template), `customized_areal/tpfc/gaia_final_reward.py::compute_reward` (judge-call + fallback pattern).
+Reference patterns (do NOT modify):
+`customized_areal/tpfc/eval_utils.py::verify_answer_llm_simpleqa` (LLM-judge template),
+`customized_areal/tpfc/gaia_final_reward.py::compute_reward` (judge-call + fallback
+pattern).
 
----
+______________________________________________________________________
 
 ## Task 6: Verifier Protocol + VerifierResult + ObjectiveVerifier
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/verifier.py`
+
 - Create: `customized_areal/tree_search/dag/test_verifier.py`
 
 - [ ] **Step 1: Write the failing test for ObjectiveVerifier**
@@ -79,8 +97,10 @@ async def test_objective_verifier_fails_on_failure() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_verifier.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'customized_areal.tree_search.dag.verifier'`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run pytest customized_areal/tree_search/dag/test_verifier.py -v`
+Expected: FAIL —
+`ModuleNotFoundError: No module named 'customized_areal.tree_search.dag.verifier'`
 
 - [ ] **Step 3: Implement the Protocol + dataclass + ObjectiveVerifier**
 
@@ -164,8 +184,7 @@ class ObjectiveVerifier:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_verifier.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_verifier.py -v` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -174,15 +193,18 @@ git add customized_areal/tree_search/dag/verifier.py customized_areal/tree_searc
 git commit -m "feat(dag): add Verifier Protocol, VerifierResult, and ObjectiveVerifier"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: LLMJudgeVerifier — fallback over acceptance_criteria
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/verifier.py`
+
 - Modify: `customized_areal/tree_search/dag/test_verifier.py`
 
-- [ ] **Step 1: Write the failing test for LLMJudgeVerifier (with mocked OpenAI client)**
+- [ ] **Step 1: Write the failing test for LLMJudgeVerifier (with mocked OpenAI
+  client)**
 
 ```python
 from customized_areal.tree_search.dag.verifier import LLMJudgeVerifier
@@ -343,12 +365,14 @@ git add customized_areal/tree_search/dag/verifier.py customized_areal/tree_searc
 git commit -m "feat(dag): add LLMJudgeVerifier fallback over acceptance_criteria"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: Composite verifier (objective → LLM-judge fallback chain)
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/verifier.py`
+
 - Modify: `customized_areal/tree_search/dag/test_verifier.py`
 
 - [ ] **Step 1: Write the failing test for the composite fallback**
@@ -433,15 +457,19 @@ git add customized_areal/tree_search/dag/verifier.py customized_areal/tree_searc
 git commit -m "feat(dag): add CompositeVerifier with objective -> LLM-judge fallback chain"
 ```
 
----
+______________________________________________________________________
 
 ## Task 9: CreditAssigner — per-agent credit at fan-in joins
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/credit.py`
 - Create: `customized_areal/tree_search/dag/test_credit.py`
 
-**Rationale:** Per design decision 8, at fan-in joins (where ≥2 upstream runs feed one downstream run), the verifier assigns per-agent credit explicitly — there is no fixed sum/mean/max aggregation rule. The `CreditAssigner` takes the DAG + verifier results and produces per-node credit weights.
+**Rationale:** Per design decision 8, at fan-in joins (where ≥2 upstream runs feed one
+downstream run), the verifier assigns per-agent credit explicitly — there is no fixed
+sum/mean/max aggregation rule. The `CreditAssigner` takes the DAG + verifier results and
+produces per-node credit weights.
 
 - [ ] **Step 1: Write the failing test for credit assignment at a fan-in**
 
@@ -509,8 +537,8 @@ def test_credit_assigner_distributes_terminal_reward_at_join() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v`
-Expected: FAIL — `CreditAssigner` undefined.
+Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v` Expected: FAIL —
+`CreditAssigner` undefined.
 
 - [ ] **Step 3: Implement CreditAssigner**
 
@@ -581,15 +609,13 @@ class CreditAssigner:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v` Expected: PASS
 
 - [ ] **Step 5: Add `import pytest` to `test_credit.py`** (needed for `pytest.approx`).
 
 - [ ] **Step 6: Run test again to verify it still passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v`
-Expected: PASS
+Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py -v` Expected: PASS
 
 - [ ] **Step 7: Commit**
 
@@ -598,15 +624,19 @@ git add customized_areal/tree_search/dag/credit.py customized_areal/tree_search/
 git commit -m "feat(dag): add CreditAssigner for per-agent credit at fan-in joins"
 ```
 
----
+______________________________________________________________________
 
 ## Task 10: Per-step credit signals (process signals shape intermediate steps)
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/credit.py`
 - Modify: `customized_areal/tree_search/dag/test_credit.py`
 
-**Rationale:** Per design decision 6, reward is hybrid — terminal outcome reward + per-node process signals. The terminal reward is distributed at joins (Task 9); process signals shape intermediate steps. This task adds the per-step signal plumbing (a `dict[str, float]` of step_id → signal) to `VerifierResult` consumption.
+**Rationale:** Per design decision 6, reward is hybrid — terminal outcome reward +
+per-node process signals. The terminal reward is distributed at joins (Task 9); process
+signals shape intermediate steps. This task adds the per-step signal plumbing (a
+`dict[str, float]` of step_id → signal) to `VerifierResult` consumption.
 
 - [ ] **Step 1: Write the failing test for per-step signals**
 
@@ -631,12 +661,14 @@ def test_credit_assigner_carries_per_step_signals() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py::test_credit_assigner_carries_per_step_signals -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_credit.py::test_credit_assigner_carries_per_step_signals -v`
 Expected: FAIL — `A#step_1` not in credit dict.
 
 - [ ] **Step 3: Extend CreditAssigner to surface per-step signals**
 
-Modify `assign()` — after computing `credit[node.node_id]`, add per-step signal surfacing:
+Modify `assign()` — after computing `credit[node.node_id]`, add per-step signal
+surfacing:
 
 ```python
             # Surface per-step signals under "{node_id}#{step_id}" keys so
@@ -647,11 +679,13 @@ Modify `assign()` — after computing `credit[node.node_id]`, add per-step signa
                     credit[f"{node.node_id}#{step_id}"] = float(signal)
 ```
 
-Place this inside the `for node in dag.topological_order():` loop, after the `credit[node.node_id] = base` line.
+Place this inside the `for node in dag.topological_order():` loop, after the
+`credit[node.node_id] = base` line.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_credit.py::test_credit_assigner_carries_per_step_signals -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_credit.py::test_credit_assigner_carries_per_step_signals -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -661,11 +695,12 @@ git add customized_areal/tree_search/dag/credit.py customized_areal/tree_search/
 git commit -m "feat(dag): surface per-step process signals on CreditAssigner output"
 ```
 
----
+______________________________________________________________________
 
 ## Task 11: Export from dag/__init__.py + full suite run
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/__init__.py`
 
 - [ ] **Step 1: Write the failing test for exports**
@@ -689,7 +724,8 @@ def test_dag_package_exports_verifier_types() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_verifier.py::test_dag_package_exports_verifier_types -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_verifier.py::test_dag_package_exports_verifier_types -v`
 Expected: FAIL — `ImportError`.
 
 - [ ] **Step 3: Add the exports**
@@ -721,13 +757,14 @@ And extend `__all__`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest customized_areal/tree_search/dag/test_verifier.py::test_dag_package_exports_verifier_types -v`
+Run:
+`uv run pytest customized_areal/tree_search/dag/test_verifier.py::test_dag_package_exports_verifier_types -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full DAG test suite**
 
-Run: `uv run pytest customized_areal/tree_search/dag/ -v`
-Expected: All tests PASS — execution_dag, environment, verifier, credit.
+Run: `uv run pytest customized_areal/tree_search/dag/ -v` Expected: All tests PASS —
+execution_dag, environment, verifier, credit.
 
 - [ ] **Step 6: Commit**
 
@@ -736,7 +773,7 @@ git add customized_areal/tree_search/dag/__init__.py
 git commit -m "feat(dag): export Verifier, CreditAssigner, and friends from dag package"
 ```
 
----
+______________________________________________________________________
 
 ## Task 12: Pre-commit + lint
 
@@ -744,13 +781,14 @@ git commit -m "feat(dag): export Verifier, CreditAssigner, and friends from dag 
 
 - [ ] **Step 1: Run ruff check**
 
-Run: `cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/verifier.py customized_areal/tree_search/dag/credit.py customized_areal/tree_search/dag/test_verifier.py customized_areal/tree_search/dag/test_credit.py customized_areal/tree_search/dag/__init__.py`
+Run:
+`cd /workspaces/leagent/backend/areal && uv run ruff check customized_areal/tree_search/dag/verifier.py customized_areal/tree_search/dag/credit.py customized_areal/tree_search/dag/test_verifier.py customized_areal/tree_search/dag/test_credit.py customized_areal/tree_search/dag/__init__.py`
 Expected: No errors.
 
 - [ ] **Step 2: Run ruff format check**
 
-Run: `uv run ruff format --check customized_areal/tree_search/dag/`
-Expected: No reformatting needed.
+Run: `uv run ruff format --check customized_areal/tree_search/dag/` Expected: No
+reformatting needed.
 
 - [ ] **Step 3: Commit any fixes**
 
@@ -759,21 +797,31 @@ git add -A
 git commit -m "chore(dag): ruff fixes for verifier and credit modules"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Notes
 
 **Spec coverage:**
+
 - Design §2 decision 7 (Verifier = objective + LLM-judge fallback) → Tasks 6, 7, 8
-- Design §2 decision 8 (Fan-in joins: verifier assigns per-agent credit explicitly) → Tasks 9, 10
-- Design §2 decision 6 (Reward is hybrid — terminal + per-step process signals) → Task 10
+- Design §2 decision 8 (Fan-in joins: verifier assigns per-agent credit explicitly) →
+  Tasks 9, 10
+- Design §2 decision 6 (Reward is hybrid — terminal + per-step process signals) → Task
+  10
 - Design §4 (verifier.py, credit.py new files) → all tasks
 - Design §5 Phase 2 (Tasks 6, 7, 8) → all tasks
-- Design §6 (Verifier tests: objective success/failure, LLM-judge fallback mocked, credit at fan-in) → Tasks 6, 7, 9
+- Design §6 (Verifier tests: objective success/failure, LLM-judge fallback mocked,
+  credit at fan-in) → Tasks 6, 7, 9
 
 **Placeholder scan:** None. Every step has concrete code or commands.
 
 **Type consistency:**
-- `VerifierResult(success, reward, source, rationale, per_step_signals)` is used consistently in Tasks 6, 7, 8, 9, 10. The `per_step_signals: dict[str, float]` field is added in Task 6 and consumed in Task 10.
-- `Verifier` Protocol method signature `async def verify(self, run: dict[str, Any]) -> VerifierResult` is consistent across ObjectiveVerifier, LLMJudgeVerifier, CompositeVerifier.
-- `CreditAssigner.assign(dag, verifier_results) -> dict[str, float]` signature consistent across Tasks 9, 10.
+
+- `VerifierResult(success, reward, source, rationale, per_step_signals)` is used
+  consistently in Tasks 6, 7, 8, 9, 10. The `per_step_signals: dict[str, float]` field
+  is added in Task 6 and consumed in Task 10.
+- `Verifier` Protocol method signature
+  `async def verify(self, run: dict[str, Any]) -> VerifierResult` is consistent across
+  ObjectiveVerifier, LLMJudgeVerifier, CompositeVerifier.
+- `CreditAssigner.assign(dag, verifier_results) -> dict[str, float]` signature
+  consistent across Tasks 9, 10.

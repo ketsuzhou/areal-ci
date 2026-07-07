@@ -1,47 +1,66 @@
 # DAG ↔ Linear Event Codec Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a canonical, JSON-serializable linear `Event` type plus a pure bidirectional codec (`dag_to_events` / `events_to_dag` / `replay_prefix_for`) between the agent-execution DAG and its completion-ordered linear trajectory.
+**Goal:** Add a canonical, JSON-serializable linear `Event` type plus a pure
+bidirectional codec (`dag_to_events` / `events_to_dag` / `replay_prefix_for`) between
+the agent-execution DAG and its completion-ordered linear trajectory.
 
-**Architecture:** Two new torch-free, I/O-free modules in `customized_areal/tree_search/dag/`: `event_model.py` (the `Event` dataclass + serialization + a derived `message_timeline` view) and `event_codec.py` (the forward/reverse conversion). The existing `gae.events_from_nodes` is refactored into a thin projection over `Event` with byte-for-byte identical output (parity-tested); `critic_observation.build_critic_observations` is left unchanged and validated against the canonical model via a parity test. `ExecutionDAG.to_records`/`from_records`, `BranchMaterializer`, `environment.py`, and the `AgentRunNode` field set are untouched.
+**Architecture:** Two new torch-free, I/O-free modules in
+`customized_areal/tree_search/dag/`: `event_model.py` (the `Event` dataclass +
+serialization + a derived `message_timeline` view) and `event_codec.py` (the
+forward/reverse conversion). The existing `gae.events_from_nodes` is refactored into a
+thin projection over `Event` with byte-for-byte identical output (parity-tested);
+`critic_observation.build_critic_observations` is left unchanged and validated against
+the canonical model via a parity test. `ExecutionDAG.to_records`/`from_records`,
+`BranchMaterializer`, `environment.py`, and the `AgentRunNode` field set are untouched.
 
-**Tech Stack:** Python 3.12 (`from __future__ import annotations`, `StrEnum`, frozen dataclasses), pytest. No torch. Lint with the project ruff.
+**Tech Stack:** Python 3.12 (`from __future__ import annotations`, `StrEnum`, frozen
+dataclasses), pytest. No torch. Lint with the project ruff.
 
 **Spec:** `docs/superpowers/specs/2026-06-29-dag-event-codec-design.md`
 
 **Environment notes (this repo):**
+
 - Run tests with: `.venv-test/bin/python -m pytest <path> -q`
-- Lint/format with the project ruff binary: `RUFF=/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff`
-- All work happens under `/workspaces/leagent/backend/areal/`. Paths below are relative to that directory.
+- Lint/format with the project ruff binary:
+  `RUFF=/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff`
+- All work happens under `/workspaces/leagent/backend/areal/`. Paths below are relative
+  to that directory.
 - Commit with the repo's author convention (no git config change):
   `git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "..."`
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `customized_areal/tree_search/dag/event_model.py` (new) | `Event` dataclass, `to_dict`/`from_dict`, `message_timeline` |
-| `customized_areal/tree_search/dag/event_codec.py` (new) | `dag_to_events`, `events_to_dag`, `replay_prefix_for`, `ReplayPrefix` |
-| `customized_areal/tree_search/dag/gae.py` (modify) | `events_from_nodes` → thin projection over `Event` |
-| `customized_areal/tree_search/dag/__init__.py` (modify) | export new public names (stays torch-free) |
-| `customized_areal/tree_search/dag/test_event_model.py` (new) | model + serialization + timeline tests |
-| `customized_areal/tree_search/dag/test_event_codec.py` (new) | forward/reverse/round-trip/error/replay + parity tests |
+| File                                                         | Responsibility                                                        |
+| ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `customized_areal/tree_search/dag/event_model.py` (new)      | `Event` dataclass, `to_dict`/`from_dict`, `message_timeline`          |
+| `customized_areal/tree_search/dag/event_codec.py` (new)      | `dag_to_events`, `events_to_dag`, `replay_prefix_for`, `ReplayPrefix` |
+| `customized_areal/tree_search/dag/gae.py` (modify)           | `events_from_nodes` → thin projection over `Event`                    |
+| `customized_areal/tree_search/dag/__init__.py` (modify)      | export new public names (stays torch-free)                            |
+| `customized_areal/tree_search/dag/test_event_model.py` (new) | model + serialization + timeline tests                                |
+| `customized_areal/tree_search/dag/test_event_codec.py` (new) | forward/reverse/round-trip/error/replay + parity tests                |
 
 **Conventions to follow** (from the existing package):
+
 - Every module starts with a docstring then `from __future__ import annotations`.
-- Reuse `DAGError` (from `execution_dag`) for all conversion errors. Do not introduce a new exception type.
+- Reuse `DAGError` (from `execution_dag`) for all conversion errors. Do not introduce a
+  new exception type.
 - Use `collections.abc.Sequence` for sequence type hints (ruff UP035).
 - No quoted annotations (ruff UP037).
 
----
+______________________________________________________________________
 
 ## Task 1: `Event` dataclass + serialization
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/event_model.py`
+
 - Test: `customized_areal/tree_search/dag/test_event_model.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -134,7 +153,8 @@ def test_defaults_are_empty() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
 Expected: FAIL with `ModuleNotFoundError: ... event_model`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -291,7 +311,8 @@ __all__ = ["EdgeRef", "Event", "message_timeline"]
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
 Expected: PASS (6 tests; `message_timeline` is covered in Task 2).
 
 - [ ] **Step 5: Lint and commit**
@@ -304,12 +325,15 @@ git add customized_areal/tree_search/dag/event_model.py customized_areal/tree_se
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "feat(dag): add canonical linear Event model + serialization"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: `message_timeline` derived view
 
 **Files:**
-- Modify: `customized_areal/tree_search/dag/event_model.py` (already contains `message_timeline` from Task 1 — this task adds its tests)
+
+- Modify: `customized_areal/tree_search/dag/event_model.py` (already contains
+  `message_timeline` from Task 1 — this task adds its tests)
+
 - Test: `customized_areal/tree_search/dag/test_event_model.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -353,12 +377,16 @@ def test_message_timeline_does_not_mutate_source() -> None:
 
 - [ ] **Step 2: Run test to verify it fails (then passes)**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
-Expected: These two tests PASS immediately (the implementation already exists from Task 1). If `message_timeline` were missing they would fail with `ImportError`. This task documents/locks the behavior.
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_model.py -q`
+Expected: These two tests PASS immediately (the implementation already exists from Task
+1). If `message_timeline` were missing they would fail with `ImportError`. This task
+documents/locks the behavior.
 
 - [ ] **Step 3: (No implementation needed)**
 
-`message_timeline` was implemented in Task 1. If the tests fail, fix `message_timeline` until they pass.
+`message_timeline` was implemented in Task 1. If the tests fail, fix `message_timeline`
+until they pass.
 
 - [ ] **Step 4: Commit**
 
@@ -367,12 +395,14 @@ git add customized_areal/tree_search/dag/test_event_model.py
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "test(dag): lock message_timeline ordering + output tagging"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: `dag_to_events` (forward path)
 
 **Files:**
+
 - Create: `customized_areal/tree_search/dag/event_codec.py`
+
 - Test: `customized_areal/tree_search/dag/test_event_codec.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -504,7 +534,8 @@ def test_dag_to_events_messages_by_node_overrides_metadata() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: FAIL with `ModuleNotFoundError: ... event_codec`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -617,7 +648,8 @@ __all__ = ["dag_to_events"]
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: PASS (7 tests).
 
 - [ ] **Step 5: Lint and commit**
@@ -630,12 +662,14 @@ git add customized_areal/tree_search/dag/event_codec.py customized_areal/tree_se
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "feat(dag): add dag_to_events forward codec"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: `events_to_dag` (reverse path, lossless + validated)
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/event_codec.py`
+
 - Test: `customized_areal/tree_search/dag/test_event_codec.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -719,8 +753,8 @@ def test_full_dict_round_trip_identity() -> None:
     assert sorted(dag_a.node_ids()) == sorted(dag_b.node_ids())
 ```
 
-Add these imports at the top of the test file (`Event` for the dict round-trip
-test, `replace` for the corruption tests):
+Add these imports at the top of the test file (`Event` for the dict round-trip test,
+`replace` for the corruption tests):
 
 ```python
 from dataclasses import replace
@@ -730,12 +764,14 @@ from customized_areal.tree_search.dag.event_model import Event
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: FAIL with `ImportError: cannot import name 'events_to_dag'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `customized_areal/tree_search/dag/event_codec.py`, add the function and update `__all__`:
+In `customized_areal/tree_search/dag/event_codec.py`, add the function and update
+`__all__`:
 
 ```python
 def events_to_dag(events: Sequence[Event]) -> ExecutionDAG:
@@ -819,7 +855,8 @@ __all__ = ["dag_to_events", "events_to_dag"]
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: PASS (all forward + reverse tests).
 
 - [ ] **Step 5: Lint and commit**
@@ -832,12 +869,14 @@ git add customized_areal/tree_search/dag/event_codec.py customized_areal/tree_se
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "feat(dag): add events_to_dag reverse codec with symmetry + topo invariant"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: `replay_prefix_for` + `ReplayPrefix`
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/event_codec.py`
+
 - Test: `customized_areal/tree_search/dag/test_event_codec.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -894,12 +933,14 @@ def test_replay_prefix_for_ambiguous_branch_point_raises() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: FAIL with `ImportError: cannot import name 'ReplayPrefix'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `customized_areal/tree_search/dag/event_codec.py`, add the dataclass and function, and update `__all__`:
+In `customized_areal/tree_search/dag/event_codec.py`, add the dataclass and function,
+and update `__all__`:
 
 ```python
 @dataclass(frozen=True)
@@ -957,7 +998,8 @@ __all__ = ["ReplayPrefix", "dag_to_events", "events_to_dag", "replay_prefix_for"
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -q`
 Expected: PASS (forward + reverse + replay).
 
 - [ ] **Step 5: Lint and commit**
@@ -970,18 +1012,20 @@ git add customized_areal/tree_search/dag/event_codec.py customized_areal/tree_se
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "feat(dag): add replay_prefix_for branch-resume helper"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: Refactor `events_from_nodes` into a thin projection over `Event`
 
 **Files:**
-- Modify: `customized_areal/tree_search/dag/gae.py` (the `events_from_nodes` function, near the bottom before `__all__`)
+
+- Modify: `customized_areal/tree_search/dag/gae.py` (the `events_from_nodes` function,
+  near the bottom before `__all__`)
 - Test: `customized_areal/tree_search/dag/test_event_codec.py` (parity test)
 
 The current `events_from_nodes` (in `gae.py`) maps each node to
-`GlobalEvent(node_id, value=value or 0.0, reward=process_reward+outcome_reward)`.
-We rewrite it to build an `Event` per node (via `event_model`) and project, with
-a parity test proving identical output.
+`GlobalEvent(node_id, value=value or 0.0, reward=process_reward+outcome_reward)`. We
+rewrite it to build an `Event` per node (via `event_model`) and project, with a parity
+test proving identical output.
 
 - [ ] **Step 1: Write the failing parity test**
 
@@ -1021,14 +1065,16 @@ def test_events_from_nodes_unscored_value_is_zero() -> None:
 
 - [ ] **Step 2: Run test to verify current behavior (baseline passes)**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k events_from_nodes -q`
-Expected: PASS against the current implementation (this establishes the parity baseline before refactor).
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k events_from_nodes -q`
+Expected: PASS against the current implementation (this establishes the parity baseline
+before refactor).
 
 - [ ] **Step 3: Refactor the implementation**
 
-In `customized_areal/tree_search/dag/gae.py`, replace the body of
-`events_from_nodes` so it routes through the canonical `Event`. Replace the
-existing function (keep the same name, signature, and docstring intent):
+In `customized_areal/tree_search/dag/gae.py`, replace the body of `events_from_nodes` so
+it routes through the canonical `Event`. Replace the existing function (keep the same
+name, signature, and docstring intent):
 
 ```python
 def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
@@ -1067,16 +1113,15 @@ def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     return events
 ```
 
-Note: the import is function-local to avoid any import-order coupling at module
-load. `gae.py` already declares `events_from_nodes` in its `__all__`; leave that
-unchanged.
+Note: the import is function-local to avoid any import-order coupling at module load.
+`gae.py` already declares `events_from_nodes` in its `__all__`; leave that unchanged.
 
 - [ ] **Step 4: Run tests to verify parity holds**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py customized_areal/tree_search/dag/test_gae.py -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py customized_areal/tree_search/dag/test_gae.py -q`
 Expected: PASS — both the new parity test and the existing `test_gae.py`
-(`test_events_from_nodes_reads_value_and_combines_rewards`) confirm identical
-output.
+(`test_events_from_nodes_reads_value_and_combines_rewards`) confirm identical output.
 
 - [ ] **Step 5: Lint and commit**
 
@@ -1088,16 +1133,17 @@ git add customized_areal/tree_search/dag/gae.py customized_areal/tree_search/dag
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "refactor(dag): express events_from_nodes as a projection over Event"
 ```
 
----
+______________________________________________________________________
 
 ## Task 7: Critic-observation parity (no code change to the builder)
 
 **Files:**
+
 - Test: `customized_areal/tree_search/dag/test_event_codec.py`
 
-`build_critic_observations` stays code-unchanged. This task proves it produces
-identical frontier observations whether fed a hand-built timeline or the
-`message_timeline` of `dag_to_events(dag)`.
+`build_critic_observations` stays code-unchanged. This task proves it produces identical
+frontier observations whether fed a hand-built timeline or the `message_timeline` of
+`dag_to_events(dag)`.
 
 - [ ] **Step 1: Write the failing/locking test**
 
@@ -1138,9 +1184,10 @@ def test_critic_observations_match_message_timeline_of_events() -> None:
 
 - [ ] **Step 2: Run test to verify it passes**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k critic -q`
-Expected: PASS. If it fails, the discrepancy is in `message_timeline`'s tagging
-or ordering — fix `message_timeline` (Task 1/2), not `build_critic_observations`.
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k critic -q`
+Expected: PASS. If it fails, the discrepancy is in `message_timeline`'s tagging or
+ordering — fix `message_timeline` (Task 1/2), not `build_critic_observations`.
 
 - [ ] **Step 3: (No implementation change)**
 
@@ -1153,11 +1200,12 @@ git add customized_areal/tree_search/dag/test_event_codec.py
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "test(dag): lock critic-observation parity via message_timeline"
 ```
 
----
+______________________________________________________________________
 
 ## Task 8: Public exports + full-suite verification
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/dag/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1182,13 +1230,14 @@ def test_public_exports_available_from_package() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k public_exports -q`
+Run:
+`.venv-test/bin/python -m pytest customized_areal/tree_search/dag/test_event_codec.py -k public_exports -q`
 Expected: FAIL — names not yet exported.
 
 - [ ] **Step 3: Add exports**
 
-In `customized_areal/tree_search/dag/__init__.py`, add these imports (alongside
-the existing block, keeping alphabetical-ish grouping) — place after the
+In `customized_areal/tree_search/dag/__init__.py`, add these imports (alongside the
+existing block, keeping alphabetical-ish grouping) — place after the
 `critic_observation` import block:
 
 ```python
@@ -1216,20 +1265,21 @@ Then add to the `__all__` list (a new commented group):
     "ReplayPrefix",
 ```
 
-**Constraint:** `__init__.py` must stay torch-free. `event_model` and
-`event_codec` import only `execution_dag` (torch-free), so this holds. Do NOT
-import `critic_score`/`critic_advantage` here (they remain excluded).
+**Constraint:** `__init__.py` must stay torch-free. `event_model` and `event_codec`
+import only `execution_dag` (torch-free), so this holds. Do NOT import
+`critic_score`/`critic_advantage` here (they remain excluded).
 
 - [ ] **Step 4: Run the full dag suite + import check**
 
 Run:
+
 ```bash
 .venv-test/bin/python -c "import customized_areal.tree_search.dag as d; print('import ok')"
 .venv-test/bin/python -m pytest customized_areal/tree_search/dag/ -q
 ```
-Expected: import prints `import ok`; the full `dag/` suite passes (previously
-81 passed / 2 skipped, plus the new `test_event_model.py` and
-`test_event_codec.py` tests).
+
+Expected: import prints `import ok`; the full `dag/` suite passes (previously 81 passed
+/ 2 skipped, plus the new `test_event_model.py` and `test_event_codec.py` tests).
 
 - [ ] **Step 5: Lint and commit**
 
@@ -1241,7 +1291,7 @@ git add customized_areal/tree_search/dag/__init__.py customized_areal/tree_searc
 git -c user.name="Kiro Agent" -c user.email="kiro@local" commit -m "feat(dag): export event codec public API"
 ```
 
----
+______________________________________________________________________
 
 ## Final verification
 
@@ -1253,15 +1303,16 @@ RUFF=/home/vscode/.cache/uv/archive-v0/cj3x863YkgrEOZ4C/bin/ruff
 $RUFF check customized_areal/tree_search/dag/
 $RUFF format --check customized_areal/tree_search/dag/
 ```
+
 Expected: all tests pass; ruff clean.
 
 - [ ] Confirm no unintended edits to `execution_dag.py`, `integration.py`,
-  `environment.py`, or `critic_observation.py` (only a test was added for the
-  latter):
+  `environment.py`, or `critic_observation.py` (only a test was added for the latter):
 
 ```bash
 git status --porcelain
 git diff --stat HEAD~8
 ```
-Expected: changes limited to the new `event_model.py`/`event_codec.py`, their
-tests, the `gae.py` `events_from_nodes` body, and `__init__.py` exports.
+
+Expected: changes limited to the new `event_model.py`/`event_codec.py`, their tests, the
+`gae.py` `events_from_nodes` body, and `__init__.py` exports.

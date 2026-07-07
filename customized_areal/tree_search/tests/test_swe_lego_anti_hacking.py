@@ -17,12 +17,19 @@ from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIss
 
 def test_swe_lego_issue_carries_issue_date_for_truncation():
     issue = SweLegoIssue(
-        repo_url="r", base_commit="c", issue_date="2025-03-14T09:30:00Z",
-        issue_text="x", issue_title="t", acceptance_criteria="a",
-        fail_to_pass=["f"], pass_to_pass=["p"],
+        repo_url="r",
+        base_commit="c",
+        issue_date="2025-03-14T09:30:00Z",
+        issue_text="x",
+        issue_title="t",
+        acceptance_criteria="a",
+        fail_to_pass=["f"],
+        pass_to_pass=["p"],
     )
     # If issue_date is empty/missing, the build script cannot compute the
     # cutoff commit and history truncation silently no-ops.
-    assert issue.issue_date, "issue_date must be non-empty to drive git filter-repo --commit-cutoff"
+    assert issue.issue_date, (
+        "issue_date must be non-empty to drive git filter-repo --commit-cutoff"
+    )
     # base_commit must also be present (the checkout target).
     assert issue.base_commit, "base_commit must be non-empty"

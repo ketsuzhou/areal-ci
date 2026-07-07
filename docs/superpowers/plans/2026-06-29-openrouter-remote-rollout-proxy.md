@@ -1,35 +1,67 @@
 # OpenRouter Remote Rollout Proxy Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let AReaL proxy users route `/chat/completions` requests to OpenRouter via a `remote:<provider/model>` model prefix, while still collecting local-tokenized training trajectories in the session cache.
+**Goal:** Let AReaL proxy users route `/chat/completions` requests to OpenRouter via a
+`remote:<provider/model>` model prefix, while still collecting local-tokenized training
+trajectories in the session cache.
 
-**Architecture:** A new `RemoteRolloutClient` in `areal/experimental/openai/proxy/remote_rollout.py` owns the OpenRouter round-trip, retokenization, and cache storage. `ProxyRolloutServer.chat_completions()` dispatches by model prefix: `"default"` stays on the existing local path, `"remote:..."` enters the remote client, anything else returns 404. Shared prompt-tokenization helpers are extracted into `areal/experimental/openai/_prompt_utils.py` so both paths use them. A new `PPOActorConfig.enable_remote_rollout` flag drives a trainer-config warning; the remote client enforces a first-request safety check via `should_compute_prox_logp()`.
+**Architecture:** A new `RemoteRolloutClient` in
+`areal/experimental/openai/proxy/remote_rollout.py` owns the OpenRouter round-trip,
+retokenization, and cache storage. `ProxyRolloutServer.chat_completions()` dispatches by
+model prefix: `"default"` stays on the existing local path, `"remote:..."` enters the
+remote client, anything else returns 404. Shared prompt-tokenization helpers are
+extracted into `areal/experimental/openai/_prompt_utils.py` so both paths use them. A
+new `PPOActorConfig.enable_remote_rollout` flag drives a trainer-config warning; the
+remote client enforces a first-request safety check via `should_compute_prox_logp()`.
 
-**Tech Stack:** Python 3.12+, FastAPI, `openai.AsyncOpenAI` (for the OpenRouter HTTP client), HuggingFace `transformers` tokenizers, pytest + httpx ASGI transport for tests.
+**Tech Stack:** Python 3.12+, FastAPI, `openai.AsyncOpenAI` (for the OpenRouter HTTP
+client), HuggingFace `transformers` tokenizers, pytest + httpx ASGI transport for tests.
 
 **Spec:** `docs/superpowers/specs/2026-06-29-openrouter-remote-rollout-proxy-design.md`
 
----
+______________________________________________________________________
 
 ## File Structure
 
-- **Create** `areal/experimental/openai/_prompt_utils.py` — shared helpers extracted from `client.py`: `_ensure_message_dict_list`, `_extract_images_from_messages`, `_DATA_URI_RE`, and a re-export of `apply_chat_template`. Both local and remote paths import from here.
-- **Create** `areal/experimental/openai/proxy/remote_rollout.py` — `RemoteRolloutClient` class with lazy OpenRouter `AsyncOpenAI` client, `create_completion()` method implementing the 10-step per-request lifecycle, finish-reason mapper, and recompute gate.
-- **Modify** `areal/experimental/openai/client.py` — replace the four helper definitions (`_ensure_message_dict_list`, `_DATA_URI_RE`, `_extract_images_from_messages`, and the `apply_chat_template` import) with imports from `_prompt_utils`. No behavior change.
-- **Modify** `areal/api/cli_args.py` — add `PPOActorConfig.enable_remote_rollout: bool` field (after `prox_logp_method`, ~line 1517) and a warning block in `PPOActorConfig.__post_init__` (after the SAPO block, before `super().__post_init__()` at line 1585).
-- **Modify** `areal/experimental/openai/proxy/proxy_rollout_server.py` — add `_remote_client` global, construct it in `_setup_openai_client()`, add model-prefix dispatch in `chat_completions()`.
-- **Create** `tests/experimental/openai/test_remote_rollout.py` — all 23 tests from the spec's testing plan.
+- **Create** `areal/experimental/openai/_prompt_utils.py` — shared helpers extracted
+  from `client.py`: `_ensure_message_dict_list`, `_extract_images_from_messages`,
+  `_DATA_URI_RE`, and a re-export of `apply_chat_template`. Both local and remote paths
+  import from here.
+- **Create** `areal/experimental/openai/proxy/remote_rollout.py` — `RemoteRolloutClient`
+  class with lazy OpenRouter `AsyncOpenAI` client, `create_completion()` method
+  implementing the 10-step per-request lifecycle, finish-reason mapper, and recompute
+  gate.
+- **Modify** `areal/experimental/openai/client.py` — replace the four helper definitions
+  (`_ensure_message_dict_list`, `_DATA_URI_RE`, `_extract_images_from_messages`, and the
+  `apply_chat_template` import) with imports from `_prompt_utils`. No behavior change.
+- **Modify** `areal/api/cli_args.py` — add `PPOActorConfig.enable_remote_rollout: bool`
+  field (after `prox_logp_method`, ~line 1517) and a warning block in
+  `PPOActorConfig.__post_init__` (after the SAPO block, before `super().__post_init__()`
+  at line 1585).
+- **Modify** `areal/experimental/openai/proxy/proxy_rollout_server.py` — add
+  `_remote_client` global, construct it in `_setup_openai_client()`, add model-prefix
+  dispatch in `chat_completions()`.
+- **Create** `tests/experimental/openai/test_remote_rollout.py` — all 23 tests from the
+  spec's testing plan.
 
----
+______________________________________________________________________
 
 ## Task 1: Extract shared prompt helpers into `_prompt_utils.py`
 
-**Why first:** The remote client needs `_extract_images_from_messages` and `_ensure_message_dict_list`. Extracting them first, into a shared module, lets both `client.py` and `remote_rollout.py` import from one place. This is a pure refactor — no behavior change — so the existing test suite guards it.
+**Why first:** The remote client needs `_extract_images_from_messages` and
+`_ensure_message_dict_list`. Extracting them first, into a shared module, lets both
+`client.py` and `remote_rollout.py` import from one place. This is a pure refactor — no
+behavior change — so the existing test suite guards it.
 
 **Files:**
+
 - Create: `areal/experimental/openai/_prompt_utils.py`
-- Modify: `areal/experimental/openai/client.py:5-60` (imports) and `client.py:80-237` (helper definitions)
+
+- Modify: `areal/experimental/openai/client.py:5-60` (imports) and `client.py:80-237`
+  (helper definitions)
 
 - [ ] **Step 1: Create `_prompt_utils.py` with the extracted helpers**
 
@@ -203,7 +235,8 @@ def _extract_images_from_messages(
 
 - [ ] **Step 2: Update `client.py` imports to pull from `_prompt_utils`**
 
-In `areal/experimental/openai/client.py`, find the import block (lines 1-61). The file currently imports `apply_chat_template` from `areal.utils.hf_utils` at line 60:
+In `areal/experimental/openai/client.py`, find the import block (lines 1-61). The file
+currently imports `apply_chat_template` from `areal.utils.hf_utils` at line 60:
 
 ```python
 from areal.utils.hf_utils import apply_chat_template
@@ -220,25 +253,42 @@ from areal.experimental.openai._prompt_utils import (
 )
 ```
 
-Also remove now-redundant imports that `_prompt_utils` owns. The file imports `re` at line 6, `Iterable`/`Mapping` at line 8, `deepcopy` at line 9, and `BaseModel` at line 52 — these are still used elsewhere in `client.py` (e.g. `_find_kth`, `_convert_tool_output_format`, `_build_messages_list`), so **leave them**. Do not remove any import that is still referenced.
+Also remove now-redundant imports that `_prompt_utils` owns. The file imports `re` at
+line 6, `Iterable`/`Mapping` at line 8, `deepcopy` at line 9, and `BaseModel` at line 52
+— these are still used elsewhere in `client.py` (e.g. `_find_kth`,
+`_convert_tool_output_format`, `_build_messages_list`), so **leave them**. Do not remove
+any import that is still referenced.
 
 - [ ] **Step 3: Delete the moved helper definitions from `client.py`**
 
 Delete these three blocks from `areal/experimental/openai/client.py`:
 
-1. The `_ensure_message_dict_list` function (lines 80-128, the block starting with `def _ensure_message_dict_list(` and ending at the `return normalized` line).
-2. The `_DATA_URI_RE` assignment (line 148: `_DATA_URI_RE = re.compile(...)`).
-3. The `_extract_images_from_messages` function (lines 151-237, the block starting with `def _extract_images_from_messages(` and ending at `return image_data, messages_for_tokenizer, vision_messages_for_vllm`).
+1. The `_ensure_message_dict_list` function (lines 80-128, the block starting with
+   `def _ensure_message_dict_list(` and ending at the `return normalized` line).
+1. The `_DATA_URI_RE` assignment (line 148: `_DATA_URI_RE = re.compile(...)`).
+1. The `_extract_images_from_messages` function (lines 151-237, the block starting with
+   `def _extract_images_from_messages(` and ending at
+   `return image_data, messages_for_tokenizer, vision_messages_for_vllm`).
 
-After deletion, `client.py` should no longer define these names — it imports them from `_prompt_utils`. The functions `_find_kth`, `_convert_tool_output_format`, `_build_messages_list`, and `concat_prompt_token_ids_with_parent` remain in `client.py` (they are local-generation-specific).
+After deletion, `client.py` should no longer define these names — it imports them from
+`_prompt_utils`. The functions `_find_kth`, `_convert_tool_output_format`,
+`_build_messages_list`, and `concat_prompt_token_ids_with_parent` remain in `client.py`
+(they are local-generation-specific).
 
 - [ ] **Step 4: Run the existing test suite to confirm no behavior change**
 
-Run: `uv run pytest tests/experimental/openai/test_concat_prompt.py tests/experimental/openai/test_client.py tests/experimental/openai/test_streaming_chat_completions.py -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_concat_prompt.py tests/experimental/openai/test_client.py tests/experimental/openai/test_streaming_chat_completions.py -x -q 2>&1 | tail -20`
 
-Expected: Tests that don't require a GPU/sglang server pass. The `test_client.py` tests are marked `pytest.mark.sglang` and may skip; that is fine. `test_concat_prompt.py` and `test_streaming_chat_completions.py` should pass (the latter mocks the client, the former uses a real tokenizer but no server).
+Expected: Tests that don't require a GPU/sglang server pass. The `test_client.py` tests
+are marked `pytest.mark.sglang` and may skip; that is fine. `test_concat_prompt.py` and
+`test_streaming_chat_completions.py` should pass (the latter mocks the client, the
+former uses a real tokenizer but no server).
 
-If `test_concat_prompt.py` or `test_streaming_chat_completions.py` fail with an `ImportError` or `NameError` for `_extract_images_from_messages` / `_ensure_message_dict_list`, the extraction missed a reference — re-read `client.py` to find any remaining direct definition or import that conflicts.
+If `test_concat_prompt.py` or `test_streaming_chat_completions.py` fail with an
+`ImportError` or `NameError` for `_extract_images_from_messages` /
+`_ensure_message_dict_list`, the extraction missed a reference — re-read `client.py` to
+find any remaining direct definition or import that conflicts.
 
 - [ ] **Step 5: Commit**
 
@@ -257,18 +307,25 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: Add `enable_remote_rollout` flag and trainer-config warning
 
-**Why second:** The recompute-gate depends on `should_compute_prox_logp()`, which already exists. Adding the config flag + warning is a small, isolated change that the later remote-client tests will exercise. Doing it before the client exists lets us write the config-warning tests (spec tests 18-20) against a stable API.
+**Why second:** The recompute-gate depends on `should_compute_prox_logp()`, which
+already exists. Adding the config flag + warning is a small, isolated change that the
+later remote-client tests will exercise. Doing it before the client exists lets us write
+the config-warning tests (spec tests 18-20) against a stable API.
 
 **Files:**
-- Modify: `areal/api/cli_args.py:1517` (add field after `prox_logp_method`) and `areal/api/cli_args.py:1572-1585` (add warning in `__post_init__`)
+
+- Modify: `areal/api/cli_args.py:1517` (add field after `prox_logp_method`) and
+  `areal/api/cli_args.py:1572-1585` (add warning in `__post_init__`)
 
 - [ ] **Step 1: Write the failing tests for the config warning**
 
-Create `tests/experimental/openai/test_remote_rollout.py` with the config-warning tests (spec tests 18-20). The class is `PPOActorConfig` (not `ActorConfig` — the spec used shorthand):
+Create `tests/experimental/openai/test_remote_rollout.py` with the config-warning tests
+(spec tests 18-20). The class is `PPOActorConfig` (not `ActorConfig` — the spec used
+shorthand):
 
 ```python
 # SPDX-License-Identifier: Apache-2.0
@@ -340,13 +397,18 @@ class TestEnableRemoteRolloutWarning:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEnableRemoteRolloutWarning -x -q 2>&1 | tail -15`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEnableRemoteRolloutWarning -x -q 2>&1 | tail -15`
 
-Expected: FAIL with `TypeError: __init__() got an unexpected keyword argument 'enable_remote_rollout'` (the field does not exist yet).
+Expected: FAIL with
+`TypeError: __init__() got an unexpected keyword argument 'enable_remote_rollout'` (the
+field does not exist yet).
 
 - [ ] **Step 3: Add the `enable_remote_rollout` field to `PPOActorConfig`**
 
-In `areal/api/cli_args.py`, find the `prox_logp_method` field (ends at line 1517 with the closing `)`). Immediately after it (before the blank line and the `# Logging Agent Trajectories` comment at line 1519), insert:
+In `areal/api/cli_args.py`, find the `prox_logp_method` field (ends at line 1517 with
+the closing `)`). Immediately after it (before the blank line and the
+`# Logging Agent Trajectories` comment at line 1519), insert:
 
 ```python
     enable_remote_rollout: bool = field(
@@ -361,7 +423,9 @@ In `areal/api/cli_args.py`, find the `prox_logp_method` field (ends at line 1517
 
 - [ ] **Step 4: Add the warning to `PPOActorConfig.__post_init__`**
 
-In `areal/api/cli_args.py`, find the SAPO validation block in `__post_init__` (lines 1572-1583, ending with the `use_decoupled_loss` SAPO check). Immediately after that block and before `super().__post_init__()` (line 1585), insert:
+In `areal/api/cli_args.py`, find the SAPO validation block in `__post_init__` (lines
+1572-1583, ending with the `use_decoupled_loss` SAPO check). Immediately after that
+block and before `super().__post_init__()` (line 1585), insert:
 
 ```python
         # Warn if remote rollout is enabled but no recompute path is active.
@@ -379,11 +443,15 @@ In `areal/api/cli_args.py`, find the SAPO validation block in `__post_init__` (l
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEnableRemoteRolloutWarning -x -q 2>&1 | tail -15`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEnableRemoteRolloutWarning -x -q 2>&1 | tail -15`
 
 Expected: PASS (3 tests).
 
-If the `test_warns_when_recompute_disabled` test still fails, check that `should_compute_prox_logp()` returns False for that config — it depends on `prox_logp_method` (default `PROX_LOGP_METHOD_RECOMPUTE`) and the `use_decoupled_loss`/`recompute_logprob` flags. See `areal/api/cli_args.py:1534-1545`.
+If the `test_warns_when_recompute_disabled` test still fails, check that
+`should_compute_prox_logp()` returns False for that config — it depends on
+`prox_logp_method` (default `PROX_LOGP_METHOD_RECOMPUTE`) and the
+`use_decoupled_loss`/`recompute_logprob` flags. See `areal/api/cli_args.py:1534-1545`.
 
 - [ ] **Step 6: Commit**
 
@@ -402,17 +470,23 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Task 3: Implement `RemoteRolloutClient` core — finish-reason mapper and recompute gate
 
-**Why:** The finish-reason mapper (spec resolved question 3) and the recompute gate (spec resolved question 1, layer 2) are pure, testable units that don't need a tokenizer or network. Build and test them first, then layer the network + tokenization logic on top in Task 4.
+**Why:** The finish-reason mapper (spec resolved question 3) and the recompute gate
+(spec resolved question 1, layer 2) are pure, testable units that don't need a tokenizer
+or network. Build and test them first, then layer the network + tokenization logic on
+top in Task 4.
 
 **Files:**
+
 - Create: `areal/experimental/openai/proxy/remote_rollout.py`
+
 - Test: `tests/experimental/openai/test_remote_rollout.py` (append)
 
-- [ ] **Step 1: Write the failing tests for the finish-reason mapper and recompute gate**
+- [ ] **Step 1: Write the failing tests for the finish-reason mapper and recompute
+  gate**
 
 Append to `tests/experimental/openai/test_remote_rollout.py`:
 
@@ -549,9 +623,11 @@ async def _async_return(value):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestMapFinishReason tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -15`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestMapFinishReason tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -15`
 
-Expected: FAIL with `ImportError: cannot import name '_map_finish_reason'` / `RemoteRolloutClient` from `remote_rollout`.
+Expected: FAIL with `ImportError: cannot import name '_map_finish_reason'` /
+`RemoteRolloutClient` from `remote_rollout`.
 
 - [ ] **Step 3: Create `remote_rollout.py` with the mapper, gate, and class skeleton**
 
@@ -707,15 +783,20 @@ class RemoteRolloutClient:
 
 - [ ] **Step 4: Run the finish-reason mapper tests to verify they pass**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestMapFinishReason -x -q 2>&1 | tail -15`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestMapFinishReason -x -q 2>&1 | tail -15`
 
 Expected: PASS (6 tests).
 
 - [ ] **Step 5: Run the recompute gate tests**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -20`
 
-Expected: Both tests FAIL — `test_first_request_fails_when_recompute_disabled` fails because `create_completion` raises `NotImplementedError` instead of the 500 HTTPException. `test_gate_opens_after_success` fails the same way. This is expected — Task 4 implements `create_completion`.
+Expected: Both tests FAIL — `test_first_request_fails_when_recompute_disabled` fails
+because `create_completion` raises `NotImplementedError` instead of the 500
+HTTPException. `test_gate_opens_after_success` fails the same way. This is expected —
+Task 4 implements `create_completion`.
 
 - [ ] **Step 6: Commit (mapper and skeleton only; gate tests land red)**
 
@@ -738,19 +819,28 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Task 4: Implement `RemoteRolloutClient.create_completion` — the full 10-step lifecycle
 
-**Why:** This is the heart of the feature. It wires the validation, prompt tokenization, OpenRouter call, cache insertion, output tokenization, finish-reason mapping, ModelResponse construction, and interaction storage into one method. The cleanup contract (delete cache entry on any failure after step 5) is enforced with a try/except.
+**Why:** This is the heart of the feature. It wires the validation, prompt tokenization,
+OpenRouter call, cache insertion, output tokenization, finish-reason mapping,
+ModelResponse construction, and interaction storage into one method. The cleanup
+contract (delete cache entry on any failure after step 5) is enforced with a try/except.
 
 **Files:**
-- Modify: `areal/experimental/openai/proxy/remote_rollout.py` (replace the `NotImplementedError` stub)
-- Test: `tests/experimental/openai/test_remote_rollout.py` (append happy-path and failure tests)
+
+- Modify: `areal/experimental/openai/proxy/remote_rollout.py` (replace the
+  `NotImplementedError` stub)
+
+- Test: `tests/experimental/openai/test_remote_rollout.py` (append happy-path and
+  failure tests)
 
 - [ ] **Step 1: Write the failing happy-path and failure tests**
 
-Append to `tests/experimental/openai/test_remote_rollout.py`. These tests use a real tokenizer (Qwen3-0.6B) following the `test_concat_prompt.py` pattern, and stub the OpenRouter call via monkeypatch on `_call_openrouter`.
+Append to `tests/experimental/openai/test_remote_rollout.py`. These tests use a real
+tokenizer (Qwen3-0.6B) following the `test_concat_prompt.py` pattern, and stub the
+OpenRouter call via monkeypatch on `_call_openrouter`.
 
 ```python
 # ---------------------------------------------------------------------------
@@ -1003,13 +1093,16 @@ from fastapi import HTTPException  # noqa: E402
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionHappyPath tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionFailures -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionHappyPath tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionFailures -x -q 2>&1 | tail -20`
 
 Expected: FAIL with `NotImplementedError: Implemented in Task 4` (the stub from Task 3).
 
 - [ ] **Step 3: Implement `create_completion` — replace the stub**
 
-In `areal/experimental/openai/proxy/remote_rollout.py`, replace the `create_completion` method body (the `raise NotImplementedError("Implemented in Task 4")` line and its docstring) with the full implementation:
+In `areal/experimental/openai/proxy/remote_rollout.py`, replace the `create_completion`
+method body (the `raise NotImplementedError("Implemented in Task 4")` line and its
+docstring) with the full implementation:
 
 ```python
     async def create_completion(
@@ -1203,27 +1296,47 @@ def _build_forwarded_params(request: dict[str, Any]) -> dict[str, Any]:
     return forwarded
 ```
 
-Note: `tools` appears in both `_STRIPPED` and `_FORWARDABLE` — this is intentional. The `_STRIPPED` set prevents it from being picked up by the generic loop (where it would be confused with the request-level `tools` field handling), and the explicit re-add at the end forwards it cleanly. If this feels brittle, an alternative is to remove `"tools"` from `_STRIPPED` and let the generic loop handle it — but then `messages` (also in `_STRIPPED`) would need the same treatment, and `messages` must never be forwarded (it is rebuilt from `messages_list`). Keep the explicit re-add for `tools` only.
+Note: `tools` appears in both `_STRIPPED` and `_FORWARDABLE` — this is intentional. The
+`_STRIPPED` set prevents it from being picked up by the generic loop (where it would be
+confused with the request-level `tools` field handling), and the explicit re-add at the
+end forwards it cleanly. If this feels brittle, an alternative is to remove `"tools"`
+from `_STRIPPED` and let the generic loop handle it — but then `messages` (also in
+`_STRIPPED`) would need the same treatment, and `messages` must never be forwarded (it
+is rebuilt from `messages_list`). Keep the explicit re-add for `tools` only.
 
 - [ ] **Step 4: Run the happy-path test**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionHappyPath -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionHappyPath -x -q 2>&1 | tail -20`
 
-Expected: PASS (1 test). If it fails with a tokenizer download error, the test environment lacks network — the `get_model_path` helper should fall back to the local path; check `/storage/openpsi/models/Qwen__Qwen3-0.6B` exists or that HuggingFace download works.
+Expected: PASS (1 test). If it fails with a tokenizer download error, the test
+environment lacks network — the `get_model_path` helper should fall back to the local
+path; check `/storage/openpsi/models/Qwen__Qwen3-0.6B` exists or that HuggingFace
+download works.
 
 - [ ] **Step 5: Run the failure tests**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionFailures -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestCreateCompletionFailures -x -q 2>&1 | tail -20`
 
 Expected: PASS (5 tests).
 
-If `test_output_tokenization_failure_removes_cache_entry` fails because the cache is not empty, the `del session_cache[completion_id]` in the except block is not running — check that the failure path catches the right exception type. The flaky encode mock raises `RuntimeError`, which is caught by the `except Exception` block (not `except HTTPException`), so the cleanup should run.
+If `test_output_tokenization_failure_removes_cache_entry` fails because the cache is not
+empty, the `del session_cache[completion_id]` in the except block is not running — check
+that the failure path catches the right exception type. The flaky encode mock raises
+`RuntimeError`, which is caught by the `except Exception` block (not
+`except HTTPException`), so the cleanup should run.
 
 - [ ] **Step 6: Run the recompute gate tests from Task 3 (they should now pass)**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRecomputeGate -x -q 2>&1 | tail -20`
 
-Expected: PASS (2 tests). The `test_gate_opens_after_first_success` test stubs `_call_openrouter`, `apply_chat_template`, and `tokenizer.encode` — all three are now called by the real `create_completion`, so the stubs must align. If `apply_chat_template` stub returns `[1, 2, 3]` but the real code expects it to be called with keyword args, adjust the lambda signature.
+Expected: PASS (2 tests). The `test_gate_opens_after_first_success` test stubs
+`_call_openrouter`, `apply_chat_template`, and `tokenizer.encode` — all three are now
+called by the real `create_completion`, so the stubs must align. If
+`apply_chat_template` stub returns `[1, 2, 3]` but the real code expects it to be called
+with keyword args, adjust the lambda signature.
 
 - [ ] **Step 7: Commit**
 
@@ -1248,19 +1361,26 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Task 5: Wire dispatch in `ProxyRolloutServer.chat_completions`
 
-**Why:** With `RemoteRolloutClient` complete and tested, wire it into the proxy server. This is the integration point — the model-prefix dispatch and the `_remote_client` global construction in `_setup_openai_client()`.
+**Why:** With `RemoteRolloutClient` complete and tested, wire it into the proxy server.
+This is the integration point — the model-prefix dispatch and the `_remote_client`
+global construction in `_setup_openai_client()`.
 
 **Files:**
-- Modify: `areal/experimental/openai/proxy/proxy_rollout_server.py:32` (import), `:96` (global), `:262-282` (`_setup_openai_client`), `:605-667` (`chat_completions`)
+
+- Modify: `areal/experimental/openai/proxy/proxy_rollout_server.py:32` (import), `:96`
+  (global), `:262-282` (`_setup_openai_client`), `:605-667` (`chat_completions`)
+
 - Test: `tests/experimental/openai/test_remote_rollout.py` (append routing tests)
 
 - [ ] **Step 1: Write the failing routing tests (spec tests 1-7)**
 
-Append to `tests/experimental/openai/test_remote_rollout.py`. These follow the `test_streaming_chat_completions.py` pattern — httpx ASGI transport, monkeypatch the server globals.
+Append to `tests/experimental/openai/test_remote_rollout.py`. These follow the
+`test_streaming_chat_completions.py` pattern — httpx ASGI transport, monkeypatch the
+server globals.
 
 ```python
 # ---------------------------------------------------------------------------
@@ -1527,9 +1647,14 @@ class TestRoutingDispatch:
 
 - [ ] **Step 2: Run the routing tests to verify they fail**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRoutingDispatch -x -q 2>&1 | tail -20`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRoutingDispatch -x -q 2>&1 | tail -20`
 
-Expected: FAIL — `srv._remote_client` does not exist yet (AttributeError), or `chat_completions` routes everything to the local client (so `test_remote_prefix_calls_remote_client` fails because the remote spy is never called, and `test_unknown_model_returns_404` fails because the unknown model is sent to the local client which accepts it).
+Expected: FAIL — `srv._remote_client` does not exist yet (AttributeError), or
+`chat_completions` routes everything to the local client (so
+`test_remote_prefix_calls_remote_client` fails because the remote spy is never called,
+and `test_unknown_model_returns_404` fails because the unknown model is sent to the
+local client which accepts it).
 
 - [ ] **Step 3: Add the `_remote_client` global and import**
 
@@ -1550,7 +1675,9 @@ _remote_client: RemoteRolloutClient | None = None
 
 - [ ] **Step 4: Construct `_remote_client` in `_setup_openai_client`**
 
-In `_setup_openai_client` (starts at line 262), the function currently ends at line 282 with the admin-key warning. After the `_session_timeout_seconds` assignment and before the `with _lock:` block, add construction of `_remote_client`:
+In `_setup_openai_client` (starts at line 262), the function currently ends at line 282
+with the admin-key warning. After the `_session_timeout_seconds` assignment and before
+the `with _lock:` block, add construction of `_remote_client`:
 
 Find this block (lines 267-282):
 
@@ -1573,7 +1700,9 @@ Find this block (lines 267-282):
             )
 ```
 
-Add `global _remote_client` at the top of the function (the existing `global` line is `global _openai_client, _session_timeout_seconds, _admin_api_key` — extend it), and construct the client after `_openai_client`:
+Add `global _remote_client` at the top of the function (the existing `global` line is
+`global _openai_client, _session_timeout_seconds, _admin_api_key` — extend it), and
+construct the client after `_openai_client`:
 
 ```python
 def _setup_openai_client():
@@ -1605,11 +1734,18 @@ def _setup_openai_client():
             )
 ```
 
-Note: `PPOActorConfig` may not have `enable_remote_rollout` plumbed through `agent_cfg` depending on how `config.agent` is resolved. The `recompute_enabled=agent_cfg.should_compute_prox_logp()` call is what matters for the runtime gate; the `enable_remote_rollout` flag only controls the trainer-config warning (already added in Task 2). Do not read `enable_remote_rollout` here.
+Note: `PPOActorConfig` may not have `enable_remote_rollout` plumbed through `agent_cfg`
+depending on how `config.agent` is resolved. The
+`recompute_enabled=agent_cfg.should_compute_prox_logp()` call is what matters for the
+runtime gate; the `enable_remote_rollout` flag only controls the trainer-config warning
+(already added in Task 2). Do not read `enable_remote_rollout` here.
 
 - [ ] **Step 5: Add model-prefix dispatch in `chat_completions`**
 
-In `chat_completions` (starts at line 610), the function currently checks `_openai_client is None` then branches on `is_streaming`. The dispatch must happen *before* the streaming check, because a remote `stream=True` request should return 400 (from the remote client), not enter the local streaming path.
+In `chat_completions` (starts at line 610), the function currently checks
+`_openai_client is None` then branches on `is_streaming`. The dispatch must happen
+*before* the streaming check, because a remote `stream=True` request should return 400
+(from the remote client), not enter the local streaming path.
 
 Find the current handler (lines 610-667):
 
@@ -1629,7 +1765,9 @@ async def chat_completions(
     ...
 ```
 
-Replace the body from the `_openai_client is None` check onward with dispatch logic. Insert the dispatch between the session-key dependency (already resolved) and the existing streaming logic:
+Replace the body from the `_openai_client is None` check onward with dispatch logic.
+Insert the dispatch between the session-key dependency (already resolved) and the
+existing streaming logic:
 
 ```python
 async def chat_completions(
@@ -1693,21 +1831,35 @@ async def chat_completions(
             # ... (rest of the existing streaming logic unchanged)
 ```
 
-The key insertion is the `model-prefix dispatch` block between the `_openai_client is None` check and the `is_streaming = request.get("stream") is True` line. Everything after `is_streaming` stays exactly as it is today.
+The key insertion is the `model-prefix dispatch` block between the
+`_openai_client is None` check and the `is_streaming = request.get("stream") is True`
+line. Everything after `is_streaming` stays exactly as it is today.
 
 - [ ] **Step 6: Run the routing tests**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRoutingDispatch -x -q 2>&1 | tail -25`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestRoutingDispatch -x -q 2>&1 | tail -25`
 
-Expected: PASS (6 tests — spec tests 1-6). Spec test 7 (`chat_template_type="concat"` + remote → 400) is covered by the remote client unit tests in Task 4 (the `chat_template_type != "hf"` check in step 1 of `create_completion`).
+Expected: PASS (6 tests — spec tests 1-6). Spec test 7 (`chat_template_type="concat"` +
+remote → 400) is covered by the remote client unit tests in Task 4 (the
+`chat_template_type != "hf"` check in step 1 of `create_completion`).
 
-If `test_remote_prefix_calls_remote_client` fails with a 500 "Remote rollout client not initialized", the `_remote_client` global is None because `_setup_openai_client` was never called in the test — but the `_routing_env` fixture monkeypatches `srv._remote_client` directly, so this should not happen. Check that the fixture runs before the test body.
+If `test_remote_prefix_calls_remote_client` fails with a 500 "Remote rollout client not
+initialized", the `_remote_client` global is None because `_setup_openai_client` was
+never called in the test — but the `_routing_env` fixture monkeypatches
+`srv._remote_client` directly, so this should not happen. Check that the fixture runs
+before the test body.
 
 - [ ] **Step 7: Run the existing streaming tests to confirm no regression**
 
-Run: `uv run pytest tests/experimental/openai/test_streaming_chat_completions.py -x -q 2>&1 | tail -15`
+Run:
+`uv run pytest tests/experimental/openai/test_streaming_chat_completions.py -x -q 2>&1 | tail -15`
 
-Expected: PASS. The local path is unchanged; only a dispatch block was added before it. If a streaming test fails, the dispatch block is interfering — check that `model` is `"default"` or absent in those tests (the existing tests don't set `model`, so `request.get("model", "default")` returns `"default"` and skips both the `remote:` and the 404 branches).
+Expected: PASS. The local path is unchanged; only a dispatch block was added before it.
+If a streaming test fails, the dispatch block is interfering — check that `model` is
+`"default"` or absent in those tests (the existing tests don't set `model`, so
+`request.get("model", "default")` returns `"default"` and skips both the `remote:` and
+the 404 branches).
 
 - [ ] **Step 8: Commit**
 
@@ -1729,13 +1881,17 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Task 6: End-to-end cache/export tests and documentation example
 
-**Why:** The routing and unit tests prove the pieces work in isolation. These tests prove the full stack — that a remote completion flows through the proxy, lands in the session cache, is reward-addressable by completion ID, and exports as tensor data. The documentation example (spec test 23) locks in the user-facing contract.
+**Why:** The routing and unit tests prove the pieces work in isolation. These tests
+prove the full stack — that a remote completion flows through the proxy, lands in the
+session cache, is reward-addressable by completion ID, and exports as tensor data. The
+documentation example (spec test 23) locks in the user-facing contract.
 
 **Files:**
+
 - Test: `tests/experimental/openai/test_remote_rollout.py` (append)
 
 - [ ] **Step 1: Write the end-to-end cache/export tests (spec tests 15-17)**
@@ -1943,27 +2099,41 @@ class TestDocumentationExample:
 
 - [ ] **Step 2: Run the end-to-end tests**
 
-Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEndToEndCacheExport tests/experimental/openai/test_remote_rollout.py::TestDocumentationExample -x -q 2>&1 | tail -25`
+Run:
+`uv run pytest tests/experimental/openai/test_remote_rollout.py::TestEndToEndCacheExport tests/experimental/openai/test_remote_rollout.py::TestDocumentationExample -x -q 2>&1 | tail -25`
 
-Expected: PASS (4 tests). These need a real tokenizer (the `_e2e_env` fixture uses `real_tokenizer`), so they may be slow on first run due to tokenizer download.
+Expected: PASS (4 tests). These need a real tokenizer (the `_e2e_env` fixture uses
+`real_tokenizer`), so they may be slow on first run due to tokenizer download.
 
-If `test_export_returns_tensor_data` fails on the `interaction.has_tensor_data` check (export returns the string-only `concat_string_interactions` form instead of `tensor_dict`), the `model_response` was not set on the interaction — check that step 9 in `create_completion` assigns `interaction.model_response = model_response` before returning.
+If `test_export_returns_tensor_data` fails on the `interaction.has_tensor_data` check
+(export returns the string-only `concat_string_interactions` form instead of
+`tensor_dict`), the `model_response` was not set on the interaction — check that step 9
+in `create_completion` assigns `interaction.model_response = model_response` before
+returning.
 
 - [ ] **Step 3: Run the full test file**
 
 Run: `uv run pytest tests/experimental/openai/test_remote_rollout.py -q 2>&1 | tail -25`
 
-Expected: All tests pass (23 tests total: 3 config-warning + 6 finish-reason + 2 recompute-gate + 1 happy-path + 5 failure + 6 routing + 3 e2e + 1 docs — note some counts differ from the spec because the finish-reason mapper is split into 6 sub-tests and the recompute gate is 2).
+Expected: All tests pass (23 tests total: 3 config-warning + 6 finish-reason + 2
+recompute-gate + 1 happy-path + 5 failure + 6 routing + 3 e2e + 1 docs — note some
+counts differ from the spec because the finish-reason mapper is split into 6 sub-tests
+and the recompute gate is 2).
 
 - [ ] **Step 4: Run ruff on the new and modified files**
 
-Run: `uv run ruff check areal/experimental/openai/_prompt_utils.py areal/experimental/openai/proxy/remote_rollout.py areal/experimental/openai/proxy/proxy_rollout_server.py areal/api/cli_args.py tests/experimental/openai/test_remote_rollout.py 2>&1 | tail -20`
+Run:
+`uv run ruff check areal/experimental/openai/_prompt_utils.py areal/experimental/openai/proxy/remote_rollout.py areal/experimental/openai/proxy/proxy_rollout_server.py areal/api/cli_args.py tests/experimental/openai/test_remote_rollout.py 2>&1 | tail -20`
 
-Expected: No errors. If ruff flags unused imports (e.g. `Iterable`/`Mapping` in `_prompt_utils.py` are used; `re` is used), remove them. If it flags the `HTTPException` import at the bottom of the test file (the `# noqa: E402` comment suppresses the late-import warning), keep the noqa.
+Expected: No errors. If ruff flags unused imports (e.g. `Iterable`/`Mapping` in
+`_prompt_utils.py` are used; `re` is used), remove them. If it flags the `HTTPException`
+import at the bottom of the test file (the `# noqa: E402` comment suppresses the
+late-import warning), keep the noqa.
 
 - [ ] **Step 5: Run ruff format**
 
-Run: `uv run ruff format areal/experimental/openai/_prompt_utils.py areal/experimental/openai/proxy/remote_rollout.py areal/experimental/openai/proxy/proxy_rollout_server.py areal/api/cli_args.py tests/experimental/openai/test_remote_rollout.py 2>&1 | tail -10`
+Run:
+`uv run ruff format areal/experimental/openai/_prompt_utils.py areal/experimental/openai/proxy/remote_rollout.py areal/experimental/openai/proxy/proxy_rollout_server.py areal/api/cli_args.py tests/experimental/openai/test_remote_rollout.py 2>&1 | tail -10`
 
 Expected: Files formatted. Re-run the test suite if formatting changed anything.
 
@@ -1987,39 +2157,61 @@ EOF
 )"
 ```
 
----
+______________________________________________________________________
 
 ## Self-Review Checklist
 
 After all tasks are complete, verify:
 
 - [ ] **Spec coverage:** Every section of the spec maps to a task.
+
   - Routing (spec §Routing) → Task 5
-  - Per-Request Lifecycle (spec §Implementation Approach > Per-Request Lifecycle) → Task 4
+  - Per-Request Lifecycle (spec §Implementation Approach > Per-Request Lifecycle) → Task
+    4
   - Cleanup Contract → Task 4 (try/except in `create_completion`)
-  - Recompute Validation 3 layers → Task 2 (layer 1: config warning) + Task 3/4 (layer 2: first-request gate) + layer 3 "no proxy-startup check" is implicit (no task needed)
-  - Tokenization And Tensor Semantics → Task 4 (EOS append, `[-1]` versions, `[0.0]` logprobs)
+  - Recompute Validation 3 layers → Task 2 (layer 1: config warning) + Task 3/4 (layer
+    2: first-request gate) + layer 3 "no proxy-startup check" is implicit (no task
+    needed)
+  - Tokenization And Tensor Semantics → Task 4 (EOS append, `[-1]` versions, `[0.0]`
+    logprobs)
   - Error Handling → Task 3 (`_call_openrouter` 502/504) + Task 4 (cleanup on failure)
-  - Security And Privacy → Task 3 (docstring on `RemoteRolloutClient`, log message on client construction)
+  - Security And Privacy → Task 3 (docstring on `RemoteRolloutClient`, log message on
+    client construction)
   - Testing Plan (23 tests) → Tasks 2, 3, 4, 5, 6
-  - Resolved Implementation Questions 1-3 → Task 3 (mapper), Task 4 (gate, ID preservation)
+  - Resolved Implementation Questions 1-3 → Task 3 (mapper), Task 4 (gate, ID
+    preservation)
 
-- [ ] **No placeholders:** Search the plan for "TBD", "TODO", "implement later", "fill in" — none should remain.
+- [ ] **No placeholders:** Search the plan for "TBD", "TODO", "implement later", "fill
+  in" — none should remain.
 
-- [ ] **Type consistency:** `RemoteRolloutClient.__init__` signature is `(tokenizer, chat_template_type, engine_max_tokens=None, recompute_enabled=False)` in Task 3 and Task 5 — match. `_map_finish_reason(finish_reason: str | None) -> str` in Task 3 — match. `_call_openrouter(provider_model, forwarded)` in Task 3 and Task 4 — match. `_recompute_verified` attribute name in Task 3, Task 4, and tests — match.
+- [ ] **Type consistency:** `RemoteRolloutClient.__init__` signature is
+  `(tokenizer, chat_template_type, engine_max_tokens=None, recompute_enabled=False)` in
+  Task 3 and Task 5 — match. `_map_finish_reason(finish_reason: str | None) -> str` in
+  Task 3 — match. `_call_openrouter(provider_model, forwarded)` in Task 3 and Task 4 —
+  match. `_recompute_verified` attribute name in Task 3, Task 4, and tests — match.
 
-- [ ] **Import paths:** `_prompt_utils` is at `areal.experimental.openai._prompt_utils` (not `areal.experimental.openai.proxy._prompt_utils`) — it's shared by `client.py` (which is in the parent package) and `remote_rollout.py` (in the proxy subpackage). Verify the import in `client.py` (Task 1 step 2) uses `from areal.experimental.openai._prompt_utils import ...`.
+- [ ] **Import paths:** `_prompt_utils` is at `areal.experimental.openai._prompt_utils`
+  (not `areal.experimental.openai.proxy._prompt_utils`) — it's shared by `client.py`
+  (which is in the parent package) and `remote_rollout.py` (in the proxy subpackage).
+  Verify the import in `client.py` (Task 1 step 2) uses
+  `from areal.experimental.openai._prompt_utils import ...`.
 
-- [ ] **Class name:** The spec says `ActorConfig` but the actual class is `PPOActorConfig` (areal/api/cli_args.py:1388). All tasks and tests use `PPOActorConfig`.
+- [ ] **Class name:** The spec says `ActorConfig` but the actual class is
+  `PPOActorConfig` (areal/api/cli_args.py:1388). All tasks and tests use
+  `PPOActorConfig`.
 
----
+______________________________________________________________________
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-06-29-openrouter-remote-rollout-proxy.md`. Two execution options:
+Plan complete and saved to
+`docs/superpowers/plans/2026-06-29-openrouter-remote-rollout-proxy.md`. Two execution
+options:
 
-**1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration.
+**1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review
+between tasks, fast iteration.
 
-**2. Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints.
+**2. Inline Execution** — Execute tasks in this session using executing-plans, batch
+execution with checkpoints.
 
 Which approach?

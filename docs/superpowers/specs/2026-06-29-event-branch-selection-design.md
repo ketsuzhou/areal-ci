@@ -1,8 +1,7 @@
 # Event Branch-Point Selection — Design
 
-Date: 2026-06-29
-Status: Approved (design); implementation pending
-Area: `customized_areal/tree_search/agents/`
+Date: 2026-06-29 Status: Approved (design); implementation pending Area:
+`customized_areal/tree_search/agents/`
 
 ## 1. Summary
 
@@ -13,12 +12,13 @@ gate** followed by **max-entropy ranking** — onto the `Event`/DAG representati
 emits **one branch point per `task_id` lane** as `(task_id, seq)` pairs that are
 directly consumable by `event_codec.replay_prefix_for`.
 
-This is a **selection policy only**: no new generation, scoring, or rollout. It does
-not replace the existing token-level `Node`-based selector; it coexists with it.
+This is a **selection policy only**: no new generation, scoring, or rollout. It does not
+replace the existing token-level `Node`-based selector; it coexists with it.
 
 ## 2. Goals / Non-Goals
 
 ### Goals
+
 - A new module `agents/branch_selection.py`, torch-free and I/O-free, consuming an
   `Event` log and returning `list[BranchPoint]`.
 - Faithfully reproduce the existing selection criterion (TD-error gate + entropy
@@ -27,24 +27,25 @@ not replace the existing token-level `Node`-based selector; it coexists with it.
 - Small, independently-testable pure functions (matching the `agents/` package style).
 
 ### Non-Goals
+
 - No new branch generation, scoring, or MCTS expansion (selection only).
-- No modification to `core/customized_grouped_workflow.py::select_branch_candidate`
-  or `core/tree_store.py` (left untouched).
+- No modification to `core/customized_grouped_workflow.py::select_branch_candidate` or
+  `core/tree_store.py` (left untouched).
 - **Wiring `select_branch_points` into the live workflow is an explicitly-flagged
-  follow-up, out of scope for this spec.** This spec delivers the torch-free
-  selection layer and its tests only.
+  follow-up, out of scope for this spec.** This spec delivers the torch-free selection
+  layer and its tests only.
 - No config schema changes (the function takes raw floats, like `gae.py`).
 
 ## 3. Locked Decisions
 
-| # | Decision |
-|---|----------|
-| Q1 | Branch-point **selection** policy only (no generation/scoring). |
-| Q2 | Port the existing criterion **as-is**: critic TD-error gate `|r_t + γ·v(s_{t+1}) − v(s_t)| ≥ td_threshold`, survivors ranked by max entropy. |
-| Q3 | **One branch point per `task_id`** (lane). |
-| Q4 | **Coexist**: new function in `agents/`; leave `Node`-based `select_branch_candidate` untouched; live-workflow wiring is a separate follow-up. |
-| Q5 | Field mapping confirmed (see §6). |
-| Structure | **Approach 2**: composable pure functions + orchestrator. |
+| #         | Decision                                                                                                                                      |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1        | Branch-point **selection** policy only (no generation/scoring).                                                                               |
+| Q2        | Port the existing criterion **as-is**: critic TD-error gate \`                                                                                |
+| Q3        | **One branch point per `task_id`** (lane).                                                                                                    |
+| Q4        | **Coexist**: new function in `agents/`; leave `Node`-based `select_branch_candidate` untouched; live-workflow wiring is a separate follow-up. |
+| Q5        | Field mapping confirmed (see §6).                                                                                                             |
+| Structure | **Approach 2**: composable pure functions + orchestrator.                                                                                     |
 
 ## 4. Architecture & Placement
 
@@ -64,8 +65,9 @@ Event log ──> branch_selection.select_branch_points(events, td_threshold, ga
    event_codec.replay_prefix_for(events, branch_point=(task_id, seq)) ──> ReplayPrefix
 ```
 
-New exports added to `agents/__init__.py` (`BranchPoint`, `select_branch_points`, and the
-three helpers). The `agents/__init__.py` must stay torch-free, which this module preserves.
+New exports added to `agents/__init__.py` (`BranchPoint`, `select_branch_points`, and
+the three helpers). The `agents/__init__.py` must stay torch-free, which this module
+preserves.
 
 ## 5. Public API & Data Types
 
@@ -106,23 +108,24 @@ def select_branch_points(
 ```
 
 API decisions:
+
 - `select_branch_points` is the only entry point most callers need; the three helpers
   are exported for unit testing and reuse (mirrors how `gae.py` exposes both
   `compute_global_gae` and `events_from_nodes`).
 - Returns a **list**, one `BranchPoint` per `task_id` that has at least one surviving
   candidate. Lanes with no eligible/surviving events contribute nothing.
 - `gamma` defaults to `1.0`, `td_threshold` to `0.0` — matching
-  `select_branch_candidate`, so `td_threshold=0.0` reproduces pure entropy selection
-  per lane.
+  `select_branch_candidate`, so `td_threshold=0.0` reproduces pure entropy selection per
+  lane.
 
 ## 6. Field Mapping (Event ← old Node)
 
-| Concept | Old (`Node`) | New (`Event`) |
-|---------|--------------|---------------|
-| Candidate eligibility | `need_branch and task_id and branch_sandbox_id` | `branch_seq is not None`; emit `(event.task_id, event.branch_seq)` |
-| TD successor `v(s_{t+1})` | same `episode_id`, `turn_idx + 1` | in-lane **DAG child within the same `task_id` lane** (terminal: `r_t = outcome_reward`, `v_next = 0`) |
-| Critic value `v(s_t)` | `tree_store`/`Node.value` | `Event.value` (missing → bypass gate, entropy-only fallback) |
-| Entropy ranking key | `entropy_stats["max_entropy"]` | `Event.metadata["max_entropy"]` (codec copies `node.metadata`) |
+| Concept                   | Old (`Node`)                                    | New (`Event`)                                                                                         |
+| ------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Candidate eligibility     | `need_branch and task_id and branch_sandbox_id` | `branch_seq is not None`; emit `(event.task_id, event.branch_seq)`                                    |
+| TD successor `v(s_{t+1})` | same `episode_id`, `turn_idx + 1`               | in-lane **DAG child within the same `task_id` lane** (terminal: `r_t = outcome_reward`, `v_next = 0`) |
+| Critic value `v(s_t)`     | `tree_store`/`Node.value`                       | `Event.value` (missing → bypass gate, entropy-only fallback)                                          |
+| Entropy ranking key       | `entropy_stats["max_entropy"]`                  | `Event.metadata["max_entropy"]` (codec copies `node.metadata`)                                        |
 
 ## 7. Algorithm
 
@@ -133,29 +136,29 @@ API decisions:
    edges to the child whose `task_id` equals the parent's. If a node has multiple
    in-lane children (unusual for a sequential lane), pick the one with the smallest
    `completion_index` for determinism. Yields `lane_children: dict[node_id -> Event]`.
-2. **Filter eligible candidates.** Keep events where `branch_seq is not None`. Group by
+1. **Filter eligible candidates.** Keep events where `branch_seq is not None`. Group by
    `task_id`.
-3. **Per lane, gate each candidate:**
+1. **Per lane, gate each candidate:**
    - `r_t, v_next = lane_successor_value(event, lane_children)`
-   - `delta = td_error(event, r_t, v_next, gamma=gamma)` (`None` if `event.value is None`)
+   - `delta = td_error(event, r_t, v_next, gamma=gamma)` (`None` if
+     `event.value is None`)
    - keep if `passes_gate(delta, td_threshold=td_threshold)`.
-4. **Rank survivors.** Within each lane, pick the survivor with the highest
-   `Event.metadata.get("max_entropy", 0.0)`. Ties broken by smallest
-   `completion_index` (deterministic).
-5. **Emit.** One `BranchPoint` per lane with a survivor, list sorted by `task_id`.
+1. **Rank survivors.** Within each lane, pick the survivor with the highest
+   `Event.metadata.get("max_entropy", 0.0)`. Ties broken by smallest `completion_index`
+   (deterministic).
+1. **Emit.** One `BranchPoint` per lane with a survivor, list sorted by `task_id`.
 
 This is a faithful port: step 3 mirrors `select_branch_candidate`'s
 `delta = abs(r_t + gamma*v_next - v_t)` gate and "missing value bypasses gate"; step 4
-mirrors `max(candidates, key=_max_entropy)`. The only semantic shifts are
-**lane = `task_id` over DAG edges** (instead of `episode_id` + `turn_idx+1`) and
-**multiple outputs (one per lane)** (instead of one global winner) — both per the
-locked decisions.
+mirrors `max(candidates, key=_max_entropy)`. The only semantic shifts are **lane =
+`task_id` over DAG edges** (instead of `episode_id` + `turn_idx+1`) and **multiple
+outputs (one per lane)** (instead of one global winner) — both per the locked decisions.
 
 ### Value-convention note
 
 In `gae.py`, `Event.value` is documented as `V_{t+1}` (value *after* the turn).
-`select_branch_candidate` treats the node's own value as `v(s_t)` and the successor's
-as `v(s_{t+1})`. This design **preserves that same relative usage** — `event.value` as
+`select_branch_candidate` treats the node's own value as `v(s_t)` and the successor's as
+`v(s_{t+1})`. This design **preserves that same relative usage** — `event.value` as
 `v(s_t)`, in-lane child's value as `v_next` — so the TD-error has identical shape to
 today's. We deliberately keep the existing convention rather than re-deriving from the
 GAE indexing; this is a conscious, behavior-preserving choice.
@@ -168,12 +171,12 @@ GAE indexing; this is a conscious, behavior-preserving choice.
   nothing (mirrors `select_branch_candidate` returning `None`); other lanes still emit.
 - **Missing `Event.value`** (`None`) → `td_error` returns `None` → gate **bypassed**,
   candidate kept (entropy-only fallback), as today.
-- **Missing `metadata["max_entropy"]`** → treated as `0.0` for ranking; if all
-  survivors in a lane tie at `0.0`, the `completion_index` tiebreak decides.
+- **Missing `metadata["max_entropy"]`** → treated as `0.0` for ranking; if all survivors
+  in a lane tie at `0.0`, the `completion_index` tiebreak decides.
 - **Terminal candidate** (no in-lane child) → `r_t = outcome_reward`, `v_next = 0.0`.
-- **Malformed DAG** (asymmetric edges, non-dense `completion_index`, etc.) → surfaced
-  by `events_to_dag`, which raises `DAGError`. `branch_selection` does not re-validate;
-  it lets `DAGError` propagate (single source of validation = the codec).
+- **Malformed DAG** (asymmetric edges, non-dense `completion_index`, etc.) → surfaced by
+  `events_to_dag`, which raises `DAGError`. `branch_selection` does not re-validate; it
+  lets `DAGError` propagate (single source of validation = the codec).
 - **Negative `gamma`/`td_threshold`** → not validated here (these come from the
   validated `Config`); `branch_selection` stays a pure leaf function with no config
   coupling, matching `gae.py`.
@@ -183,10 +186,11 @@ No mutation of input events; no I/O; deterministic output for identical input.
 ## 9. Testing
 
 Strict TDD (failing tests first). Torch-free; run via `.venv-test/bin/python -m pytest`;
-lint with the project ruff. New file `tests/test_branch_selection.py` (alongside
-the tests, matching where `test_gae.py` lives).
+lint with the project ruff. New file `tests/test_branch_selection.py` (alongside the
+tests, matching where `test_gae.py` lives).
 
 **Helper-level (unit):**
+
 - `lane_successor_value`: in-lane child → `(0.0, child.value)`; terminal →
   `(outcome_reward, 0.0)`; child with `value=None` → `v_next=0.0`.
 - `td_error`: known `|δ|` arithmetic; `value=None` → `None`.
@@ -194,6 +198,7 @@ the tests, matching where `test_gae.py` lives).
   `delta ≥ threshold` boundary (inclusive); below → False.
 
 **Orchestrator-level (ported from `test_branch_td_gate.py`):**
+
 - `td_threshold=0.0` reproduces entropy-only: highest `max_entropy` per lane wins.
 - No value → entropy-only fallback kept.
 - Sub-threshold candidate dropped; lower-entropy-but-higher-δ candidate chosen.
@@ -203,6 +208,7 @@ the tests, matching where `test_gae.py` lives).
 - Missing critic value bypasses gate.
 
 **Lane / multi-output (new):**
+
 - Two `task_id` lanes → exactly two `BranchPoint`s, each the in-lane winner.
 - Emitted `(task_id, seq)` round-trips through `replay_prefix_for` without `DAGError`
   (integration guard — proves output is materializer-ready).
@@ -210,8 +216,8 @@ the tests, matching where `test_gae.py` lives).
 - Empty log and no-eligible-events → `[]`.
 - Malformed log → `DAGError` propagates from `events_to_dag`.
 
-Coverage target: every helper branch and every orchestrator edge case in §8. No GPU,
-no skips needed (fully torch-free).
+Coverage target: every helper branch and every orchestrator edge case in §8. No GPU, no
+skips needed (fully torch-free).
 
 ## 10. Follow-ups (out of scope)
 

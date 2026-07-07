@@ -7,7 +7,8 @@
 
 Generated-by: comet-handoff.sh
 
-OpenSpec remains the canonical capability spec. This handoff is a deterministic, source-traceable context pack, not an agent-authored summary.
+OpenSpec remains the canonical capability spec. This handoff is a deterministic,
+source-traceable context pack, not an agent-authored summary.
 
 ## openspec/changes/sub-project-e-critic-reward-entropy-env/proposal.md
 
@@ -103,7 +104,7 @@ attributable to environments.
 - Lines: 1-141
 - SHA256: 808112c7efa5f78a0da9b6d0cde67a069e55643e9106ccecb41a29b3c2abe6cc
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 # Sub-project E — critic-driven reward + entropy + env_id (design)
@@ -196,7 +197,7 @@ Full source: openspec/changes/sub-project-e-critic-reward-entropy-env/design.md
 - Lines: 1-233
 - SHA256: 473d6c94733e84d7018de115b6fbc4cbfabf0e52c6064888ad3919fcfd9e5d75
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 # Tasks — sub-project-e-critic-reward-entropy-env
@@ -285,11 +286,12 @@ Full source: openspec/changes/sub-project-e-critic-reward-entropy-env/tasks.md
 
 ## openspec/changes/sub-project-e-critic-reward-entropy-env/specs/critic-driven-training-signal/spec.md
 
-- Source: openspec/changes/sub-project-e-critic-reward-entropy-env/specs/critic-driven-training-signal/spec.md
+- Source:
+  openspec/changes/sub-project-e-critic-reward-entropy-env/specs/critic-driven-training-signal/spec.md
 - Lines: 1-138
 - SHA256: 7b4f814afe3af40fca7661fae1cd7a13aacd8fe0003b7eb6b043fce452a319e7
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 ## ADDED Requirements
@@ -374,5 +376,5 @@ attribution.
   empty)
 ```
 
-Full source: openspec/changes/sub-project-e-critic-reward-entropy-env/specs/critic-driven-training-signal/spec.md
-
+Full source:
+openspec/changes/sub-project-e-critic-reward-entropy-env/specs/critic-driven-training-signal/spec.md
