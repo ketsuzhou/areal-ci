@@ -85,7 +85,8 @@ provider config), docs.
 (append "Task N: complete (commits <base7>..<head7>, review clean)" as tasks
 finish)
 
-T7: _(dispatched from prior SDD; pending close-out under this OpenSpec change)_
+T7: complete (multica main fb40610c7..86c3c28ec..61ed426fd, review CLEAN; 7/7 MaybeClose tests pass, build clean)
+  Shared maybeCloseTrainingSession(ctx, deps, task, projectID) called from CompleteTask/FailTask/CancelTaskWithResult; arealSessionCloser interface (SetReward+EndSession) added; TrainingSessionDeps gains Closer field; extractArealProxyConfig safely parses task.Context JSONB; default_reward from training_dispatch with fallback to trainingDefaultReward=1.0 (T8 makes configurable); SetReward error → still calls EndSession (best-effort); RL errors logged via slog.Warn, never fatal. Doc note added: runtime_sweeper.FailStaleTasks bypasses FailTask (raw SQL), so stale tasks won't auto-close — reaper is future hardening.
 T8: pending
 T9: pending
 
