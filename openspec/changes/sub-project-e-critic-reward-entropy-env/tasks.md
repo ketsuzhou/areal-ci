@@ -122,16 +122,16 @@ tests.
 **Files**: `internal/service/task.go` (new `maybeSpawnCriticTask`),
 tests.
 
-- [ ] Failing tests: trained task terminal + `critic_agent_id` set +
+- [x] Failing tests: trained task terminal + `critic_agent_id` set +
   session open → critic task created with trained agent's output as input;
   trained session NOT closed. Trained task terminal + no critic → no spawn
   (D's behavior). Idempotent (don't spawn twice).
-- [ ] Implement: `maybeSpawnCriticTask` called from the same chokepoints as
+- [x] Implement: `maybeSpawnCriticTask` called from the same chokepoints as
   D's close hook (but BEFORE the close — the close is deferred to
   critic-terminal). Link the critic task to the trained session (T1/1b
   decides the linkage mechanism).
-- [ ] Run: `go test ./internal/service/ -run 'CriticSpawn|TrainingClose'`.
-- [ ] Commit: `feat(training): auto-spawn critic task on trained-task terminal`.
+- [x] Run: `go test ./internal/service/ -run 'CriticSpawn|TrainingClose'`.
+- [x] Commit: `feat(training): auto-spawn critic task on trained-task terminal`.
 
 ### Task 8: Deferred close hook on critic-terminal (TDD, multica)
 
@@ -220,7 +220,7 @@ T3: complete (multica `9e3fa6f0b` — migration 153 + training_dispatch.critic_a
 T4: complete (areal `4fb458ea` — env_id on StartSessionRequest)
 T5: complete (multica `eeac55e62` + `343215231` — arealrl Go client + env_id)
 T6: complete (multica `fb40610c7` — session-open hook passes env_id)
-T7: pending (D-blocked — now unblocked)
+T7: complete (multica `0b68f606d..f43a9ab66` + `b77577bfa` review-fix; spec ✅, code quality Approved. maybeSpawnCriticTask + RouteTerminalTrainingTask + FindCriticTaskForTrained/CreateCriticTask queries; 4 new tests + 8 existing close tests pass. Minor findings: dead MaybeCloseTrainingSession public method kept for T8/T10; brief test-regex was wrong (SpawnCritic not CriticSpawn).)
 T8: pending (D-blocked — now unblocked)
 T9: complete (areal `277d6f7b` — logprobs capture in proxy)
 T10: pending (D-blocked — now unblocked)
