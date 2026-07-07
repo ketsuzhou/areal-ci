@@ -1,14 +1,14 @@
 workflow: full
-phase: build
+phase: verify
 build_mode: subagent-driven-development
 build_pause: null
 isolation: branch
-verify_mode: null
+verify_mode: full
 base_ref: b48c9ab222428efb022fc772e0526cefc055e9aa
 design_doc: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
 plan: docs/superpowers/plans/2026-07-06-training-agent-session-lifecycle.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-07-07-sub-project-d-session-lifecycle-verify.md
 branch_status: pending
 created_at: 2026-07-06
 verified_at: null
