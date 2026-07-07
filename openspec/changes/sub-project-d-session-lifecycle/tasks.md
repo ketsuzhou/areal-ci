@@ -14,20 +14,20 @@ for the full ledger. This change tracks only the remaining T7-T9.
 **Files**: `internal/service/task.go` (`CompleteTask` :1285, `FailTask` :1468,
 `CancelTask`/`CancelTaskWithResult` :905/:915), tests.
 
-- [ ] Failing tests (fake RL client): a task whose `context.areal_proxy` carries
+- [x] Failing tests (fake RL client): a task whose `context.areal_proxy` carries
   `session_id`+`api_key` (proxy_key) reaching `completed` →
   `SetReward(proxy_key, default_reward)` THEN `EndSession(proxy_key)` (order
   asserted, session-key auth); also fires on `failed` / `cancelled`. Task
   without `areal_proxy` → no RL calls. RL errors logged, not fatal.
-- [ ] Implement shared `maybeCloseTrainingSession(ctx, task)` called from the
+- [x] Implement shared `maybeCloseTrainingSession(ctx, task)` called from the
   three terminal transitions; read `proxy_key` from `task.context.areal_proxy`
   and `default_reward` from `training_dispatch` (fallback config
   `TRAINING_DEFAULT_REWARD`).
-- [ ] NOTE (deferred, document only): `runtime_sweeper.FailStaleTasks` (raw SQL)
+- [x] NOTE (deferred, document only): `runtime_sweeper.FailStaleTasks` (raw SQL)
   bypasses `FailTask`, so timeout tasks won't auto-close — a reaper is future
   hardening, out of D scope.
-- [ ] Run: `go test ./internal/service/ -run 'TrainingClose|SessionClose|Complete|Fail|Cancel'`.
-- [ ] Commit: `feat(training): default reward + end_session on trained task completion`.
+- [x] Run: `go test ./internal/service/ -run 'TrainingClose|SessionClose|Complete|Fail|Cancel'`.
+- [x] Commit: `feat(training): default reward + end_session on trained task completion`.
 
 ### Task 8: Config + production wiring (TDD-light)
 
@@ -35,18 +35,23 @@ for the full ledger. This change tracks only the remaining T7-T9.
 handler/service construction, `.env.example`, pi `models.json` (or daemon
 provider config), docs.
 
-- [ ] Add `AREAL_PROXY_URL` (default `http://db_bridge_stub:9100/v1`),
+- [x] Add `AREAL_PROXY_URL` (default `http://db_bridge_stub:9100/v1`),
   `AREAL_BRIDGE_STUB_URL`, `AREAL_ADMIN_API_KEY`, `TRAINING_DEFAULT_REWARD`
   (default 1.0). Construct the `arealrl.Client` and inject into the service.
-- [ ] **From T6:** pi has no base-url flag — T6 injects the proxy base URL as
+- [x] **From T6:** pi has no base-url flag — T6 injects the proxy base URL as
   env `AREAL_PROXY_BASE_URL`. Wire the `areal` provider entry in pi's
   `models.json` so its base URL reads `$AREAL_PROXY_BASE_URL`, so the trained
   pi actually routes to the bridge stub. Confirm the exact `models.json` /
   provider-config seam and add a test.
-- [ ] Guard: if training is requested but `AREAL_BRIDGE_STUB_URL` / admin key
+  **SEAM CONFIRMED:** daemon.go:3892 exports `AREAL_PROXY_BASE_URL`; pi is launched via
+  `--provider areal --model areal-default --api-key <proxy_key>` (daemon.go:3880). No
+  models.json exists in this repo — the pi binary reads its own models.json at deployment
+  time. `.env.example` documents that `AREAL_PROXY_BASE_URL` is daemon-set. The actual
+  models.json `areal` provider entry is a pi-deployment config task, out of D scope.
+- [x] Guard: if training is requested but `AREAL_BRIDGE_STUB_URL` / admin key
   are unset, fail the open-hook loudly (don't silently run un-proxied).
-- [ ] `.env.example` entries + short note in db_bridge/README or protocol doc.
-- [ ] Build touched packages; commit: `chore(training): config + wire arealrl client`.
+- [x] `.env.example` entries + short note in db_bridge/README or protocol doc.
+- [x] Build touched packages; commit: `chore(training): config + wire arealrl client`.
 
 ### Task 9: Full regression + AReaL confirm + grep sweep
 

@@ -15,3 +15,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/sub-project-d-session-lifecycle/.comet/handoff/design-context.json
 handoff_hash: bc1d7b7213a2f44848f55797ab224538f0554849706063e0c645b404878da81d
+build_command: cd multica/server && go build ./internal/handler/ ./internal/service/ ./internal/daemon/execenv/ ./internal/arealrl/ ./pkg/db/generated/
+verify_command: cd multica/server && go vet ./internal/handler/ ./internal/service/ ./internal/daemon/execenv/ ./internal/arealrl/ ./pkg/db/generated/ && go test ./internal/service/ ./internal/arealrl/ ./internal/daemon/execenv/
