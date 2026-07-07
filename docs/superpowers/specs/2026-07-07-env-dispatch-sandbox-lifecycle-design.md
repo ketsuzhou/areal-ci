@@ -42,6 +42,16 @@ Env-dispatch accepts optional per-agent environment specs. Specified squad membe
 
 Validation must reject unknown agents, agents outside the workspace or squad, and unknown or unauthorized env specs before creating partial rollout state. Empty per-agent env fields preserve current env-dispatch behavior.
 
+## Sandbox Backend Bridge
+
+Env-dispatch today creates rollout sandboxes through the cloud-runtime/Fleet proxy, producing opaque sandbox ids. That path has no pause/resume, so it cannot back checkpoint save/resume. The sandbox node gateway (`sandbox_instance` + sandboxd jobs, Cube pause/resume) is a separate system with the lifecycle semantics checkpointing needs.
+
+To connect them, env-dispatch gains a sandbox_instance creation path through the env sandbox lifecycle service. The lifecycle service exposes a `Create` operation that mirrors the existing `CreateSandboxInstance` handler: insert a `sandbox_instance` row, enqueue the `create` sandboxd job, and notify the owning node. Rollouts that are save/resume-capable (trained rollouts, or any dispatch that requests checkpointing) create sandbox_instances through this path and populate structured `SandboxInstanceRef`s on the rollout and env. The existing Fleet fork/boot path stays for non-checkpointed rollouts with unchanged behavior.
+
+Scratch (sandbox_instance-backed) creates fresh sandbox_instances from the requested template or base env, one per agent or per per-agent env spec. Branch (sandbox_instance-backed) creates fresh sandboxInstances from the source env's template rather than a live fork; the Multica DB subtree (issues, chat sessions, messages) is still copied by the existing `CopyProjectSubtree`, so the child continues the copied conversation in a fresh sandbox. Live sandbox filesystem state is not carried, which is acceptable because trajectory state lives in Multica's DB.
+
+Checkpoint save/resume only operates on sandbox_instance refs. A checkpoint request against a Fleet-only env returns a typed error. True live-state fork of a sandbox_instance is deferred.
+
 ## Data Flow
 
 1. AReaL or another caller creates an env-dispatch rollout, optionally including per-agent env specs and training intent.

@@ -33,3 +33,12 @@
 
 - User selected: switch to `executing-plans` and continue inline with TDD.
 - Comet state updated: `build_mode=executing-plans`.
+
+## Task 3 Blocker (architectural gap)
+
+- Stage: blocked
+- Finding: env-dispatch rollouts today create sandboxes via the cloud-runtime/Fleet proxy (`ForkSandbox`/`BootSandbox` -> `/api/v1/sandboxes/...`), producing opaque `sandbox_id` strings stored in `environment.sandbox_ids`.
+- The Task 2 lifecycle service (and the checkpoint save/resume design D2/D3) operates on `sandbox_instance` rows + sandboxd `stop`/`resume` jobs from the sandbox node gateway — a DIFFERENT sandbox system that Fleet sandboxes are not part of.
+- Consequence: Task 3's "persist/return structured sandbox-instance refs for rollout environments" cannot be truthfully implemented without first deciding how rollout sandboxes become `sandbox_instance`-backed. Populating `SandboxRefs` from Fleet sandbox ids would be meaningless for pause/resume.
+- Note: Fleet also exposes snapshot/fork routes (`SnapshotCloudRuntimeSandbox`, `ForkCloudRuntimeSandbox`), but the confirmed design (D2) explicitly chose sandbox_instance pause-in-place over Fleet snapshots/forks.
+- Required user decision: see options presented in chat.

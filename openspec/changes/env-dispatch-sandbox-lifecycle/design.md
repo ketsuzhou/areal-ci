@@ -51,6 +51,12 @@ A checkpoint stores sandbox instance refs plus an event reference and an inline 
 
 Env-dispatch accepts optional per-agent environment specs. Specified agents resolve to their own sandbox instance/template; unspecified agents use the existing default/shared behavior. All agents still share the same Multica entity subtree for the rollout.
 
+### D7: Bridge env-dispatch to sandbox_instance for save/resume-capable rollouts
+
+Env-dispatch creates sandbox_instance-backed environments through the env sandbox lifecycle service `Create` operation (mirroring the existing `CreateSandboxInstance` handler) for save/resume-capable rollouts, and populates structured `SandboxInstanceRef`s. The existing Fleet fork/boot path stays for non-checkpointed rollouts. Scratch creates fresh sandbox_instances from a template; branch creates fresh sandbox_instances from the source env's template (not a live fork), relying on the copied Multica DB subtree to carry trajectory state. Checkpoint save/resume only operates on sandbox_instance refs and returns a typed error against Fleet-only envs. True live-state fork of a sandbox_instance is deferred.
+
+Alternative considered: checkpoint via Fleet snapshot/fork. Rejected because the confirmed save semantic (D2) is pause-in-place via sandboxd stop, which Fleet sandboxes do not support.
+
 ## Risks / Trade-offs
 
 - Pause-in-place interrupts the active rollout -> restrict automatic saves to training flows that expect a pause and name APIs as resume, not branch.

@@ -245,9 +245,62 @@ base-ref: 6bffe9f6d31c0d75e81bd0cf86713074d45270e9
 
 ---
 
-### Task 3: Add Structured Sandbox Refs and Per-agent Env Intent to Env-dispatch
+### Task 2b: Add Lifecycle Create Operation
 
-**OpenSpec tasks:** 3.1, 3.2, 3.3, 3.4
+**OpenSpec tasks:** 2.5, 2.6
+
+**Files:**
+- Modify: `multica/server/internal/service/env_sandbox_lifecycle.go`
+- Modify: `multica/server/internal/service/env_sandbox_lifecycle_test.go`
+- Modify: `openspec/changes/env-dispatch-sandbox-lifecycle/tasks.md`
+
+**Interfaces:**
+- Consumes: `EnvSandboxLifecycleDeps` from Task 2.
+- Produces:
+  ```go
+  func (s *EnvSandboxLifecycleService) Create(ctx context.Context, in CreateSandboxInstanceInput, actorUserID string) (SandboxInstanceRef, error)
+
+  type CreateSandboxInstanceInput struct {
+      WorkspaceID string
+      NodeID      string // optional; resolved/auto-selected when empty
+      Template    string
+      Limits      json.RawMessage
+      Runtime     json.RawMessage
+      RuntimeEnv  map[string]string
+  }
+  ```
+- Extends `EnvSandboxLifecycleDeps` with:
+  ```go
+  InsertSandboxInstance(ctx context.Context, in CreateSandboxInstanceInput, actorUserID string) (SandboxInstanceRef, error)
+  ```
+
+- [ ] **Step 1: Write failing lifecycle Create test**
+
+  Add `TestEnvSandboxLifecycleCreateEnqueuesCreateJobAndWakesNode` asserting the deps record an inserted `sandbox_instance` row (status `pending`), a `create` job, and a node wakeup.
+
+- [ ] **Step 2: Run tests and verify red**
+
+  Run: `cd multica/server && go test ./internal/service -run 'TestEnvSandboxLifecycleCreate' -count=1`
+  Expected: compile failure for missing `Create`/`InsertSandboxInstance`.
+
+- [ ] **Step 3: Implement Create**
+
+  `Create` calls `InsertSandboxInstance` to persist a `pending` row, builds create payload (template, limits, runtime, runtime_env), enqueues a `create` job, notifies the node, and returns the ref.
+
+- [ ] **Step 4: Run scoped tests**
+
+  Run: `cd multica/server && go test ./internal/service -run 'TestEnvSandboxLifecycle' -count=1`
+  Expected: PASS.
+
+- [ ] **Step 5: Check off tasks 2.5/2.6 and commit**
+
+  Commit: `feat(sandbox): add env sandbox lifecycle create operation`
+
+---
+
+### Task 3: Add Structured Sandbox Refs, Per-agent Env Intent, and the sandbox_instance Backend Bridge
+
+**OpenSpec tasks:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 
 **Files:**
 - Modify: `multica/server/internal/service/env_dispatch.go`
@@ -324,6 +377,20 @@ base-ref: 6bffe9f6d31c0d75e81bd0cf86713074d45270e9
 
   Ensure reset/dispatch fills `SandboxRefs` and `AgentSandboxRefs` on `EnvRollout`. Extend `maybeOpenTrainingSession` plumbing only if needed so trained task/session context can preserve env id and sandbox refs.
 
+- [ ] **Step 6b: Write failing bridge tests**
+
+  Add tests:
+  ```go
+  func TestEnvDispatchSandboxInstanceScratchCreatesRefs(t *testing.T) {}
+  func TestEnvDispatchSandboxInstanceBranchCreatesFreshFromTemplate(t *testing.T) {}
+  func TestEnvDispatchNonCheckpointedRolloutPreservesFleetPath(t *testing.T) {}
+  ```
+  Assert save/resume-capable rollouts call lifecycle `Create` and populate `SandboxRefs`; branch creates from the source template (no live fork); non-checkpointed rollouts still call `ForkSandbox`/`BootSandbox` and leave `SandboxRefs` empty.
+
+- [ ] **Step 6c: Implement the sandbox_instance creation path**
+
+  In `resetOne`, when the rollout is save/resume-capable (trained rollout via `TrainAgentID`, or an explicit checkpoint flag), create sandbox_instances via the injected `EnvSandboxLifecycleService.Create` instead of `ForkSandbox`. Scratch creates from the requested template; branch creates from the source env's template. Populate `SandboxRefs`/`AgentSandboxRefs`. Non-checkpointed rollouts keep the existing Fleet fork path unchanged.
+
 - [ ] **Step 7: Parse and emit per-agent env fields in handler**
 
   Extend `EnvDispatchRequest` and response mapping in `multica/server/internal/handler/env_dispatch.go` with JSON fields:
@@ -349,13 +416,13 @@ base-ref: 6bffe9f6d31c0d75e81bd0cf86713074d45270e9
 
 - [ ] **Step 9: Check off OpenSpec env-dispatch tasks and commit**
 
-  Mark tasks 3.1 through 3.4 complete.
+  Mark tasks 3.1 through 3.6 complete.
 
   Commit:
 
   ```bash
   git add multica/server/internal/service/env_dispatch.go multica/server/internal/service/env_dispatch_test.go multica/server/internal/handler/env_dispatch.go openspec/changes/env-dispatch-sandbox-lifecycle/tasks.md
-  git commit -m "feat: carry sandbox refs through env dispatch"
+  git commit -m "feat: bridge env dispatch to sandbox_instance"
   ```
 
 ---
