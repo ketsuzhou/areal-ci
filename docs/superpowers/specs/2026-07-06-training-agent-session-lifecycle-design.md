@@ -2,6 +2,8 @@
 comet_change: sub-project-d-session-lifecycle
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
+status: final
 ---
 
 # Sub-project D — training_agent session lifecycle (design)

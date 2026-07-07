@@ -2,6 +2,7 @@
 change: sub-project-d-session-lifecycle
 design-doc: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
 base-ref: b48c9ab222428efb022fc772e0526cefc055e9aa
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 # Sub-project D — training_agent session lifecycle (implementation plan)
@@ -24,6 +25,7 @@ Execution: subagent-driven (implementer → reviewer per task).
 - db_bridge (if touched): `cd multica/db_bridge && uv run pytest -q`.
 - Commit each task to multica `main`; record commit hash in the ledger.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 1: Read-and-document the seams (investigation — STOP-if-broken)
@@ -60,6 +62,7 @@ only inside the daemon/runtime, invisible to the server) — that would break
 Approach A's server-side open-hook and require re-brainstorming. Otherwise begin
 `DONE:` with the mapping. Commit the note.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 2: Contract — `train_agent_id` on env_dispatch (TDD)
@@ -76,6 +79,7 @@ Approach A's server-side open-hook and require re-brainstorming. Otherwise begin
 - [ ] Run: `go test ./internal/handler/ ./internal/service/ -run 'EnvDispatch|Dispatch'`.
 - [ ] Commit: `feat(env-dispatch): accept train_agent_id (training target)`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 3: Persist training intent — `training_dispatch` (TDD)
@@ -98,6 +102,7 @@ Approach A's server-side open-hook and require re-brainstorming. Otherwise begin
 - [ ] Verify generated code compiles: `go build ./pkg/db/generated/ ./internal/service/`.
 - [ ] Commit: `feat(training): persist training_dispatch per rollout project (migration 152)`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 4: RL bridge client (Go) (TDD)
@@ -123,6 +128,7 @@ Contract = **experimental openai-proxy stack** (T1/1d, user-approved):
 - [ ] Run: `go test ./internal/arealrl/`.
 - [ ] Commit: `feat(arealrl): Go client for experimental /rl start/set_reward/end_session`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 5: Session-open hook at trained-member task creation (TDD)
@@ -152,6 +158,7 @@ Contract = **experimental openai-proxy stack** (T1/1d, user-approved):
 - [ ] Run: `go test ./internal/service/ ./internal/handler/ -run 'Training|SessionOpen|EnvDispatch'`.
 - [ ] Commit: `feat(training): open RL session + inject areal proxy config on trained task creation`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 6: Runtime provider wiring in execenv (TDD) — NEEDS-NEW-FIELD (T1/1c)
@@ -175,6 +182,7 @@ T1 confirmed there is NO existing per-task, context-sourced provider override
 - [ ] Run: `go test ./internal/daemon/... ./internal/handler/ -run 'Provider|ArealProxy|Claim'`.
 - [ ] Commit: `feat(execenv): wire areal proxy provider config from task context at claim`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 7: Session-close hook on completion (TDD)
@@ -197,6 +205,7 @@ T1 confirmed there is NO existing per-task, context-sourced provider override
 - [ ] Run: `go test ./internal/service/ -run 'TrainingClose|SessionClose|Complete|Fail|Cancel'`.
 - [ ] Commit: `feat(training): default reward + end_session on trained task completion`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 8: Config + production wiring (TDD-light)
@@ -217,6 +226,7 @@ handler/service construction, `.env.example`, docs.
 - [ ] `.env.example` entries + short note in db_bridge/README or protocol doc.
 - [ ] Build touched packages; commit: `chore(training): config + wire arealrl client`.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ### Task 9: Full regression + AReaL confirm + grep sweep
@@ -230,6 +240,7 @@ handler/service construction, `.env.example`, docs.
   resolve to intended code only.
 - [ ] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
 
+archived-with: 2026-07-07-sub-project-d-session-lifecycle
 ---
 
 ## Task ledger (track in `.superpowers/sdd/progress.md`)
