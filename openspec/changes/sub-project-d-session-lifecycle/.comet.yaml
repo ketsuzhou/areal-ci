@@ -1,8 +1,8 @@
 workflow: full
 phase: build
-build_mode: null
-build_pause: plan-ready
-isolation: null
+build_mode: subagent-driven-development
+build_pause: null
+isolation: branch
 verify_mode: null
 base_ref: b48c9ab222428efb022fc772e0526cefc055e9aa
 design_doc: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
