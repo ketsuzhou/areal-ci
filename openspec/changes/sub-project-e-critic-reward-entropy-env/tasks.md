@@ -8,8 +8,8 @@ D's multica `main` commits `816d1e86c..0b68f606d` (T7-T10: close hook,
 config guard, wiring) are local-only. E's T7/T8/T10/T11 are unblocked.
 
 T1-T6 of the overall training-agent effort are on multica `main`
-(`7969187a..816d1e86c`). E's T1-T6 + T9 are complete (commits below); T7,
-T8, T10, T11 remain.
+(`7969187a..816d1e86c`). E's T1-T9 are complete (commits below); T10,
+T11 remain.
 
 ## Remaining work (this change)
 
@@ -138,15 +138,15 @@ tests.
 **Files**: `internal/service/task.go` (extend `maybeCloseTrainingSession`
 or add `maybeCloseTrainingSessionFromCritic`), tests.
 
-- [ ] Failing tests: critic task terminal + linked trained session open →
+- [x] Failing tests: critic task terminal + linked trained session open →
   `SetReward(critic_reward)` then `EndSession` on the trained session.
   Critic produced no reward → `SetReward(default)` fallback. No linked
   session → no-op. RL errors logged, not fatal.
-- [ ] Implement: read critic reward from critic task result (T1/1c decides
+- [x] Implement: read critic reward from critic task result (T1/1c decides
   shape); read linked trained session's `proxy_key` (T1/1b); call
   `SetReward` + `EndSession`.
-- [ ] Run: `go test ./internal/service/ -run 'TrainingClose|CriticClose'`.
-- [ ] Commit: `feat(training): deferred close hook on critic-terminal with critic reward`.
+- [x] Run: `go test ./internal/service/ -run 'TrainingClose|CriticClose'`.
+- [x] Commit: `feat(training): deferred close hook on critic-terminal with critic reward`.
 
 ### Task 9: AReaL proxy — logprobs capture for entropy (TDD, areal Python)
 
@@ -221,7 +221,7 @@ T4: complete (areal `4fb458ea` — env_id on StartSessionRequest)
 T5: complete (multica `eeac55e62` + `343215231` — arealrl Go client + env_id)
 T6: complete (multica `fb40610c7` — session-open hook passes env_id)
 T7: complete (multica `0b68f606d..f43a9ab66` + `b77577bfa` review-fix; spec ✅, code quality Approved. maybeSpawnCriticTask + RouteTerminalTrainingTask + FindCriticTaskForTrained/CreateCriticTask queries; 4 new tests + 8 existing close tests pass. Minor findings: dead MaybeCloseTrainingSession public method kept for T8/T10; brief test-regex was wrong (SpawnCritic not CriticSpawn).)
-T8: pending (D-blocked — now unblocked)
+T8: complete (multica `b77577bfa..de2ac7aa9`; spec ✅, code quality Approved. maybeCloseTrainingSessionFromCritic + parseCriticReward + RouteTerminalTrainingTask critic-task check; 6 new tests + 4 T7 + 7 D-close pass. Minor: defaultReward==0 fallback is pre-existing pattern from D; T8-2 fixture missing trained_task_id in critic_of — optional.)
 T9: complete (areal `277d6f7b` — logprobs capture in proxy)
 T10: pending (D-blocked — now unblocked)
 T11: pending
