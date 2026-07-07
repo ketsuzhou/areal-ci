@@ -289,3 +289,20 @@ T6: complete (multica main 57f17d572..816d1e86c, review clean; build/vet/gofmt c
   DEPENDENCY -> T8: must wire pi models.json `areal` provider baseURL = $AREAL_PROXY_BASE_URL so the trained
   pi actually routes to the bridge stub (plan Task 8 updated).
 T7: DISPATCHED (session-close hook: default reward + end_session).
+T7: complete (multica main fb40610c7..86c3c28ec..61ed426fd, review CLEAN; 7/7 MaybeClose tests pass, build clean)
+  Shared maybeCloseTrainingSession(ctx, deps, task, projectID) called from CompleteTask/FailTask/CancelTaskWithResult; arealSessionCloser interface (SetReward+EndSession) added; TrainingSessionDeps gains Closer field; extractArealProxyConfig safely parses task.Context JSONB; default_reward from training_dispatch with fallback to trainingDefaultReward=1.0 (T8 makes configurable); SetReward error → still calls EndSession (best-effort); RL errors logged via slog.Warn, never fatal. Doc note added: runtime_sweeper.FailStaleTasks bypasses FailTask (raw SQL), so stale tasks won't auto-close — reaper is future hardening.
+T8: complete (multica main 61ed426fd..ae6f2435a, review CLEAN; 5 config tests + 7 close tests + 6 open tests pass, build clean)
+  TrainingConfig struct + LoadTrainingConfig() reads AREAL_BRIDGE_STUB_URL/AREAL_ADMIN_API_KEY/AREAL_PROXY_URL/TRAINING_DEFAULT_REWARD from env; NewTrainingSessionDeps(cfg, q) returns nil when BridgeStubURL/AdminAPIKey empty (hooks stay no-ops); arealrl.New assigned to both RL (starter) + Closer fields; TaskService.WithTraining(*TrainingSessionDeps) builder injects it; cmd/server/main.go wires LoadTrainingConfig + conditional WithTraining after NewTaskService; .env.example documents all 4 vars + notes AREAL_PROXY_BASE_URL is daemon-set; TrainingSessionDeps gains DefaultReward float64 field used in maybeCloseTrainingSession (falls back to 1.0 when zero). Invalid TRAINING_DEFAULT_REWARD → warning log + 1.0 fallback.
+  MINOR (non-blocking): trainingDefaultReward constant in training.go:86 has stale comment "T8 will make this configurable" — T8 is done, comment should say "fallback used when DefaultReward is zero" or be inlined. Literal 1.0 appears in 3 places (training.go:268, training_config.go:45,49) — could DRY to the constant. Not worth a fix cycle.
+T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
+  - go build ./internal/handler/ ./internal/service/ ./internal/daemon/execenv/ ./internal/arealrl/ ./pkg/db/generated/ = OK
+  - go vet same scoped packages = OK
+  - go test scoped: internal/service OK (training_test 7 close + 6 open, training_config_test 5, env_dispatch_test all pass); internal/arealrl OK; internal/daemon/execenv OK (cached); pkg/db/generated no tests.
+  - internal/handler: 16 FAIL (8 TestDaemonRegister_* + 8 TestClaimTask_* ON CONFLICT 42P10) = PRE-EXISTING baseline (reproduced at base 816d1e86c), 0 new.
+  - gofmt -l: 4 touched files needed alignment (training_config.go, cmd/server/main.go, training_test.go, env_dispatch_test.go) → committed as 1667f85c3 chore(training): gofmt T7-T8 touched files. Re-check clean.
+  - db_bridge: NOT touched by D, skipped.
+  - AReaL confirm-only: start_session/set_reward/end_session all exist in areal/experimental/openai/proxy/proxy_gateway.py (lines 353/623/637); server.py:182-184 defines RL_START_SESSION_PATHNAME="rl/start_session", RL_END_SESSION_PATHNAME="rl/end_session", RL_SET_REWARD_PATHNAME="rl/set_reward". Bridge routes /rl/* to gateway. NO code change.
+  - grep sweep: train_agent_id (env_dispatch.go handler+service, agent.go) / training_dispatch (env_dispatch.go, training.go) / areal_proxy (training.go, agent.go, daemon/types.go) / arealrl (training.go, training_config.go, arealrl/client.go) — ALL resolve to intended code only, no stray references.
+  - MINOR carried from T8: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences. Non-blocking.
+
+D READY FOR VERIFY. multica main: 816d1e86c..1667f85c3 (4 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt). Commits local-only.

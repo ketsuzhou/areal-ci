@@ -50,15 +50,15 @@ provider config), docs.
 
 ### Task 9: Full regression + AReaL confirm + grep sweep
 
-- [ ] Scoped Go: `go build ./internal/handler/ ./internal/service/
+- [x] Scoped Go: `go build ./internal/handler/ ./internal/service/
   ./internal/daemon/execenv/ ./internal/arealrl/ ./pkg/db/generated/` +
   `go vet` same + `go test` same (confirm only pre-existing 16 ON CONFLICT
   handler fails; 0 new).
-- [ ] `gofmt -l` clean on touched files.
-- [ ] db_bridge smoke (if touched): `cd multica/db_bridge && uv run pytest -q`.
-- [ ] AReaL confirm-only: verify `start_session` / `set_reward` / `end_session`
+- [x] `gofmt -l` clean on touched files.
+- [x] db_bridge smoke (if touched): `cd multica/db_bridge && uv run pytest -q`.
+- [x] AReaL confirm-only: verify `start_session` / `set_reward` / `end_session`
   exist and the bridge routes `/rl/*` to the gateway (no code change expected).
-- [ ] grep: `train_agent_id`, `training_dispatch`, `areal_proxy`, `arealrl`
+- [x] grep: `train_agent_id`, `training_dispatch`, `areal_proxy`, `arealrl`
   resolve to intended code only.
 - [ ] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
 
@@ -90,7 +90,17 @@ T7: complete (multica main fb40610c7..86c3c28ec..61ed426fd, review CLEAN; 7/7 Ma
 T8: complete (multica main 61ed426fd..ae6f2435a, review CLEAN; 5 config tests + 7 close tests + 6 open tests pass, build clean)
   TrainingConfig struct + LoadTrainingConfig() reads AREAL_BRIDGE_STUB_URL/AREAL_ADMIN_API_KEY/AREAL_PROXY_URL/TRAINING_DEFAULT_REWARD from env; NewTrainingSessionDeps(cfg, q) returns nil when BridgeStubURL/AdminAPIKey empty (hooks stay no-ops); arealrl.New assigned to both RL (starter) + Closer fields; TaskService.WithTraining(*TrainingSessionDeps) builder injects it; cmd/server/main.go wires LoadTrainingConfig + conditional WithTraining after NewTaskService; .env.example documents all 4 vars + notes AREAL_PROXY_BASE_URL is daemon-set; TrainingSessionDeps gains DefaultReward float64 field used in maybeCloseTrainingSession (falls back to 1.0 when zero). Invalid TRAINING_DEFAULT_REWARD → warning log + 1.0 fallback.
   MINOR (non-blocking): trainingDefaultReward constant in training.go:86 has stale comment "T8 will make this configurable" — T8 is done, comment should say "fallback used when DefaultReward is zero" or be inlined. Literal 1.0 appears in 3 places (training.go:268, training_config.go:45,49) — could DRY to the constant. Not worth a fix cycle.
-T9: pending
+T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
+  - go build/vet/test scoped packages (./internal/handler/ ./internal/service/ ./internal/daemon/execenv/ ./internal/arealrl/ ./pkg/db/generated/) = OK.
+  - internal/service: training_test (7 close + 6 open) + training_config_test (5) + env_dispatch_test all pass. internal/arealrl OK. internal/daemon/execenv OK.
+  - internal/handler: 16 FAIL (8 TestDaemonRegister_* + 8 TestClaimTask_* ON CONFLICT 42P10) = PRE-EXISTING baseline (reproduced at base 816d1e86c), 0 new. cmd/server NOT compiled here (pre-existing webpush.go:180 go 1.26 overflow).
+  - gofmt -l: 4 touched files needed alignment (training_config.go, cmd/server/main.go, training_test.go, env_dispatch_test.go) → committed 1667f85c3. Re-check clean.
+  - db_bridge: NOT touched by D, skipped.
+  - AReaL confirm-only: start_session/set_reward/end_session exist in areal/experimental/openai/proxy/proxy_gateway.py:353/623/637; server.py:182-184 defines RL_*_PATHNAME constants. Bridge routes /rl/* to gateway. NO code change.
+  - grep sweep: train_agent_id / training_dispatch / areal_proxy / arealrl — ALL resolve to intended code only.
+  - MINOR carried: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences (training.go:268, training_config.go:45,49). Non-blocking.
+
+D READY FOR VERIFY. multica main: 816d1e86c..1667f85c3 (4 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt). Commits local-only.
 
 Bases: multica `main` @ 816d1e86c (T6 tip). Commits local-only unless the user
 says push.
