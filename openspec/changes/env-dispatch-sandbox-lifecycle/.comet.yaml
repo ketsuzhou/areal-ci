@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: executing-plans
+build_pause: null
+isolation: branch
+verify_mode: null
+base_ref: 6bffe9f6d31c0d75e81bd0cf86713074d45270e9
+design_doc: docs/superpowers/specs/2026-07-07-env-dispatch-sandbox-lifecycle-design.md
+plan: docs/superpowers/plans/2026-07-07-env-dispatch-sandbox-lifecycle.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-07
+verified_at: null
+archived: false
+handoff_context: openspec/changes/env-dispatch-sandbox-lifecycle/.comet/handoff/design-context.json
+handoff_hash: 5d7ab380e062213c7b0ae39ed7f2e223954bb0342874c782824f11225facd1c4
