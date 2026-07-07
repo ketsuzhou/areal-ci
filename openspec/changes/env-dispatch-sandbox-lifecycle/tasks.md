@@ -7,10 +7,10 @@
 
 ## 2. Sandbox Lifecycle Service
 
-- [ ] 2.1 Add failing Multica tests for save enqueuing existing sandbox `stop` jobs, resume enqueuing `resume` jobs with runtime metadata, delete preserving force-delete fallback, and missing sandbox typed errors.
-- [ ] 2.2 Implement an internal env sandbox lifecycle service that wraps existing sandbox query/job machinery for create, save, resume, delete, and reconfigure.
-- [ ] 2.3 Preserve sandboxd websocket wakeups, node ownership checks, Cube `local_ref`, runtime env/model metadata, and existing status transitions.
-- [ ] 2.4 Run scoped Go tests for sandbox handler/lifecycle packages.
+- [x] 2.1 Add failing Multica tests for save enqueuing existing sandbox `stop` jobs, resume enqueuing `resume` jobs with runtime metadata, delete preserving force-delete fallback, and missing sandbox typed errors.
+- [x] 2.2 Implement an internal env sandbox lifecycle service that wraps existing sandbox query/job machinery for create, save, resume, delete, and reconfigure.
+- [x] 2.3 Preserve sandboxd websocket wakeups, node ownership checks, Cube `local_ref`, runtime env/model metadata, and existing status transitions.
+- [x] 2.4 Run scoped Go tests for sandbox handler/lifecycle packages.
 
 ## 3. Env-dispatch Sandbox-instance Handles and Per-agent Envs
 
