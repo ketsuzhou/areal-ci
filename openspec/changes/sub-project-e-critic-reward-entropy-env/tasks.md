@@ -1,16 +1,15 @@
 # Tasks — sub-project-e-critic-reward-entropy-env
 
-## Prior work (depends on sub-project D)
+## Prior work (depends on sub-project D — COMPLETE)
 
-Sub-project D (session lifecycle) MUST be complete (T7-T9 done) before E's
-close-hook and critic-spawn changes can be implemented. D is currently
-paused at `build_pause=plan-ready` in
-`openspec/changes/sub-project-d-session-lifecycle/`. See
-`.superpowers/sdd/progress.md` for the cross-repo ledger.
+Sub-project D (session lifecycle) is complete and archived
+(`openspec/changes/archive/2026-07-07-sub-project-d-session-lifecycle/`).
+D's multica `main` commits `816d1e86c..0b68f606d` (T7-T10: close hook,
+config guard, wiring) are local-only. E's T7/T8/T10/T11 are unblocked.
 
 T1-T6 of the overall training-agent effort are on multica `main`
-(`7969187a..816d1e86c`). E's implementation will branch from D's tip once
-D's T7-T9 land on multica `main`.
+(`7969187a..816d1e86c`). E's T1-T6 + T9 are complete (commits below); T7,
+T8, T10, T11 remain.
 
 ## Remaining work (this change)
 
@@ -55,16 +54,16 @@ the mapping. Commit the note.
 **Files**: `internal/handler/env_dispatch.go`, `internal/service/env_dispatch.go`,
 `internal/handler/env_dispatch_test.go`, `internal/service/env_dispatch_test.go`.
 
-- [ ] Failing tests: request with `critic_agent_id` shape-validated (400 on
+- [x] Failing tests: request with `critic_agent_id` shape-validated (400 on
   malformed UUID); service accepts it; validation — allowed with `squad_id`
   + `train_agent_id`; equal to `agent_id` rejected (can't critique yourself);
   empty ⇒ unchanged behavior.
-- [ ] Add `CriticAgentID string` to `EnvDispatchRequest` (json
+- [x] Add `CriticAgentID string` to `EnvDispatchRequest` (json
   `critic_agent_id,omitempty`) and `service.EnvDispatchInput`; thread
   through the handler→service mapping.
-- [ ] Handler UUID shape-check when present; service `validate()` rule.
-- [ ] Run: `go test ./internal/handler/ ./internal/service/ -run 'EnvDispatch|Dispatch'`.
-- [ ] Commit: `feat(env-dispatch): accept critic_agent_id (critic for trained agent)`.
+- [x] Handler UUID shape-check when present; service `validate()` rule.
+- [x] Run: `go test ./internal/handler/ ./internal/service/ -run 'EnvDispatch|Dispatch'`.
+- [x] Commit: `feat(env-dispatch): accept critic_agent_id (critic for trained agent)`.
 
 ### Task 3: Persist critic intent — extend `training_dispatch` (TDD)
 
@@ -74,14 +73,14 @@ the mapping. Commit the note.
 sibling), `internal/service/env_dispatch.go` (+ deps method + adapter +
 fake), tests.
 
-- [ ] Migration: `ALTER TABLE training_dispatch ADD COLUMN critic_agent_id
+- [x] Migration: `ALTER TABLE training_dispatch ADD COLUMN critic_agent_id
   UUID NULL`.
-- [ ] Queries: extend `CreateTrainingDispatch` to accept `critic_agent_id`;
+- [x] Queries: extend `CreateTrainingDispatch` to accept `critic_agent_id`;
   extend `GetTrainingDispatchByProject` to return it.
-- [ ] Service: persist `critic_agent_id` when set. Failing tests first
+- [x] Service: persist `critic_agent_id` when set. Failing tests first
   (fake asserts critic_agent_id is stored when set; NULL when empty).
-- [ ] Verify generated code compiles: `go build ./pkg/db/generated/ ./internal/service/`.
-- [ ] Commit: `feat(training): persist critic_agent_id on training_dispatch (migration 153)`.
+- [x] Verify generated code compiles: `go build ./pkg/db/generated/ ./internal/service/`.
+- [x] Commit: `feat(training): persist critic_agent_id on training_dispatch (migration 153)`.
 
 ### Task 4: AReaL contract — env_id on StartSessionRequest (TDD)
 
@@ -89,34 +88,34 @@ fake), tests.
 `areal/experimental/openai/proxy/proxy_rollout_server.py`,
 `areal/experimental/openai/proxy/proxy_gateway.py`, tests.
 
-- [ ] Add `env_id: str | None = None` to `StartSessionRequest`.
-- [ ] Persist `env_id` on the session (extend session data structure).
-- [ ] Tests: `start_session` accepts and persists `env_id`; old requests
+- [x] Add `env_id: str | None = None` to `StartSessionRequest`.
+- [x] Persist `env_id` on the session (extend session data structure).
+- [x] Tests: `start_session` accepts and persists `env_id`; old requests
   without `env_id` still work (additive).
-- [ ] Commit (in areal repo): `feat(proxy): accept env_id on start_session for trajectory attribution`.
+- [x] Commit (in areal repo): `feat(proxy): accept env_id on start_session for trajectory attribution`.
 
 ### Task 5: RL bridge client — env_id in StartSession (TDD, multica Go)
 
 **Files**: `internal/arealrl/client.go`, `internal/arealrl/client_test.go`.
 
-- [ ] Failing tests: `StartSession(ctx, taskID, envID string)` includes
+- [x] Failing tests: `StartSession(ctx, taskID, envID string)` includes
   `env_id` in the request body when non-empty; omits when empty.
-- [ ] Implement: add `envID` parameter; marshal into request body
+- [x] Implement: add `envID` parameter; marshal into request body
   conditionally.
-- [ ] Run: `go test ./internal/arealrl/`.
-- [ ] Commit: `feat(arealrl): pass env_id to start_session`.
+- [x] Run: `go test ./internal/arealrl/`.
+- [x] Commit: `feat(arealrl): pass env_id to start_session`.
 
 ### Task 6: Session-open hook — pass env_id (TDD, multica)
 
 **Files**: `internal/service/task.go` (D's `maybeOpenTrainingSession`),
 tests.
 
-- [ ] Failing tests: when `training_dispatch` has `env_id`, the open hook
+- [x] Failing tests: when `training_dispatch` has `env_id`, the open hook
   passes it to `arealrl.Client.StartSession`. When no `env_id`, omitted.
-- [ ] Implement: read `env_id` from `training_dispatch` (or env_dispatch
+- [x] Implement: read `env_id` from `training_dispatch` (or env_dispatch
   input) and pass to the RL client.
-- [ ] Run: `go test ./internal/service/ -run 'Training|SessionOpen|EnvDispatch'`.
-- [ ] Commit: `feat(training): pass env_id when opening RL session`.
+- [x] Run: `go test ./internal/service/ -run 'Training|SessionOpen|EnvDispatch'`.
+- [x] Commit: `feat(training): pass env_id when opening RL session`.
 
 ### Task 7: Critic auto-spawn on trained-terminal (TDD, multica)
 
@@ -154,13 +153,13 @@ or add `maybeCloseTrainingSessionFromCritic`), tests.
 **Files**: `areal/experimental/openai/proxy/proxy_rollout_server.py`,
 `areal/experimental/openai/proxy/proxy_gateway.py`, tests.
 
-- [ ] Failing tests: proxied LLM calls include `logprobs=true` in the
+- [x] Failing tests: proxied LLM calls include `logprobs=true` in the
   request; logprobs in the response are persisted per interaction. Upstream
   LLM error on logprobs → logged, interaction still recorded.
-- [ ] Implement: inject `logprobs=true` in the proxy's forwarded request;
+- [x] Implement: inject `logprobs=true` in the proxy's forwarded request;
   persist logprobs in the session's interaction data.
-- [ ] Run: `uv run pytest tests/test_proxy_*.py` (or equivalent).
-- [ ] Commit (in areal repo): `feat(proxy): capture logprobs for entropy computation`.
+- [x] Run: `uv run pytest tests/test_proxy_*.py` (or equivalent).
+- [x] Commit (in areal repo): `feat(proxy): capture logprobs for entropy computation`.
 
 ### Task 10: Config + production wiring (TDD-light, multica)
 
@@ -215,19 +214,19 @@ docs.
 (append "Task N: complete (commits <base7>..<head7>, review clean)" as tasks
 finish)
 
-T1: pending
-T2: pending
-T3: pending
-T4: pending
-T5: pending
-T6: pending
-T7: pending
-T8: pending
-T9: pending
-T10: pending
+T1: complete (areal `052020fb` — seams investigation note)
+T2: complete (multica `0fb6c2644` — critic_agent_id on env_dispatch)
+T3: complete (multica `9e3fa6f0b` — migration 153 + training_dispatch.critic_agent_id)
+T4: complete (areal `4fb458ea` — env_id on StartSessionRequest)
+T5: complete (multica `eeac55e62` + `343215231` — arealrl Go client + env_id)
+T6: complete (multica `fb40610c7` — session-open hook passes env_id)
+T7: pending (D-blocked — now unblocked)
+T8: pending (D-blocked — now unblocked)
+T9: complete (areal `277d6f7b` — logprobs capture in proxy)
+T10: pending (D-blocked — now unblocked)
 T11: pending
 
-Bases: areal `master` @ <TBD at first commit>; multica `main` @ <TBD — D's
-tip when D's T7-T9 land>. Depends on: sub-project D complete (T7-T9). D
-currently paused at `build_pause=plan-ready`. Commits local-only unless the
+Bases: areal `master` @ `48d49aba` (D's OpenSpec change creation); multica
+`main` @ `816d1e86c` (D's T6 tip). D complete (archived
+`2026-07-07-sub-project-d-session-lifecycle`). Commits local-only unless the
 user says push.
