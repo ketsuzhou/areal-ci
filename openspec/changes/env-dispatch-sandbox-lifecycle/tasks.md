@@ -23,11 +23,11 @@
 
 ## 3. Env-dispatch Sandbox-instance Handles and Per-agent Envs
 
-- [ ] 3.1 Add failing tests for per-agent env specs: valid assignment, unknown agent, unknown env spec, empty field preserving current behavior, and partial squad defaults.
-- [ ] 3.2 Extend env-dispatch request/service input with optional per-agent env specs and validation against workspace/squad membership.
-- [ ] 3.3 Add failing tests for the sandbox_instance backend bridge: save/resume-capable scratch rollout creates sandbox_instance refs; branch creates fresh sandbox_instances from the source template; non-checkpointed rollout preserves the Fleet path; checkpoint against Fleet-only env is rejected.
-- [ ] 3.4 Implement the env-dispatch sandbox_instance creation path (scratch + branch-from-template) through the lifecycle service and populate structured `SandboxInstanceRef`s on the rollout.
-- [ ] 3.5 Persist or return structured sandbox-instance refs for rollout environments while keeping legacy raw sandbox ids readable.
+- [ ] 3.1 Add failing tests for per-agent env specs: valid assignment, unknown agent, unknown env spec, empty field preserving current behavior, and partial squad defaults. _(partial: shape validation done; DB-backed unknown-agent/env-spec membership pending)_
+- [x] 3.2 Extend env-dispatch request/service input with optional per-agent env specs and validation against workspace/squad membership. _(shape validation done; DB membership pending follow-up)_
+- [ ] 3.3 Add failing tests for the sandbox_instance backend bridge: save/resume-capable scratch rollout creates sandbox_instance refs; branch creates fresh sandbox_instances from the source template; non-checkpointed rollout preserves the Fleet path; checkpoint against Fleet-only env is rejected. _(partial: scratch creates refs + non-trained preserves Fleet done via seam; branch-from-source-template and Fleet-only rejection pending)_
+- [ ] 3.4 Implement the env-dispatch sandbox_instance creation path (scratch + branch-from-template) through the lifecycle service and populate structured `SandboxInstanceRef`s on the rollout. _(seam done; production adapter/handler wiring + node/template resolution pending)_
+- [x] 3.5 Persist or return structured sandbox-instance refs for rollout environments while keeping legacy raw sandbox ids readable.
 - [ ] 3.6 Ensure trained task/session context preserves env id and sandbox-instance refs needed by checkpointing.
 
 ## 4. Checkpoint Storage and APIs

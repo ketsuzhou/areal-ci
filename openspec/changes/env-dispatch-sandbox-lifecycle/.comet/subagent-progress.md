@@ -42,3 +42,20 @@
 - Consequence: Task 3's "persist/return structured sandbox-instance refs for rollout environments" cannot be truthfully implemented without first deciding how rollout sandboxes become `sandbox_instance`-backed. Populating `SandboxRefs` from Fleet sandbox ids would be meaningless for pause/resume.
 - Note: Fleet also exposes snapshot/fork routes (`SnapshotCloudRuntimeSandbox`, `ForkCloudRuntimeSandbox`), but the confirmed design (D2) explicitly chose sandbox_instance pause-in-place over Fleet snapshots/forks.
 - Required user decision: see options presented in chat.
+
+## Build Progress (executing-plans + TDD, inline)
+
+- Task 1 (investigation): DONE — commit afa8b95c (outer repo). Seam notes in design.md.
+- Task 2 (lifecycle service): DONE — multica commit 152538cbc. Save/Resume/Delete/Reconfigure + typed errors.
+- Task 2b (lifecycle Create): DONE — multica commit da0ad0b50. Create inserts pending row, enqueues create job, wakes node.
+- Task 3 slice A (per-agent types + shape validation + ref fields): DONE — multica commit a4f821dd2.
+- Task 3 slice B (bridge seam): DONE — multica commit dbe5934ae. WithSandboxLifecycle; trained rollouts create sandbox_instances; non-trained preserves Fleet.
+- Bridge design pivot: confirmed by user (option 1 bridge + option 2 branch-from-template); design doc + delta spec + tasks + plan updated — outer commit 3cb250f8.
+
+## Remaining
+- Task 3: handler per_agent_env JSON parsing/response; production adapter wiring (node selection via PickAvailableSandboxNodeForWorkspace, template resolution, branch-from-source-template); DB membership validation (unknown agent/env spec); trained task/session context ref preservation (3.6).
+- Tasks 4-9: checkpoint schema/queries/service, checkpoint APIs, resume-from-checkpoint, entropy/event triggers, AReaL client integration, verification/docs.
+
+## Verification evidence
+- multica: `go test ./internal/service -count=1` -> ok; `go build ./...` -> BUILD_OK; `go test ./internal/handler -run TestEnvDispatch` -> ok.
+- openspec: `openspec validate env-dispatch-sandbox-lifecycle --strict` -> valid.
