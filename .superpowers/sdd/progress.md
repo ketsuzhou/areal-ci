@@ -305,4 +305,24 @@ T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
   - grep sweep: train_agent_id (env_dispatch.go handler+service, agent.go) / training_dispatch (env_dispatch.go, training.go) / areal_proxy (training.go, agent.go, daemon/types.go) / arealrl (training.go, training_config.go, arealrl/client.go) — ALL resolve to intended code only, no stray references.
   - MINOR carried from T8: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences. Non-blocking.
 
-D READY FOR RE-VERIFY. multica main: 816d1e86c..0b68f606d (6 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt, fc35d4587 stale-comment-fix, 0b68f606d config-guard-fix). WARNING 1 from verify addressed. Commits local-only.
+D ARCHIVED. multica main: 816d1e86c..0b68f606d (6 commits). areal master: merged + archived to openspec/changes/archive/2026-07-07-sub-project-d-session-lifecycle/.
+
+=== SUB-PROJECT E — critic-driven reward + entropy + env_id ===
+Spec: docs/superpowers/specs/2026-07-06-critic-driven-training-signal-design.md
+Plan: docs/superpowers/plans/2026-07-06-critic-driven-training-signal.md
+Bases: areal master @ 48d49aba; multica main @ 816d1e86c (D's T6 tip).
+Depends on: sub-project D — COMPLETE AND ARCHIVED.
+
+T1: complete (areal 052020fb; seams note). All 6 seams confirmed.
+T2: complete (multica 0fb6c2644; 40/40 env_dispatch tests). CriticAgentID on env_dispatch.
+T3: complete (multica 9e3fa6f0b; 11/11 tests). Migration 153 + critic_agent_id on training_dispatch.
+T4: complete (areal 4fb458ea; 6/6 tests). env_id on StartSessionRequest (additive).
+T5: complete (multica eeac55e62 + 343215231; 6/6 tests). arealrl Go client + env_id.
+T6: complete (multica fb40610c7; 11/11 + 40/40 + 2/2 tests). Session-open hook passes env_id.
+T7: complete (multica 0b68f606d..f43a9ab66 + b77577bfa; spec ✅, quality Approved). maybeSpawnCriticTask + RouteTerminalTrainingTask + FindCriticTaskForTrained/CreateCriticTask.
+T8: complete (multica b77577bfa..de2ac7aa9; spec ✅, quality Approved). maybeCloseTrainingSessionFromCritic + parseCriticReward.
+T9: complete (areal 277d6f7b; 3/3 + 43/43 tests). logprobs injection with graceful fallback.
+T10: complete (multica de2ac7aa9..69511fdf3; TDD-light). No new config. db_bridge README notes env_id.
+T11: complete (Go build/vet/test clean; AReaL proxy 9 pass; db_bridge 168 pass; grep clean. Final review: READY TO MERGE).
+
+E VERIFIED + ARCHIVED. multica main: 816d1e86c..69511fdf3. areal master: merged from sub-project-e-critic-reward-entropy-env.
