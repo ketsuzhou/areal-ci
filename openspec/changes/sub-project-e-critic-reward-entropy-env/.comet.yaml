@@ -1,14 +1,14 @@
 workflow: full
-phase: build
+phase: verify
 build_mode: subagent-driven-development
 build_pause: null
 isolation: branch
-verify_mode: null
+verify_mode: full
 base_ref: 48d49aba673f34dfbe0059387e1a6f609cc7bf8c
 design_doc: docs/superpowers/specs/2026-07-06-critic-driven-training-signal-design.md
 plan: docs/superpowers/plans/2026-07-06-critic-driven-training-signal.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-07-07-sub-project-e-critic-reward-entropy-env-verify.md
 branch_status: pending
 created_at: 2026-07-06
 verified_at: null
