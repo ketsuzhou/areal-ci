@@ -289,3 +289,38 @@ T6: complete (multica main 57f17d572..816d1e86c, review clean; build/vet/gofmt c
   DEPENDENCY -> T8: must wire pi models.json `areal` provider baseURL = $AREAL_PROXY_BASE_URL so the trained
   pi actually routes to the bridge stub (plan Task 8 updated).
 T7: DISPATCHED (session-close hook: default reward + end_session).
+=== SUB-PROJECT E — critic-driven reward + entropy + env_id ===
+Spec: docs/superpowers/specs/2026-07-06-critic-driven-training-signal-design.md
+Plan: docs/superpowers/plans/2026-07-06-critic-driven-training-signal.md (areal master, committed)
+Branch: areal `sub-project-e-critic-reward-entropy-env` (off master @ 48d49aba). multica commits to `main`.
+Bases: areal `master` @ 48d49aba673f34dfbe0059387e1a6f609cc7bf8c; multica `main` @ 816d1e86c (D's T6 tip; D's T7-T9 pending).
+Depends on: sub-project D's T7-T9 (session-close hook, config, regression). D currently paused at T7 DISPATCHED.
+Approach: multica auto-spawns critic on trained-terminal (replaces D's close); critic JSON output parsed for reward; deferred close on critic-terminal. AReaL proxy gains env_id on StartSessionRequest + injects logprobs=True for entropy.
+
+T1: DISPATCHED (investigation; may return BLOCKED and reshape plan).
+T1: complete (areal master 863c4e6e..052020fb, review clean; note docs/superpowers/notes/2026-07-06-E-seams.md).
+  All 6 seams confirmed: CompleteTask(1296)/FailTask(1487)/CancelTask(924) are the chokepoints; context JSONB (mig 003) holds critic_of; critic output in agent_task_queue.result JSONB; env_id on env_dispatch.EnvID (line 49); _call_client_create (proxy_rollout_server.py:565) is the single logprobs chokepoint; StartSessionRequest/SessionData (server.py:26,66) accept env_id additively. No blockers.
+T2: complete (multica main f1d954d83..0fb6c2644, review clean; 40/40 env_dispatch tests pass incl 8 new critic_agent_id cases).
+  CriticAgentID on EnvDispatchRequest (json critic_agent_id,omitempty) + service.EnvDispatchInput; 4 Validate() rules (requires train, !=train, !=agent, empty=unchanged); handler UUID shape-check; threaded handler→service. No sqlc, no regressions.
+T3: complete (multica main 0fb6c2644..9e3fa6f0b, review clean; 11/11 EnvDispatch tests pass incl 2 new persistence tests).
+  Migration 153 (critic_agent_id UUID NULL on training_dispatch); CreateTrainingDispatch query extended ($4=critic_agent_id, $5=default_reward COALESCE 1.0 per brief); generated Go hand-written (CriticAgentID pgtype.UUID); service+adapter+fake+stub updated; tests verify persisted-when-set + NULL-when-empty.
+  MINOR (non-blocking): implementer forgot to write task-E3-report.md (verified tests pass directly: 11/11 green). Reviewer false-positive on COALESCE($5,1.0) — confirmed brief-specified and behaviorally equivalent to D's DB default (default_reward dp default 1.0).
+T4: complete (areal sub-project-e-critic-reward-entropy-env 052020fb..4fb458ea, review clean; 6/6 env_id tests pass).
+  StartSessionRequest.env_id: str|None=None (server.py:54); SessionData.env_id persisted in __init__ (server.py:77-79); proxy_rollout_server.py:28 threads request.env_id to SessionData. Additive, backward-compatible. New test file tests/experimental/openai/test_proxy_env_id.py (6 tests incl integration via ASGI transport).
+T5: complete (multica main 9e3fa6f0b..343215231, review clean; 6/6 StartSession tests pass).
+  StartSession(ctx, taskID, envID string) — env_id conditionally marshaled (client.go:88-93); D's caller maybeOpenTrainingSession in training.go:284 passes "" (T6 wires real value); arealSessionStarter interface + fake + 4 test callsites updated. Minor: testify dep added (test-only).
+T6: complete (multica main 343215231..fb40610c7, no separate review — finished in-controller after implementer quota error).
+  EnqueueAgentRun interface gains envID string (between sandboxID and idx); env_dispatch.dispatchOne passes r.EnvID at both call sites; envDispatchDepsAdapter.maybeOpenTrainingSession threads envID to TaskService.MaybeOpenTrainingSession; maybeOpenTrainingSession/tryOpenTrainingSession signatures gain envID; StartSession receives envID instead of hardcoded ""; issue/chat/quick-create paths in task.go pass "" (no env_dispatch there); fakeEnvDispatchDeps + stubEnvDispatchDeps + 2 squad test callers updated. 2 new TDD tests (PassesEnvID + EmptyEnvID_WhenUnavailable) + 5 existing test callsites updated to new signature. Build clean, 11/11 MaybeOpenTrainingSession tests + 40/40 EnvDispatch tests + 2/2 squad EnqueueAgentRun tests pass.
+  MINOR (non-blocking): implementer hit quota error mid-task; finished in-controller (8 missed callers: 4 in task.go, 3 in env_dispatch.go adapter/stub/helper, 1 in env_dispatch_test.go fake, 2 in squad test files, 5 in training_test.go existing callsites). 16 pre-existing baseline failures (TestDaemon* + TestClaimTask* ON CONFLICT 42P10) unrelated to T6 — D's paused T7-T9 work.
+T9: complete (areal sub-project-e-critic-reward-entropy-env 4fb458ea..277d6f7b, review CLEAN; 3/3 new + 43/43 related tests pass).
+  _call_client_create injects kwargs["logprobs"]=True AFTER inspect.signature-based arg filter (line 663); _is_logprobs_unsupported heuristic requires "logprobs" + ("not supported"|"unsupported"|"unrecognized"|"unknown argument") in error message; on rejection, retry once without logprobs + emit warning; HTTPException(500) translation preserved on both first-call and retry paths (ValueError→detail=str(e), other→detail=f"{type(e).__name__}: {e}"); should_compute_prox_logp() recompute path left untouched (orthogonal per T1/1e). New test file tests/experimental/openai/test_proxy_logprobs.py (3 tests: injects_logprobs, fallback_on_logprobs_error, propagates_unrelated_error).
+  MINOR (non-blocking, reviewer suggestion): add 4th test for caller-supplied logprobs=False override (current code overwrites to True; no test locks this in). Optional: caplog-based warning assertion in fallback test.
+
+=== SUB-PROJECT E — BLOCKED on D ===
+All E tasks that don't depend on D are complete (T1, T2, T3, T4, T5, T6, T9). Remaining E tasks:
+  T7 (critic auto-spawn on trained-terminal) — DEPENDS ON D's T7-T9
+  T8 (deferred close hook on critic-terminal) — DEPENDS ON D's T7-T9
+  T10 (config + production wiring) — DEPENDS ON D's T7-T9
+  T11 (full regression + cross-repo verification + grep sweep) — depends on all
+D is currently paused at T7 DISPATCHED (session-close hook: default reward + end_session). Resume D via /comet to land T7-T9, then E's T7/T8/T10/T11 can proceed.
+
