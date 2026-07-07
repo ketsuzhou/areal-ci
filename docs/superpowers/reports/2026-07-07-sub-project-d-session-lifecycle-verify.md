@@ -101,15 +101,18 @@ T1-T6 (commits `f1d954d83`..`fb40610c7`) were already on main before D started; 
 (none)
 
 ### WARNING (Should fix)
+(none — WARNING 1 was fixed in commit `0b68f606d`; see Resolution below)
 
-**WARNING 1 — Config guard production-wiring gap**
+### WARNING 1 — Config guard production-wiring gap (RESOLVED)
 
-- **File:** `internal/service/training.go:104-106` (`tryOpenTrainingSession`), `internal/service/training_config.go:60-63` (`NewTrainingSessionDeps`)
-- **What's wrong:** When `AREAL_BRIDGE_STUB_URL` or `AREAL_ADMIN_API_KEY` are unset, `NewTrainingSessionDeps` returns `nil`, so `TaskService.Training` is `nil`. The open-hook wrapper `tryOpenTrainingSession` then returns early at `training.go:104-106` (`if s.Training == nil { return }`) — a **silent no-op**. If `train_agent_id` is set on `env_dispatch` (training requested) but the bridge env vars are unset, the trained task is created without `context.areal_proxy` and the trained agent runs **un-proxied**.
+- **Originally found:** `internal/service/training.go:104-106` (`tryOpenTrainingSession`), `internal/service/training_config.go:60-63` (`NewTrainingSessionDeps`)
+- **What was wrong:** When `AREAL_BRIDGE_STUB_URL` or `AREAL_ADMIN_API_KEY` are unset, `NewTrainingSessionDeps` returned `nil`, so `TaskService.Training` was `nil`. The open-hook wrapper `tryOpenTrainingSession` then returned early at `training.go:104-106` (`if s.Training == nil { return }`) — a **silent no-op**. If `train_agent_id` was set on `env_dispatch` (training requested) but the bridge env vars were unset, the trained task was created without `context.areal_proxy` and the trained agent ran **un-proxied**.
 - **Spec violated:** Requirement "Config guard against un-proxied training runs" — Scenario: "Training requested but bridge config missing" — "the session-open hook returns a loud error and the trained task is not created in an un-proxied state".
 - **Helper-level guard exists:** `training.go:161-166` returns a loud `fmt.Errorf(...)` when `deps.RL == nil || deps.ProxyURL == ""`, but it is unreachable in production because `maybeOpenTrainingSession` is never called when `s.Training` is nil. The test `TestMaybeOpenTrainingSession_TargetButMissingBridge_LoudError` covers the helper directly but not the production wiring.
 - **Impact:** Operator misconfiguration (sets `train_agent_id` but forgets bridge env vars) leads to silent un-proxied training runs — no reward signal, no session lifecycle. Bounded to operator-error scenarios; no data loss or security issue.
 - **Recommended fix:** Either (a) make `NewTrainingSessionDeps` return a non-nil `TrainingSessionDeps` with `Lookup` set but `RL=nil`/`ProxyURL=""` when env vars are unset, so the existing loud-error guard at `training.go:161-166` is reachable; or (b) in `tryOpenTrainingSession`, when `s.Training == nil`, still check if the task is a training target (requires `Queries` always available on `TaskService`) and log a loud `slog.Error` if so. Option (a) is simpler; option (b) preserves the nil-means-disabled semantics.
+
+**Resolution (commit `0b68f606d`):** `NewTrainingSessionDeps` now returns a non-nil `*TrainingSessionDeps` with `Lookup`+`Store` set but `RL`/`Closer` nil when config is missing and `q` is non-nil (production path). The existing loud-error guard at `training.go:161-166` is now reachable: when a training target is requested despite missing config, the hook returns `fmt.Errorf("training: task %s targets train_agent %s but the RL bridge is not configured...")`, which `tryOpenTrainingSession` logs via `slog.Error`. The close hook no-ops on nil `Closer` (`training.go:257-259`). New test `TestNewTrainingSessionDeps_GuardDepsWhenConfigMissing` verifies the production-path contract; existing `TestMaybeOpenTrainingSession_TargetButMissingBridge_LoudError` covers the helper-level behavior.
 
 ### SUGGESTION (Nice to fix)
 
@@ -132,9 +135,9 @@ The working tree has uncommitted changes in `customized_areal/tree_search/agents
 
 ## Final Assessment
 
-**Ready to merge: With fixes** (WARNING 1 should be addressed before archive, or explicitly accepted as a known gap with documented impact).
+**Ready to merge: Yes** (WARNING 1 resolved in commit `0b68f606d`; remaining items are SUGGESTION-level only).
 
-**Reasoning:** D's T7-T9 implementation is spec-complete for the normal flow (session open, close, default reward, config wiring). The one spec violation is an operator-misconfiguration edge case (training requested but bridge config missing → silent no-op instead of loud error). The helper-level guard exists and is tested, but the production wiring short-circuits before it's reached. All other requirements, scenarios, design decisions, and quality bars are met. Pre-existing baseline failures (16 handler ON CONFLICT, webpush build) are unrelated.
+**Reasoning:** D's T7-T10 implementation is spec-complete. The config guard production-wiring gap (WARNING 1) is fixed: `NewTrainingSessionDeps` now returns guard-ready deps when config is missing, making the loud-error guard reachable in production. All 5 requirements are met, all scenarios are covered, design decisions D1-D6 are followed, and build/vet/test/gofmt are clean. Pre-existing baseline failures (16 handler ON CONFLICT, webpush build) are unrelated. Two SUGGESTION-level items (pi models.json deployment concern, 1.0 literal DRY) are non-blocking.
 
 ## Recommendation
 
