@@ -1,5 +1,5 @@
 workflow: full
-phase: verify
+phase: archive
 build_mode: subagent-driven-development
 build_pause: null
 isolation: branch
@@ -7,11 +7,11 @@ verify_mode: full
 base_ref: b48c9ab222428efb022fc772e0526cefc055e9aa
 design_doc: docs/superpowers/specs/2026-07-06-training-agent-session-lifecycle-design.md
 plan: docs/superpowers/plans/2026-07-06-training-agent-session-lifecycle.md
-verify_result: pending
+verify_result: pass
 verification_report: docs/superpowers/reports/2026-07-07-sub-project-d-session-lifecycle-verify.md
-branch_status: pending
+branch_status: handled
 created_at: 2026-07-06
-verified_at: null
+verified_at: 2026-07-07
 archived: false
 handoff_context: openspec/changes/sub-project-d-session-lifecycle/.comet/handoff/design-context.json
 handoff_hash: bc1d7b7213a2f44848f55797ab224538f0554849706063e0c645b404878da81d
