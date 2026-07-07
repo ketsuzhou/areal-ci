@@ -305,4 +305,4 @@ T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
   - grep sweep: train_agent_id (env_dispatch.go handler+service, agent.go) / training_dispatch (env_dispatch.go, training.go) / areal_proxy (training.go, agent.go, daemon/types.go) / arealrl (training.go, training_config.go, arealrl/client.go) — ALL resolve to intended code only, no stray references.
   - MINOR carried from T8: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences. Non-blocking.
 
-D READY FOR VERIFY. multica main: 816d1e86c..1667f85c3 (4 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt). Commits local-only.
+D READY FOR RE-VERIFY. multica main: 816d1e86c..0b68f606d (6 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt, fc35d4587 stale-comment-fix, 0b68f606d config-guard-fix). WARNING 1 from verify addressed. Commits local-only.

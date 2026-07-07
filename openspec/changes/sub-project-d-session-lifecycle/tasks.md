@@ -67,6 +67,30 @@ provider config), docs.
   resolve to intended code only.
 - [x] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
 
+### Task 10: Fix config guard production-wiring gap (verify-fail fix)
+
+**Files**: `internal/service/training_config.go` (`NewTrainingSessionDeps`),
+`internal/service/training_test.go` (new production-path test).
+
+**Background:** Verify found WARNING 1 — when `AREAL_BRIDGE_STUB_URL` /
+`AREAL_ADMIN_API_KEY` are unset, `NewTrainingSessionDeps` returned nil, so
+`TaskService.Training` was nil, so `tryOpenTrainingSession` returned early
+(silent no-op). If `train_agent_id` was set on dispatch, the trained task ran
+un-proxied. The helper-level loud-error guard (`training.go:161-166`) was
+unreachable in production.
+
+- [x] Fix `NewTrainingSessionDeps`: when `BridgeStubURL` / `AdminAPIKey` are
+  empty, return a non-nil `*TrainingSessionDeps` with `Lookup`+`Store` set
+  (from `q`) but `RL=nil`, `Closer=nil`, so the existing loud-error guard at
+  `training.go:161-166` is reachable for training targets. Close hook already
+  no-ops on `Closer==nil` (`training.go:257-259`). Return nil only when `q`
+  is nil (no Queries to check against).
+- [x] Add test: `TaskService` with nil-config `Training` (env vars unset) +
+  training-target task → `tryOpenTrainingSession` logs `slog.Error` (verify
+  via test helper or direct `maybeOpenTrainingSession` call with the non-nil
+  deps from `NewTrainingSessionDeps`).
+- [x] Build + test scoped packages; commit: `fix(training): make config guard reachable in production`.
+
 ## Test runners / constraints
 
 - multica Go: `DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable`.
@@ -105,7 +129,7 @@ T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
   - grep sweep: train_agent_id / training_dispatch / areal_proxy / arealrl — ALL resolve to intended code only.
   - MINOR carried: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences (training.go:268, training_config.go:45,49). Non-blocking.
 
-D READY FOR VERIFY. multica main: 816d1e86c..fc35d4587 (5 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt, fc35d4587 stale-comment-fix). Final whole-branch review: READY TO MERGE (no Critical/Important; 1 stale-comment fix landed as fc35d4587). Commits local-only.
+D READY FOR RE-VERIFY. multica main: 816d1e86c..0b68f606d (6 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt, fc35d4587 stale-comment-fix, 0b68f606d config-guard-fix). WARNING 1 from verify addressed. Commits local-only.
 
 Bases: multica `main` @ 816d1e86c (T6 tip). Commits local-only unless the user
 says push.
