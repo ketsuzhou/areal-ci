@@ -563,6 +563,24 @@ def set_reward(
 # =============================================================================
 
 
+def _is_logprobs_unsupported(exc: Exception) -> bool:
+    """Heuristic: did the upstream provider reject the ``logprobs`` parameter?
+
+    Matches error messages that mention ``logprobs`` together with a phrase
+    indicating the parameter is not accepted (e.g. OpenAI ``BadRequestError``
+    "logprobs ... not supported", or a generic "unknown argument: logprobs").
+    Broad enough to catch provider-specific and generic exceptions, narrow
+    enough to leave unrelated errors alone.
+    """
+    msg = str(exc).lower()
+    if "logprobs" not in msg:
+        return False
+    return any(
+        phrase in msg
+        for phrase in ("not supported", "unsupported", "unrecognized", "unknown argument")
+    )
+
+
 async def _call_client_create(
     create_fn,
     request: dict[str, Any] | BaseModel,
@@ -638,12 +656,29 @@ async def _call_client_create(
     if stream:
         kwargs["stream"] = True
 
+    # Sub-project E: inject logprobs=True so AReaL can compute token-level
+    # entropy from captured trajectories. If the upstream rejects the
+    # parameter, retry once without it (graceful fallback). Other errors
+    # surface as HTTPException(500) exactly as before.
+    kwargs["logprobs"] = True
     try:
         return await create_fn(areal_cache=session_data.completions, **kwargs)
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+        if not _is_logprobs_unsupported(e):
+            if isinstance(e, ValueError):
+                raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+        logger.warning(
+            "upstream rejected logprobs=True; retrying without (session %s)",
+            session_id,
+        )
+        kwargs.pop("logprobs", None)
+        try:
+            return await create_fn(areal_cache=session_data.completions, **kwargs)
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
 @app.post(
