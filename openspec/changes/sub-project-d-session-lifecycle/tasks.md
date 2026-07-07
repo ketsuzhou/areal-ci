@@ -60,7 +60,7 @@ provider config), docs.
   exist and the bridge routes `/rl/*` to the gateway (no code change expected).
 - [x] grep: `train_agent_id`, `training_dispatch`, `areal_proxy`, `arealrl`
   resolve to intended code only.
-- [ ] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
+- [x] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
 
 ## Test runners / constraints
 
@@ -100,7 +100,7 @@ T9: complete (verification only; multica main ae6f2435a..1667f85c3 gofmt fix)
   - grep sweep: train_agent_id / training_dispatch / areal_proxy / arealrl — ALL resolve to intended code only.
   - MINOR carried: trainingDefaultReward constant stale comment + 3 literal 1.0 occurrences (training.go:268, training_config.go:45,49). Non-blocking.
 
-D READY FOR VERIFY. multica main: 816d1e86c..1667f85c3 (4 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt). Commits local-only.
+D READY FOR VERIFY. multica main: 816d1e86c..fc35d4587 (5 commits: 86c3c28ec close-hook, 61ed426fd doc-note, ae6f2435a config+wiring, 1667f85c3 gofmt, fc35d4587 stale-comment-fix). Final whole-branch review: READY TO MERGE (no Critical/Important; 1 stale-comment fix landed as fc35d4587). Commits local-only.
 
 Bases: multica `main` @ 816d1e86c (T6 tip). Commits local-only unless the user
 says push.
