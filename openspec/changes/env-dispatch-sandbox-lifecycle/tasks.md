@@ -18,8 +18,8 @@
 - [x] 2.2 Implement an internal env sandbox lifecycle service that wraps existing sandbox query/job machinery for create, save, resume, delete, and reconfigure.
 - [x] 2.3 Preserve sandboxd websocket wakeups, node ownership checks, Cube `local_ref`, runtime env/model metadata, and existing status transitions.
 - [x] 2.4 Run scoped Go tests for sandbox handler/lifecycle packages.
-- [ ] 2.5 Add failing tests for lifecycle `Create`: inserts a `sandbox_instance` row, enqueues the existing `create` sandboxd job, and notifies the owning node.
-- [ ] 2.6 Implement lifecycle `Create` mirroring the existing `CreateSandboxInstance` handler and run scoped Go tests.
+- [x] 2.5 Add failing tests for lifecycle `Create`: inserts a `sandbox_instance` row, enqueues the existing `create` sandboxd job, and notifies the owning node.
+- [x] 2.6 Implement lifecycle `Create` mirroring the existing `CreateSandboxInstance` handler and run scoped Go tests.
 
 ## 3. Env-dispatch Sandbox-instance Handles and Per-agent Envs
 
