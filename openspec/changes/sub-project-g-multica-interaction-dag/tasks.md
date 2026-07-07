@@ -1,8 +1,13 @@
 ## 1. Investigation — interaction seams and turn-index source
 
-- [ ] 1.1 Confirm where Multica drives each assistant turn (proxy `/chat/completions`
-  boundary) and define the per-`agent_run_id` turn-counter seam for `start_turn_idx` /
-  `end_turn_idx`.
+- [x] 1.1 **DONE (inline investigation):** Multica does NOT proxy `/chat/completions`.
+  In training mode the sandboxed agent (`pi -p --provider areal`) routes LLM via `db_bridge`
+  → shared Supabase → AReaL gateway. `task_message.seq` counts agent *events* (text/tool_use/
+  tool_result/thinking/error — `daemon.go` `seq.Add(1)` per event), NOT LLM turns, so
+  `seq ≠ AReaL turn_idx` (1 Node = 1 `/chat/completions`). Turn-index source = shared
+  `interaction_id` (D5 revised): AReaL returns it in the response `id`; `pi` surfaces it via
+  its `message_end` event; the daemon stamps `task_message.interaction_id`; turns are
+  numbered per session as the 1-based ordinal of interaction_ids. See design D5 + section 2b.
 - [ ] 1.2 Confirm the delegation seam (`issue.parent_issue_id`, `internal/service/task.go`)
   emits a `DELEGATION` edge source and closes the parent run's current segment.
 - [ ] 1.3 Confirm the mention seam (`internal/mention`) emits a `MENTION` peer edge without
@@ -19,15 +24,38 @@
 ## 2. Migration + DB queries
 
 - [ ] 2.1 Add migration: `interaction_dag_segment` (segment_id, project_id, agent_run_id,
-  issue_id, task_id, start_turn_idx, end_turn_idx, closing_event, closing_event_target,
-  created_at), `interaction_dag_edge` (src_segment_id, dst_segment_id, type), and
-  `interaction_dag_env_snapshot` (segment_id, sandbox_ids, issue_snapshot_id, env_state).
+  issue_id, task_id, start_turn_idx, end_turn_idx, closing_event_interaction_id,
+  closing_event, closing_event_target, created_at), `interaction_dag_edge` (src_segment_id,
+  dst_segment_id, type), `interaction_dag_env_snapshot` (segment_id, sandbox_ids,
+  issue_snapshot_id, env_state), `interaction_dag_turn` (session_id, agent_run_id,
+  interaction_id, turn_idx, created_at, UNIQUE(session_id, interaction_id)) — the
+  per-session ordered interaction_id→turn_idx map. Also `ALTER task_message ADD
+  interaction_id UUID` + index `(task_id, interaction_id)` (stamped by the daemon from
+  `pi`'s `message_end`; see 2b).
 - [ ] 2.2 Generate / add DB query files: `CreateSegment`, `CloseSegment` (set
   end_turn_idx + closing_event), `AddEdge`, `CaptureEnvSnapshot`, `RecordSessionAgentRun`,
   `ListSegmentsForProject`, `ListEdgesForProject`, `ListEnvSnapshotsForProject`,
   `GetDagStatus` (project_id → in_progress|done|failed).
 - [ ] 2.3 Ensure `DELETE /api/v1/env-dispatch/{projectID}` cascades to the new tables.
 - [ ] 2.4 Commit: `feat(interaction-dag): migration + queries for segments edges snapshots`.
+
+## 2b. interaction_id surfacing (cross-repo — D5 revised)
+
+The turn index depends on `interaction_id` flowing AReaL → `pi` → daemon → task_message.
+
+- [ ] 2b.1 **AReaL proxy:** ensure `/chat/completions` response carries `interaction_id`
+  (the `Node.node_id`) as the response `id` (confirm it is already exposed; else echo it).
+  Test: response body `id` equals the cached `Node.node_id`.
+- [ ] 2b.2 **pi areal provider:** extract the response `interaction_id` and emit it in the
+  `message_end` stream event (add `ID`/`InteractionID` to the event payload; today `pi`
+  consumes `message_end` internally and emits no per-turn `agent.Message`).
+- [ ] 2b.3 **Multica daemon:** handle the `message_end` interaction_id; stamp
+  `interaction_id` onto the turn's `task_message` rows (text/tool_use/tool_result of that
+  turn share it). Add the arm to the `switch msg.Type` in `daemon.go`.
+- [ ] 2b.4 **Multica:** per session, number turns = 1-based ordinal of distinct
+  `interaction_id`s in creation order; expose `interaction_id → turn_idx` for the recording
+  service. Test: ordinal matches AReaL `list[Node]` enumerate order for a 2-turn run.
+- [ ] 2b.5 Commit (per repo): `feat(interaction-dag): surface interaction_id for turn indexing`.
 
 ## 3. Incremental recording service (TDD)
 

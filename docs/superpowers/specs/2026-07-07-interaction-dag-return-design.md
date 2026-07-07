@@ -127,14 +127,28 @@ SuperNodeAssembler.assemble(sessions_nodes, dag_result)  [unchanged consumer]
 All recording is best-effort: a recording error is logged and the run continues; a
 `DagResult` with a missing segment is detectable by AReaL's assembler dense-coverage check.
 
-### Turn-index tracking
+### Turn-index tracking (revised — shared `interaction_id`)
 
-Multica drives each agent turn through the AReaL proxy (`/chat/completions` per assistant
-turn). One assistant turn = one turn. The service increments a per-`agent_run_id` counter
-at the driving boundary. The closing communication event's turn index becomes the
-segment's `end_turn_idx`. Because AReaL's proxy interaction cache orders interactions by
-execution order, AReaL's `list[Node]` 1-based positions align with these indices (the
-assembler validates and raises `DAGError` on any mismatch).
+Multica does **not** proxy `/chat/completions`: in training mode the sandboxed agent
+(`pi -p --provider areal`) routes LLM calls through `db_bridge` → shared Supabase → AReaL's
+gateway, and `task_message.seq` counts agent *events* (text/tool_use/tool_result/…), not
+LLM turns — so `seq` cannot be the turn index. Instead the turn index comes from a shared
+`interaction_id`:
+
+- AReaL's proxy returns each response's `interaction_id` (the `Node.node_id`) in the
+  `/chat/completions` response `id`; `db_bridge` relays it transparently to `pi`.
+- `pi`'s areal provider emits the `interaction_id` in its `message_end` event (1:1 per
+  `/chat/completions`); the daemon stamps it onto the turn's `task_message` rows (new
+  `task_message.interaction_id` column).
+- The service numbers turns per session as the 1-based ordinal of `interaction_id`s in
+  creation order. A closing communication event's `interaction_id` → its ordinal =
+  `end_turn_idx`.
+
+Alignment is by construction: Multica's `message_end` order and AReaL's `list[Node]`
+enumerate order are both the `/chat/completions` execution order, so the 1-based ordinals
+match with no cross-system query. `SegmentSpec`/`SuperNodeAssembler` are unchanged; the
+assembler still validates dense `[1, len(nodes)]` coverage and may assert
+`Node[turn_idx].node_id == interaction_id`.
 
 ### Event hooks
 

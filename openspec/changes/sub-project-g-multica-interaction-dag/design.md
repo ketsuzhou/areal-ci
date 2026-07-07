@@ -104,16 +104,48 @@ execution than a held long-poll, SSE, or webhook. No connection-held state.
 **Alternatives considered:** long-poll / SSE / webhook — rejected for v1 complexity; can be
 added later behind the same endpoint.
 
-### D5 — Turn-index tracking at the agent-run driving boundary
+### D5 — Turn-index via shared `interaction_id` (revised during build Task 1)
 
-Multica drives each agent turn through the AReaL proxy (`/chat/completions` per assistant
-turn). One assistant turn = one turn. Multica maintains a per-`agent_run_id` turn counter
-and closes the current segment when a communication event fires on that run, stamping the
-closing turn's index as `end_turn_idx`.
+**Correction:** Multica does **not** proxy `/chat/completions`. In training mode the
+sandboxed agent (`pi -p --provider areal`) routes each LLM call through `db_bridge` → a
+shared Supabase table → AReaL's proxy-rollout gateway; Multica never sees the LLM
+request/response directly. Consequently Multica has no native per-turn counter at the
+proxy boundary, and `task_message.seq` is **not** a turn index: the in-sandbox daemon
+assigns `seq` (`internal/daemon/daemon.go`) per *agent event* — `text`, `tool_use`,
+`tool_result`, `thinking`, `error` each get their own `seq` — so one assistant turn
+produces 3+ `task_message` rows. AReaL's `turn_idx` (`tree_store.py` `Node`) is instead
+one per `/chat/completions` assistant response. `seq ≠ turn_idx`.
 
-**Rationale:** Multica is the driver, so it is the natural place to count turns; the proxy
-interaction cache on the AReaL side already orders interactions by execution order, so
-AReaL's `list[Node]` positions align with these 1-based indices.
+**Revised mechanism — shared `interaction_id`:**
+
+1. AReaL's proxy already mints a per-response `interaction_id` (the `Node.node_id`, a UUID
+   from the inference engine) and returns it in the `/chat/completions` response `id`
+   (small AReaL-side change if not already exposed in the body).
+2. The response transits `db_bridge` transparently to the agent. `pi`'s areal provider
+   extracts the `interaction_id` and emits it in its `message_end` stream event — the
+   event that is 1:1 with each `/chat/completions` response (today `pi` consumes
+   `message_end` internally for usage and emits no per-turn `agent.Message`; this adds an
+   `ID`/`InteractionID` field).
+3. The Multica daemon captures the `interaction_id` from `message_end` and stamps it onto
+   the turn's `task_message` rows (new `task_message.interaction_id` column + index; every
+   event-row of a turn — text/tool_use/tool_result — shares that turn's id).
+4. Multica numbers turns per session as the **1-based ordinal of `interaction_id`s in
+   creation order**. A communication event (e.g. a delegation `tool_use`) carries the
+   `interaction_id` of the LLM response that produced it; that id's per-session ordinal is
+   the segment's `end_turn_idx`.
+
+**Why the contract stays stable (no `SuperNodeAssembler` change):** both Multica (via
+`message_end` order) and AReaL (via `list[Node]` enumerate order in
+`customized_grouped_workflow.py`) define `turn_idx` as the 1-based ordinal of LLM
+responses per session in execution order. Same order ⇒ same ordinals ⇒ alignment by
+construction — with no Multica→AReaL query. `SegmentSpec.start_turn_idx`/`end_turn_idx`
+slice `list[Node]` exactly as before; `interaction_id` is an optional audit key (AReaL may
+assert `Node[turn_idx].node_id == interaction_id`).
+
+**Rationale:** the only component bridging the `db_bridge` response (HTTP, carries
+`interaction_id`) and the Multica daemon (stdout stream) is the agent (`pi`), so `pi`'s
+`message_end` is the unique correct surfacing seam. Ordinal alignment removes the
+off-by-one risk of independent counters.
 
 ### D6 — Segment semantics (matches 2026-06-30 D7, Option A)
 
@@ -140,11 +172,15 @@ topological invariant and rejects cycles.
 
 ## Risks / Trade-offs
 
-- **Turn-index drift** (off-by-one, missed turns between Multica's count and AReaL's
-  `list[Node]`) → Mitigation: the assembler already validates `start_turn_idx` /
-  `end_turn_idx` against the actual `list[Node]` length and raises `DAGError` on mismatch;
-  tests cover the boundary. Multica counts exactly one turn per assistant completion it
-  drives.
+- **Turn-index drift** (off-by-one between Multica's ordinal and AReaL's `list[Node]`) →
+  Mitigation: ordinals are derived from the same execution order on both sides (D5), so
+  drift is structurally impossible; the assembler additionally validates dense coverage
+  `[1, len(nodes)]` and raises `DAGError` on mismatch, and may assert
+  `Node[turn_idx].node_id == interaction_id`. The residual risk is a missed/extra
+  `message_end` event (e.g. a retried `/chat/completions` that AReaL does not cache as a
+  Node) → Mitigation: `pi` emits `message_end` only for responses it commits; AReaL caches
+  exactly one Node per committed response; an E2E test asserts the per-session count
+  matches.
 - **Concurrent fan-out delegation ordering** (planner delegates to several workers at once)
   → Mitigation: each delegation closes the planner's current segment and opens a child
   segment per worker; multiple `DELEGATION` edges are recorded deterministically. The DAG
