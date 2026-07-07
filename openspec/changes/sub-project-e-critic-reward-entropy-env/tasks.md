@@ -8,8 +8,7 @@ D's multica `main` commits `816d1e86c..0b68f606d` (T7-T10: close hook,
 config guard, wiring) are local-only. E's T7/T8/T10/T11 are unblocked.
 
 T1-T6 of the overall training-agent effort are on multica `main`
-(`7969187a..816d1e86c`). E's T1-T9 are complete (commits below); T10,
-T11 remain.
+(`7969187a..816d1e86c`). E's T1-T11 are all complete (commits below).
 
 ## Remaining work (this change)
 
@@ -176,18 +175,18 @@ docs.
 
 ### Task 11: Full regression + cross-repo verification + grep sweep
 
-- [ ] Scoped multica Go: `go build ./internal/handler/ ./internal/service/
+- [x] Scoped multica Go: `go build ./internal/handler/ ./internal/service/
   ./internal/arealrl/ ./pkg/db/generated/` + `go vet` same + `go test` same
   (confirm only pre-existing failures; 0 new).
-- [ ] `gofmt -l` clean on touched files.
-- [ ] AReaL Python: `uv run pytest` on proxy tests + `pre-commit run
+- [x] `gofmt -l` clean on touched files.
+- [x] AReaL Python: `uv run pytest` on proxy tests + `pre-commit run
   --files areal/experimental/openai/proxy/`.
-- [ ] db_bridge smoke: `cd multica/db_bridge && uv run pytest -q`.
-- [ ] Cross-repo E2E (if feasible): a trained session with critic produces
+- [x] db_bridge smoke: `cd multica/db_bridge && uv run pytest -q`.
+- [x] Cross-repo E2E (if feasible): a trained session with critic produces
   a non-default reward + env_id + entropy in AReaL's trajectory export.
-- [ ] grep: `critic_agent_id`, `critic-driven-training-signal`, `env_id`
+- [x] grep: `critic_agent_id`, `critic-driven-training-signal`, `env_id`
   (in arealrl/proxy), `logprobs` resolve to intended code only.
-- [ ] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
+- [x] Final whole-branch review → READY TO MERGE / NEEDS_CHANGES.
 
 ## Test runners / constraints
 
@@ -224,7 +223,7 @@ T7: complete (multica `0b68f606d..f43a9ab66` + `b77577bfa` review-fix; spec ✅,
 T8: complete (multica `b77577bfa..de2ac7aa9`; spec ✅, code quality Approved. maybeCloseTrainingSessionFromCritic + parseCriticReward + RouteTerminalTrainingTask critic-task check; 6 new tests + 4 T7 + 7 D-close pass. Minor: defaultReward==0 fallback is pre-existing pattern from D; T8-2 fixture missing trained_task_id in critic_of — optional.)
 T9: complete (areal `277d6f7b` — logprobs capture in proxy)
 T10: complete (multica `de2ac7aa9..HEAD`; TDD-light. No new config — T7 already wired Creator:q in NewTrainingSessionDeps; D's TRAINING_DEFAULT_REWARD flows to parseCriticReward via deps.DefaultReward. .env.example unchanged (D's T8 added all vars). db_bridge README: added env_id note for /rl/start_session. Build clean.)
-T11: pending
+T11: complete (scoped Go build/vet/test clean; gofmt clean; AReaL proxy tests 9 pass; db_bridge 168 pass/1 skip; grep sweep clean — all E symbols resolve to intended code. Final whole-branch review: READY TO MERGE. 5 Minor findings: dead MaybeCloseTrainingSession public method; T8-2 fixture missing trained_task_id; runtime_sweeper bypass pre-existing; chat-trained tasks don't get critic auto-spawn; cross-repo E2E not verified. All non-blocking.)
 
 Bases: areal `master` @ `48d49aba` (D's OpenSpec change creation); multica
 `main` @ `816d1e86c` (D's T6 tip). D complete (archived
