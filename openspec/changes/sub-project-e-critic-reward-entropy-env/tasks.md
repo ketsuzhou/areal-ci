@@ -166,13 +166,13 @@ or add `maybeCloseTrainingSessionFromCritic`), tests.
 **Files**: config loader, handler/service construction, `.env.example`,
 docs.
 
-- [ ] No new config required for critic (critic_agent_id comes from
+- [x] No new config required for critic (critic_agent_id comes from
   env_dispatch). Confirm `TRAINING_DEFAULT_REWARD` (from D) is the fallback.
-- [ ] Wire the critic auto-spawn + deferred close into the task service
+- [x] Wire the critic auto-spawn + deferred close into the task service
   construction.
-- [ ] `.env.example` entries (if any new config) + short note in
+- [x] `.env.example` entries (if any new config) + short note in
   db_bridge/README or protocol doc.
-- [ ] Build touched packages; commit: `chore(training): wire critic auto-spawn + deferred close`.
+- [x] Build touched packages; commit: `chore(training): wire critic auto-spawn + deferred close`.
 
 ### Task 11: Full regression + cross-repo verification + grep sweep
 
@@ -223,7 +223,7 @@ T6: complete (multica `fb40610c7` — session-open hook passes env_id)
 T7: complete (multica `0b68f606d..f43a9ab66` + `b77577bfa` review-fix; spec ✅, code quality Approved. maybeSpawnCriticTask + RouteTerminalTrainingTask + FindCriticTaskForTrained/CreateCriticTask queries; 4 new tests + 8 existing close tests pass. Minor findings: dead MaybeCloseTrainingSession public method kept for T8/T10; brief test-regex was wrong (SpawnCritic not CriticSpawn).)
 T8: complete (multica `b77577bfa..de2ac7aa9`; spec ✅, code quality Approved. maybeCloseTrainingSessionFromCritic + parseCriticReward + RouteTerminalTrainingTask critic-task check; 6 new tests + 4 T7 + 7 D-close pass. Minor: defaultReward==0 fallback is pre-existing pattern from D; T8-2 fixture missing trained_task_id in critic_of — optional.)
 T9: complete (areal `277d6f7b` — logprobs capture in proxy)
-T10: pending (D-blocked — now unblocked)
+T10: complete (multica `de2ac7aa9..HEAD`; TDD-light. No new config — T7 already wired Creator:q in NewTrainingSessionDeps; D's TRAINING_DEFAULT_REWARD flows to parseCriticReward via deps.DefaultReward. .env.example unchanged (D's T8 added all vars). db_bridge README: added env_id note for /rl/start_session. Build clean.)
 T11: pending
 
 Bases: areal `master` @ `48d49aba` (D's OpenSpec change creation); multica
