@@ -87,7 +87,9 @@ finish)
 
 T7: complete (multica main fb40610c7..86c3c28ec..61ed426fd, review CLEAN; 7/7 MaybeClose tests pass, build clean)
   Shared maybeCloseTrainingSession(ctx, deps, task, projectID) called from CompleteTask/FailTask/CancelTaskWithResult; arealSessionCloser interface (SetReward+EndSession) added; TrainingSessionDeps gains Closer field; extractArealProxyConfig safely parses task.Context JSONB; default_reward from training_dispatch with fallback to trainingDefaultReward=1.0 (T8 makes configurable); SetReward error → still calls EndSession (best-effort); RL errors logged via slog.Warn, never fatal. Doc note added: runtime_sweeper.FailStaleTasks bypasses FailTask (raw SQL), so stale tasks won't auto-close — reaper is future hardening.
-T8: pending
+T8: complete (multica main 61ed426fd..ae6f2435a, review CLEAN; 5 config tests + 7 close tests + 6 open tests pass, build clean)
+  TrainingConfig struct + LoadTrainingConfig() reads AREAL_BRIDGE_STUB_URL/AREAL_ADMIN_API_KEY/AREAL_PROXY_URL/TRAINING_DEFAULT_REWARD from env; NewTrainingSessionDeps(cfg, q) returns nil when BridgeStubURL/AdminAPIKey empty (hooks stay no-ops); arealrl.New assigned to both RL (starter) + Closer fields; TaskService.WithTraining(*TrainingSessionDeps) builder injects it; cmd/server/main.go wires LoadTrainingConfig + conditional WithTraining after NewTaskService; .env.example documents all 4 vars + notes AREAL_PROXY_BASE_URL is daemon-set; TrainingSessionDeps gains DefaultReward float64 field used in maybeCloseTrainingSession (falls back to 1.0 when zero). Invalid TRAINING_DEFAULT_REWARD → warning log + 1.0 fallback.
+  MINOR (non-blocking): trainingDefaultReward constant in training.go:86 has stale comment "T8 will make this configurable" — T8 is done, comment should say "fallback used when DefaultReward is zero" or be inlined. Literal 1.0 appears in 3 places (training.go:268, training_config.go:45,49) — could DRY to the constant. Not worth a fix cycle.
 T9: pending
 
 Bases: multica `main` @ 816d1e86c (T6 tip). Commits local-only unless the user
