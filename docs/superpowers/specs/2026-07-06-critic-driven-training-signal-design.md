@@ -2,6 +2,8 @@
 comet_change: sub-project-e-critic-reward-entropy-env
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
+status: final
 ---
 
 # Sub-project E — critic-driven reward + entropy + env_id (design)

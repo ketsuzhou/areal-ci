@@ -2,6 +2,7 @@
 change: sub-project-e-critic-reward-entropy-env
 design-doc: docs/superpowers/specs/2026-07-06-critic-driven-training-signal-design.md
 base-ref: 48d49aba673f34dfbe0059387e1a6f609cc7bf8c
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 # Sub-project E — critic-driven reward + entropy + env_id (implementation plan)
@@ -49,6 +50,7 @@ base-ref: 48d49aba673f34dfbe0059387e1a6f609cc7bf8c
 
 - `.superpowers/sdd/progress.md` — modify, append E task ledger.
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 1: Investigation — confirm seams for critic dispatch + entropy capture
@@ -75,6 +77,7 @@ git add docs/superpowers/notes/2026-07-06-E-seams.md
 git commit -m "docs(E): record Task 1 seams investigation (critic spawn + logprobs + env_id)"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 2: Contract — `critic_agent_id` on env_dispatch (TDD, multica)
@@ -194,6 +197,7 @@ cd multica && git add server/internal/handler/env_dispatch.go server/internal/ha
 git commit -m "feat(env-dispatch): accept critic_agent_id (critic for trained agent)"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 3: Persist critic intent — migration 153 (TDD, multica)
@@ -286,6 +290,7 @@ cd multica && git add server/migrations/153_training_dispatch_critic.up.sql serv
 git commit -m "feat(training): persist critic_agent_id on training_dispatch (migration 153)"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 4: AReaL contract — env_id on StartSessionRequest (TDD, areal Python)
@@ -360,6 +365,7 @@ git add areal/experimental/openai/proxy/server.py areal/experimental/openai/prox
 git commit -m "feat(proxy): accept env_id on start_session for trajectory attribution"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 5: RL bridge client — env_id in StartSession (TDD, multica Go)
@@ -443,6 +449,7 @@ cd multica && git add server/internal/arealrl/client.go server/internal/arealrl/
 git commit -m "feat(arealrl): pass env_id to start_session"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 6: Session-open hook — pass env_id (TDD, multica)
@@ -496,6 +503,7 @@ cd multica && git add server/internal/service/task.go server/internal/service/ta
 git commit -m "feat(training): pass env_id when opening RL session"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 7: Critic auto-spawn on trained-terminal (TDD, multica)
@@ -665,6 +673,7 @@ cd multica && git add server/internal/service/task.go server/internal/service/ta
 git commit -m "feat(training): auto-spawn critic task on trained-task terminal"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 8: Deferred close hook on critic-terminal (TDD, multica)
@@ -809,6 +818,7 @@ cd multica && git add server/internal/service/task.go server/internal/service/ta
 git commit -m "feat(training): deferred close hook on critic-terminal with critic reward"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 9: AReaL proxy — logprobs capture for entropy (TDD, areal Python)
@@ -899,6 +909,7 @@ git add areal/experimental/openai/proxy/proxy_rollout_server.py areal/experiment
 git commit -m "feat(proxy): capture logprobs for entropy computation"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 10: Config + production wiring (TDD-light, multica)
@@ -925,6 +936,7 @@ cd multica && git add server/internal/daemon/config.go server/internal/service/t
 git commit -m "chore(training): wire critic spawn + deferred close; note env_id in db_bridge"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ### Task 11: Full regression + cross-repo verification + grep sweep
@@ -995,6 +1007,7 @@ git add .superpowers/sdd/progress.md
 git commit -m "chore(sdd): record sub-project E completion in ledger"
 ```
 
+archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env
 ---
 
 ## Self-review
