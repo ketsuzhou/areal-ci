@@ -268,6 +268,39 @@ class SessionData:
                 ready_transition=False,
             )
 
+    def close_segment(self) -> RewardResult:
+        """Close the active segment into a ready trajectory WITHOUT setting a reward.
+
+        Decouples the trajectory boundary from reward so each communication-bounded
+        segment is its own exportable trajectory. The segment's reward is assigned
+        later (AReaL-side; judge in change 2), not at close.
+        """
+        with self._lock:
+            now = time.time()
+            self._last_access_time = now
+            completions = self._active_completions
+            if len(completions) == 0:
+                raise ValueError("No interactions in session")
+            terminal_interaction_id = completions.last_interaction_id
+            trajectory_id = self._next_trajectory_id
+            self._next_trajectory_id += 1
+            ready = ReadyTrajectory(
+                trajectory_id=trajectory_id,
+                interaction_id=terminal_interaction_id,
+                completions=completions,
+                created_at=now,
+                needs_online_callback=False,
+            )
+            self._ready_trajectories[trajectory_id] = ready
+            self._active_completions = InteractionCache()
+            # Do NOT touch _last_reward_interaction_id / _last_set_reward_time.
+            return RewardResult(
+                session_id=self.session_id,
+                trajectory_id=trajectory_id,
+                interaction_count=len(completions),
+                ready_transition=True,
+            )
+
     def finalize_if_reward_timeout_elapsed(
         self,
         now: float | None = None,
