@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from customized_areal.tree_search.agents.execution_dag import (
     DAGError,
@@ -34,6 +34,7 @@ from customized_areal.tree_search.agents.execution_dag import (
     ExecutionDAG,
     SuperNode,
 )
+from customized_areal.tree_search.agents.multica_dag_client import AssembledDag
 
 
 @dataclass(frozen=True)
@@ -89,8 +90,101 @@ class DagResult:
     env_snapshots: dict[str, TeamEnvSnapshot]
 
 
+class TensorResolver(Protocol):
+    """Resolves a segment's ``tensor_ref`` to its token/logprob tensors.
+
+    Implementations call the v2 data_proxy ``/data/<shard_id>`` / ``/data/batch``
+    endpoints. Returns a torch-free dict (``input_ids``, ``loss_mask``,
+    ``logprobs``, ``versions``, ``attention_mask``, ``rewards``) so the assembler
+    stays torch-free and unit-testable.
+    """
+
+    def resolve(self, tensor_ref: dict[str, Any]) -> dict[str, Any]: ...
+
+
 class SuperNodeAssembler:
     """Assemble SuperNodes from Multica's segment specs + proxy interactions."""
+
+    def assemble_from_refs(
+        self,
+        dag: AssembledDag,
+        resolver: TensorResolver,
+    ) -> ExecutionDAG:
+        """Build an ExecutionDAG from an AssembledDag by resolving tensor refs.
+
+        This is the v2 segment-DAG consumer path. Unlike :meth:`assemble`
+        (which slices an agent's ``list[Node]`` by ``start_turn_idx`` /
+        ``end_turn_idx``), each segment's payload comes from resolving its
+        ``tensor_ref`` via ``resolver`` - no turn indices, no message text, no
+        judge scores cross this boundary (per the locked architecture).
+
+        Design choices:
+          - ``segment_id`` is used as the SuperNode ``node_id`` so the
+            AssembledDag edges (which reference segment ids) resolve directly.
+          - Resolved tensors are stored on ``metadata["tensors"]``; segment
+            identity (``segment_id``, ``trajectory_id``) is stored in metadata
+            too. SuperNode has no ``payload`` field, so metadata is the
+            non-invasive attachment point (the old ``assemble`` path is
+            unaffected).
+          - ``task_id`` is "" because the v2 SegmentSpec dropped it (the locked
+            segment shape carries ``trajectory_id`` + ``tensor_ref`` instead).
+          - Acyclicity is validated via :meth:`ExecutionDAG.topological_order`,
+            which raises ``DAGError`` on a cycle. ``completion_index`` is
+            stamped from that order, mirroring :meth:`assemble`.
+
+        Args:
+            dag: The AssembledDag fetched from Multica (structure only).
+            resolver: Resolves each segment's ``tensor_ref`` to tensors.
+
+        Returns:
+            The assembled ExecutionDAG (one SuperNode per segment).
+
+        Raises:
+            DAGError: On a cycle, a dangling edge, or an unknown EdgeType.
+        """
+        agent_run_to_session: dict[str, str] = {
+            agent_run_id: session_id
+            for session_id, agent_run_id in dag.session_to_agent_run.items()
+        }
+
+        edag = ExecutionDAG()
+        for seg in dag.segments:
+            tensors = resolver.resolve(seg.tensor_ref)
+            env = seg.env_snapshot or {}
+            closing_event = (
+                EdgeType(seg.closing_event) if seg.closing_event else None
+            )
+            super_node = SuperNode(
+                node_id=seg.segment_id,
+                agent_id=seg.agent_run_id,
+                issue_id=seg.issue_id,
+                task_id="",
+                closing_event=closing_event,
+                session_id=agent_run_to_session.get(seg.agent_run_id),
+                sandbox_ids=list(env.get("sandbox_ids", [])),
+                issue_snapshot_id=env.get("issue_snapshot_id"),
+                env_state=dict(env.get("env_state", {})),
+                nodes=[],
+                metadata={
+                    "segment_id": seg.segment_id,
+                    "trajectory_id": seg.trajectory_id,
+                    "tensors": tensors,
+                },
+            )
+            edag.add_event(super_node)
+
+        for edge in dag.edges:
+            edag.add_edge(
+                edge.src_segment_id,
+                edge.dst_segment_id,
+                EdgeType(edge.type),
+            )
+
+        # Validate acyclicity and stamp completion_index from topological order.
+        # topological_order raises DAGError if the graph contains a cycle.
+        for idx, super_node in enumerate(edag.topological_order()):
+            super_node.completion_index = idx
+        return edag
 
     def assemble(
         self,
