@@ -39,10 +39,10 @@
 
 ## 5. Resume-from-checkpoint
 
-- [ ] 5.1 Add failing tests for successful resume, per-agent sandbox refs preserved, incomplete save rejected, checkpoint not found, and cross-workspace access rejected.
-- [ ] 5.2 Implement resume-from-checkpoint using the env sandbox lifecycle service and existing sandboxd resume job flow.
-- [ ] 5.3 Ensure API and client naming use resume-from-checkpoint terminology, not branch-from-checkpoint.
-- [ ] 5.4 Return a rollout handle that AReaL can use to continue tree-search execution.
+- [x] 5.1 Add failing tests for successful resume, per-agent sandbox refs preserved, incomplete save rejected, checkpoint not found, and cross-workspace access rejected.
+- [x] 5.2 Implement resume-from-checkpoint using the env sandbox lifecycle service and existing sandboxd resume job flow.
+- [x] 5.3 Ensure API and client naming use resume-from-checkpoint terminology, not branch-from-checkpoint.
+- [x] 5.4 Return a rollout handle that AReaL can use to continue tree-search execution.
 
 ## 6. Entropy and Event-triggered Checkpoints
 
