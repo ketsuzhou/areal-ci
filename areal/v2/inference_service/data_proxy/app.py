@@ -769,6 +769,11 @@ def create_app(config: DataProxyConfig) -> FastAPI:
                 )
                 merged.update(interactions)
             except KeyError:
+                if body.trajectory_id is not None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"trajectory_id {body.trajectory_id} not found in session {sid}"
+                    )
                 continue
 
         if all(v.has_tensor_data for v in merged.values()):

@@ -91,3 +91,66 @@ def test_gateway_close_segment_route_registered():
     # route exists (will 502/401 without a router, but not 404)
     r = app.post("/rl/close_segment", headers={"Authorization": "Bearer k"})
     assert r.status_code != 404
+
+
+def test_export_single_trajectory_remove_session_false():
+    cfg = DataProxyConfig(admin_api_key="areal-admin-key", backend_addr="")
+    app_instance = create_data_proxy_app(cfg)
+    with TestClient(app_instance) as client:
+        # start session (admin)
+        r = client.post("/rl/start_session", json={"task_id": "t3"},
+                     headers={"Authorization": "Bearer areal-admin-key"})
+        assert r.status_code == 201
+        api_key = r.json()["sessions"][0]["session_api_key"]
+        session_id = r.json()["sessions"][0]["session_id"]
+
+        # Directly add an interaction to the session instead of calling /chat/completions
+        store = app_instance.state.session_store
+        session = store.get_session(session_id)
+        session.add_string_interaction([{"role": "user", "content": "a"}], "hello")
+
+        # Close segment to get trajectory_id 0
+        r = client.post("/rl/close_segment", headers={"Authorization": f"Bearer {api_key}"})
+        assert r.status_code == 200
+        assert r.json()["trajectory_id"] == 0
+
+        # Export with remove_session=False
+        r = client.post("/export_trajectories", json={
+            "session_ids": [session_id],
+            "trajectory_id": 0,
+            "remove_session": False
+        }, headers={"Authorization": "Bearer areal-admin-key"})
+        assert r.status_code == 200
+
+        # Verify session still exists
+        assert store.get_session(session_id) is not None
+
+
+def test_export_unknown_trajectory_400():
+    cfg = DataProxyConfig(admin_api_key="areal-admin-key", backend_addr="")
+    app_instance = create_data_proxy_app(cfg)
+    with TestClient(app_instance) as client:
+        # start session (admin)
+        r = client.post("/rl/start_session", json={"task_id": "t4"},
+                     headers={"Authorization": "Bearer areal-admin-key"})
+        assert r.status_code == 201
+        api_key = r.json()["sessions"][0]["session_api_key"]
+        session_id = r.json()["sessions"][0]["session_id"]
+
+        # Directly add an interaction to the session instead of calling /chat/completions
+        store = app_instance.state.session_store
+        session = store.get_session(session_id)
+        session.add_string_interaction([{"role": "user", "content": "a"}], "hello")
+
+        # Close segment to get trajectory_id 0
+        r = client.post("/rl/close_segment", headers={"Authorization": f"Bearer {api_key}"})
+        assert r.status_code == 200
+
+        # Export with unknown trajectory_id
+        r = client.post("/export_trajectories", json={
+            "session_ids": [session_id],
+            "trajectory_id": 99,
+            "remove_session": False
+        }, headers={"Authorization": "Bearer areal-admin-key"})
+        # This should return 400 after we fix the endpoint
+        assert r.status_code == 400
