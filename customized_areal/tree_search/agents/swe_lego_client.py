@@ -8,6 +8,10 @@ Wraps ``POST /api/v1/env``, ``DELETE /api/v1/env/{envID}``,
 from __future__ import annotations
 
 import logging
+
+from customized_areal.tree_search.env_checkpoint import (
+    should_create_entropy_checkpoint,
+)
 import os
 
 import httpx
@@ -229,4 +233,36 @@ class MulticaEnvDispatchClient:
             raise MulticaCheckpointError(resp.status_code, resp.text[:200])
         raise RuntimeError(
             f"resume_from_checkpoint failed: status={resp.status_code} body={resp.text[:200]}"
+        )
+
+    async def maybe_create_entropy_checkpoint(
+        self,
+        *,
+        project_id: str,
+        event_ref: str,
+        env_id_map: dict[str, str],
+        sandbox_refs: list[dict],
+        entropy: float | None,
+        threshold: float | None,
+        save_timeout_ms: int | None = None,
+    ) -> dict | None:
+        """Create an entropy-gated checkpoint when entropy >= threshold.
+
+        The AReaL rollout loop calls this at decision points with the model's
+        entropy (from logprobs) and a configured threshold. Returns the
+        checkpoint dict on creation, None when skipped (missing logprobs or
+        below threshold). A skip never fails the rollout. Checkpoint API
+        errors propagate as MulticaCheckpointError so the caller can decide
+        whether to retry or continue.
+        """
+        if not should_create_entropy_checkpoint(entropy, threshold):
+            return None
+        return await self.create_checkpoint(
+            project_id=project_id,
+            event_ref=event_ref,
+            checkpoint_kind="entropy_gated",
+            env_id_map=env_id_map,
+            sandbox_refs=sandbox_refs,
+            entropy_score=entropy,
+            save_timeout_ms=save_timeout_ms,
         )

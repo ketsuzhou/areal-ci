@@ -319,3 +319,71 @@ def test_resume_cross_workspace_raises_typed_404():
     with pytest.raises(MulticaCheckpointError) as exc_info:
         asyncio.run(c.resume_from_checkpoint(checkpoint_id="cp-missing"))
     assert exc_info.value.status_code == 404
+
+
+def test_maybe_create_entropy_checkpoint_creates_when_above_threshold():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"id": "cp-1", "save_status": "complete"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    result = asyncio.run(
+        c.maybe_create_entropy_checkpoint(
+            project_id="p1",
+            event_ref="evt-1",
+            env_id_map={"a1": "env-1"},
+            sandbox_refs=[{"instance_id": "inst-1"}],
+            entropy=1.5,
+            threshold=1.0,
+        )
+    )
+    assert result is not None
+    assert result["id"] == "cp-1"
+    assert seen["body"]["checkpoint_kind"] == "entropy_gated"
+    assert seen["body"]["entropy_score"] == 1.5
+
+
+def test_maybe_create_entropy_checkpoint_skips_when_logprobs_missing():
+    called = {"count": 0}
+
+    def handler(req):
+        called["count"] += 1
+        return httpx.Response(201, json={"id": "cp-1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    result = asyncio.run(
+        c.maybe_create_entropy_checkpoint(
+            project_id="p1",
+            event_ref="evt-1",
+            env_id_map={},
+            sandbox_refs=[],
+            entropy=None,  # logprobs unavailable
+            threshold=1.0,
+        )
+    )
+    assert result is None
+    assert called["count"] == 0  # no API call made
+
+
+def test_maybe_create_entropy_checkpoint_skips_when_below_threshold():
+    called = {"count": 0}
+
+    def handler(req):
+        called["count"] += 1
+        return httpx.Response(201, json={"id": "cp-1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    result = asyncio.run(
+        c.maybe_create_entropy_checkpoint(
+            project_id="p1",
+            event_ref="evt-1",
+            env_id_map={},
+            sandbox_refs=[],
+            entropy=0.2,
+            threshold=1.0,
+        )
+    )
+    assert result is None
+    assert called["count"] == 0

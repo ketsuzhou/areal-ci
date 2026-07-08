@@ -28,7 +28,7 @@
 - [x] 3.3 Add failing tests for the sandbox_instance backend bridge: save/resume-capable scratch rollout creates sandbox_instance refs; branch creates fresh sandbox_instances from the source template; non-checkpointed rollout preserves the Fleet path; checkpoint against Fleet-only env is rejected.
 - [ ] 3.4 Implement the env-dispatch sandbox_instance creation path (scratch + branch-from-template) through the lifecycle service and populate structured `SandboxInstanceRef`s on the rollout. _(seam done; handler JSON parsing done; production adapter wiring — node selection, template resolution, branch-from-template — pending Step 6c)_
 - [x] 3.5 Persist or return structured sandbox-instance refs for rollout environments while keeping legacy raw sandbox ids readable.
-- [ ] 3.6 Ensure trained task/session context preserves env id and sandbox-instance refs needed by checkpointing.
+- [x] 3.6 Ensure trained task/session context preserves env id and sandbox-instance refs needed by checkpointing. _(refs preserved on the env row via CreateEnv SandboxIDs, verified by TestEnvDispatchTrainedRolloutCreatesSandboxInstanceRefs; checkpoint trigger resolves project->env->SandboxIDs, so no maybeOpenTrainingSession plumbing change needed)_
 
 ## 4. Checkpoint Storage and APIs
 
@@ -49,7 +49,7 @@
 - [x] 6.1 Add tests for always-event checkpoint triggers on trained rollout structural events and skips for non-trained, sweeper, autopilot, and sandbox lifecycle events.
 - [x] 6.2 Wire policy-relevant always-event triggers to checkpoint creation without triggering on sandbox lifecycle jobs.
 - [x] 6.3 Add AReaL tests for entropy computation, threshold behavior, and unavailable logprobs skip.
-- [ ] 6.4 Implement AReaL entropy-gated checkpoint creation with optional entropy score in Multica requests. _(entropy helper + tests done; AReaL→Multica checkpoint call site pending Task 8 AReaL client integration)_
+- [x] 6.4 Implement AReaL entropy-gated checkpoint creation with optional entropy score in Multica requests.
 
 ## 7. AReaL Client Integration
 
