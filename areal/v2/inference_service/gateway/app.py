@@ -375,6 +375,49 @@ def create_app(config: GatewayConfig) -> FastAPI:
         )
 
     # =========================================================================
+    # POST /rl/close_segment — session key or admin key (mirror /rl/set_reward)
+    # =========================================================================
+
+    @app.post("/rl/close_segment")
+    async def close_segment(request: Request):
+        token = extract_bearer_token(request)
+        body = await request.body()
+        headers = _forwarding_headers(dict(request.headers))
+
+        model = None
+        try:
+            body_json = json.loads(body)
+            model = body_json.get("model")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        try:
+            worker_addr = await query_router(
+                config.router_addr,
+                token,
+                "/rl/close_segment",
+                config.router_timeout,
+                admin_api_key=config.admin_api_key,
+                model=model,
+                client=_client(),
+            )
+        except (RouterUnreachableError, RouterKeyRejectedError) as exc:
+            return _router_error_response(exc)
+
+        resp = await forward_request(
+            f"{worker_addr}/rl/close_segment",
+            body,
+            headers,
+            config.forward_timeout,
+            client=_client(),
+        )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type"),
+        )
+
+    # =========================================================================
     # POST /pause_generation/{worker_id} — admin key ONLY, target single worker
     # =========================================================================
 

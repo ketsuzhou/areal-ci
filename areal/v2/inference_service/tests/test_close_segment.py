@@ -1,8 +1,12 @@
 from fastapi.testclient import TestClient
 
-from areal.v2.inference_service.data_proxy.app import create_app
+from areal.v2.inference_service.data_proxy.app import (
+    create_app as create_data_proxy_app,
+)
 from areal.v2.inference_service.data_proxy.config import DataProxyConfig
 from areal.v2.inference_service.data_proxy.session import SessionData
+from areal.v2.inference_service.gateway.app import create_app as create_gateway_app
+from areal.v2.inference_service.gateway.config import GatewayConfig
 
 
 def _seed(session: SessionData) -> str:
@@ -51,7 +55,7 @@ def test_close_segment_session_stays_live_for_next_segment():
 
 def test_close_segment_endpoint_session_key():
     cfg = DataProxyConfig(admin_api_key="areal-admin-key", backend_addr="")
-    app_instance = create_app(cfg)
+    app_instance = create_data_proxy_app(cfg)
     with TestClient(app_instance) as client:
         # start session (admin)
         r = client.post("/rl/start_session", json={"task_id": "t1"},
@@ -74,9 +78,16 @@ def test_close_segment_endpoint_session_key():
 
 def test_close_segment_endpoint_empty_active_400():
     cfg = DataProxyConfig(admin_api_key="areal-admin-key", backend_addr="")
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(create_data_proxy_app(cfg)) as client:
         r = client.post("/rl/start_session", json={"task_id": "t2"},
                      headers={"Authorization": "Bearer areal-admin-key"})
         api_key = r.json()["sessions"][0]["session_api_key"]
         r = client.post("/rl/close_segment", headers={"Authorization": f"Bearer {api_key}"})
         assert r.status_code == 400
+
+
+def test_gateway_close_segment_route_registered():
+    app = TestClient(create_gateway_app(GatewayConfig(admin_api_key="areal-admin-key")))
+    # route exists (will 502/401 without a router, but not 404)
+    r = app.post("/rl/close_segment", headers={"Authorization": "Bearer k"})
+    assert r.status_code != 404
