@@ -1,3 +1,8 @@
+> **Superseded by `multica-v2-segment-dag-training`** (2026-07-08). Contract changed:
+> turn-index slicing -> `close_segment` + per-segment tensor-ref export; scores moved out of
+> the DAG to AReaL's judge; `AssembledDag` replaces `DagResult`. This change never started
+> building (0/60 tasks); archived in favor of the v2 segment-DAG data path.
+
 ## Why
 
 AReaL already designs and implements the **consumer** side of a multi-agent interaction

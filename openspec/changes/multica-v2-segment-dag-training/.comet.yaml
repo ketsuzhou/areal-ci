@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: subagent-driven-development
+build_pause: null
+isolation: branch
+verify_mode: null
+base_ref: fb9a195cd10504c6cc3e762b49753bf86235a11d
+design_doc: docs/superpowers/specs/2026-07-08-multica-v2-segment-dag-design.md
+plan: docs/superpowers/plans/2026-07-08-multica-v2-segment-dag.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-08
+verified_at: null
+archived: false
+handoff_context: openspec/changes/multica-v2-segment-dag-training/.comet/handoff/design-context.json
+handoff_hash: bff52d85bda76bd960f923c9bbf9de236e5b0c1c6ed03a881c14d0f2c707f2a2
