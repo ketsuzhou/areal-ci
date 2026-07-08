@@ -419,3 +419,31 @@ pass; grep clean. Final review: READY TO MERGE).
 
 E VERIFIED + ARCHIVED. multica main: 816d1e86c..69511fdf3. areal master: merged from
 sub-project-e-critic-reward-entropy-env.
+
+# SDD progress - multica-v2-segment-dag-training
+
+Plan: docs/superpowers/plans/2026-07-08-multica-v2-segment-dag.md
+Spec: docs/superpowers/specs/2026-07-08-multica-v2-segment-dag-design.md
+Impl repo: areal (branch: multica-v2-segment-dag-training) + multica/server (own branch, U6-U9)
+Controller: claude (this session)
+
+## Ledger
+Task 1.1: complete (commits fa2d8679..d77fab31, review clean) MINOR (defer to final review):
+test_close_segment_moves_active_to_ready_no_reward's last assertion
+(`active_completions is not None`) does not verify the no-reward claim - strengthen to
+check the closed trajectory's interaction reward is None.
+Task 1.2: complete (commits d77fab31..632e4949, review clean, no issues)
+Task 1.3: complete (commit 6bde9872, amended from 48979c63). IMPLEMENTER NEVER RAN TESTS
+(broken uv/.venv env). Orchestrator re-verified: ran `.venv-test/bin/python -m pytest`
+(7/7 green) + `uvx ruff check` (clean). Found + fixed: (a) `test_close_segment_endpoint_session_key`
+used bare `create_app` instead of imported `create_data_proxy_app` (NameError); (b) ruff
+import-wrap. Broader `areal/v2/inference_service/` suite: 7 passed, 0 regressions.
+
+ENV (applies to ALL remaining tasks): project `.venv` is broken (points to non-existent
+/dfs/.../AReaL-main/.venv) and `uv run` fails with "No interpreter found". Use
+`.venv-test/bin/python -m pytest <path>` for tests (Python 3.12, fine for v2 tests) and
+`uvx ruff check <paths>` for lint. Do NOT trust implementer self-reports of GREEN in this
+workspace - re-run tests yourself. U1 independent reviewer dispatched (sonnet).
+
+U1 (close_segment) STATUS: code complete + verified-green; independent review IN-FLIGHT.
+Next: U2 (per-segment tensor-ref export reuse).

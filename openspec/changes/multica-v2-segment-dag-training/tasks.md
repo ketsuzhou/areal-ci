@@ -49,17 +49,17 @@
 `areal/v2/inference_service/data_proxy/app.py`, `areal/v2/inference_service/gateway/app.py`,
 tests under `areal/v2/inference_service/tests/`.
 
-- [ ] 3.1 Failing tests: `close_segment` moves active completions into a ready trajectory
+- [x] 3.1 Failing tests: `close_segment` moves active completions into a ready trajectory
   and returns its `trajectory_id`, assigning no reward.
-- [ ] 3.2 Failing tests: session stays live after `close_segment` - further turns capture
+- [x] 3.2 Failing tests: session stays live after `close_segment` - further turns capture
   into a new active segment that can be closed independently.
-- [ ] 3.3 Failing tests: `close_segment` on a session with no active completions returns a
+- [x] 3.3 Failing tests: `close_segment` on a session with no active completions returns a
   typed error and produces no trajectory.
-- [ ] 3.4 Failing tests: `close_segment` does not require a prior `set_reward` (no
+- [x] 3.4 Failing tests: `close_segment` does not require a prior `set_reward` (no
   `_last_reward_interaction_id` dependency).
-- [ ] 3.5 Implement `SessionData.close_segment()` + data_proxy `/rl/close_segment` + gateway
-  route.
-- [ ] 3.6 Commit: `feat(v2-segment-dag): close_segment no-reward active->ready close`.
+- [x] 3.5 Implement `SessionData.close_segment()` + data_proxy `/rl/close_segment` + gateway
+  route. (commits d77fab31 + 632e4949 + 6bde9872; 7/7 tests green, ruff clean)
+- [x] 3.6 Commit: `feat(v2-segment-dag): close_segment no-reward active->ready close`.
 
 ## 4. V2 per-segment tensor-ref export + data_proxy resolve (TDD)
 
