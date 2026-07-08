@@ -445,5 +445,19 @@ ENV (applies to ALL remaining tasks): project `.venv` is broken (points to non-e
 `uvx ruff check <paths>` for lint. Do NOT trust implementer self-reports of GREEN in this
 workspace - re-run tests yourself. U1 independent reviewer dispatched (sonnet).
 
-U1 (close_segment) STATUS: code complete + verified-green; independent review IN-FLIGHT.
-Next: U2 (per-segment tensor-ref export reuse).
+U1 (close_segment) STATUS: CLOSED. Code complete + verified-green (9/9 tests, ruff). Independent
+review APPROVED (re-dispatch a0816718 after original a08... stalled at 140 bytes). All 4 spec
+contracts PASS; data_proxy + gateway routes mirror /rl/set_reward; no new issues. MINOR (weak
+no-reward assertion) deferred to final review.
+
+Task 2.1 (U2 - per-segment export contract + unknown-trajectory 400): CLOSED (commit 796c9004).
+Orchestrator re-verified: 9/9 tests green (7 U1 + 2 U2), ruff clean. Diff: 5-line fix at
+data_proxy/app.py:771 - raise HTTPException 400 when `body.trajectory_id is not None` and
+KeyError (preserves multi-trajectory `continue` when trajectory_id is None). 2 new tests seed
+via add_string_interaction (no /chat/completions backend) + assert export-keeps-session and
+unknown-trajectory-400. Independent review APPROVED (a666d1e5) - all 4 contracts PASS.
+DEFERRED (tasks 4.2/4.4): refs-only / RTensor.remotize contract + /data/* resolve tests need
+tensor-seeded interactions; string interactions exercise concat_string_interactions instead.
+Revisit at U4 (assemble_from_refs resolves tensor_ref).
+
+Next: U3 (areal MulticaDagClient consumer) - IN PROGRESS (implementer ac2bd37d). U4 gates on it.
