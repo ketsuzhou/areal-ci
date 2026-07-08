@@ -46,10 +46,10 @@
 
 ## 6. Entropy and Event-triggered Checkpoints
 
-- [ ] 6.1 Add tests for always-event checkpoint triggers on trained rollout structural events and skips for non-trained, sweeper, autopilot, and sandbox lifecycle events.
-- [ ] 6.2 Wire policy-relevant always-event triggers to checkpoint creation without triggering on sandbox lifecycle jobs.
-- [ ] 6.3 Add AReaL tests for entropy computation, threshold behavior, and unavailable logprobs skip.
-- [ ] 6.4 Implement AReaL entropy-gated checkpoint creation with optional entropy score in Multica requests.
+- [x] 6.1 Add tests for always-event checkpoint triggers on trained rollout structural events and skips for non-trained, sweeper, autopilot, and sandbox lifecycle events.
+- [x] 6.2 Wire policy-relevant always-event triggers to checkpoint creation without triggering on sandbox lifecycle jobs.
+- [x] 6.3 Add AReaL tests for entropy computation, threshold behavior, and unavailable logprobs skip.
+- [ ] 6.4 Implement AReaL entropy-gated checkpoint creation with optional entropy score in Multica requests. _(entropy helper + tests done; AReaL→Multica checkpoint call site pending Task 8 AReaL client integration)_
 
 ## 7. AReaL Client Integration
 
