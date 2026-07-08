@@ -1,5 +1,6 @@
 import pytest
 
+from customized_areal.tree_search.agents.execution_dag import DAGError
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     EdgeSpec,
@@ -96,7 +97,7 @@ def test_assemble_from_refs_rejects_cycle():
         ],
         session_to_agent_run={"s": "ar"},
     )
-    with pytest.raises(Exception):
+    with pytest.raises(DAGError):
         SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
 
 
