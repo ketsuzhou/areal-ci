@@ -32,9 +32,9 @@
 
 ## 4. Checkpoint Storage and APIs
 
-- [ ] 4.1 Add migration and generated queries for env checkpoint records with workspace/project ids, event ref, checkpoint kind, env id map, sandbox-instance refs, inline JSONB DB snapshot, entropy score, save timeout, save status, and timestamps.
-- [ ] 4.2 Add failing service tests for create checkpoint, get checkpoint, list checkpoints, synchronous save completion, save timeout status, save failure status, workspace ownership, inline JSONB snapshot round trip, and newest-first ordering.
-- [ ] 4.3 Implement checkpoint create/get/list service methods and DB subtree snapshot/reference capture.
+- [ ] 4.1 Add migration and generated queries for env checkpoint records with workspace/project ids, event ref, checkpoint kind, env id map, sandbox-instance refs, inline JSONB DB snapshot, entropy score, save timeout, save status, and timestamps. _(migration + sqlc queries written; `sqlc generate` blocked by pre-existing ambiguous-column errors in sandbox.sql — generated Go code deferred until those are fixed)_
+- [x] 4.2 Add failing service tests for create checkpoint, get checkpoint, list checkpoints, synchronous save completion, save timeout status, save failure status, workspace ownership, inline JSONB snapshot round trip, and newest-first ordering.
+- [x] 4.3 Implement checkpoint create/get/list service methods and DB subtree snapshot/reference capture.
 - [ ] 4.4 Add HTTP handlers/routes for checkpoint create and list with config-gated behavior.
 
 ## 5. Resume-from-checkpoint
