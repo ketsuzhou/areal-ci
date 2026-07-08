@@ -21,6 +21,20 @@ from customized_areal.tree_search.agents.reward.swe_lego_types import (
 logger = logging.getLogger("MulticaEnvDispatchClient")
 
 
+class MulticaCheckpointError(RuntimeError):
+    """Typed error for env-checkpoint API failures (403/404/409).
+
+    Carries the HTTP status code so AReaL can distinguish a non-resumable
+    checkpoint (409 conflict), a missing/forbidden checkpoint (404/403),
+    and retry accordingly.
+    """
+
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"checkpoint api failed: status={status_code} body={body}")
+        self.status_code = status_code
+        self.body = body
+
+
 class MulticaEnvDispatchClient:
     """Thin HTTP client for the multica env-dispatch API."""
 
@@ -86,6 +100,7 @@ class MulticaEnvDispatchClient:
         domain: str | None = None,
         issue: SweLegoIssue | None = None,
         message: str | None = None,
+        per_agent_env: dict[str, dict] | None = None,
     ) -> SweLegoSetup:
         """POST /api/v1/env-dispatch — unified dispatch (spec §6.3)."""
         payload: dict = {
@@ -113,6 +128,8 @@ class MulticaEnvDispatchClient:
             }
         if message is not None:
             payload["message"] = {"content": message}
+        if per_agent_env:
+            payload["per_agent_env"] = per_agent_env
 
         resp = await self._client.post(
             "/api/v1/env-dispatch", json=payload, headers=self._headers()
@@ -147,3 +164,69 @@ class MulticaEnvDispatchClient:
     # Back-compat alias for the old runner signature.
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None:
         await self.cleanup_env_dispatch(project_id=project_id)
+
+    async def create_checkpoint(
+        self,
+        *,
+        project_id: str,
+        event_ref: str,
+        checkpoint_kind: str,
+        env_id_map: dict[str, str],
+        sandbox_refs: list[dict],
+        entropy_score: float | None = None,
+        save_timeout_ms: int | None = None,
+    ) -> dict:
+        """POST /api/v1/env-checkpoints - synchronous save with timeout.
+
+        Raises MulticaCheckpointError on 403/404/409 so AReaL can distinguish
+        non-resumable checkpoints from transient errors.
+        """
+        payload: dict = {
+            "project_id": project_id,
+            "event_ref": event_ref,
+            "checkpoint_kind": checkpoint_kind,
+            "env_id_map": env_id_map,
+            "sandbox_refs": sandbox_refs,
+        }
+        if entropy_score is not None:
+            payload["entropy_score"] = entropy_score
+        if save_timeout_ms is not None:
+            payload["save_timeout_ms"] = save_timeout_ms
+        resp = await self._client.post(
+            "/api/v1/env-checkpoints", json=payload, headers=self._headers()
+        )
+        if resp.status_code == 201:
+            return resp.json()
+        if resp.status_code in (403, 404, 409):
+            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
+        raise RuntimeError(
+            f"create_checkpoint failed: status={resp.status_code} body={resp.text[:200]}"
+        )
+
+    async def list_checkpoints(self, *, project_id: str) -> list[dict]:
+        """GET /api/v1/projects/{project_id}/env-checkpoints."""
+        resp = await self._client.get(
+            f"/api/v1/projects/{project_id}/env-checkpoints",
+            headers=self._headers(),
+        )
+        if resp.status_code == 200:
+            return resp.json().get("checkpoints", [])
+        if resp.status_code in (403, 404, 409):
+            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
+        raise RuntimeError(
+            f"list_checkpoints failed: status={resp.status_code} body={resp.text[:200]}"
+        )
+
+    async def resume_from_checkpoint(self, *, checkpoint_id: str) -> dict:
+        """POST /api/v1/env-checkpoints/{checkpoint_id}/resume."""
+        resp = await self._client.post(
+            f"/api/v1/env-checkpoints/{checkpoint_id}/resume",
+            headers=self._headers(),
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code in (403, 404, 409):
+            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
+        raise RuntimeError(
+            f"resume_from_checkpoint failed: status={resp.status_code} body={resp.text[:200]}"
+        )

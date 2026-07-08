@@ -53,9 +53,9 @@
 
 ## 7. AReaL Client Integration
 
-- [ ] 7.1 Add tests that `create_env_dispatch` serializes per-agent env specs when provided and omits them when empty.
-- [ ] 7.2 Add checkpoint create/list/resume client tests, including 403/404/409-style typed error handling.
-- [ ] 7.3 Implement AReaL client helpers for checkpoint create/list/resume and per-agent env dispatch.
+- [x] 7.1 Add tests that `create_env_dispatch` serializes per-agent env specs when provided and omits them when empty.
+- [x] 7.2 Add checkpoint create/list/resume client tests, including 403/404/409-style typed error handling.
+- [x] 7.3 Implement AReaL client helpers for checkpoint create/list/resume and per-agent env dispatch.
 
 ## 8. Verification and Documentation
 
