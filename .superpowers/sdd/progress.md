@@ -493,7 +493,11 @@ ModuleNotFoundError) - ALL pre-existing, NONE import supernode_assembler/multica
 assemble_from_refs. Dense per-session coverage gap-check (DAGError on gap) DEFERRED to U5
 (training plumbing owns session-boundary validation). U3 reviewer (a556dbad) stalled (3rd stall);
 U3 treated CLOSED on orchestrator's own verification (5/5 + design match + U4 consumes U3's
-AssembledDag correctly). Independent U4 review: PENDING dispatch.
+AssembledDag correctly). Independent U4 review: APPROVED (agent a047489e completed; VERDICT
+APPROVED - confirmed locked-architecture conformance, API correctness (add_event/add_edge/.events/
+topological_order, task_id="", metadata["tensors"]), all implementation decisions sound, old assemble
+path untouched with 22 existing tests passing, test quality good). MINOR fixed: tightened U4 cycle test
+from pytest.raises(Exception) to pytest.raises(DAGError) (commit 1beae470).
 
 Next: U5 (minimal training plumbing + tensor lifecycle) - coupled to U4's ExecutionDAG output.
 
