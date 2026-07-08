@@ -97,9 +97,18 @@ v2. This honors D1 (close decoupled from reward).
   resolve directly; `task_id` is `""` because the v2 `SegmentSpec` dropped it; `session_id` is
   reverse-mapped from `session_to_agent_run`. Dense per-session coverage (gap -> `DAGError`) is
   deferred to the training-plumbing unit (U5).
-- Minimal training: consume the built DAG with placeholder zero reward (proves the path).
-- Cleanup: `DELETE /data/clear` for resolved shards after training; `remove_session` once the
-  session's last segment is consumed.
+- Minimal training (`segment_dag_trainer.run_segment_dag_training_step`): `get_dag` ->
+  `assemble_from_refs` -> `topological_order()` -> `assemble_node_advantages` (global GAE over
+  completion-ordered SuperNodes with placeholder zero reward). Change 1 exercises only the GAE
+  forward path - no torch/FSDP, no judge, no critic V (those land in change 2).
+  `events_from_nodes` treats an unset `value` as `0.0`, so the zero-reward SuperNodes flow
+  through with zero advantages (proves the path).
+- Cleanup (tensor lifecycle): `DataProxyTensorResolver.clear` (`DELETE /data/clear` with the
+  consumed shard ids) + `DataProxySessionRemover.remove` (`POST /export_trajectories` with
+  `remove_session=True` - the data_proxy exposes session removal only via the export endpoint).
+  Cleanup is success-path only in change 1; a failed step (cycle/DAGError) propagates without
+  releasing shards. Tensor-ref contract (change 1): `{"shard_id": str}` per segment; finalized
+  when Multica (U6/U8) pins the export contract.
 
 ## Data Flow (single rollout)
 

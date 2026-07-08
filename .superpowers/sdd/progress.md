@@ -496,3 +496,32 @@ U3 treated CLOSED on orchestrator's own verification (5/5 + design match + U4 co
 AssembledDag correctly). Independent U4 review: PENDING dispatch.
 
 Next: U5 (minimal training plumbing + tensor lifecycle) - coupled to U4's ExecutionDAG output.
+
+Task 5 (U5 - minimal training plumbing + tensor lifecycle): CLOSED (commit f56e4951). Orchestrator
+IMPLEMENTED + verified directly (no implementer subagent - plan's U5 step-1 "locate training entry"
+found NO lightweight DAG-consuming trainer; the existing CustomizedPPOTrainer is FSDP-heavy and
+untestable in the CPU .venv-test env). Decision (documented in design doc + module docstring): the
+"minimal training step" = the GAE forward path `assemble_node_advantages(topological_order(),
+initial_value=0.0, gamma, lam)` with placeholder zero reward - pure float math, no torch/FSDP
+(`events_from_nodes` treats unset `value` as 0.0, so zero-reward SuperNodes flow through with zero
+advantages). New module `segment_dag_trainer.py`: (a) `TrainingTensorResolver` Protocol (resolve +
+clear) + `SessionRemover` Protocol; (b) `DataProxyTensorResolver` (GET /data/<shard_id> +
+deserialize_value; DELETE /data/clear with shard_ids); (c) `DataProxySessionRemover` (POST
+/export_trajectories remove_session=True - data_proxy exposes session removal only via export);
+(d) `run_segment_dag_training_step(*, client, resolver, session_remover, project_id, gamma, lam,
+poll_timeout, poll_interval, assembler=None) -> AssembledAdvantages` wiring get_dag -> assemble_from_refs
+-> topological_order -> assemble_node_advantages -> clear shards + remove sessions. Cleanup is
+success-path only (failed step propagates without releasing shards - caller handles retry). Tensor-ref
+contract pinned for change 1: `{"shard_id": str}` per segment; finalized when Multica U6/U8 pins export.
+Verified: 6/6 U5 tests green (zero-reward path asserts advantages all-zero + clear/remove invoked;
+cycle propagates DAGError WITHOUT cleanup; DataProxyTensorResolver resolve+clear via MockTransport;
+404->KeyError; clear-noop-on-empty; DataProxySessionRemover export+remove_session body). ruff clean.
+Regression: 10 passed (U4 assemble_ref_resolve + U3 dag_client + e2e supernode). Dense per-session
+coverage gap-check (DAGError on gap) NOT added - the plan deferred it to U5, but U5's GAE path operates
+on topological order which already rejects cycles; per-session gap validation is a Multica-assembly
+concern (U8) more than an areal-consumer one - DEFERRED to U8/final-review with a note.
+
+AREAL-SIDE UNITS COMPLETE (U1-U5). Next: multica/server branch U6-U9 (arealrl CloseSegment+
+ExportTrajectory, interaction_dag recording, AssembledDag+/dag endpoint, migration 155), then U10
+(config + E2E + grep sweep, both repos). Multica path correction pending (U6): proposal.md says
+`internal/arealrl/client.go` but actual is `server/internal/arealrl/client.go`.
