@@ -366,3 +366,39 @@ the env-dispatch branch driver, and the verifier/harvest finalizers. The live
 leaf `SuperNode`s before insertion into `MCTSTreeStore`, and per-turn `Node.env_id` is
 stamped from backend metadata so the branch-frontier handle is available wherever a
 future coordinator needs it.
+
+## Env Checkpoint Semantics
+
+Env checkpoint creation is pause-in-place. Multica synchronously waits for
+sandboxd stop/Cube pause up to the configured timeout and stores the project
+subtree inline as JSONB. A completed checkpoint can be resumed through
+resume-from-checkpoint, which resumes the same sandbox instances. The API does
+not provide immutable fork, branch, snapshot, or copy-on-write semantics.
+
+### Endpoints
+
+- `POST /api/v1/env-checkpoints` - create a checkpoint; body carries
+  `project_id`, `event_ref`, `checkpoint_kind`, `env_id_map`, `sandbox_refs`,
+  optional `entropy_score`, and optional `save_timeout_ms`. Returns 201 on
+  synchronous save completion, 409 on save timeout/failure (non-resumable), 400
+  on validation error. Gated by `ENV_CHECKPOINTS_ENABLED` (disabled -> 404).
+- `GET /api/v1/env-checkpoints/{checkpointID}` - fetch a single checkpoint,
+  workspace-scoped (cross-workspace -> 404).
+- `GET /api/v1/projects/{projectID}/env-checkpoints` - list checkpoints for a
+  project, newest first.
+- `POST /api/v1/env-checkpoints/{checkpointID}/resume` - resume the saved
+  sandbox instances; returns a `rollout_handle` AReaL uses to continue
+  tree-search. Incomplete checkpoints (pending/timed_out/failed) -> 409.
+
+### Save Statuses
+
+`complete` (resumable), `timed_out` (non-resumable), `failed` (non-resumable),
+`pending` (transient, set during synchronous save). Resume rejects anything
+other than `complete`.
+
+### AReaL Entropy Gating
+
+AReaL calls `should_create_entropy_checkpoint(entropy, threshold)` before
+hitting the create API. When logprobs are unavailable (`entropy is None`) or no
+threshold is configured, the checkpoint is skipped silently - the rollout
+continues without failing or creating a spurious checkpoint.

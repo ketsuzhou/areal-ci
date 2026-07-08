@@ -59,7 +59,7 @@
 
 ## 8. Verification and Documentation
 
-- [ ] 8.1 Run scoped Multica Go tests for env-dispatch, sandbox lifecycle, checkpoint service/handler, and generated query users.
-- [ ] 8.2 Run scoped AReaL Python tests for env-dispatch client, entropy helper, and checkpoint resume client.
-- [ ] 8.3 Validate the OpenSpec change with `openspec validate env-dispatch-sandbox-lifecycle --strict`.
-- [ ] 8.4 Document operational semantics: save pauses the active sandbox, resume resumes the same saved sandbox, immutable branching is deferred.
+- [x] 8.1 Run scoped Multica Go tests for env-dispatch, sandbox lifecycle, checkpoint service/handler, and generated query users. _(service + handler scoped tests pass; `cmd/server` integration tests have pre-existing DB-dependent failures unrelated to this change)_
+- [x] 8.2 Run scoped AReaL Python tests for env-dispatch client, entropy helper, and checkpoint resume client.
+- [x] 8.3 Validate the OpenSpec change with `openspec validate env-dispatch-sandbox-lifecycle --strict`.
+- [x] 8.4 Document operational semantics: save pauses the active sandbox, resume resumes the same saved sandbox, immutable branching is deferred.
