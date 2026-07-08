@@ -525,7 +525,24 @@ coverage gap-check (DAGError on gap) NOT added - the plan deferred it to U5, but
 on topological order which already rejects cycles; per-session gap validation is a Multica-assembly
 concern (U8) more than an areal-consumer one - DEFERRED to U8/final-review with a note.
 
-AREAL-SIDE UNITS COMPLETE (U1-U5). Next: multica/server branch U6-U9 (arealrl CloseSegment+
-ExportTrajectory, interaction_dag recording, AssembledDag+/dag endpoint, migration 155), then U10
-(config + E2E + grep sweep, both repos). Multica path correction pending (U6): proposal.md says
-`internal/arealrl/client.go` but actual is `server/internal/arealrl/client.go`.
+U5 independent review: APPROVED (agent a4a3af3b completed; VERDICT APPROVED - all locked-architecture
+conformance, API correctness, design decisions sound, edge cases handled, test quality good, regression
+U3/U4/e2e pass). 2 MINOR (non-blocking): (1) resolve uses tensor_ref["shard_id"] (fail-fast) while
+cleanup uses .get("shard_id") (skip unresolved) - intentional asymmetry, correct; (2) TrainingTensorResolver
+redeclares resolve() from TensorResolver - stylistic, harmless. U1-U5 ALL REVIEW-APPROVED.
+
+Task 6 (U6 - multica arealrl CloseSegment + ExportTrajectory): CLOSED (multica commit 72f1b7ba2 on
+branch feature/multica-v2-segment-dag-training, based on upstream/dev which was 5 commits ahead of
+local dev). Orchestrator-IMPLEMENTED + verified directly (no implementer subagent). Plan U6 code adapted
+to actual doJSON(ctx, path, bearer, body) signature (plan assumed doJSON(ctx, method, path, key, body, out)
+- wrong; actual takes no method/out, caller decodes). Added: closeSegmentPath/exportTrajPath constants;
+CloseSegment(ctx, proxyKey) (session-key auth, no body, returns trajectory_id, errors if nil);
+ExportTrajectory(ctx, sessionID, trajectoryID) (admin-key auth via c.adminKey - NOT a param as plan
+guessed, consistent with StartSession; remove_session=false; returns raw traj json.RawMessage). Both
+reuse doJSON/checkStatus. Package doc updated with both endpoints. Verified: 15/15 arealrl tests pass
+(10 existing + 5 new: CloseSegment request/auth + non-2xx + missing-trajectory_id; ExportTrajectory
+request/auth + non-2xx); go vet clean; gofmt clean. tasks.md path fixed: internal/arealrl/client.go ->
+server/internal/arealrl/client.go (line 26). AREAL-SIDE U1-U5 + MULTICA U6 DONE.
+
+Next: U7 (multica interaction_dag recording + hooks), U8 (AssembledDag+/dag endpoint), U9 (migration 155),
+U10 (config + E2E + grep, both repos).

@@ -23,7 +23,7 @@
   `close_segment` + export are called per communication event (delegation / mention /
   completion / squad briefing).
 - [ ] 1.6 Confirm `session_id <-> agent_run_id` capture at `/rl/start_session`
-  (`internal/arealrl/client.go`) and the root-task completion signal that flips the DAG
+  (`server/internal/arealrl/client.go`) and the root-task completion signal that flips the DAG
   endpoint `202` -> `200`.
 - [ ] 1.7 Decide `close_segment` on empty active (error vs empty trajectory) and record in
   design.
