@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 build_mode: executing-plans
 build_pause: null
 isolation: branch
@@ -15,3 +15,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/env-dispatch-sandbox-lifecycle/.comet/handoff/design-context.json
 handoff_hash: 5d7ab380e062213c7b0ae39ed7f2e223954bb0342874c782824f11225facd1c4
+build_command: cd multica/server && go build ./...
+verify_command: cd multica/server && go test ./internal/service ./internal/handler -count=1
