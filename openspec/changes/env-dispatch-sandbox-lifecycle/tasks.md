@@ -26,7 +26,7 @@
 - [x] 3.1 Add failing tests for per-agent env specs: valid assignment, unknown agent, unknown env spec, empty field preserving current behavior, and partial squad defaults.
 - [x] 3.2 Extend env-dispatch request/service input with optional per-agent env specs and validation against workspace/squad membership.
 - [x] 3.3 Add failing tests for the sandbox_instance backend bridge: save/resume-capable scratch rollout creates sandbox_instance refs; branch creates fresh sandbox_instances from the source template; non-checkpointed rollout preserves the Fleet path; checkpoint against Fleet-only env is rejected.
-- [ ] 3.4 Implement the env-dispatch sandbox_instance creation path (scratch + branch-from-template) through the lifecycle service and populate structured `SandboxInstanceRef`s on the rollout. _(seam done; handler JSON parsing done; production adapter wiring — node selection, template resolution, branch-from-template — pending Step 6c)_
+- [x] 3.4 Implement the env-dispatch sandbox_instance creation path (scratch + branch-from-template) through the lifecycle service and populate structured `SandboxInstanceRef`s on the rollout.
 - [x] 3.5 Persist or return structured sandbox-instance refs for rollout environments while keeping legacy raw sandbox ids readable.
 - [x] 3.6 Ensure trained task/session context preserves env id and sandbox-instance refs needed by checkpointing. _(refs preserved on the env row via CreateEnv SandboxIDs, verified by TestEnvDispatchTrainedRolloutCreatesSandboxInstanceRefs; checkpoint trigger resolves project->env->SandboxIDs, so no maybeOpenTrainingSession plumbing change needed)_
 
