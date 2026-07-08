@@ -93,6 +93,15 @@ class SetRewardResponse(BaseModel):
     ready_transition: bool
 
 
+class CloseSegmentResponse(BaseModel):
+    message: str
+    interaction_count: int
+    session_id: str
+    trajectory_id: int | None
+    trajectory_ready: bool
+    ready_transition: bool
+
+
 class RegisterModelResponse(BaseModel):
     status: str
     name: str
@@ -508,6 +517,28 @@ def create_app(config: DataProxyConfig) -> FastAPI:
             trajectory_id=reward_result.trajectory_id,
             trajectory_ready=reward_result.trajectory_id is not None,
             ready_transition=reward_result.ready_transition,
+        )
+
+    @app.post("/rl/close_segment", response_model=CloseSegmentResponse)
+    async def close_segment(request: Request):
+        store: SessionStore = app.state.session_store
+        token = _extract_bearer_token(request)
+        session = _resolve_session_from_token(token, store)
+        if session is None:
+            raise HTTPException(
+                status_code=401, detail="Invalid or expired session API key."
+            )
+        try:
+            result = session.close_segment()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return CloseSegmentResponse(
+            message="success",
+            interaction_count=result.interaction_count,
+            session_id=result.session_id,
+            trajectory_id=result.trajectory_id,
+            trajectory_ready=result.trajectory_id is not None,
+            ready_transition=result.ready_transition,
         )
 
     # =========================================================================
