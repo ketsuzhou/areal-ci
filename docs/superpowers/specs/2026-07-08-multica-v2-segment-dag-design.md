@@ -89,9 +89,14 @@ v2. This honors D1 (close decoupled from reward).
 - `MulticaDagClient`: poll `GET .../dag` (`202` retry with backoff, `200` -> `AssembledDag`,
   `404`/`403` typed errors).
 - Resolve each segment's `tensor_ref` via `/data/<shard_id>` / `/data/batch` -> tensors.
-- `SuperNodeAssembler` ref-resolve path (replaces turn-index slice): build
-  `SuperNode(payload=tensors, metadata=segment)` + `ExecutionDAG` from edges; validate
-  acyclic + dense per-session coverage (gap -> `DAGError`).
+- `SuperNodeAssembler.assemble_from_refs(dag, resolver)` (replaces turn-index slice): for each
+  segment, `resolver.resolve(tensor_ref)` -> tensors; build a `SuperNode` per segment and an
+  `ExecutionDAG` from the edges; validate acyclic via `topological_order()` (raises `DAGError` on
+  cycle). Implementation-boundary note: `SuperNode` has no `payload` field, so resolved tensors
+  attach to `metadata["tensors"]` (non-invasive); `segment_id` becomes the `node_id` so edges
+  resolve directly; `task_id` is `""` because the v2 `SegmentSpec` dropped it; `session_id` is
+  reverse-mapped from `session_to_agent_run`. Dense per-session coverage (gap -> `DAGError`) is
+  deferred to the training-plumbing unit (U5).
 - Minimal training: consume the built DAG with placeholder zero reward (proves the path).
 - Cleanup: `DELETE /data/clear` for resolved shards after training; `remove_session` once the
   session's last segment is consumed.

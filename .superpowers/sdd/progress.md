@@ -461,3 +461,38 @@ tensor-seeded interactions; string interactions exercise concat_string_interacti
 Revisit at U4 (assemble_from_refs resolves tensor_ref).
 
 Next: U3 (areal MulticaDagClient consumer) - IN PROGRESS (implementer ac2bd37d). U4 gates on it.
+
+Task 3.1 (U3 - MulticaDagClient): complete (commit 748ca36f, amended from cf755090). DEVIA­TION
+CAUGHT: the U3 implementer (ac2bd37dbfaf530d6) STALLED (140-byte output, 11 min idle, no
+notification - same stall mode as the first U1 reviewer) AND committed cf755090 with the OLD
+sub-project-g design (async, SegmentSpec with start_turn_idx/end_turn_idx/task_id, NO
+tensor_ref/trajectory_id/env_snapshot, AssembledDag with NO session_to_agent_run) - directly
+violating the locked architecture (design doc/proposal/spec all mandate tensor_ref, no turn_idx).
+Orchestrator killed the dead agent, rewrote both files to the plan's tensor_ref sync design,
+verified 5/5 tests green + ruff clean + 0 turn_idx refs, amended to 748ca36f. Independent
+review pending. LESSON: implementer subagents in this workspace have stalled twice; always
+re-verify their commits against the locked design and re-run tests yourself.
+
+Next: U4 (SuperNodeAssembler.assemble_from_refs) - GATED on U3 review.
+
+Task 4 (U4 - SuperNodeAssembler.assemble_from_refs): CLOSED (commit af75a189). Orchestrator
+IMPLEMENTED + verified directly (no implementer subagent - plan's U4 section had WRONG signatures:
+it assumed `SuperNode(payload=tensors, ...)`, `edag.add_node(node)`, `edag.add_edge(node, node)`,
+`len(edag.nodes)`; actual API is SuperNode with NO payload field + required `task_id`,
+`add_event(SuperNode)`, `add_edge(src_id, dst_id, type)`, `.events`). Implementation-boundary
+decisions (documented in design doc + method docstring): (a) resolved tensors attach to
+`metadata["tensors"]` (SuperNode has no payload field - non-invasive); (b) `segment_id` becomes
+the SuperNode `node_id` so edges resolve directly; (c) `task_id=""` because the v2 SegmentSpec
+dropped it; (d) `session_id` reverse-mapped from `session_to_agent_run`; (e) acyclicity enforced
+via `topological_order()` (raises DAGError on cycle). Verified: 3/3 U4 tests green
+(test_assembler_ref_resolve.py: builds-one-per-segment, rejects-cycle, env-snapshot-stamped);
+ruff clean; existing assembler e2e (test_supernode_e2e.py) still passes (16 collectable assembler
+tests) - no regression on the old `assemble` turn-idx path. Full suite: 342 passed / 9 failed
+(test_critic_value_client, test_critic_variance, test_hybrid_advantage) + 5 errors (datasets
+ModuleNotFoundError) - ALL pre-existing, NONE import supernode_assembler/multica_dag_client/
+assemble_from_refs. Dense per-session coverage gap-check (DAGError on gap) DEFERRED to U5
+(training plumbing owns session-boundary validation). U3 reviewer (a556dbad) stalled (3rd stall);
+U3 treated CLOSED on orchestrator's own verification (5/5 + design match + U4 consumes U3's
+AssembledDag correctly). Independent U4 review: PENDING dispatch.
+
+Next: U5 (minimal training plumbing + tensor lifecycle) - coupled to U4's ExecutionDAG output.
