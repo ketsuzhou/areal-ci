@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: null
+build_pause: null
+isolation: null
+verify_mode: null
+base_ref: a6072e994522a295669e8deb756d242e1adb60ff
+design_doc: docs/superpowers/specs/2026-07-09-multica-pi-diagnosis-agent-design.md
+plan: null
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-09
+verified_at: null
+archived: false
+handoff_context: openspec/changes/multica-pi-diagnosis-agent/.comet/handoff/design-context.json
+handoff_hash: 13e8460723ed0fd4e17e08dafcce38ac8e4f03f5c0e7c4c83b890bbbdeefc580
