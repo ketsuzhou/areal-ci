@@ -89,6 +89,11 @@ class Node:
     # GAEAdvantageComputer. 0.0 when the critic is disabled.
     value: float = 0.0
 
+    # MCTS visit count for tree-search branching: how many branches have backed
+    # up a return through this node (the fork/checkpoint point). Updated by
+    # ``branch_backup``; 0 for non-fork nodes.
+    visit_count: int = 0
+
     # Critic's own uncertainty about ``value``: the categorical variance of the
     # critic's score distribution. Used as var_theta in the variance-aware
     # hybrid blend. 0.0 when the critic is one-hot or disabled.

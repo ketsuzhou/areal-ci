@@ -12,8 +12,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from customized_areal.tree_search.agents.execution_dag import ExecutionDAG
+
+if TYPE_CHECKING:
+    # Node is referenced only in the ``branch_backup`` annotation; import under
+    # TYPE_CHECKING to keep this module importable without the tree_store/torch
+    # stack and to avoid a circular import.
+    from customized_areal.tree_search.core.tree_store import Node
 
 logger = logging.getLogger("DagBackup")
 
@@ -76,3 +83,27 @@ def distribute_reward_over_dag(
         queue.extend(parents)
 
     return credit
+
+
+def branch_backup(
+    parent: Node,
+    *,
+    branch_return: float,
+    discount: float,
+    visit_count: int = 1,
+) -> None:
+    """MCTS-style value backup from a branch to its fork point (checkpoint node).
+
+    Propagates a discounted branch return to ``parent`` (the checkpoint node the
+    branch forked from): ``parent.value`` becomes the running mean of discounted
+    branch returns over visits, and ``parent.visit_count`` accumulates. Used by
+    tree-search branching so future branch selection can rank checkpoints by
+    value. Distinct from :func:`distribute_reward_over_dag`, which assigns a
+    terminal reward across the multi-agent execution DAG.
+    """
+    discounted = discount * branch_return
+    new_count = parent.visit_count + visit_count
+    parent.value = (
+        parent.value * parent.visit_count + discounted * visit_count
+    ) / new_count
+    parent.visit_count = new_count
