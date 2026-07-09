@@ -2038,15 +2038,18 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         Inserts the SuperNodes via ``insert_super_batch`` (NOT
         ``_wrap_leaf_super`` -- the multi-segment edge structure is preserved),
-        computes DAG-level GAE advantages via ``assemble_node_advantages`` over
-        the topological order, and builds the training batch from each segment's
-        resolved tensors (``metadata["tensors"]``). Rewards and critic values
-        are placeholder zero on this path (Change 2 wires the judge + critic V),
-        so advantages are zero -- the point is that the multica data path runs
-        end-to-end. Single-episode only: ``super_nodes`` is one DAG's
-        topological order (M>1 parallel rollouts are handled by the caller).
+        computes DAG-level GAE advantages via ``assemble_node_advantages`` per
+        assembled DAG (grouped by ``group_idx``), and builds the training batch
+        from each segment's resolved tensors (``metadata["tensors"]``). Rewards
+        and critic values are placeholder zero on this path (Change 2 wires the
+        judge + critic V), so advantages are zero -- the point is that the
+        multica data path runs end-to-end. ``super_nodes`` may span M parallel
+        rollouts (one DAG each); per-episode grouping keeps independent DAGs
+        from being chained by the global GAE (which propagates backward, so a
+        later episode's reward would otherwise contaminate an earlier one).
         """
         from customized_areal.tree_search.agents.dag_advantage import (
+            AssembledAdvantages,
             assemble_node_advantages,
         )
 
@@ -2056,15 +2059,37 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.tree_store.insert_super_batch(
             super_nodes, query_id=query_id, backup=True
         )
-        advantages = assemble_node_advantages(
-            super_nodes,
-            initial_value=0.0,
-            gamma=self.critic_gamma,
-            lam=self.critic_lambda,
+        # Group by episode (group_idx, stamped in _result_to_nodes) and run GAE
+        # per assembled DAG. A single global pass would chain independent
+        # episodes -- GAE propagates backward, so a later episode's reward would
+        # contaminate an earlier episode's advantages.
+        per_episode: dict[int, list[SuperNode]] = {}
+        order: list[int] = []
+        for sn in super_nodes:
+            gi = sn.metadata.get("group_idx", 0)
+            if gi not in per_episode:
+                per_episode[gi] = []
+                order.append(gi)
+            per_episode[gi].append(sn)
+        adv: dict[str, float] = {}
+        returns: dict[str, float] = {}
+        baselines: dict[str, float] = {}
+        for gi in order:
+            ep_adv = assemble_node_advantages(
+                per_episode[gi],
+                initial_value=0.0,
+                gamma=self.critic_gamma,
+                lam=self.critic_lambda,
+            )
+            adv.update(ep_adv.advantages)
+            returns.update(ep_adv.returns)
+            baselines.update(ep_adv.baseline_values)
+        merged_advantages = AssembledAdvantages(
+            advantages=adv, returns=returns, baseline_values=baselines
         )
         result_dict = _supernodes_to_batched_tensor_dict(
             super_nodes,
-            advantages,
+            merged_advantages,
             max_tokens=self.max_tokens,
             loss_mode=self.loss_mode.value,
         )

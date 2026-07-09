@@ -15,7 +15,10 @@ import pytest
 import torch
 
 from customized_areal.tree_search.agents.dag_advantage import AssembledAdvantages
-from customized_areal.tree_search.agents.execution_dag import SuperNode
+from customized_areal.tree_search.agents.execution_dag import (
+    ExecutionDAG,
+    SuperNode,
+)
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
@@ -27,6 +30,16 @@ from customized_areal.tree_search.core.customized_grouped_workflow import (
 )
 
 
+def _tensors() -> dict:
+    """Resolved segment tensors (resp span = last 3 of 5 tokens)."""
+    return {
+        "input_ids": [10, 20, 30, 40, 50],
+        "loss_mask": [0, 0, 1, 1, 1],
+        "logprobs": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "versions": [0, 0, 1, 1, 1],
+    }
+
+
 def _seg(node_id: str) -> SuperNode:
     """A one-segment SuperNode with resolved tensors (resp span = last 3 tokens)."""
     return SuperNode(
@@ -35,14 +48,7 @@ def _seg(node_id: str) -> SuperNode:
         issue_id="i1",
         task_id="",
         outcome_reward=0.0,
-        metadata={
-            "tensors": {
-                "input_ids": [10, 20, 30, 40, 50],
-                "loss_mask": [0, 0, 1, 1, 1],
-                "logprobs": [0.1, 0.2, 0.3, 0.4, 0.5],
-                "versions": [0, 0, 1, 1, 1],
-            }
-        },
+        metadata={"tensors": _tensors()},
     )
 
 
@@ -124,3 +130,88 @@ async def test_finalize_episode_multica_empty_returns_none(tmp_path):
         fresh_nodes=[], cached_nodes=[], engine=None, data={}, query_id="q1"
     )
     assert out is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_m2_per_episode_advantages(tmp_path):
+    # Two episodes (group_idx 0, 1), one SuperNode each, distinct rewards.
+    # GAE (gamma=lam=1, V=0): per-episode advantage == reward. A single chained
+    # pass would give ep0 advantage = r0 + r1 (GAE propagates backward, so ep1's
+    # reward would contaminate ep0). Per-episode grouping must keep them
+    # independent: ep0 -> 1.0 (not 6.0), ep1 -> 5.0.
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        checkpoint_dir=str(tmp_path),
+        advantage_mode=AdvantageMode.TREE,
+        loss_mode=LossMode.GRPO,
+        cache_mode=CacheMode.OFF,
+        critic_gamma=1.0,
+        critic_lambda=1.0,
+    )
+    sn0 = SuperNode(
+        node_id="ep0_seg",
+        agent_id="r0",
+        issue_id="i0",
+        task_id="",
+        outcome_reward=1.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+    sn1 = SuperNode(
+        node_id="ep1_seg",
+        agent_id="r1",
+        issue_id="i1",
+        task_id="",
+        outcome_reward=5.0,
+        metadata={"group_idx": 1, "tensors": _tensors()},
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[sn0, sn1], cached_nodes=[], engine=None, data={}, query_id="q1"
+    )
+
+    assert out is not None
+    # Per-episode: ep0 advantage = 1.0 (NOT 6.0 chained), ep1 = 5.0.
+    assert torch.allclose(out["advantages"][0], torch.full((3,), 1.0))
+    assert torch.allclose(out["advantages"][1], torch.full((3,), 5.0))
+
+
+class _FakeBaseWorkflow:
+    """Returns a fresh 1-SuperNode ExecutionDag per arun_episode call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def arun_episode(self, engine, data):
+        self.calls += 1
+        sn = SuperNode(
+            node_id=f"seg{self.calls}",
+            agent_id="r",
+            issue_id="i",
+            task_id="",
+            metadata={"tensors": _tensors()},
+        )
+        edag = ExecutionDAG()
+        edag.add_event(sn)
+        return {"assembled_dag": None, "execution_dag": edag}
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_fixed_m2_aggregates_parallel_rollouts(tmp_path):
+    # group_size=2 -> 2 parallel arun_episode calls on the base workflow, each
+    # returning a 1-SuperNode multica DAG; both are aggregated into one batch.
+    fake = _FakeBaseWorkflow()
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=fake,
+        group_size=2,
+        checkpoint_dir=str(tmp_path),
+        advantage_mode=AdvantageMode.TREE,
+        loss_mode=LossMode.GRPO,
+        cache_mode=CacheMode.OFF,
+    )
+
+    out = await wf._arun_episode_fixed(engine=None, data={}, query_id="q1")
+
+    assert out is not None
+    assert fake.calls == 2  # M=2 parallel rollouts
+    assert out["input_ids"].shape[0] == 2  # 2 SuperNodes aggregated into the batch
