@@ -750,6 +750,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         judge_max_concurrency: int = 4,
         multica_dag_enabled: bool = False,
         multica_dag_client=None,
+        multica_dispatch_client=None,
+        multica_assembler=None,
+        multica_resolver=None,
+        multica_session_remover=None,
     ) -> None:
         from customized_areal.tree_search.core.advantage import TreeAdvantageComputer
         from customized_areal.tree_search.core.checkpoint import TreeCheckpointManager
@@ -922,6 +926,27 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self._multica_dag_enabled = multica_dag_enabled
         self._multica_dag_client = multica_dag_client
         self._coordinator = None  # Phase 1b/2 wires TeamRolloutCoordinator
+        if multica_dag_enabled:
+            # Wire the multica base workflow: one arun_episode = one Multica task
+            # = N agents -> AssembledDag. multica_dag_client is the get_dag
+            # poller; multica_dispatch_client is the create_env_dispatch client
+            # (a distinct concern). The workflow's group_size is the squad size
+            # N (defaults to 1); this grouped workflow's own group_size is M
+            # parallel tasks - a different axis. Multica owns /rl/start_session
+            # + the session_to_agent_run binding + per-agent credentials; AReaL
+            # never calls start_session on this path. The passed-in ``workflow``
+            # is overridden on the multica path.
+            from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
+                MultiAgentEnvDispatchWorkflow,
+            )
+
+            self.workflow = MultiAgentEnvDispatchWorkflow(
+                dispatch_client=multica_dispatch_client,
+                dag_client=multica_dag_client,
+                assembler=multica_assembler,
+                resolver=multica_resolver,
+                session_remover=multica_session_remover,
+            )
 
     async def _load_fresh_query_data(
         self,
