@@ -33,7 +33,7 @@ class _FakeResolver:
         self.cleared: list[list[str]] = []
 
     def resolve(self, tensor_ref: dict[str, Any]) -> dict[str, Any]:
-        shard_id = tensor_ref["shard_id"]
+        shard_id = tensor_ref["input_ids"]["shard_id"]
         self.calls.append(shard_id)
         return {
             "input_ids": [1, 2],
@@ -70,7 +70,7 @@ def _seg(segment_id: str, agent_run_id: str, shard_id: str) -> dict:
         "agent_run_id": agent_run_id,
         "issue_id": "issue-1",
         "trajectory_id": 0,
-        "tensor_ref": {"shard_id": shard_id},
+        "tensor_ref": {"input_ids": {"shard_id": shard_id, "node_addr": "node-a"}},
         "closing_event": None,
         "env_snapshot": {},
     }
@@ -151,16 +151,23 @@ def test_run_segment_dag_training_step_cycle_propagates_without_cleanup():
 def test_data_proxy_tensor_resolver_resolves_and_clears():
     from areal.infra.rpc.serialization import serialize_value
 
-    tensor = {"input_ids": [1, 2, 3], "loss_mask": [1, 1, 0]}
-    body = orjson.dumps(serialize_value(tensor))
+    # Multi-shard contract: each field maps to its own shard; resolve fetches
+    # every shard and reassembles a {field: tensor} dict.
+    shards = {"shard-9": [1, 2, 3], "shard-10": [1, 1, 0]}
+    bodies = {sid: orjson.dumps(serialize_value(val)) for sid, val in shards.items()}
     seen: list[tuple[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and "/data/shard-9" in str(request.url):
-            seen.append(("GET", str(request.url)))
-            return httpx.Response(
-                200, content=body, headers={"content-type": "application/octet-stream"}
-            )
+        if request.method == "GET" and "/data/" in str(request.url):
+            sid = str(request.url).rsplit("/data/", 1)[1]
+            seen.append(("GET", sid))
+            if sid in bodies:
+                return httpx.Response(
+                    200,
+                    content=bodies[sid],
+                    headers={"content-type": "application/octet-stream"},
+                )
+            return httpx.Response(404)
         if request.method == "DELETE" and "/data/clear" in str(request.url):
             payload = json.loads(request.content.decode())
             seen.append(("DELETE", json.dumps(payload)))
@@ -171,13 +178,19 @@ def test_data_proxy_tensor_resolver_resolves_and_clears():
         "http://proxy", _transport=httpx.MockTransport(handler)
     )
 
-    resolved = resolver.resolve({"shard_id": "shard-9"})
-    assert resolved == tensor
+    resolved = resolver.resolve(
+        {
+            "input_ids": {"shard_id": "shard-9", "node_addr": "node-a"},
+            "loss_mask": {"shard_id": "shard-10", "node_addr": "node-a"},
+        }
+    )
+    assert resolved == {"input_ids": [1, 2, 3], "loss_mask": [1, 1, 0]}
 
     resolver.clear(["shard-9", "shard-10"])
-    assert ("GET",) and seen[0][0] == "GET"
-    assert seen[1][0] == "DELETE"
-    cleared = json.loads(seen[1][1])
+    assert seen[0] == ("GET", "shard-9")
+    assert seen[1] == ("GET", "shard-10")
+    assert seen[2][0] == "DELETE"
+    cleared = json.loads(seen[2][1])
     assert cleared == {"shard_ids": ["shard-9", "shard-10"]}
 
 
@@ -189,7 +202,7 @@ def test_data_proxy_tensor_resolver_404_raises_keyerror():
         "http://proxy", _transport=httpx.MockTransport(handler)
     )
     with pytest.raises(KeyError):
-        resolver.resolve({"shard_id": "missing"})
+        resolver.resolve({"input_ids": {"shard_id": "missing", "node_addr": "node-a"}})
 
 
 def test_data_proxy_tensor_resolver_clear_noop_on_empty():

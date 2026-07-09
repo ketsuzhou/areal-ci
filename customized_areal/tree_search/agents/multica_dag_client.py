@@ -36,6 +36,8 @@ class SegmentSpec:
 
     Carries a ``tensor_ref`` (resolved later by the assembler) instead of turn
     indices or message text. No judge scores live here.
+
+    tensor_ref is a field->shard map: {"input_ids": {"shard_id": str, "node_addr": str}, ...}.
     """
 
     segment_id: str

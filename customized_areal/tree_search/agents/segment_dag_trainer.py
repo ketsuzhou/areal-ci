@@ -89,23 +89,30 @@ class DataProxyTensorResolver:
         return httpx.Client(**kwargs)
 
     def resolve(self, tensor_ref: dict[str, Any]) -> dict[str, Any]:
-        shard_id = tensor_ref.get("shard_id")
-        if not shard_id:
-            raise KeyError("tensor_ref missing 'shard_id'")
-        # Lazy import: keeps the module importable without the rpc infra, so the
-        # orchestration path (which never calls resolve on this class in tests)
-        # stays torch/infra-free.
+        if not isinstance(tensor_ref, dict) or not tensor_ref:
+            raise KeyError("tensor_ref missing field->shard map")
         from areal.infra.rpc.serialization import deserialize_value
 
+        # Multi-shard contract (Option B): tensor_ref maps each field name to a
+        # shard ref ``{shard_id, node_addr}``; each shard is fetched separately
+        # and reassembled into a ``{field: tensor}`` dict for the assembler.
+        tensors: dict[str, Any] = {}
         with self._client() as client:
-            resp = client.get(f"{self._base}/data/{shard_id}")
-        if resp.status_code == 404:
-            raise KeyError(f"shard {shard_id} not found")
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"unexpected {resp.status_code} resolving shard {shard_id}: {resp.text}"
-            )
-        return deserialize_value(orjson.loads(resp.content))  # type: ignore[no-any-return]
+            for field, ref in tensor_ref.items():
+                if not isinstance(ref, dict):
+                    raise KeyError(f"tensor_ref field {field!r} is not a shard ref")
+                shard_id = ref.get("shard_id")
+                if not shard_id:
+                    raise KeyError(f"tensor_ref field {field!r} missing 'shard_id'")
+                resp = client.get(f"{self._base}/data/{shard_id}")
+                if resp.status_code == 404:
+                    raise KeyError(f"shard {shard_id} not found (field {field!r})")
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"unexpected {resp.status_code} resolving shard {shard_id}: {resp.text}"
+                    )
+                tensors[field] = deserialize_value(orjson.loads(resp.content))
+        return tensors
 
     def clear(self, shard_ids: list[str]) -> None:
         if not shard_ids:
@@ -208,11 +215,11 @@ def run_segment_dag_training_step(
     )
 
     # Tensor lifecycle cleanup: release resolved shards, then revoke sessions.
-    shard_ids = [
-        seg.tensor_ref["shard_id"]
-        for seg in dag.segments
-        if seg.tensor_ref.get("shard_id")
-    ]
+    shard_ids: list[str] = []
+    for seg in dag.segments:
+        for ref in (seg.tensor_ref or {}).values():
+            if isinstance(ref, dict) and ref.get("shard_id"):
+                shard_ids.append(ref["shard_id"])
     resolver.clear(shard_ids)
     for session_id in dag.session_to_agent_run:
         session_remover.remove(session_id)
