@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: null
+build_pause: null
+isolation: null
+verify_mode: null
+base_ref: f60c86bbeda297938f641b77c97425f655c49a35
+design_doc: docs/superpowers/specs/2026-07-09-multica-v2-segment-dag-recording-design.md
+plan: docs/superpowers/plans/2026-07-09-multica-v2-segment-dag-recording.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-09
+verified_at: null
+archived: false
+handoff_context: openspec/changes/multica-v2-segment-dag-recording-assembly/.comet/handoff/design-context.json
+handoff_hash: 33ed0b5706d26b36ae279f9d0584d986da3644fdbf2c9ea19187665122526e59
