@@ -546,3 +546,95 @@ server/internal/arealrl/client.go (line 26). AREAL-SIDE U1-U5 + MULTICA U6 DONE.
 
 Next: U7 (multica interaction_dag recording + hooks), U8 (AssembledDag+/dag endpoint), U9 (migration 155),
 U10 (config + E2E + grep, both repos).
+
+# SDD progress - areal-v2-integration-and-tree-search-branching (v2 roadmap change 3)
+
+Plan: docs/superpowers/plans/2026-07-08-areal-v2-tree-search-branching.md Spec:
+docs/superpowers/specs/2026-07-08-areal-v2-tree-search-branching-design.md Impl
+repo: areal (branch: worktree-areal-v2-tree-search-branching) Controller: claude
+(this session), DIRECT execution (no implementer subagents - user rejected subagent
+dispatch; worked TDD + per-task commit). Base: f89eb1b2. Builds on the UNMERGED
+multica-v2-segment-dag-training U1-U6 components (create_env_dispatch / get_dag /
+assemble_from_refs / DataProxyTensorResolver / DataProxySessionRemover /
+EnvDispatchBranchDriver) - REUSES them, does not reimplement. All phases
+F-independent (branching via EnvDispatchBranchDriver drive_lane, not Sub-project F).
+Env: `python3 -m pytest` (NOT `uv run pytest` - broken .venv/uv); `uvx ruff check`.
+torch 2.12.1 CPU. Pre-existing (NOT ours): 9 critic tests RuntimeError "no current
+event loop in thread MainThread" (uvloop policy); 5 tests ModuleNotFoundError
+'datasets'; test_node_torch_lazy::test_tree_store_imports_without_torch (torchdata).
+None touch changed files.
+
+## Tasks (tasks.md: 18 done / 4 deferred-or-skipped of 22)
+
+Phase 1 (MultiAgentEnvDispatchWorkflow orchestrator): 1.1 6689bd83 (N=1 SCRATCH,
+AReaL never calls start_session); 1.2 41f21d07 (N>1 squad + partial-squad drop ->
+None); 1.3 152403ef (tensor-ref resolve + success-path-only cleanup ordering, no
+cleanup on DAGError); 1.4 4fa4e1bd (DagTimeout->None reject; DagNotFound/DagForbidden
+propagate). Phase 2 (TreeSearchGroupedRolloutWorkflow wiring, Approach B
+SuperNode-preserving): 2.1 a69d5f58 (_result_to_nodes multica branch returns
+SuperNodes, preserves structure, return type list[Node]|list[SuperNode]|None); 2.2
+06354ad6 (_finalize_multica_episode: insert_super_batch + per-episode GAE + batched
+tensor dict); 2.3 6851bc4c (activate multica_dag_client hook + wire self.workflow);
+2.4 99891ac2 (group_size=M parallel rollouts + per-episode GAE grouping via
+group_idx). Phase 3 (tree-search branching, F-independent): 3.1 7115705a
+(EdgeType.BRANCH + Edge provenance branch_from_segment_id/branch_from_checkpoint_id
++ to_records/from_records); 3.2 7b441809 (BRANCH edge parsing in assemble_from_refs);
+3.3 47ccffed (Node.visit_count + branch_backup MCTS running-mean value update); 3.4
+d31d6fc7 (branch execution via EnvDispatchBranchDriver.drive_lane, SCRATCH path
+unchanged); 3.5 b15203b8 (max_group_size bound + consecutive-failure circuit breaker,
+budget counts SUCCESSFUL branches only); 3.6 426a7cb9 (MCTS backup wiring + branched
+session cleanup). Phase 4: 4.1 covered by existing test_multica_dag_client 202->200
+polling (no AReaL-side contract to assert); 4.3 d881c246 (session lifecycle test:
+Multica mints, AReaL harvests+removes, never start_session). Phase 5: 5.1 done
+(test_multi_agent_env_dispatch.py suite); 5.4 24ed5296 (multi-level branch-tree
+backup aggregation); 5.6 cdd61b62 (ruff clean + tasks.md checkoff).
+
+## Deviations (documented, sound)
+- branch_backup landed in existing agents/dag_backup.py (not a new dag/ package) -
+  same API as plan's dag/backup.py; consolidated with existing
+  distribute_reward_over_dag/CreditAssignment.
+- Parallel _supernodes_to_batched_tensor_dict helper (mirrors _node_to_tensor_dict)
+  because multica SuperNodes carry tensors in metadata["tensors"] (nodes=[]), not as
+  Node fields. Builds [1,seq_len] dict: input_ids/loss_mask/logprobs/versions/
+  attention_mask/rewards=scalar/topk_ids=-1 sentinel/advantages broadcast; teacher_logp
+  zeros unless loss_mode=="grpo"; concat via concat_padded_tensors.
+- _branch_budget = max(0, max_group_size - initial_group_size), counts SUCCESSFUL
+  branches only so the consecutive-failure circuit breaker (max_failed_additions =
+  max(3, max_group_size)) still fires on failures.
+- branch_backup guards SuperNode.value is None -> 0.0 (SuperNode.value defaults None;
+  bare None*int would crash). visit_count running-mean update.
+
+## Deferred / out-of-scope (annotated in tasks.md)
+- 4.2 cross-step staleness (rollout_batch awaits all arun_episode before set_version) -
+  lives in v2 service-layer controller, not in this codebase.
+- 5.2/5.3 v2 gateway/router/SessionStore integration (M=2xN=2 parallel, 429-free) -
+  v2 service layer not present here.
+- 5.5 E2E (N=2 squad, group_size=2, SCRATCH then BRANCH) - hardware-gated GPU skip.
+
+## Verification
+- 9 new test files: 39 passed (test_multi_agent_env_dispatch 12,
+  test_result_to_nodes_multica 3, test_finalize_multica_episode 8 incl M=2 per-episode
+  + M=2 gather + branch_backup + 2-level tree, test_multica_workflow_wiring 2,
+  test_branch_edge 4, test_assemble_branch_edge 2, test_branch_backup 3,
+  test_branch_budget 3, test_v2_session_lifecycle 2).
+- Full tree_search suite: 387 passed, 9 failed + 5 errors ALL pre-existing env issues
+  (critic uvloop event-loop RuntimeError, datasets/torchdata ModuleNotFoundError).
+- ruff clean on all 8 source + 9 test files. pre-commit not installed in worktree
+  (ruff is the relevant Python check).
+- Locked-architecture checks PASS: no AReaL-side start_session call; branching via
+  EnvDispatchBranchDriver (F-independent); all 6 reused components invoked, none
+  reimplemented; cleanup success-path-only; M>1 GAE grouped per-episode via group_idx;
+  fetch vs assembly DAGError/SegmentSpec not conflated.
+
+## Known issue (USER DECISION: leave as-is)
+Commit 99891ac2 accidentally swept 7 GAIA dataset files (LFS-tracked) into the branch
+(real-bytes-in-git -> LFS pointers, ~15MB; base f89eb1b2 has the full real content so
+no data loss). Unrelated to tree-search. User chose LEAVE AS-IS over revert/history
+strip. If this branch is squashed for MR, the LFS-pointer blobs become unreachable
+(no LFS push); if pushed unsquashed, ~15MB LFS objects go to the fork. Flagged for MR
+review.
+
+ALL EXECUTABLE TASKS COMPLETE (18 done, 4 documented-deferred/skipped). Commits:
+f89eb1b2..cdd61b62 (17 commits), local + partially pushed to origin
+(ahead 16). Final code review SKIPPED per user. Awaiting user decision on
+finish-branch ceremony / MR.
