@@ -262,3 +262,85 @@ async def test_finalize_episode_multica_branch_backup_propagates_to_parent(tmp_p
     assert parent.value == 1.0
     # The child (branch terminal) is not a fork point: no backup to it.
     assert child.visit_count == 0
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_two_level_branch_tree_aggregates(tmp_path):
+    # A 2-level branch tree: root forks b1 and b2 (fan-out); b1 forks c1, b2
+    # forks c2. branch_backup aggregates at each checkpoint:
+    #   b1.value = c1.outcome (0.8), b2.value = c2.outcome (0.2)
+    #   root.value = mean(b1.outcome, b2.outcome) = mean(0.4, 0.6) = 0.5
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        checkpoint_dir=str(tmp_path),
+        advantage_mode=AdvantageMode.TREE,
+        loss_mode=LossMode.GRPO,
+        cache_mode=CacheMode.OFF,
+        critic_gamma=1.0,
+        critic_lambda=1.0,
+    )
+    root = SuperNode(
+        node_id="root",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("b1", EdgeType.BRANCH), ("b2", EdgeType.BRANCH)),
+    )
+    b1 = SuperNode(
+        node_id="b1",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.4,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("c1", EdgeType.BRANCH),),
+    )
+    b2 = SuperNode(
+        node_id="b2",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.6,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("c2", EdgeType.BRANCH),),
+    )
+    c1 = SuperNode(
+        node_id="c1",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.8,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+    c2 = SuperNode(
+        node_id="c2",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.2,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[root, b1, b2, c1, c2],
+        cached_nodes=[],
+        engine=None,
+        data={},
+        query_id="q1",
+    )
+
+    assert out is not None
+    # Level-1 checkpoints aggregate their single branch's return.
+    assert b1.visit_count == 1
+    assert b1.value == 0.8
+    assert b2.visit_count == 1
+    assert b2.value == 0.2
+    # Root aggregates its two branches (running mean of 0.4 and 0.6).
+    assert root.visit_count == 2
+    assert root.value == 0.5
+    # Leaf branches are not fork points.
+    assert c1.visit_count == 0
+    assert c2.visit_count == 0
