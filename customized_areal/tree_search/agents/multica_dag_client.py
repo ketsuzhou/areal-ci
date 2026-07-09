@@ -54,6 +54,10 @@ class EdgeSpec:
     src_segment_id: str
     dst_segment_id: str
     type: str
+    # BRANCH provenance (None for non-branch edges). Multica emits these on
+    # branch edges so AReaL can credit the forked checkpoint via MCTS backup.
+    branch_from_segment_id: str | None = None
+    branch_from_checkpoint_id: str | None = None
 
 
 @dataclass

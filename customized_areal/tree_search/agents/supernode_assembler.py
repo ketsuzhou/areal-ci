@@ -178,6 +178,8 @@ class SuperNodeAssembler:
                 edge.src_segment_id,
                 edge.dst_segment_id,
                 EdgeType(edge.type),
+                branch_from_segment_id=edge.branch_from_segment_id,
+                branch_from_checkpoint_id=edge.branch_from_checkpoint_id,
             )
 
         # Validate acyclicity and stamp completion_index from topological order.
