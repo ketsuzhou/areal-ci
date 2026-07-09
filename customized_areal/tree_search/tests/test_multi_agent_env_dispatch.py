@@ -308,3 +308,128 @@ async def test_arun_episode_dag_fetch_errors_propagate(exc):
     assert assembler.called is False
     assert resolver.cleared == []
     assert sr.removed == []
+
+
+class _RecordingDispatch:
+    """Returns a preconfigured setup; records the env_id of each dispatch."""
+
+    def __init__(self, setup):
+        self._setup = setup
+        self.dispatch_env_ids: list[str | None] = []
+
+    async def create_env_dispatch(self, **kw):
+        self.dispatch_env_ids.append(kw.get("env_id"))
+        return self._setup
+
+
+class _FakeBranchDriver:
+    """Records drive_lane calls; returns a fixed child env_id."""
+
+    def __init__(self, child_env_id: str = "child_env"):
+        self.child_env_id = child_env_id
+        self.drive_calls: list[dict] = []
+
+    async def drive_lane(self, *, agent_run_id, sandbox_id, session_id):
+        self.drive_calls.append(
+            {
+                "agent_run_id": agent_run_id,
+                "sandbox_id": sandbox_id,
+                "session_id": session_id,
+            }
+        )
+        return self.child_env_id
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_branch_forks_then_runs_on_child_env():
+    # data carries a branch source -> fork via branch_driver, then run the squad
+    # on the forked child env (NOT base_env_id).
+    sr = _FakeSessionRemover()
+    branch_driver = _FakeBranchDriver(child_env_id="child_env")
+    dispatch = _RecordingDispatch(
+        SweLegoSetup(
+            rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
+        )
+    )
+    wf = MultiAgentEnvDispatchWorkflow(
+        dispatch_client=dispatch,
+        dag_client=_FakeDagClient(
+            AssembledDag(segments=[], edges=[], session_to_agent_run={"sess1": "r1"})
+        ),
+        assembler=_FakeAssembler(),
+        resolver=_FakeResolver(),
+        session_remover=sr,
+        poll_timeout=5.0,
+        poll_interval=0.0,
+        group_size=1,
+        base_env_id="base_env",
+        branch_driver=branch_driver,
+    )
+    out = await wf.arun_episode(
+        engine=None,
+        data={
+            "query_id": "q1",
+            "branch_from_env_id": "source_env",
+            "branch_from_agent_run_id": "r_parent",
+            "branch_from_session_id": "sess_parent",
+        },
+    )
+    assert out is not None
+    # The source env was forked.
+    assert branch_driver.drive_calls == [
+        {
+            "agent_run_id": "r_parent",
+            "sandbox_id": "source_env",
+            "session_id": "sess_parent",
+        }
+    ]
+    # The squad ran on the forked child env (not base_env_id).
+    assert dispatch.dispatch_env_ids == ["child_env"]
+    assert sr.removed == ["sess1"]
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_scratch_path_does_not_call_branch_driver():
+    # SCRATCH (no branch source) does not fork; runs on base_env_id.
+    branch_driver = _FakeBranchDriver()
+    dispatch = _RecordingDispatch(
+        SweLegoSetup(
+            rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
+        )
+    )
+    wf = MultiAgentEnvDispatchWorkflow(
+        dispatch_client=dispatch,
+        dag_client=_FakeDagClient(
+            AssembledDag(segments=[], edges=[], session_to_agent_run={"sess1": "r1"})
+        ),
+        assembler=_FakeAssembler(),
+        resolver=_FakeResolver(),
+        session_remover=_FakeSessionRemover(),
+        poll_timeout=5.0,
+        poll_interval=0.0,
+        group_size=1,
+        base_env_id="base_env",
+        branch_driver=branch_driver,
+    )
+    out = await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert out is not None
+    assert branch_driver.drive_calls == []
+    assert dispatch.dispatch_env_ids == ["base_env"]
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_branch_without_driver_raises():
+    wf = MultiAgentEnvDispatchWorkflow(
+        dispatch_client=_RecordingDispatch(
+            SweLegoSetup(rollouts=[])
+        ),
+        dag_client=_FakeDagClient(),
+        assembler=_FakeAssembler(),
+        resolver=_FakeResolver(),
+        session_remover=_FakeSessionRemover(),
+        base_env_id="base_env",  # no branch_driver configured
+    )
+    with pytest.raises(RuntimeError):
+        await wf.arun_episode(
+            engine=None, data={"branch_from_env_id": "source_env"}
+        )

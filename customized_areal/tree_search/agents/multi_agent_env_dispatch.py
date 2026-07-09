@@ -46,21 +46,42 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         poll_interval: float = 1.0,
         group_size: int = 1,
         base_env_id: str = "",
+        branch_driver=None,
     ):
         self._dispatch = dispatch_client
         self._dag_client = dag_client
         self._assembler = assembler
         self._resolver = resolver
         self._session_remover = session_remover
+        self._branch_driver = branch_driver
         self.poll_timeout = poll_timeout
         self.poll_interval = poll_interval
         self.group_size = group_size
         self.base_env_id = base_env_id
 
     async def arun_episode(self, engine, data: dict[str, Any]) -> dict[str, Any] | None:
+        # Branch execution (F-independent, via EnvDispatchBranchDriver): if data
+        # carries a branch source, fork the source env via the branch driver,
+        # then run the squad on the forked env. SCRATCH (no branch source) runs
+        # on base_env_id. Branch *selection* (which node to fork from) lives in
+        # the grouped workflow's select_branch_candidate; this is execution only.
+        branch_from_env_id = data.get("branch_from_env_id")
+        if branch_from_env_id:
+            if self._branch_driver is None:
+                raise RuntimeError(
+                    "branch_from_env_id set in data but no branch_driver configured"
+                )
+            dispatch_env_id = await self._branch_driver.drive_lane(
+                agent_run_id=data.get("branch_from_agent_run_id", ""),
+                sandbox_id=branch_from_env_id,
+                session_id=data.get("branch_from_session_id", ""),
+            )
+        else:
+            dispatch_env_id = self.base_env_id
+
         setup = await self._dispatch.create_env_dispatch(
             mode="scratch",
-            env_id=self.base_env_id,
+            env_id=dispatch_env_id,
             dispatch_type="message",
             agent_id=data.get("agent_id", ""),
             group_size=self.group_size,
