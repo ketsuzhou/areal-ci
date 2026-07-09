@@ -173,3 +173,33 @@ async def test_arun_episode_partial_squad_returns_none_and_skips_cleanup():
     assert assembler.called is False
     assert resolver.cleared == []
     assert sr.removed == []
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_scratch_n2_returns_dag_covering_both_agents():
+    # N=2 squad: both agent_run_ids are covered by session_to_agent_run -> the
+    # episode succeeds and the assembled DAG covers both agents; both sessions
+    # are cleaned up. (The N=2 partial-squad drop is covered by the test above.)
+    sr = _FakeSessionRemover()
+    wf = _make_workflow(
+        dispatch=_FakeDispatch(
+            SweLegoSetup(
+                rollouts=[
+                    SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1"),
+                    SweLegoRollout(agent_run_id="r2", env_id="e2", project_id="p1"),
+                ]
+            )
+        ),
+        dag_client=_FakeDagClient(
+            AssembledDag(
+                segments=[],
+                edges=[],
+                session_to_agent_run={"sess1": "r1", "sess2": "r2"},
+            )
+        ),
+        session_remover=sr,
+    )
+    out = await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert out is not None
+    assert out["assembled_dag"].session_to_agent_run == {"sess1": "r1", "sess2": "r2"}
+    assert sorted(sr.removed) == ["sess1", "sess2"]
