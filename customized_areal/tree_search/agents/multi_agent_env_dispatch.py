@@ -72,6 +72,12 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         project_id = setup.rollouts[0].project_id
         from customized_areal.tree_search.agents.multica_dag_client import DagTimeout
 
+        # DAG fetch error policy: DagTimeout (the DAG never left 202 within the
+        # poll window) is a rejected episode -> None (the squad stalled; an
+        # immediate retry would re-dispatch, not re-poll the same DAG). The
+        # remaining fetch errors - DagNotFound (404) / DagForbidden (403) /
+        # DagError (unexpected status) - PROPAGATE so the caller's retry layer
+        # can back off or surface them; they are not silently swallowed.
         try:
             dag = await asyncio.to_thread(
                 self._dag_client.get_dag,

@@ -16,6 +16,9 @@ from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
 )
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
+    DagError,
+    DagForbidden,
+    DagNotFound,
     DagTimeout,
     SegmentSpec,
 )
@@ -271,5 +274,37 @@ async def test_arun_episode_assembly_failure_skips_cleanup_and_propagates():
     )
     with pytest.raises(DAGError):
         await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert resolver.cleared == []
+    assert sr.removed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [DagNotFound("p1"), DagForbidden("p1"), DagError("unexpected 500")],
+    ids=["not_found", "forbidden", "unexpected"],
+)
+async def test_arun_episode_dag_fetch_errors_propagate(exc):
+    # DagNotFound (404) / DagForbidden (403) / DagError (unexpected status) are
+    # NOT swallowed into None - they propagate so the caller's retry layer can
+    # back off or surface them. Only DagTimeout is a None-reject (covered
+    # above). No assembly or cleanup runs (the DAG was never fetched).
+    assembler = _FakeAssembler()
+    resolver = _FakeResolver()
+    sr = _FakeSessionRemover()
+    wf = _make_workflow(
+        dispatch=_FakeDispatch(
+            SweLegoSetup(
+                rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
+            )
+        ),
+        dag_client=_FakeDagClient(raises=exc),
+        assembler=assembler,
+        resolver=resolver,
+        session_remover=sr,
+    )
+    with pytest.raises(type(exc)):
+        await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert assembler.called is False
     assert resolver.cleared == []
     assert sr.removed == []
