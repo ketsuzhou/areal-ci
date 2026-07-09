@@ -928,8 +928,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
     def _result_to_nodes(
         self, result: Any, query_id: str, group_idx: int
-    ) -> list[Node] | None:
-        """Convert a single arun_episode result to list[Node]."""
+    ) -> list[Node] | list[SuperNode] | None:
+        """Convert a single arun_episode result to nodes.
+
+        Single-agent path: a dict/list of ``InteractionWithTokenLogpReward`` ->
+        ``list[Node]``. Multica multi-agent path: a dict carrying
+        ``"execution_dag"`` (an ``ExecutionDAG[SuperNode]`` assembled by
+        ``MultiAgentEnvDispatchWorkflow``) -> ``list[SuperNode]``, preserved (not
+        flattened to ``Node``) so the multi-segment edge structure survives to
+        ``_finalize_episode``. Returns ``None`` for an unparseable result.
+        """
         from areal.experimental.openai.types import InteractionWithTokenLogpReward
 
         task_id: str | None = None
@@ -940,6 +948,27 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             raw_messages = result.raw_messages
             branch_point_node_id = result.branch_point_node_id
             result = result.result
+
+        # Multica multi-agent path: the base workflow returned an assembled
+        # ExecutionDAG[SuperNode] (one SuperNode per segment). Preserve the
+        # SuperNodes - do NOT flatten to Nodes - so the multi-segment edge
+        # structure survives to _finalize_episode. Each SuperNode is stamped
+        # with query_id/group_idx (via metadata; SuperNode has no such fields)
+        # and made self-contained: incoming_edges/outgoing_edges are populated
+        # from the DAG, mirroring the legacy assemble() path.
+        if isinstance(result, dict) and "execution_dag" in result:
+            edag = result["execution_dag"]
+            super_nodes = edag.topological_order()
+            for sn in super_nodes:
+                sn.incoming_edges = tuple(
+                    (e.src, e.type) for e in edag.edges if e.dst == sn.node_id
+                )
+                sn.outgoing_edges = tuple(
+                    (e.dst, e.type) for e in edag.edges if e.src == sn.node_id
+                )
+                sn.metadata["query_id"] = query_id
+                sn.metadata["group_idx"] = group_idx
+            return super_nodes or None
 
         if isinstance(result, dict) and all(
             isinstance(v, InteractionWithTokenLogpReward) for v in result.values()
