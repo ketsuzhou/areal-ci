@@ -33,6 +33,7 @@ class EdgeType(StrEnum):
     DELEGATION = "delegation"  # parent issue -> sub-issue (fan-out)
     MENTION = "mention"  # one run mentions/triggers another (peer)
     COMPLETION = "completion"  # child run completes -> parent (fan-in)
+    BRANCH = "branch"  # a fork from a closed segment's checkpoint (tree search)
 
 
 @dataclass
@@ -203,6 +204,10 @@ class Edge:
     src: str  # node_id
     dst: str  # node_id
     type: EdgeType
+    # BRANCH provenance: the segment + checkpoint the branch forked from. None
+    # for non-BRANCH edges and legacy edges without provenance.
+    branch_from_segment_id: str | None = None
+    branch_from_checkpoint_id: str | None = None
 
 
 class DAGError(ValueError):
@@ -233,14 +238,28 @@ class ExecutionDAG:
         self._in.setdefault(event.node_id, [])
         return event
 
-    def add_edge(self, src: str, dst: str, type: EdgeType) -> Edge:
+    def add_edge(
+        self,
+        src: str,
+        dst: str,
+        type: EdgeType,
+        *,
+        branch_from_segment_id: str | None = None,
+        branch_from_checkpoint_id: str | None = None,
+    ) -> Edge:
         if src not in self._events:
             raise DAGError(f"unknown src event: {src!r}")
         if dst not in self._events:
             raise DAGError(f"unknown dst event: {dst!r}")
         if src == dst:
             raise DAGError(f"self-loop not allowed: {src!r}")
-        edge = Edge(src=src, dst=dst, type=type)
+        edge = Edge(
+            src=src,
+            dst=dst,
+            type=type,
+            branch_from_segment_id=branch_from_segment_id,
+            branch_from_checkpoint_id=branch_from_checkpoint_id,
+        )
         # Idempotent: don't double-add an identical edge.
         if edge in self._edges:
             return edge
@@ -318,9 +337,14 @@ class ExecutionDAG:
         from dataclasses import asdict
 
         runs = [asdict(ev) for ev in self._events.values()]
-        edges = [
-            {"src": e.src, "dst": e.dst, "type": e.type.value} for e in self._edges
-        ]
+        edges = []
+        for e in self._edges:
+            rec = {"src": e.src, "dst": e.dst, "type": e.type.value}
+            if e.branch_from_segment_id is not None:
+                rec["branch_from_segment_id"] = e.branch_from_segment_id
+            if e.branch_from_checkpoint_id is not None:
+                rec["branch_from_checkpoint_id"] = e.branch_from_checkpoint_id
+            edges.append(rec)
         return runs, edges
 
     # -- structural queries ---------------------------------------------
@@ -432,7 +456,13 @@ class ExecutionDAG:
                 etype = e["type"]
                 if not isinstance(etype, EdgeType):
                     etype = EdgeType(etype)
-                dag.add_edge(e["src"], e["dst"], etype)
+                dag.add_edge(
+                    e["src"],
+                    e["dst"],
+                    etype,
+                    branch_from_segment_id=e.get("branch_from_segment_id"),
+                    branch_from_checkpoint_id=e.get("branch_from_checkpoint_id"),
+                )
             return dag
 
         # Infer delegation edges from parent_issue_id on the records.
