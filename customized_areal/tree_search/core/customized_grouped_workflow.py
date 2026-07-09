@@ -1645,6 +1645,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             fresh_nodes, cached_nodes, engine, data, query_id
         )
 
+    @property
+    def _branch_budget(self) -> int:
+        """Per-query branch budget: max additional (branch) episodes beyond the
+        initial SCRATCH round. Branches are capped at
+        ``max_group_size - initial_group_size`` so the total (initial + branches)
+        never exceeds ``max_group_size`` - even when early episodes fail and
+        ``_count_episodes`` stays below ``max_group_size``.
+        """
+        return max(0, self.max_group_size - self.initial_group_size)
+
     async def _arun_episode_dynamic(
         self, engine, data: dict[str, Any], query_id: str
     ) -> dict[str, Any] | None:
@@ -1707,9 +1717,12 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         next_group_idx = need_gen
         consecutive_failed_additions = 0
         max_failed_additions = max(3, self.max_group_size)
+        branch_budget = self._branch_budget
+        branch_samples = 0  # successful additional (branch) episodes
         while (
             self.loss_mode != LossMode.DISTILL
             and self._count_episodes(all_nodes) < self.max_group_size
+            and branch_samples < branch_budget
         ):
             if uncertainty <= self.uncertainty_threshold:
                 logger.info(
@@ -1753,6 +1766,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 all_nodes = fresh_nodes + cached_nodes
                 uncertainty = self._compute_uncertainty_for_nodes(all_nodes)
                 consecutive_failed_additions = 0
+                branch_samples += 1
 
                 logger.info(
                     "TreeSearchGroupedWorkflow [dynamic]: query_id=%s "
