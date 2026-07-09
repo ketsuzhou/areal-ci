@@ -70,6 +70,9 @@ from customized_areal.tree_search.agents.harvest import (
 from customized_areal.tree_search.agents.integration import (
     finalize_with_verifier,
 )
+from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
+    MultiAgentEnvDispatchWorkflow,
+)
 from customized_areal.tree_search.agents.rl_session import (
     RLBridgeClient,
     RLSessionRewardWriter,
@@ -149,4 +152,7 @@ __all__ = [
     "RLSessionRewardWriter",
     # integration
     "finalize_with_verifier",
+    # multi-agent env dispatch workflow (Phase 1 -- thin RolloutWorkflow
+    # orchestrator over the v2-segment-dag components)
+    "MultiAgentEnvDispatchWorkflow",
 ]
