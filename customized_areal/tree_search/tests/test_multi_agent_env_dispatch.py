@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import pytest
 
+from customized_areal.tree_search.agents.execution_dag import DAGError
 from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
     MultiAgentEnvDispatchWorkflow,
 )
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     DagTimeout,
+    SegmentSpec,
 )
 from customized_areal.tree_search.agents.reward.swe_lego_types import (
     SweLegoRollout,
@@ -203,3 +205,71 @@ async def test_arun_episode_scratch_n2_returns_dag_covering_both_agents():
     assert out is not None
     assert out["assembled_dag"].session_to_agent_run == {"sess1": "r1", "sess2": "r2"}
     assert sorted(sr.removed) == ["sess1", "sess2"]
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_clears_consumed_shards_and_removes_sessions():
+    # Segments carry tensor_ref shard_ids; on success the workflow releases
+    # exactly those shards (resolver.clear) and revokes each session
+    # (session_remover.remove). resolve() is the assembler's concern, not the
+    # workflow's - the workflow's contract is the cleanup of consumed refs.
+    resolver = _FakeResolver()
+    sr = _FakeSessionRemover()
+    seg = SegmentSpec(
+        segment_id="seg1",
+        agent_run_id="r1",
+        issue_id="i1",
+        trajectory_id=0,
+        tensor_ref={"shard_id": "shard1"},
+        closing_event=None,
+        env_snapshot={},
+    )
+    wf = _make_workflow(
+        dispatch=_FakeDispatch(
+            SweLegoSetup(
+                rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
+            )
+        ),
+        dag_client=_FakeDagClient(
+            AssembledDag(
+                segments=[seg], edges=[], session_to_agent_run={"sess1": "r1"}
+            )
+        ),
+        resolver=resolver,
+        session_remover=sr,
+    )
+    out = await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert out is not None
+    assert resolver.cleared == [["shard1"]]
+    assert sr.removed == ["sess1"]
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_assembly_failure_skips_cleanup_and_propagates():
+    # If assemble_from_refs raises, cleanup must NOT run - shards/sessions stay
+    # live so the caller can retry - and the error propagates. This matches
+    # run_segment_dag_training_step's success-path-only cleanup ordering.
+
+    class _FailingAssembler:
+        def assemble_from_refs(self, dag, resolver):  # sync
+            raise DAGError("cycle detected")
+
+    resolver = _FakeResolver()
+    sr = _FakeSessionRemover()
+    wf = _make_workflow(
+        dispatch=_FakeDispatch(
+            SweLegoSetup(
+                rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
+            )
+        ),
+        dag_client=_FakeDagClient(
+            AssembledDag(segments=[], edges=[], session_to_agent_run={"sess1": "r1"})
+        ),
+        assembler=_FailingAssembler(),
+        resolver=resolver,
+        session_remover=sr,
+    )
+    with pytest.raises(DAGError):
+        await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert resolver.cleared == []
+    assert sr.removed == []
