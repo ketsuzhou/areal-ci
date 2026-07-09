@@ -33,7 +33,7 @@ the `AssembledDag` edge contract has no `BRANCH` type.
 | Staleness | Gates trainer batch admission, not minting | `staleness_manager.get_capacity()` is the bound; gateway `start_session` doesn't consult it |
 | R1 - BRANCH backup | MCTS-style value propagation | Branch return backs up along `BRANCH` edge to parent checkpoint node; consistent with existing structural backup |
 | Harvest | Direct `AssembledDag` polling (202->200) | Matches v2-segment-dag contract; controller awaits `arun_episode`; callback stays single-agent-only |
-| R4 - branch checkpoint | Depend on Sub-project F | F provides env-snapshot + issue-subtree fork; this change defines edge + backup + polling |
+| R4 - branch checkpoint | F-independent via `EnvDispatchBranchDriver` | Branch fork uses existing `create_env_dispatch(mode="branch")` (Multica env-dispatch); Sub-project F sandbox snapshot/fork is out of scope; `env_snapshot` is refs-only |
 | R2 - within-step staleness | Batch boundary guarantee | `rollout_batch` awaits all `arun_episode`s before `set_version`; no cross-step leak |
 | R5 - backpressure | Staleness manager is the bound | Excess `AssembledDag`s hold at Multica's 202 until polled |
 | Partial squad failure | Drop the task | Matches `_run_offline` group-abandon (`workflow.py:214-222`); no partial `SuperNode` |
@@ -54,48 +54,62 @@ one Multica task:
 3. Poll `GET /api/v1/env-dispatch/{projectID}/dag` -> `202` in-progress / `200` +
    `AssembledDag` done. Configurable poll interval + timeout; on timeout, reject the
    trajectory (R-partial-failure).
-4. Resolve each segment's `tensor_ref` via `/data/<shard_id>` / `/data/batch` (v2-segment-dag
-   ref-resolution).
-5. Return `{assembled_dag, tensors}` (consumed by `_result_to_nodes`).
+4. `SuperNodeAssembler.assemble_from_refs(dag, DataProxyTensorResolver)` (existing, sync via
+   `asyncio.to_thread`) -> resolves each segment's `tensor_ref` via `/data/*` and builds the
+   `ExecutionDAG[SuperNode]` (one `SuperNode` per segment + typed edges). **Reuses the
+   existing assembler - not reimplemented.**
+5. Return `{"assembled_dag", "execution_dag"}` (consumed by `_result_to_nodes`'s multica
+   branch). Success-path cleanup: `DataProxyTensorResolver.clear` + `DataProxySessionRemover.remove`.
 
-**Boundary**: N=1 degenerates to the single-agent leaf path. The workflow depends on
-`multica_dag_client` (the activated hook) for `create_env_dispatch` + polling.
+**Boundary**: N=1 degenerates to the single-agent leaf path. The workflow is a *thin
+orchestrator* over existing v2-segment-dag components (`MulticaEnvDispatchClient`,
+`MulticaDagClient`, `SuperNodeAssembler`, `DataProxyTensorResolver`/`SessionRemover`) - it
+does NOT reimplement dispatch/polling/assembly. AReaL NEVER calls `start_session` (Multica
+owns it). Sync calls run in `asyncio.to_thread` so M parallel episodes stay concurrent.
 
-**Interface contract** (what consumers depend on): `arun_episode(engine, data) -> dict`
-where the dict carries the `AssembledDag` + resolved tensors, OR `None` on
-drop/timeout. Internal polling/credential mechanics are private.
+**Interface contract**: `arun_episode(engine, data) -> {"assembled_dag", "execution_dag"} | None`
+(`None` on drop/timeout/partial-squad). Internal polling/credential mechanics are private.
 
-### 3.2 `TreeSearchGroupedRolloutWorkflow` multi-agent wiring (Approach A)
+### 3.2 `TreeSearchGroupedRolloutWorkflow` multi-agent wiring (Approach B: SuperNode-preserving)
 
 `customized_areal/tree_search/core/customized_grouped_workflow.py`:
 
 - `_result_to_nodes` (`:929`): branch on result type. Single-agent interaction dict ->
-  unchanged. `AssembledDag` -> per-segment turn-`Node`s via `interactions_dict_to_nodes`,
-  one `episode_id` per `agent_run_id`.
-- `_wrap_leaf_super` (`:91`) -> multi-agent `SuperNode` builder: N agent-runs (`agent_id`,
-  `issue_id` from segments) + typed edges. Leaf = N=1 (preserve single-agent tests).
-- `multica_dag_client` hook (`:682`/`:852`): activated; passed to
-  `MultiAgentEnvDispatchWorkflow` constructed as `self.workflow` for the multica path.
-- `_arun_episode_fixed` gather (`:1496`): shape unchanged - M parallel
-  `_run_fresh_episode` calls, each returning a multi-agent `AssembledDag`.
-- `_finalize_episode` (`:1754`): per-agent-run credit at fan-in joins; aggregate multi-agent
-  `SuperNode`s; `TreeAdvantageComputer` consumes per-node credit across the DAG.
+  unchanged. Multica result (`{"assembled_dag", "execution_dag"}`) -> return the
+  `ExecutionDAG`'s `SuperNode`s **without flattening to `Node`s** (the multi-segment edge
+  structure must survive to `_finalize_episode`). Return type widens to
+  `list[Node] | list[SuperNode] | None`.
+- `_finalize_episode` (`:1754`): multica branch inserts the multi-`SuperNode` `ExecutionDAG`
+  via `tree_store.insert_super_batch` (NOT `_wrap_leaf_super`) and computes advantages over
+  the DAG (`TreeAdvantageComputer` if it handles `SuperNode`s, else `assemble_node_advantages`
+  over `topological_order()`). N=1 multica = leaf `SuperNode` (parity). Judge/distillation
+  stay Change 2.
+- `multica_dag_client` hook (`:682`/`:852`): activated; `self.workflow` =
+  `MultiAgentEnvDispatchWorkflow` (constructed with the dispatch/dag clients +
+  resolver/session_remover/assembler) for the multica path.
+- `_arun_episode_fixed` gather (`:1496`): shape unchanged - M parallel `_run_fresh_episode`
+  calls, each returning a multica `{"assembled_dag", "execution_dag"}`.
 
 **Non-multica paths** (`OpenAIProxyWorkflow` / `InferenceServiceWorkflow`) remain unchanged;
 the multi-agent base workflow is selected only for the v2/multica config.
 
-### 3.3 Branching
+### 3.3 Branching (F-independent, via `EnvDispatchBranchDriver`)
 
-- `EdgeType` (`execution_dag.py`): add `BRANCH`.
-- `AssembledDag` edge contract: `branch` edge carries `branch_from_segment_id`,
-  `branch_from_checkpoint_id`.
-- `select_branch_candidate` (`:233`) -> F's checkpoint-fork (env snapshot + issue subtree)
-  + new `/rl/start_session` for the branched agent(s) -> run -> close new segments ->
-  `branch` edge emission.
-- `backup.py`: extend structural backup to propagate branch return along `BRANCH` edges to
-  the parent checkpoint node (MCTS value update); each branch retains its own advantage.
-- `max_group_size` bounds total branches per query (`max_group_size - initial_group_size`);
-  consecutive-failure circuit breaker applies.
+- `EdgeType` (`execution_dag.py`): add `BRANCH` + `Edge` provenance
+  (`branch_from_segment_id`, `branch_from_checkpoint_id`).
+- `AssembledDag` edge contract: Multica emits `branch` edges;
+  `SuperNodeAssembler.assemble_from_refs` maps them to `EdgeType.BRANCH` + provenance.
+- Branch *execution* lives in `MultiAgentEnvDispatchWorkflow` (the env-dispatch runner model,
+  per `customized_grouped_workflow.py:1416`): a branch `arun_episode` forks via the existing
+  `EnvDispatchBranchDriver.drive_lane` (`create_env_dispatch(mode="branch", env_id=<source>)`),
+  runs the branched squad, harvests the branched `AssembledDag` with a `branch` edge.
+  **F-independent** - no Sub-project F sandbox snapshot/fork; `env_snapshot` is refs-only.
+- Branch *selection/backup/bounds* live in the grouped workflow/`tree_store`:
+  `select_branch_candidate` (`:233`) picks the branch point; `backup.py` (new) propagates
+  branch return along `BRANCH` edges to the parent checkpoint `Node` (MCTS value update via
+  `Node.visit_count`); each branch retains its own advantage; `max_group_size` bounds total
+  branches per query (`max_group_size - initial_group_size`); consecutive-failure circuit
+  breaker applies.
 
 ## 4. Data flow
 
@@ -104,12 +118,13 @@ PPO trainer -> controller.rollout_batch(M) -> submit M arun_episode (grouped wor
   per arun_episode:
     _arun_episode_fixed: asyncio.gather(M x _run_fresh_episode)        (:1496)
       each -> self.workflow.arun_episode = MultiAgentEnvDispatchWorkflow
-        create_env_dispatch(N agents) -> [N sessions, Multica start_session]
-        poll env-dispatch -> AssembledDag{segments, edges(+branch), session_to_agent_run}
-        resolve tensor_refs -> /data/*
-        return {assembled_dag, tensors}
-    _result_to_nodes(AssembledDag) -> per-agent-run Nodes + multi-agent SuperNode  (:929)
-  _finalize_episode: per-agent-run credit + MCTS backup across BRANCH edges          (:1754)
+        create_env_dispatch(scratch, N agents)  [Multica owns start_session + creds]
+        asyncio.to_thread(get_dag) -> AssembledDag{segments, edges(+branch), session_to_agent_run}
+        asyncio.to_thread(assemble_from_refs, dag, resolver) -> ExecutionDAG[SuperNode]
+        cleanup: resolver.clear + session_remover.remove
+        return {assembled_dag, execution_dag}
+    _result_to_nodes -> list[SuperNode] (preserved, not flattened)                 (:929)
+  _finalize_episode: insert_super_batch(SuperNodes) + DAG advantages + MCTS backup  (:1754)
 -> compute_advantages -> update_weights -> set_version(v+1)
 ```
 
@@ -137,8 +152,9 @@ this batch boundary.
 - **R1 backup complexity**: MCTS value aggregation at parent checkpoint nodes (discount,
   visit counting) over deep branch trees. *Mitigation*: `max_group_size` bounds depth/width;
   unit-test backup over a multi-level branch tree.
-- **F schedule coupling**: branching ships only when F lands; multi-agent + SCRATCH ship
-  independently. *Mitigation*: SCRATCH path is F-independent.
+- **F independence**: branching uses `EnvDispatchBranchDriver` (`create_env_dispatch(mode="branch")`),
+  not Sub-project F's sandbox snapshot/fork; all phases ship together. Sub-project F remains
+  out of scope for full sandbox snapshot/fork.
 - **AssembledDag polling latency**: long tasks delay `arun_episode` return. *Mitigation*:
   configurable timeout; staleness gates batch not individual poll latency.
 - **`BRANCH` edge delta to `v2-segment-dag`**: extends the shipped `AssembledDag` contract.
@@ -158,7 +174,8 @@ this batch boundary.
 - **E2E (cloud-only)**: N=2 squad, `group_size=2`, SCRATCH; then a `BRANCH` from a closed
   segment. Verify harvest + advantage + one weight update. Skip with explanation when
   multi-node hardware unavailable (per `backend/areal/CLAUDE.md`).
-- **Pre-commit**: `pre-commit run --all-files`; `uv run pytest` for touched modules.
+- **Pre-commit**: `pre-commit run --all-files`; `python3 -m pytest` for touched modules
+  (`uv run pytest` is broken in this env).
 
 ## 8. Out of scope
 

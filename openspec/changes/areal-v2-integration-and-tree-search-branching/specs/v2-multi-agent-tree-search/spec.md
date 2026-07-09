@@ -27,50 +27,55 @@ path - Multica owns session opening.
 - **THEN** the workflow produces a leaf `SuperNode` with no DAG edges, identical to the
   existing single-agent path
 
-### Requirement: AssembledDag resolves into a multi-agent SuperNode
+### Requirement: AssembledDag resolves into a multi-agent SuperNode (via SuperNodeAssembler)
 
-`TreeSearchGroupedRolloutWorkflow._result_to_nodes` SHALL branch on result type: a
-single-agent interaction dict (unchanged) vs an `AssembledDag`. For an `AssembledDag` it
-SHALL produce per-segment turn-`Node`s with one `episode_id` per `agent_run_id`, and a
-multi-agent `SuperNode` carrying N agent-runs plus typed edges from the `AssembledDag`. The
-leaf `SuperNode` (single-agent, no edges) MUST remain the degenerate N=1 case.
+`MultiAgentEnvDispatchWorkflow.arun_episode` SHALL build the `ExecutionDAG[SuperNode]` by
+reusing the existing `SuperNodeAssembler.assemble_from_refs(dag, resolver)` (ref-resolution,
+not turn-index slicing). `TreeSearchGroupedRolloutWorkflow._result_to_nodes` SHALL branch on
+result type: a single-agent interaction dict (unchanged) vs the multica
+`{"assembled_dag", "execution_dag"}` result. For the multica result it SHALL preserve the
+`ExecutionDAG`'s `SuperNode`s (one per segment, carrying N agent-runs + typed edges) without
+flattening to `Node`s. The leaf `SuperNode` (single-agent, no edges) MUST remain the
+degenerate N=1 case.
 
-#### Scenario: AssembledDag yields per-agent-run Nodes
-- **WHEN** `_result_to_nodes` receives an `AssembledDag`
-- **THEN** each segment's interactions become turn-`Node`s stamped with one `episode_id`
-  per `agent_run_id`, and the assembled `SuperNode` carries all N agent-runs
+#### Scenario: AssembledDag resolves to SuperNodes via the assembler
+- **WHEN** `arun_episode` receives an `AssembledDag`
+- **THEN** `SuperNodeAssembler.assemble_from_refs` resolves each segment's `tensor_ref` and
+  builds one `SuperNode` per segment + an `ExecutionDAG` of typed edges, returned to
+  `_result_to_nodes` without flattening
 
-#### Scenario: Edges populate the SuperNode
+#### Scenario: Edges populate the ExecutionDAG
 - **WHEN** the `AssembledDag` carries `delegation` / `mention` / `completion` / `branch` edges
-- **THEN** the multi-agent `SuperNode` records those edges and the `ExecutionDAG` topology
-  matches Multica's recorded structure
+- **THEN** the `ExecutionDAG` records those edges and its topology matches Multica's recorded
+  structure
 
-### Requirement: BRANCH edge type with fork provenance
+### Requirement: BRANCH edge type with fork provenance (F-independent)
 
 The `AssembledDag` edge contract SHALL be extended with a `branch` edge type (in addition
 to `delegation` / `mention` / `completion`). A `branch` edge MUST carry
 `branch_from_segment_id` and `branch_from_checkpoint_id` provenance identifying the closed
-segment and checkpoint the branch forked from. Branching SHALL fork the env + issue subtree
-via Sub-project F's checkpoint-fork primitive and open a new `/rl/start_session` for the
-branched agent(s).
+segment the branch forked from. Branch execution SHALL fork the source env via the existing
+`EnvDispatchBranchDriver` (`create_env_dispatch(mode="branch", env_id=<source>)`) - NOT
+Sub-project F's sandbox snapshot/fork (out of scope; `env_snapshot` is refs-only). Multica
+owns the new `/rl/start_session` for the branched agent(s).
 
 #### Scenario: Branch records provenance
-- **WHEN** a branch forks from a closed segment's checkpoint
+- **WHEN** a branch forks from a closed segment
 - **THEN** the `AssembledDag` gains a `branch` edge carrying `branch_from_segment_id` and
-  `branch_from_checkpoint_id`, and the branched agent runs under a new session
+  `branch_from_checkpoint_id`, and the branched agent runs under a new session minted by Multica
 
-#### Scenario: Branch uses Sub-project F fork
-- **WHEN** `select_branch_candidate` selects a branch point
-- **THEN** the fork restores env snapshot + issue subtree via F's checkpoint-fork primitive
-  before the branched agent runs
+#### Scenario: Branch fork is F-independent
+- **WHEN** `MultiAgentEnvDispatchWorkflow` executes a branch
+- **THEN** it forks via `EnvDispatchBranchDriver.drive_lane` (`create_env_dispatch(mode="branch")`);
+  no Sub-project F sandbox snapshot/fork is invoked
 
 ### Requirement: MCTS value backup across BRANCH edges
 
 Advantage backup SHALL propagate a branch's terminal return along its `branch` edge to the
-parent segment's checkpoint node (MCTS-style), updating the parent's value estimate from
-branch outcomes. This extends the existing structural backup (`backup.py`) that distributes
-terminal reward along `delegation` / `mention` / `completion` edges. Each branch trajectory
-SHALL also retain its own advantage for policy-gradient training.
+parent segment's checkpoint node (MCTS-style), updating the parent's value estimate (running
+mean of discounted branch returns over `Node.visit_count`) from branch outcomes. A new
+`backup.py` provides `branch_backup` for this; each branch trajectory SHALL also retain its
+own advantage for policy-gradient training.
 
 #### Scenario: Branch return backs up to parent checkpoint
 - **WHEN** a branch trajectory completes with a terminal return
@@ -121,10 +126,10 @@ only for the single-agent `InferenceServiceWorkflow` online path.
 
 ### Requirement: Partial squad failure drops the task
 
-If any of the N agents in a squad fails (session error, export failure, or incomplete
-`AssembledDag`), `MultiAgentEnvDispatchWorkflow.arun_episode` SHALL drop the task and
-return no trajectory (the rollout is rejected), mirroring the offline group-abandon
-behavior. Partial `AssembledDag` assembly MUST NOT produce a partial `SuperNode`.
+`MultiAgentEnvDispatchWorkflow.arun_episode` SHALL drop the task and return no trajectory
+when any of the N agents in a squad fails (session error, export failure, or incomplete
+`AssembledDag`), mirroring the offline group-abandon behavior. Partial `AssembledDag`
+assembly MUST NOT produce a partial `SuperNode`.
 
 #### Scenario: One agent failure drops the task
 - **WHEN** one of N agents fails during a squad task
