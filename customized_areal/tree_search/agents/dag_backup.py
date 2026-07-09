@@ -102,8 +102,9 @@ def branch_backup(
     terminal reward across the multi-agent execution DAG.
     """
     discounted = discount * branch_return
+    current_value = parent.value if parent.value is not None else 0.0
     new_count = parent.visit_count + visit_count
     parent.value = (
-        parent.value * parent.visit_count + discounted * visit_count
+        current_value * parent.visit_count + discounted * visit_count
     ) / new_count
     parent.visit_count = new_count

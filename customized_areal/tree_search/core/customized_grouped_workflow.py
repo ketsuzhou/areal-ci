@@ -2073,6 +2073,28 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.tree_store.insert_super_batch(
             super_nodes, query_id=query_id, backup=True
         )
+        # MCTS branch backup: for each BRANCH edge, propagate the branch's
+        # terminal return (the child segment's outcome_reward) to the parent
+        # (fork) segment's value via branch_backup. This is the cross-episode
+        # value signal for future branch selection; distinct from the per-episode
+        # GAE advantages computed below. (Branch session cleanup - removing the
+        # branched sessions - happens in MultiAgentEnvDispatchWorkflow.arun_episode.)
+        from customized_areal.tree_search.agents.dag_backup import branch_backup
+        from customized_areal.tree_search.agents.execution_dag import EdgeType
+
+        super_by_id = {sn.node_id: sn for sn in super_nodes}
+        for sn in super_nodes:
+            for dst_id, etype in sn.outgoing_edges:
+                if etype is EdgeType.BRANCH:
+                    child = super_by_id.get(dst_id)
+                    if child is None:
+                        continue
+                    branch_backup(
+                        sn,
+                        branch_return=float(child.outcome_reward),
+                        discount=self.critic_gamma,
+                    )
+
         # Group by episode (group_idx, stamped in _result_to_nodes) and run GAE
         # per assembled DAG. A single global pass would chain independent
         # episodes -- GAE propagates backward, so a later episode's reward would

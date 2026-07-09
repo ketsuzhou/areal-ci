@@ -78,6 +78,11 @@ class SuperNode:
     # Critic value V_{t+1} (Phase 3, out of scope here). None until scored.
     value: float | None = None
 
+    # MCTS visit count for tree-search branching: how many branches have backed
+    # up a return through this segment (the fork/checkpoint). Updated by
+    # ``branch_backup``; 0 for non-fork segments.
+    visit_count: int = 0
+
     # Team environment snapshot at close time.
     sandbox_ids: list[str] = field(default_factory=list)
     issue_snapshot_id: str | None = None

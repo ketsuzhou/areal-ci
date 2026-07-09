@@ -16,6 +16,7 @@ import torch
 
 from customized_areal.tree_search.agents.dag_advantage import AssembledAdvantages
 from customized_areal.tree_search.agents.execution_dag import (
+    EdgeType,
     ExecutionDAG,
     SuperNode,
 )
@@ -215,3 +216,49 @@ async def test_arun_episode_fixed_m2_aggregates_parallel_rollouts(tmp_path):
     assert out is not None
     assert fake.calls == 2  # M=2 parallel rollouts
     assert out["input_ids"].shape[0] == 2  # 2 SuperNodes aggregated into the batch
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_branch_backup_propagates_to_parent(tmp_path):
+    # A BRANCH edge: parent (fork) -> child (branch). The child's terminal
+    # return (outcome_reward=1.0) propagates to the parent via branch_backup
+    # (gamma=1.0): parent.value = 1.0, parent.visit_count = 1.
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        checkpoint_dir=str(tmp_path),
+        advantage_mode=AdvantageMode.TREE,
+        loss_mode=LossMode.GRPO,
+        cache_mode=CacheMode.OFF,
+        critic_gamma=1.0,
+        critic_lambda=1.0,
+    )
+    parent = SuperNode(
+        node_id="parent",
+        agent_id="r1",
+        issue_id="i1",
+        task_id="",
+        outcome_reward=0.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("child", EdgeType.BRANCH),),
+    )
+    child = SuperNode(
+        node_id="child",
+        agent_id="r2",
+        issue_id="i2",
+        task_id="",
+        outcome_reward=1.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        incoming_edges=(("parent", EdgeType.BRANCH),),
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[parent, child], cached_nodes=[], engine=None, data={}, query_id="q1"
+    )
+
+    assert out is not None
+    # branch_backup propagated the child's return to the parent (fork) segment.
+    assert parent.visit_count == 1
+    assert parent.value == 1.0
+    # The child (branch terminal) is not a fork point: no backup to it.
+    assert child.visit_count == 0
