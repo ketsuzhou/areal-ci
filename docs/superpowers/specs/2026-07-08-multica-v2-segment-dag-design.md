@@ -161,6 +161,60 @@ New (design phase): close_segment reuses `_mark_active_trajectory_ready_locked` 
 (`needs_online_callback=False`); export / `/data/*` / `/data/clear` reused as-is; reward is
 AReaL-side (v2 reward-less for segments); per-segment export omits `group_id`.
 
+## U7 Pre-Build Design Decisions (from seam trace)
+
+Traced against live multica `server/` + areal `customized_areal/` before U7 implementation.
+The plan's U7 omitted session/agent_run identity semantics; these pin them down.
+
+- **D8 - `agent_run_id` = `task.ID` (attempt-level); no separate runs table.**
+  `EnqueueAgentRun` (handler/env_dispatch.go:662) returns `util.UUIDToString(task.ID)` as the
+  runID; `EnvRollout.AgentRunID = task.ID` (env_dispatch.go:717). AReal consumes `agent_run_id`
+  as `SuperNode.agent_id` and as the key to reverse-lookup `session_id` from
+  `session_to_agent_run` (supernode_assembler.py:159,163). The segment-table `task_id` column
+  is redundant traceability - v2 `SegmentSpec` dropped it and sets `SuperNode.task_id=""`
+  (supernode_assembler.py:161). Retries create a NEW `task.ID` (child via `parent_task_id`,
+  agent.sql:178), so `agent_run_id` is per-attempt, not per-logical-task.
+
+- **D9 - Fresh areal RL session per retry attempt (NOT inherited).** Today `CreateRetryTask`
+  copies `p.context` (which holds `areal_proxy` = areal `SessionID`+`ProxyKey`,
+  training.go:209), so the child inherits the parent's areal session and
+  `maybeOpenTrainingSession`'s `hasArealProxyContext` guard (training.go:200) no-ops - no fresh
+  `StartSession`, no `RecordSessionAgentRun`. A retry child's segments then carry the child's
+  `task.ID` as `agent_run_id`, which is absent from `session_to_agent_run` ->
+  `agent_run_to_session.get(child_id)` = None at assembly (supernode_assembler.py:163) ->
+  dangling. Decision: each attempt opens its OWN areal session. Three changes: (1)
+  `CreateRetryTask` strips `areal_proxy` from the child's context [keep the chat
+  `session_id`/`work_dir` resume CASE-WHEN - that is the multica chat session, separate]; (2)
+  `MaybeRetryFailedTask` calls `tryOpenTrainingSession(child, projectID, envID)` BEFORE
+  `NotifyTaskEnqueued` (mirror enqueueMentionTask: open at task.go:614, notify at :618); (3)
+  `RecordSessionAgentRun` (D10) then fires for the child. Close ordering supports it: `FailTask`
+  -> `RouteTerminalTrainingTask` closes S_A (`EndSession`, training.go:424/437/445) ->
+  `MaybeRetryFailedTask` creates B -> B opens fresh S_B. Only the 4 retryable reasons produce a
+  child (`runtime_offline`/`runtime_recovery`/`timeout`/`codex_semantic_inactivity`,
+  task.go:1725); non-retryable failures are terminal (session closed, no child). Scope: change
+  (1) touches pre-existing `CreateRetryTask` (migration 055), not U7's new files - U7 in-scope
+  dependency. The sweeper path (`runtime_sweeper.FailStaleTasks`, `queued_expired`) bypasses
+  `FailTask` (orphaned session, no child) - pre-existing gap (training.go:274-277); the
+  fresh-session design's coverage boundary is the `FailTask` path.
+
+- **D10 - `RecordSessionAgentRun` call site.** Inside `maybeOpenTrainingSession`
+  (training.go:158), immediately after `StartSession` succeeds (~line 226, after the persist at
+  :220, before the slog at :227). Records `{projectID, sessionID=creds.SessionID (line 204),
+  agentRunID=taskID}`. This is the single idempotent chokepoint: both the task.go `Enqueue*`
+  paths (via `tryOpenTrainingSession`, task.go:510/614/750/834) and the env_dispatch path (via
+  the adapter at handler/env_dispatch.go:713 -> `MaybeOpenTrainingSession`) funnel through it;
+  placed after the `hasArealProxyContext` guard it fires only on real first-open. It builds the
+  `session_to_agent_run: {session_id -> agent_run_id(=task.ID)}` map AReal's assembler consumes.
+  Conflation trap: `maybeOpenTrainingSession` receives both `taskID` (the run == agent_run_id)
+  and `agentID` (the agent). `agentRunID` = `taskID`, NOT `agentID` - AReal stores `agent_run_id`
+  in a field named `agent_id` (supernode_assembler.py:159), which makes this confusion easy.
+
+U7 open items (resolve during U7 implementation): `envID` source for a retry child's
+`StartSession` (enqueue paths pass `""`; env_dispatch passes real envID; retry child is not
+env-dispatched); exact `tensor_ref` shape `ExportTrajectory` returns (U6) - `CloseSegmentForEvent`
+must decode it from the raw traj JSON; `envSnapshot` source for `CloseSegmentForEvent`
+(refs-only, no sandbox pause/fork).
+
 ## Open Items (deferred to change 2)
 
 - `outcome_reward` semantics (judge supernode score as outcome vs separate verifier) - affects

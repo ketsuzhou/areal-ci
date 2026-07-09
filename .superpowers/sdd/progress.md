@@ -544,8 +544,69 @@ reuse doJSON/checkStatus. Package doc updated with both endpoints. Verified: 15/
 request/auth + non-2xx); go vet clean; gofmt clean. tasks.md path fixed: internal/arealrl/client.go ->
 server/internal/arealrl/client.go (line 26). AREAL-SIDE U1-U5 + MULTICA U6 DONE.
 
-Next: U7 (multica interaction_dag recording + hooks), U8 (AssembledDag+/dag endpoint), U9 (migration 155),
-U10 (config + E2E + grep, both repos).
+Next: U7 (multica interaction_dag recording + hooks), U8 (AssembledDag+/dag endpoint),
+U10 (config + E2E + grep, both repos). U9 (migration) DONE - commit 8dd8c8c8a, see below.
+
+Task 9 (U9 - migration): CLOSED (multica commit 8dd8c8c8a). Orchestrator-IMPLEMENTED + verified. DEVIATION
+from plan: plan lumped 3 table migrations all at "155" but multica convention is one-file-per-number AND
+env_snapshot has FK to segment (must migrate after). Used 155_interaction_dag_segment / 156_interaction_dag_edge
+/ 157_interaction_dag_env_snapshot (up+down each). segment: text PK + project/agent_run/issue/task/trajectory_id
+bigint/tensor_ref jsonb/closing_event/closing_event_target_segment/created_at, idx on project_id. edge: bigserial
+PK + project/src/dst/type CHECK(delegation/mention/completion), idx on project_id. env_snapshot: segment_id PK
+FK CASCADE + sandbox_ids jsonb/issue_snapshot_id/env_state jsonb default '{}'. Verified: `DATABASE_URL=...
+go run ./cmd/migrate up` applies 155-157 cleanly (tables created); `down` drops them cleanly (a PRE-EXISTING
+042_autopilot dependency error fires later in the full rollback - NOT ours, my 157/156/155 down applied before
+it); up re-applies. Note: `migrate down` rolls back ALL migrations (aggressive tool behavior), not just last.
+
+Task 7 (U7 - InteractionDAGService + hooks): NOT STARTED. Prior ledger entry "IN PROGRESS
+(implementer aa8f44e1, background)" was STALE - that background agent died in a prior session
+leaving zero work: both repos clean (no interaction_dag.go, no mods to task.go/training.go/
+env_dispatch.go/handler/env_dispatch.go, no U7 commit; multica HEAD 8dd8c8c8a = U9). Pre-build
+seam trace (this session, multica server/ + areal customized_areal/) produced 3 design decisions
+NOT in the plan, captured in design doc section "## U7 Pre-Build Design Decisions":
+- D8 agent_run_id = task.ID (attempt-level). EnqueueAgentRun (handler/env_dispatch.go:662)
+  returns task.ID as runID; no runs table. areal consumes as SuperNode.agent_id + session-lookup
+  key (supernode_assembler.py:159,163); segment-table task_id is redundant (v2 SegmentSpec
+  dropped it, task_id=""). Retries create NEW task.ID (child via parent_task_id, agent.sql:178).
+- D9 Fresh areal RL session per retry attempt (NOT inherited). Today CreateRetryTask copies
+  p.context (areal_proxy) -> child inherits parent session -> maybeOpenTrainingSession no-ops
+  (hasArealProxyContext guard, training.go:200) -> no fresh StartSession/RecordSessionAgentRun
+  -> retry children's segments dangle at assembly. Decision: each attempt opens own session.
+  Requires (1) CreateRetryTask strips areal_proxy from child context [keep chat session_id/
+  work_dir resume CASE-WHEN], (2) MaybeRetryFailedTask calls tryOpenTrainingSession(child)
+  BEFORE NotifyTaskEnqueued (mirror enqueueMentionTask :614->:618 ordering), (3) RecordSession-
+  AgentRun fires for child. Close ordering: FailTask->RouteTerminal closes S_A->MaybeRetry
+  creates B->B opens S_B. Only retryable reasons produce a child (runtime_offline/
+  runtime_recovery/timeout/codex_semantic_inactivity, task.go:1725). Scope: change (1) touches
+  pre-existing CreateRetryTask (mig 055) - U7 in-scope dependency. Sweeper path bypasses
+  FailTask (orphaned session, no child) - pre-existing gap, coverage boundary.
+- D10 RecordSessionAgentRun call site: inside maybeOpenTrainingSession (training.go:158) after
+  StartSession succeeds (~line 226, post-persist :220). Records {projectID, sessionID=
+  creds.SessionID (:204), agentRunID=taskID}. Single idempotent chokepoint both Enqueue*
+  (tryOpenTrainingSession 510/614/750/834) and env_dispatch (adapter handler/env_dispatch.go:713
+  -> MaybeOpenTrainingSession) share. Trap: agentRunID=taskID (run) NOT agentID (agent); areal
+  stores it in field named agent_id (supernode_assembler.py:159).
+U7 open items (resolve during impl): envID source for retry child's StartSession; exact
+tensor_ref shape from ExportTrajectory (U6); envSnapshot source for CloseSegmentForEvent.
+
+Task 7.1 (U7.1 - InteractionDAGService + sqlc + tests): CLOSED (multica commits 3f9587a3d +
+157284045). Implementer subagent built the recorder; task-reviewer (sonnet) marked APPROVED
+(no Critical). Orchestrator independently re-verified (16/16 tests incl. hermetic integration
+on real Postgres; gofmt+vet clean). Deliverables: InteractionDAGService (RecordSessionAgentRun
+4-param, CloseSegmentForEvent, AddEdge) behind INTERACTION_DAG_ENABLED; migration 158
+interaction_dag_session_run (fills U9's session->agent_run gap); hand-written sqlc for all 4
+interaction_dag tables (sqlc generate broken). Review fixes (157284045): Important -
+segment+env_snapshot now atomic via a single data-modifying CTE
+(InsertInteractionDAGSegmentWithSnapshot; $1 reused as snapshot FK; paired ops stay together,
+no orphan-on-snapshot-failure); Minor - nil/empty envSnapshot -> env_state='{}' not 'null';
+Minor - var _ InteractionDAGStore=(*db.Queries)(nil) compile-time assertion. Deferred #3
+(tensor_ref null masking) + #5 (env_state duplication) - pending U6/U8 shape pinning / doc'd
+intent. Public service API stable for U7.2. D8/D9/D10 above remain; D9 = U7.3.
+Next: U7.2 - wire RecordSessionAgentRun into maybeOpenTrainingSession (D10, training.go:~226
+post-persist) + CloseSegmentForEvent/AddEdge hooks at delegation/mention/completion/squad seams
+in task.go (trained rollouts only; INTERACTION_DAG_ENABLED composing with s.Training gate) +
+integration tests. Then U7.3 (D9 fresh session per retry: CreateRetryTask strips areal_proxy,
+MaybeRetryFailedTask opens fresh session before NotifyTaskEnqueued).
 
 # SDD progress - areal-v2-integration-and-tree-search-branching (v2 roadmap change 3)
 
