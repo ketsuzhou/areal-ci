@@ -2,11 +2,6 @@
 
 Runs the verifier over a completed run and writes the resulting reward to the
 RL session (replacing the constant ``set_reward(1.0)``).
-
-Branching is driven entirely through the env-dispatch primitive
-(``EnvDispatchBranchDriver``); the former cloud-branch transport
-(``BranchMaterializer`` / ``MulticaIssueForker`` / ``agent_start_branch``) has
-been removed.
 """
 
 from __future__ import annotations

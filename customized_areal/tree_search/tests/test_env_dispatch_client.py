@@ -15,17 +15,6 @@ def _transport(handler):
     return httpx.MockTransport(handler)
 
 
-def test_create_base_env_returns_env_id():
-    def handler(req):
-        assert req.method == "POST"
-        assert req.url.path == "/api/v1/env"
-        return httpx.Response(201, json={"env_id": "env-1", "sandbox_id": "sbx-1"})
-
-    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    env_id = asyncio.run(c.create_base_env(image_ref="img:tag"))
-    assert env_id == "env-1"
-
-
 def test_create_env_dispatch_scratch_swe_lego():
     def handler(req):
         body = json.loads(req.content)
@@ -33,25 +22,7 @@ def test_create_env_dispatch_scratch_swe_lego():
         assert body["domain"] == "swe_lego"
         assert body["dispatch_type"] == "issue"
         assert body["group_size"] == 2
-        return httpx.Response(
-            201,
-            json={
-                "rollouts": [
-                    {
-                        "env_id": "e1",
-                        "project_id": "p1",
-                        "issue_id": "i1",
-                        "agent_run_id": "r1",
-                    },
-                    {
-                        "env_id": "e2",
-                        "project_id": "p2",
-                        "issue_id": "i2",
-                        "agent_run_id": "r2",
-                    },
-                ]
-            },
-        )
+        return httpx.Response(201, json={"project_id": "p1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     issue = SweLegoIssue(
@@ -64,7 +35,7 @@ def test_create_env_dispatch_scratch_swe_lego():
         fail_to_pass=["f"],
         pass_to_pass=["p"],
     )
-    setup = asyncio.run(
+    project_id = asyncio.run(
         c.create_env_dispatch(
             mode="scratch",
             env_id="base",
@@ -75,9 +46,7 @@ def test_create_env_dispatch_scratch_swe_lego():
             issue=issue,
         )
     )
-    assert len(setup.rollouts) == 2
-    assert setup.rollouts[0].agent_run_id == "r1"
-    assert setup.rollouts[1].env_id == "e2"
+    assert project_id == "p1"
 
 
 def test_cleanup_env_dispatch_hits_renamed_url():
@@ -92,32 +61,12 @@ def test_cleanup_env_dispatch_hits_renamed_url():
     assert seen["path"] == "/api/v1/env-dispatch/p1"
 
 
-def test_delete_env_idempotent_on_404():
-    def handler(req):
-        return httpx.Response(404)
-
-    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    asyncio.run(c.delete_env(env_id="env-1"))  # no raise
-
-
 def test_create_env_dispatch_squad_omits_agent_and_env():
     seen = {}
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(
-            201,
-            json={
-                "rollouts": [
-                    {
-                        "env_id": "e1",
-                        "project_id": "p1",
-                        "chat_session_id": "c1",
-                        "agent_run_id": "r1",
-                    },
-                ]
-            },
-        )
+        return httpx.Response(201, json={"project_id": "p1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -138,30 +87,20 @@ def test_create_env_dispatch_squad_omits_agent_and_env():
     assert seen["body"]["mode"] == "scratch"
 
 
-def test_create_env_dispatch_resume_mode_passthrough():
+def test_create_env_dispatch_resume_passes_checkpoint_as_env_id():
     seen = {}
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(
-            201,
-            json={
-                "rollouts": [
-                    {
-                        "env_id": "e1",
-                        "project_id": "p1",
-                        "issue_id": "i1",
-                        "agent_run_id": "r1",
-                    },
-                ]
-            },
-        )
+        return httpx.Response(201, json={"project_id": "p1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    # Resume-from-checkpoint has no separate endpoint: the checkpoint id is carried
+    # by env_id on a mode="resume" dispatch.
     asyncio.run(
         c.create_env_dispatch(
             mode="resume",
-            env_id="src",
+            env_id="cp-1",
             dispatch_type="issue",
             agent_id="ag",
             group_size=1,
@@ -169,6 +108,7 @@ def test_create_env_dispatch_resume_mode_passthrough():
         )
     )
     assert seen["body"]["mode"] == "resume"
+    assert seen["body"]["env_id"] == "cp-1"
 
 
 def test_create_env_dispatch_serializes_per_agent_env_specs():
@@ -176,7 +116,7 @@ def test_create_env_dispatch_serializes_per_agent_env_specs():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"rollouts": []})
+        return httpx.Response(201, json={"project_id": "p1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -197,7 +137,7 @@ def test_create_env_dispatch_omits_per_agent_env_when_empty():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"rollouts": []})
+        return httpx.Response(201, json={"project_id": "p1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -271,28 +211,6 @@ def test_list_checkpoints_returns_items():
     assert items[1]["save_status"] == "timed_out"
 
 
-def test_resume_from_checkpoint_posts_resume_route():
-    seen = {}
-
-    def handler(req):
-        seen["path"] = req.url.path
-        seen["method"] = req.method
-        return httpx.Response(
-            200,
-            json={
-                "checkpoint_id": "cp-1",
-                "project_id": "p1",
-                "rollout_handle": "resume:cp-1",
-            },
-        )
-
-    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    result = asyncio.run(c.resume_from_checkpoint(checkpoint_id="cp-1"))
-    assert seen["method"] == "POST"
-    assert seen["path"] == "/api/v1/env-checkpoints/cp-1/resume"
-    assert result["rollout_handle"] == "resume:cp-1"
-
-
 def test_checkpoint_conflict_raises_typed_error():
     def handler(req):
         return httpx.Response(409, json={"error": "checkpoint save timed out"})
@@ -309,16 +227,6 @@ def test_checkpoint_conflict_raises_typed_error():
             )
         )
     assert exc_info.value.status_code == 409
-
-
-def test_resume_cross_workspace_raises_typed_404():
-    def handler(req):
-        return httpx.Response(404, json={"error": "checkpoint not found"})
-
-    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    with pytest.raises(MulticaCheckpointError) as exc_info:
-        asyncio.run(c.resume_from_checkpoint(checkpoint_id="cp-missing"))
-    assert exc_info.value.status_code == 404
 
 
 def test_maybe_create_entropy_checkpoint_creates_when_above_threshold():

@@ -109,7 +109,7 @@ class SuperNodeAssembler:
         self,
         dag: AssembledDag,
         resolver: TensorResolver,
-    ) -> ExecutionDAG:
+    ) -> ExecutionDAG | None:
         """Build an ExecutionDAG from an AssembledDag by resolving tensor refs.
 
         This is the v2 segment-DAG consumer path. Unlike :meth:`assemble`
@@ -137,11 +137,16 @@ class SuperNodeAssembler:
             resolver: Resolves each segment's ``tensor_ref`` to tensors.
 
         Returns:
-            The assembled ExecutionDAG (one SuperNode per segment).
+            The assembled ExecutionDAG (one SuperNode per segment), or None when
+            the dag has no segments (empty trajectory).
 
         Raises:
             DAGError: On a cycle, a dangling edge, or an unknown EdgeType.
         """
+        # Empty trajectory (no segments recorded) -> None so callers skip the
+        # episode rather than train on an empty graph.
+        if not dag.segments:
+            return None
         agent_run_to_session: dict[str, str] = {
             agent_run_id: session_id
             for session_id, agent_run_id in dag.session_to_agent_run.items()

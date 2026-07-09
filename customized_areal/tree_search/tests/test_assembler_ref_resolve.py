@@ -85,6 +85,15 @@ def test_assemble_from_refs_builds_one_supernode_per_segment():
     assert edag.get("seg-2").completion_index == 1
 
 
+def test_assemble_from_refs_returns_none_for_empty_trajectory():
+    # A dag with no segments (no trajectory recorded) -> None so callers skip
+    # the episode rather than train on an empty graph.
+    dag = AssembledDag(segments=[], edges=[], session_to_agent_run={})
+    resolver = FakeResolver()
+    assert SuperNodeAssembler().assemble_from_refs(dag, resolver) is None
+    assert resolver.calls == []  # no segments resolved
+
+
 def test_assemble_from_refs_rejects_cycle():
     dag = AssembledDag(
         segments=[

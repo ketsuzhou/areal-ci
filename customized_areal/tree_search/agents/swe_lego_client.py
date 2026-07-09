@@ -1,25 +1,25 @@
 """HTTP client for the multica unified env-dispatch API.
 
-Wraps ``POST /api/v1/env``, ``DELETE /api/v1/env/{envID}``,
-``POST /api/v1/env-dispatch``, and ``DELETE /api/v1/env-dispatch/{projectID}``
-(spec §6). Uses stdlib :mod:`logging` so the module stays importable without torch.
+Wraps ``POST /api/v1/env-dispatch`` (unified dispatch - fresh env, branch, or
+resume-from-checkpoint), ``DELETE /api/v1/env-dispatch/{projectID}`` (cascade
+cleanup), and the env-checkpoint channel (``POST /api/v1/env-checkpoints``,
+``GET /api/v1/projects/{projectID}/env-checkpoints``) per spec §6. Env boot/teardown
+and checkpoint-resume are not separate endpoints: a fresh env is created by the
+dispatch itself, its teardown is the cascade cleanup, and resume-from-checkpoint is
+expressed as ``create_env_dispatch(mode="resume", env_id=<checkpoint_id>)``. Uses
+stdlib :mod:`logging` so the module stays importable without torch.
 """
 
 from __future__ import annotations
 
 import logging
-
-from customized_areal.tree_search.env_checkpoint import (
-    should_create_entropy_checkpoint,
-)
 import os
 
 import httpx
 
-from customized_areal.tree_search.agents.reward.swe_lego_types import (
-    SweLegoIssue,
-    SweLegoRollout,
-    SweLegoSetup,
+from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue
+from customized_areal.tree_search.env_checkpoint import (
+    should_create_entropy_checkpoint,
 )
 
 logger = logging.getLogger("MulticaEnvDispatchClient")
@@ -71,27 +71,6 @@ class MulticaEnvDispatchClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def create_base_env(self, *, image_ref: str) -> str:
-        """POST /api/v1/env — boot a sandbox from image_ref, return env_id."""
-        resp = await self._client.post(
-            "/api/v1/env", json={"image_ref": image_ref}, headers=self._headers()
-        )
-        if resp.status_code != 201:
-            raise RuntimeError(
-                f"create_base_env failed: status={resp.status_code} body={resp.text[:200]}"
-            )
-        return resp.json()["env_id"]
-
-    async def delete_env(self, *, env_id: str) -> None:
-        """DELETE /api/v1/env/{envID} — idempotent on 404."""
-        resp = await self._client.delete(
-            f"/api/v1/env/{env_id}", headers=self._headers()
-        )
-        if resp.status_code not in (200, 204, 404):
-            raise RuntimeError(
-                f"delete_env failed: status={resp.status_code} body={resp.text[:200]}"
-            )
-
     async def create_env_dispatch(
         self,
         *,
@@ -105,8 +84,14 @@ class MulticaEnvDispatchClient:
         issue: SweLegoIssue | None = None,
         message: str | None = None,
         per_agent_env: dict[str, dict] | None = None,
-    ) -> SweLegoSetup:
-        """POST /api/v1/env-dispatch — unified dispatch (spec §6.3)."""
+    ) -> str:
+        """POST /api/v1/env-dispatch — unified dispatch (spec §6.3).
+
+        ``mode`` selects the dispatch kind: ``scratch`` (fresh env, booted by the
+        dispatch itself), ``branch`` (fork ``env_id`` = source env), or ``resume``
+        (resume from a checkpoint, with ``env_id`` = the checkpoint id). There is
+        no separate env-boot or checkpoint-resume endpoint.
+        """
         payload: dict = {
             "mode": mode,
             "dispatch_type": dispatch_type,
@@ -142,18 +127,7 @@ class MulticaEnvDispatchClient:
             raise RuntimeError(
                 f"create_env_dispatch failed: status={resp.status_code} body={resp.text[:200]}"
             )
-        body = resp.json()
-        rollouts = [
-            SweLegoRollout(
-                env_id=r["env_id"],
-                project_id=r["project_id"],
-                issue_id=r.get("issue_id", ""),
-                chat_session_id=r.get("chat_session_id", ""),
-                agent_run_id=r.get("agent_run_id", ""),
-            )
-            for r in body["rollouts"]
-        ]
-        return SweLegoSetup(rollouts=rollouts)
+        return resp.json()["project_id"]
 
     async def cleanup_env_dispatch(self, *, project_id: str) -> None:
         """DELETE /api/v1/env-dispatch/{projectID} — cascades to issues/chat/tasks."""
@@ -219,20 +193,6 @@ class MulticaEnvDispatchClient:
             raise MulticaCheckpointError(resp.status_code, resp.text[:200])
         raise RuntimeError(
             f"list_checkpoints failed: status={resp.status_code} body={resp.text[:200]}"
-        )
-
-    async def resume_from_checkpoint(self, *, checkpoint_id: str) -> dict:
-        """POST /api/v1/env-checkpoints/{checkpoint_id}/resume."""
-        resp = await self._client.post(
-            f"/api/v1/env-checkpoints/{checkpoint_id}/resume",
-            headers=self._headers(),
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        if resp.status_code in (403, 404, 409):
-            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
-        raise RuntimeError(
-            f"resume_from_checkpoint failed: status={resp.status_code} body={resp.text[:200]}"
         )
 
     async def maybe_create_entropy_checkpoint(

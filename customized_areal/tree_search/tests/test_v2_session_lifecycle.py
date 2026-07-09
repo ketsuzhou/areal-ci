@@ -23,10 +23,6 @@ from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
     MultiAgentEnvDispatchWorkflow,
 )
 from customized_areal.tree_search.agents.multica_dag_client import AssembledDag
-from customized_areal.tree_search.agents.reward.swe_lego_types import (
-    SweLegoRollout,
-    SweLegoSetup,
-)
 from customized_areal.tree_search.agents.segment_dag_trainer import (
     DataProxySessionRemover,
 )
@@ -59,9 +55,7 @@ class _RecordingDispatch:
 
     async def create_env_dispatch(self, **kw):
         self.calls.append(kw)
-        return SweLegoSetup(
-            rollouts=[SweLegoRollout(agent_run_id="r1", env_id="e1", project_id="p1")]
-        )
+        return "p1"
 
 
 class _FakeDagClient:
