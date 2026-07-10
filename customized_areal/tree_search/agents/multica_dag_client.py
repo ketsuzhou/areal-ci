@@ -81,28 +81,57 @@ class AssembledDag:
 
 
 class MulticaDagClient:
-    """Synchronous client that polls Multica for an assembled DAG."""
+    """Synchronous client that polls Multica for an assembled DAG.
+
+    Polling is config-driven with sane defaults: ``poll_interval`` (initial
+    seconds between polls, default 2.0), ``poll_timeout`` (overall deadline,
+    default 300.0), ``poll_backoff`` (interval growth factor, default 1.5), and
+    ``poll_max_interval`` (backoff cap, default 10.0). ``http_timeout`` (default
+    10.0) bounds each HTTP request. ``get_dag`` accepts per-call ``timeout`` /
+    ``interval`` overrides that fall back to the configured defaults.
+    """
 
     def __init__(
         self,
         base_url: str,
         api_key: str,
         *,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 300.0,
+        poll_backoff: float = 1.5,
+        poll_max_interval: float = 10.0,
+        http_timeout: float = 10.0,
         _transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._api_key = api_key
         self._transport = _transport
+        self._poll_interval = poll_interval
+        self._poll_timeout = poll_timeout
+        self._poll_backoff = poll_backoff
+        self._poll_max_interval = poll_max_interval
+        self._http_timeout = http_timeout
 
     def get_dag(
-        self, project_id: str, *, timeout: float, interval: float
+        self,
+        project_id: str,
+        *,
+        timeout: float | None = None,
+        interval: float | None = None,
     ) -> AssembledDag:
         url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        deadline = time.monotonic() + timeout
-        client_kwargs: dict[str, Any] = {"headers": headers, "timeout": 10.0}
+        # Per-call overrides fall back to the client's configured defaults.
+        poll_timeout = timeout if timeout is not None else self._poll_timeout
+        poll_interval = interval if interval is not None else self._poll_interval
+        deadline = time.monotonic() + poll_timeout
+        client_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "timeout": self._http_timeout,
+        }
         if self._transport is not None:
             client_kwargs["transport"] = self._transport
+        current_interval = poll_interval
         with httpx.Client(**client_kwargs) as client:
             while True:
                 resp = client.get(url)
@@ -111,9 +140,17 @@ class MulticaDagClient:
                 if resp.status_code == 202:
                     if time.monotonic() >= deadline:
                         raise DagTimeout(
-                            f"dag for {project_id} not ready in {timeout}s"
+                            f"dag for {project_id} not ready in {poll_timeout}s"
                         )
-                    time.sleep(interval)
+                    time.sleep(current_interval)
+                    # Backoff: grow the poll interval up to the configured cap so
+                    # a slow-to-assemble DAG does not hammer the endpoint. The
+                    # factor defaults to 1.5 (>1.0 grows; 1.0 is a steady poll).
+                    if self._poll_backoff > 1.0:
+                        current_interval = min(
+                            current_interval * self._poll_backoff,
+                            self._poll_max_interval,
+                        )
                     continue
                 if resp.status_code == 404:
                     raise DagNotFound(project_id)

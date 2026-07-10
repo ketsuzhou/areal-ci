@@ -46,7 +46,9 @@ def test_get_dag_polls_until_200():
             return httpx.Response(202, json={"status": "in_progress"})
         return httpx.Response(200, json=_dag_payload())
 
-    client = MulticaDagClient("http://multica", "key", _transport=httpx.MockTransport(handler))
+    client = MulticaDagClient(
+        "http://multica", "key", _transport=httpx.MockTransport(handler)
+    )
     dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
     assert dag.segments[0].segment_id == "seg-1"
@@ -60,7 +62,9 @@ def test_get_dag_polls_until_200():
 
 def test_get_dag_404_raises():
     client = MulticaDagClient(
-        "http://multica", "key", _transport=httpx.MockTransport(lambda r: httpx.Response(404))
+        "http://multica",
+        "key",
+        _transport=httpx.MockTransport(lambda r: httpx.Response(404)),
     )
     with pytest.raises(DagNotFound):
         client.get_dag("proj-x", timeout=1.0, interval=0.0)
@@ -68,7 +72,9 @@ def test_get_dag_404_raises():
 
 def test_get_dag_403_raises():
     client = MulticaDagClient(
-        "http://multica", "key", _transport=httpx.MockTransport(lambda r: httpx.Response(403))
+        "http://multica",
+        "key",
+        _transport=httpx.MockTransport(lambda r: httpx.Response(403)),
     )
     with pytest.raises(DagForbidden):
         client.get_dag("proj-x", timeout=1.0, interval=0.0)
@@ -93,3 +99,57 @@ def test_get_dag_other_status_raises_dag_error():
     with pytest.raises(DagError) as exc_info:
         client.get_dag("proj-1", timeout=1.0, interval=0.0)
     assert "500" in str(exc_info.value)
+
+
+def test_get_dag_backoff_grows_interval(monkeypatch):
+    """The poll interval grows by the backoff factor up to the configured cap."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "customized_areal.tree_search.agents.multica_dag_client.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 4:
+            return httpx.Response(202, json={"status": "in_progress"})
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient(
+        "http://multica",
+        "key",
+        poll_interval=1.0,
+        poll_backoff=2.0,
+        poll_max_interval=5.0,
+        poll_timeout=100.0,
+        _transport=httpx.MockTransport(handler),
+    )
+    # No per-call timeout/interval: client defaults drive polling.
+    client.get_dag("proj-1")
+    # 3 retries -> 3 sleeps. Interval grows 1.0 -> 2.0 -> 4.0 (capped at 5.0).
+    assert len(sleeps) == 3
+    assert sleeps[0] == pytest.approx(1.0)
+    assert sleeps[1] == pytest.approx(2.0)
+    assert sleeps[2] == pytest.approx(4.0)
+    assert calls["n"] == 4
+
+
+def test_get_dag_uses_client_defaults_without_overrides(monkeypatch):
+    """get_dag without per-call kwargs uses the client's configured timeout."""
+    monkeypatch.setattr(
+        "customized_areal.tree_search.agents.multica_dag_client.time.sleep",
+        lambda s: None,
+    )
+
+    def handler(request):
+        return httpx.Response(202, json={"status": "in_progress"})
+
+    client = MulticaDagClient(
+        "http://multica",
+        "key",
+        poll_timeout=0.0,  # immediate timeout
+        _transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(DagTimeout):
+        client.get_dag("proj-1")  # no timeout/interval kwargs
