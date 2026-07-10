@@ -3,7 +3,7 @@
 - Change: multica-v2-segment-dag-recording-assembly
 - Phase: design
 - Mode: compact
-- Context hash: 33ed0b5706d26b36ae279f9d0584d986da3644fdbf2c9ea19187665122526e59
+- Context hash: a134b264c6248801544141f298b6e9cfcd3b3be4a492c7884c4373096906c447
 
 Generated-by: comet-handoff.sh
 
@@ -90,8 +90,8 @@ multica side (U7.2 -> U7.3 -> U8 -> U10) so a trained rollout round-trips end to
 ## openspec/changes/multica-v2-segment-dag-recording-assembly/design.md
 
 - Source: openspec/changes/multica-v2-segment-dag-recording-assembly/design.md
-- Lines: 1-153
-- SHA256: 352bcc473a7fec252ab47f435991e6f01d5fcf9bfa76a0b0fc9d900497b1ae2a
+- Lines: 1-163
+- SHA256: c7fd96d7c94015d09605ad647c3ab9709bd4b9824927ad58849fa5c728fae49b
 
 [TRUNCATED]
 
@@ -183,8 +183,8 @@ Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/design.m
 ## openspec/changes/multica-v2-segment-dag-recording-assembly/tasks.md
 
 - Source: openspec/changes/multica-v2-segment-dag-recording-assembly/tasks.md
-- Lines: 1-91
-- SHA256: 49f295543378b45cc91a014649d21e7302e05b4c9a85081729e69b5566ae37ec
+- Lines: 1-104
+- SHA256: 81419e0d1c1e42e34ea9088f53add14e5c577a5a9c93827c45e7707ef46ab185
 
 [TRUNCATED]
 
@@ -195,43 +195,45 @@ Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/design.m
 `server/internal/service/interaction_dag.go`, integration tests under
 `server/internal/service/`.
 
-- [ ] 1.1 Failing tests: `RecordSessionAgentRun` fires inside `maybeOpenTrainingSession`
+- [x] 1.1 Failing tests: `RecordSessionAgentRun` fires inside `maybeOpenTrainingSession`
   immediately after `StartSession` succeeds (D10), recording `{projectID, sessionID,
   agentRunID=taskID}`; idempotent across repeated open attempts.
-- [ ] 1.2 Failing tests: at a delegation event the parent run calls `close_segment` + export,
+- [x] 1.2 Failing tests: at a delegation event the parent run calls `close_segment` + export,
   records a segment with `trajectory_id` + `tensor_ref` + `closing_event`, opens a child
   segment, and records a `delegation` edge.
-- [ ] 1.3 Failing tests: a mention records a `mention` edge without closing a segment.
-- [ ] 1.4 Failing tests: a completion calls `close_segment` + export on the child run and
+- [x] 1.3 Failing tests: a mention records a `mention` edge without closing a segment.
+- [x] 1.4 Failing tests: a completion calls `close_segment` + export on the child run and
   records a `completion` edge.
-- [ ] 1.5 Failing tests: a squad briefing closes a segment via `close_segment` + export.
-- [ ] 1.6 Failing tests: a leaf run (no communication event) yields exactly one leaf segment
+- [x] 1.5 Failing tests: a squad-context handoff closes the producer/parent segment via
+  `close_segment` + export with `closing_event = "squad_briefing"` while the structural edge
+  remains `delegation`.
+- [x] 1.6 Failing tests: a leaf run (no communication event) yields exactly one leaf segment
   with `closing_event = None`.
-- [ ] 1.7 Failing tests: concurrent fan-out delegation produces multiple `delegation` edges and
+- [x] 1.7 Failing tests: concurrent fan-out delegation produces multiple `delegation` edges and
   a deterministic, acyclic segment set.
-- [ ] 1.8 Failing tests: recording is gated to trained rollouts (`INTERACTION_DAG_ENABLED` AND
+- [x] 1.8 Failing tests: recording is gated to trained rollouts (`INTERACTION_DAG_ENABLED` AND
   `s.Training != nil`); a non-trained rollout records nothing and makes no `close_segment`/
   export calls.
-- [ ] 1.9 Failing tests: a recording error is logged and the run continues (best-effort).
-- [ ] 1.10 Implement the D10 chokepoint + the delegation/mention/completion/squad seams behind
+- [x] 1.9 Failing tests: a recording error is logged and the run continues (best-effort).
+- [x] 1.10 Implement the D10 chokepoint + the delegation/mention/completion/squad seams behind
   the flag.
-- [ ] 1.11 Commit: `feat(v2-segment-dag-recording): wire recorder into trained-rollout path (U7.2)`.
+- [x] 1.11 Commit: `feat(v2-segment-dag-recording): wire recorder into trained-rollout path (U7.2)`.
 
 ## 2. U7.3 - Fresh areal RL session per retry (D9) (TDD)
 
 **Files:** `server/internal/service/task.go` (`CreateRetryTask`, `MaybeRetryFailedTask`),
 `server/internal/service/training.go`, tests.
 
-- [ ] 2.1 Failing tests: `CreateRetryTask` strips `areal_proxy` from the child context while
+- [x] 2.1 Failing tests: `CreateRetryTask` strips `areal_proxy` from the child context while
   keeping the chat `session_id`/`work_dir` resume CASE-WHEN.
-- [ ] 2.2 Failing tests: `MaybeRetryFailedTask` calls `tryOpenTrainingSession(child,
+- [x] 2.2 Failing tests: `MaybeRetryFailedTask` calls `tryOpenTrainingSession(child,
   projectID, envID)` BEFORE `NotifyTaskEnqueued` (mirror `enqueueMentionTask` ordering).
-- [ ] 2.3 Failing tests: the child opens its own session (`StartSession` fires) and the child's
+- [x] 2.3 Failing tests: the child opens its own session (`StartSession` fires) and the child's
   `agent_run_id` (= child `task.ID`) is recorded via D10.
-- [ ] 2.4 Failing tests: the parent session is closed (`EndSession`) before the child opens.
-- [ ] 2.5 Failing tests: a non-retryable failure is terminal (session closed, no child).
-- [ ] 2.6 Implement the retry-session lifecycle (D9).
-- [ ] 2.7 Commit: `feat(v2-segment-dag-recording): fresh areal RL session per retry (U7.3, D9)`.
+- [x] 2.4 Failing tests: the parent session is closed (`EndSession`) before the child opens.
+- [x] 2.5 Failing tests: a non-retryable failure is terminal (session closed, no child).
+- [x] 2.6 Implement the retry-session lifecycle (D9).
+- [x] 2.7 Commit: `feat(v2-segment-dag-recording): fresh areal RL session per retry (U7.3, D9)`.
 
 ## 3. U8 - AssembledDag assembly + /dag endpoint (TDD)
 
@@ -239,36 +241,34 @@ Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/design.m
 `server/internal/handler/env_dispatch.go`, `server/internal/handler/env_dispatch_test.go`,
 hand-written sqlc for `AssembleAssembledDag`.
 
-- [ ] 3.1 Failing tests: `AssembleAssembledDag(project_id)` returns `segments`, `edges`,
+- [x] 3.1 Failing tests: `AssembleAssembledDag(project_id)` returns `segments`, `edges`,
   `session_to_agent_run` with each segment carrying `trajectory_id` + `tensor_ref` +
   `closing_event` + `env_snapshot` (no scores, no turn indices, no text).
-- [ ] 3.2 Failing tests: edges carry `src` / `dst` / `type` = `delegation` / `mention` /
+- [x] 3.2 Failing tests: edges carry `src` / `dst` / `type` = `delegation` / `mention` /
   `completion`; the assembled DAG is acyclic.
-- [ ] 3.3 Failing tests: `GET /api/v1/env-dispatch/{projectID}/dag` returns `202` in progress,
+- [x] 3.3 Failing tests: `GET /api/v1/env-dispatch/{projectID}/dag` returns `202` in progress,
   `200` + `AssembledDag` done, `404` unknown project, `403` cross-workspace.
-- [ ] 3.4 Failing tests: an incomplete/failed rollout yields a `failed` status, not a partial
+- [x] 3.4 Failing tests: an incomplete/failed rollout yields a `failed` status, not a partial
   `AssembledDag`; a densely-covered failed run returns `200` + `AssembledDag`.
-- [ ] 3.5 Implement the read-only assembly from recorded rows + the polling handler.
-- [ ] 3.6 Commit: `feat(v2-segment-dag-recording): assemble AssembledDag + /dag endpoint (U8)`.
+- [x] 3.5 Implement the read-only assembly from recorded rows + the polling handler.
+- [x] 3.6 Commit: `feat(v2-segment-dag-recording): assemble AssembledDag + /dag endpoint (U8)`.
 
 ## 4. U10 - Config + E2E + grep sweep (both repos)
 
-- [ ] 4.1 Add `INTERACTION_DAG_ENABLED` default (on for trained rollouts) + areal polling
+- [x] 4.1 Add `INTERACTION_DAG_ENABLED` default (on for trained rollouts) + areal polling
   config (interval, timeout, backoff) for `MulticaDagClient`.
-- [ ] 4.2 Scoped multica Go build/test/vet for touched packages; `gofmt -l` clean.
-- [ ] 4.3 AReaL: `.venv-test/bin/python -m pytest areal/v2/inference_service/tests/` and
+- [x] 4.2 Scoped multica Go build/test/vet for touched packages; `gofmt -l` clean.
+- [x] 4.3 AReaL: `.venv-test/bin/python -m pytest areal/v2/inference_service/tests/` and
   `customized_areal/tree_search/tests/ -k 'segment_dag or supernode or env_dispatch'`.
-- [ ] 4.4 Cross-repo E2E if feasible: 3-agent `mode=scratch` rollout -> `close_segment` +
+- [x] 4.4 Cross-repo E2E if feasible (live 3-agent services/GPU unavailable; verified through targeted cross-repo contract suites): 3-agent `mode=scratch` rollout -> `close_segment` +
   export per event -> poll `GET .../dag` -> AReaL resolves refs and reconstructs the
   `ExecutionDAG` losslessly -> minimal training step -> cleanup.
-- [ ] 4.5 Verify env snapshots are refs-only (no sandbox pause/fork) - F-independence.
-- [ ] 4.6 grep sweep: `close_segment`, `AssembledDag`, `tensor_ref`, `v2-segment-dag-recording`,
+- [x] 4.5 Verify env snapshots are refs-only (no sandbox pause/fork) - F-independence.
+- [x] 4.6 grep sweep: `close_segment`, `AssembledDag`, `tensor_ref`, `v2-segment-dag-recording`,
   `env-dispatch/{projectID}/dag` resolve to intended code only; no `start_turn_idx` /
   `end_turn_idx` remain in the new tables/code.
-- [ ] 4.7 Final whole-branch review -> READY TO MERGE / NEEDS_CHANGES.
-- [ ] 4.8 Commit: `docs(v2-segment-dag-recording): U10 full regression + E2E + grep sweep`.
-
-## Test runners / constraints
+- [x] 4.7 Final whole-branch review -> READY TO MERGE / NEEDS_CHANGES.
+- [x] 4.8 Commit: `docs(v2-segment-dag-recording): U10 full regression + E2E + grep sweep`.
 ```
 
 Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/tasks.md
@@ -276,8 +276,8 @@ Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/tasks.md
 ## openspec/changes/multica-v2-segment-dag-recording-assembly/specs/v2-segment-dag-recording/spec.md
 
 - Source: openspec/changes/multica-v2-segment-dag-recording-assembly/specs/v2-segment-dag-recording/spec.md
-- Lines: 1-138
-- SHA256: dbaa81e2f73a74279a9d4ae602611661da062ffd7ca4af922fcd27767b439f42
+- Lines: 1-143
+- SHA256: 9fafa8b3d0d1ebee2649d4837cbc5d23729c89c7200e8b7ea7fdb96ec725513e
 
 [TRUNCATED]
 
@@ -291,15 +291,20 @@ Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/tasks.md
 Multica SHALL record interaction-DAG segments only for trained rollouts (a `TrainAgentID` is
 set on the env dispatch) and only while `INTERACTION_DAG_ENABLED` is on. For each communication
 event (delegation, mention, completion, squad briefing) on a trained rollout, Multica SHALL
-call `close_segment` + per-segment export on the relevant run and record a segment carrying
-`trajectory_id`, `tensor_ref`, `closing_event`, and a ref-only `env_snapshot`. A leaf run with
+call `close_segment` + per-segment export on the producer/parent run whose session has emitted
+the handoff/completion, then record a segment carrying `trajectory_id`, `tensor_ref`,
+`closing_event`, and a ref-only `env_snapshot`. For squad-context handoff, the edge remains a
+`delegation` edge while the producer segment records `closing_event = "squad_briefing"`; Multica
+MUST NOT close the receiver/child session before it has emitted its own model turn. A leaf run with
 no communication event SHALL yield exactly one leaf segment with `closing_event = None`.
 Non-trained rollouts SHALL record nothing and SHALL incur no recording overhead.
 
 #### Scenario: Trained rollout records a segment per communication event
 - **WHEN** a trained rollout fires a delegation, mention, completion, or squad-briefing event
-- **THEN** Multica calls `close_segment` + export and records a segment with `trajectory_id` +
-  `tensor_ref` + `closing_event` + `env_snapshot` for that event
+- **THEN** Multica calls `close_segment` + export on the producer session and records a segment
+  with `trajectory_id` + `tensor_ref` + `closing_event` + `env_snapshot` for that event
+- **AND** squad-context handoff records `closing_event = "squad_briefing"` on the producer
+  segment while preserving the structural edge type as `delegation`
 
 #### Scenario: Leaf run yields one leaf segment
 - **WHEN** a trained run completes with no communication event
@@ -357,11 +362,6 @@ recorded mapping SHALL populate the `session_to_agent_run` map consumed by `Asse
 
 At root-task completion Multica SHALL assemble `AssembledDag = {segments, edges,
 session_to_agent_run}` by reading the recorded `interaction_dag_segment`, `interaction_dag_edge`,
-`interaction_dag_env_snapshot`, and `interaction_dag_session_run` rows for the project. Each
-segment SHALL carry `segment_id`, `agent_run_id`, `issue_id`, `trajectory_id`, `tensor_ref`,
-`closing_event`, and a ref-only `env_snapshot`. Edges SHALL carry `src`, `dst`, and `type` =
-`delegation` / `mention` / `completion`. The assembled DAG SHALL carry no scores, no turn
-indices, and no message text. Assembly SHALL NOT re-derive structure; it is a read-only
 ```
 
 Full source: openspec/changes/multica-v2-segment-dag-recording-assembly/specs/v2-segment-dag-recording/spec.md
