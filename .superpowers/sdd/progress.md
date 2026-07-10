@@ -699,3 +699,22 @@ ALL EXECUTABLE TASKS COMPLETE (18 done, 4 documented-deferred/skipped). Commits:
 f89eb1b2..cdd61b62 (17 commits), local + partially pushed to origin
 (ahead 16). Final code review SKIPPED per user. Awaiting user decision on
 finish-branch ceremony / MR.
+
+# SDD progress - multica-pi-diagnosis-agent
+
+Plan: docs/superpowers/plans/2026-07-09-multica-pi-diagnosis-agent.md
+Spec: docs/superpowers/specs/2026-07-09-multica-pi-diagnosis-agent-design.md
+Impl: multica/ (Go, branch feature/multica-v2-segment-dag-training) + areal worktree (Python).
+Execution: subagent-driven-development (areal worktree isolation).
+
+## Tasks
+
+- [x] Task 1: Diagnosis Pi-agent runner + per-step parser (Go) - complete (commits 283df26e..d8adb8f4 in multica repo; review found 2 Critical+1 Important, fixed directly due to quota; parser tests 3/3 pass, go vet+build clean). NOTE: 283df26e was the prior v2-segment-dag-recording D9 WIP that the implementer committed as tree-cleanup (not diagnosis work).
+- [ ] Task 2: per-segment turn-range capture + migration (Go) - BLOCKED: interaction_dag.go conflict with concurrent v2-segment-dag-recording session.
+- [ ] Tasks 3-9: pending.
+
+## Blockers (build paused 2026-07-09)
+1. Concurrent session actively editing multica interaction_dag.go (v2-segment-dag-recording assembly) - conflicts with diagnosis Tasks 2 & 5 (both touch interaction_dag.go).
+2. Subagent quota exceeded (429, resets 20:50 CST) - blocks subagent-driven dispatch; Task 1 fix applied directly.
+
+Resume: after concurrent session finishes interaction_dag.go AND quota resets. Re-run comet-build / SDD from Task 2.
