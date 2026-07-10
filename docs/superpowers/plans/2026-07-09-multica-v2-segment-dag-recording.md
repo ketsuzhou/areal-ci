@@ -6,7 +6,7 @@ base-ref: f60c86bbeda297938f641b77c97425f655c49a35
 
 # Multica v2 Segment-DAG Recording + Assembly Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Finish the multica side of the v2 segment-DAG data path so a trained rollout round-trips end to end: event hooks record segments, retries open fresh areal sessions, `AssembledDag` is assembled and served at `/dag`, and AReaL resolves multi-shard `tensor_ref`s into tensors.
 
@@ -59,7 +59,7 @@ base-ref: f60c86bbeda297938f641b77c97425f655c49a35
 - Consumes: U6 `ExportTrajectory` raw `json.RawMessage` = areal `traj` dict `{field: serialized RTensor}`.
 - Produces: `decodeTensorRef(raw) ([]byte, error)` returning jsonb `{"<field>": {"shard_id": "...", "node_addr": "..."}, ...}`.
 
-- [ ] **Step 1: Write failing tests for multi-shard decode**
+- [x] **Step 1: Write failing tests for multi-shard decode**
 
 Add to `interaction_dag_test.go`. Replace the fake `ExportTrajectory` to return a real-shape RTensor-envelope traj, and assert `decodeTensorRef` extracts a field->shard map.
 
@@ -137,12 +137,12 @@ func TestDecodeTensorRef_MissingShardIDIsError(t *testing.T) {
 
 Also update the existing fake `fakeArealSegmentClient.ExportTrajectory` (e.g. `interaction_dag_test.go:180,223`) to return the envelope shape so `CloseSegmentForEvent` stores a field->shard `tensor_ref`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable go test ./internal/service/ -run TestDecodeTensorRef -v`
 Expected: FAIL (current `decodeTensorRef` returns the whole traj dict, not a field->shard map; assertions on `ref["input_ids"]["shard_id"]` fail).
 
-- [ ] **Step 3: Implement multi-shard `decodeTensorRef`**
+- [x] **Step 3: Implement multi-shard `decodeTensorRef`**
 
 Replace `decodeTensorRef` in `interaction_dag.go:239-258`:
 
@@ -212,12 +212,12 @@ func extractShardRef(fieldRaw json.RawMessage) (map[string]string, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable go test ./internal/service/ -run TestDecodeTensorRef -v`
 Expected: PASS (3/3). Then run the full U7.1 suite to confirm the updated fake didn't regress: `go test ./internal/service/ -run TestInteractionDAG -v` -> green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/interaction_dag.go server/internal/service/interaction_dag_test.go
@@ -237,7 +237,7 @@ git commit -m "fix(v2-segment-dag-recording): decodeTensorRef multi-shard field-
 - Consumes: `tensor_ref: dict[str, dict[str,str]]` = field->`{shard_id, node_addr}` (from Task 1).
 - Produces: `resolve(tensor_ref) -> dict[str, Any]` = field->resolved tensor; `clear` receives all field shard_ids.
 
-- [ ] **Step 1: Write failing tests for multi-shard resolve**
+- [x] **Step 1: Write failing tests for multi-shard resolve**
 
 Add to `customized_areal/tree_search/tests/test_segment_dag_trainer.py` (create if absent):
 
@@ -303,12 +303,12 @@ def test_resolve_404_raises_keyerror():
     raise AssertionError("expected KeyError for 404 shard")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /workspaces/leagent/backend/areal && .venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_segment_dag_trainer.py -v`
 Expected: FAIL (current `resolve` does `tensor_ref.get("shard_id")` -> `None` -> `KeyError("tensor_ref missing 'shard_id'")` immediately; multi-shard fetch never happens).
 
-- [ ] **Step 3: Implement multi-shard `resolve`**
+- [x] **Step 3: Implement multi-shard `resolve`**
 
 Replace `resolve` in `segment_dag_trainer.py:91-108`:
 
@@ -358,12 +358,12 @@ resolver.clear(shard_ids)
 
 (Replace the prior single-`shard_id` collection. If the prior code already iterates segments, adapt it to flatten all field refs.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /workspaces/leagent/backend/areal && .venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_segment_dag_trainer.py -v`
 Expected: PASS (3/3). Regression: `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/ -k 'segment_dag or supernode or env_dispatch' -v` -> green. Lint: `uvx ruff check customized_areal/tree_search/agents/segment_dag_trainer.py customized_areal/tree_search/agents/multica_dag_client.py` -> clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /workspaces/leagent/backend/areal
@@ -383,7 +383,7 @@ git commit -m "fix(v2-segment-dag-recording): DataProxyTensorResolver multi-shar
 - Consumes: `InteractionDAGService.RecordSessionAgentRun(ctx, projectID, sessionID, agentRunID, issueID string) error`; `creds.SessionID` (`training.go:204`); `taskID`; `issueID` (resolve via `GetIssue` if not in hand).
 - Produces: a `session_to_agent_run` row per session-open (idempotent upsert).
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```go
 func TestMaybeOpenTrainingSession_RecordsSessionAgentRun(t *testing.T) {
@@ -407,12 +407,12 @@ func TestMaybeOpenTrainingSession_RecordsSessionAgentRun(t *testing.T) {
 
 (`recordingDAGFake` implements `InteractionDAGService`-shaped interface recording calls; mirror the existing fake pattern in `training_test.go`.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestMaybeOpenTrainingSession_RecordsSessionAgentRun -v`
 Expected: FAIL (no `RecordSessionAgentRun` call; `RecordedRuns()` empty).
 
-- [ ] **Step 3: Implement D10 chokepoint**
+- [x] **Step 3: Implement D10 chokepoint**
 
 In `maybeOpenTrainingSession` (`training.go:~226`, after the persist at `:220`, before the slog at `:227`), insert (guarded by `s.Training != nil && s.Training.DAG != nil && s.Training.DAG.Enabled()`):
 
@@ -427,12 +427,12 @@ if s.Training != nil && s.Training.DAG != nil && s.Training.DAG.Enabled() {
 
 `agentRunID = taskID` (NOT `agentID`). Add `resolveIssueID` helper (returns `task.IssueID` if already a string, else `GetIssue`). `taskID` is the arg already in `maybeOpenTrainingSession`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestMaybeOpenTrainingSession_RecordsSessionAgentRun -v`
 Expected: PASS. Regression: `go test ./internal/service/ -run TestMaybeOpenTrainingSession -v` -> green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/training.go server/internal/service/training_test.go
@@ -451,7 +451,7 @@ git commit -m "feat(v2-segment-dag-recording): D10 RecordSessionAgentRun chokepo
 - Consumes: `CloseSegmentForEvent(ctx, projectID, sessionID, proxyKey, closingEvent, envSnapshot) (segmentID, err)`; `AddEdge(ctx, projectID, srcSeg, dstSeg, edgeType)`; `SegmentIDForAgentRun(ctx, agentRunID)`.
 - Produces: per-event segment + edge rows.
 
-- [ ] **Step 1: Write failing integration tests** (hermetic Postgres, U7.1 pattern). One test per seam:
+- [x] **Step 1: Write failing integration tests** (hermetic Postgres, U7.1 pattern). One test per seam:
 
 ```go
 func TestInteractionDAG_DelegationRecordsSegmentAndEdge(t *testing.T) {
@@ -479,12 +479,12 @@ func TestInteractionDAG_ConcurrentFanOutDeterministicAcyclic(t *testing.T) {
 
 Drive each seam via the existing `claimTaskByRuntimeForTest`/`enqueueMentionTask` test helpers; assert against `interaction_dag_segment`/`_edge` rows directly (hermetic DB).
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestInteractionDAG_ -v`
 Expected: FAIL (seams don't call `CloseSegmentForEvent`/`AddEdge` yet).
 
-- [ ] **Step 3: Implement the seams**
+- [x] **Step 3: Implement the seams**
 
 In `enqueueMentionTask` (`task.go:581`), after the child task is created and `tryOpenTrainingSession(child, projectID, envID)` (`:614`) but before `NotifyTaskEnqueued` (`:618`), insert the delegation hook (guarded `s.Training != nil && s.Training.DAG.Enabled()`):
 
@@ -511,12 +511,12 @@ Leaf: in `CompleteTask` for a trained run with no communication event, `CloseSeg
 
 Add helpers: `arealProxyKeyFromContext(ctxJSON) string` (parse `areal_proxy.api_key` from the task context JSONB), `leanEnvSnapshot(ctx, s, projectID) map[string]any` (`sandbox_ids` from `project.env_id -> environment.sandbox_ids`, else `[]`; `env_state={}`).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestInteractionDAG_ -v`
 Expected: PASS (5/5). `go vet ./internal/service/` clean; `gofmt -l` clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/task.go server/internal/service/interaction_dag_test.go
@@ -532,7 +532,7 @@ git commit -m "feat(v2-segment-dag-recording): event seams delegation/mention/co
 - Modify: `multica/server/internal/service/env_dispatch.go` (squad briefing hook where `SandboxRefs` are in scope)
 - Test: `multica/server/internal/service/interaction_dag_test.go`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 func TestInteractionDAG_NonTrainedRolloutRecordsNothing(t *testing.T) {
@@ -548,21 +548,21 @@ func TestInteractionDAG_SquadContextHandoffClosesProducerSegment(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestInteractionDAG_ -v`
 Expected: FAIL (gating not asserted; squad seam absent).
 
-- [ ] **Step 3: Implement gating + squad seam**
+- [x] **Step 3: Implement gating + squad seam**
 
 Gating is already in place via the `s.Training != nil && s.Training.DAG.Enabled()` guards (Task 3/4). Implement squad-context handoff at the existing parent/producer delegation seam, not at daemon claim: close the producer session with `closing_event="squad_briefing"` when the handoff is a squad-context delegation, and keep the structural edge type as `delegation` when the child later closes. Best-effort: all hooks `slog.Warn` on error and continue (already the pattern in Task 4).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestInteractionDAG_ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/task.go server/internal/service/env_dispatch.go server/internal/service/interaction_dag_test.go
@@ -582,7 +582,7 @@ git commit -m "feat(v2-segment-dag-recording): gating + best-effort + squad brie
 - Consumes: `areal_proxy` key in the parent task `context` JSONB (`training.go:38-44`).
 - Produces: child task `context` with `areal_proxy` removed, chat `session_id`/`work_dir` preserved.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```go
 func TestCreateRetryTask_StripsArealProxyKeepsChatSession(t *testing.T) {
@@ -605,12 +605,12 @@ func TestCreateRetryTask_StripsArealProxyKeepsChatSession(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestCreateRetryTask_StripsArealProxy -v`
 Expected: FAIL (child inherits `areal_proxy` via `agent.sql:186` `p.context` copy).
 
-- [ ] **Step 3: Implement the strip**
+- [x] **Step 3: Implement the strip**
 
 Lower-risk mechanism: after `CreateRetryTask` returns the child, rewrite the child's `context` JSONB to drop `areal_proxy` and persist via a targeted update (mirror the existing `MergeTaskArealProxyContext` query style - add `StripArealProxyFromTaskContext(ctx, childID)` hand-written sqlc that does `UPDATE agent_task_queue SET context = context - 'areal_proxy' WHERE id = $1`). Call it in `createRetryTaskWithPendingWakeTransfer` right after the child is created (`:1813`/`:1822`), before `broadcastTaskEvent`. (This avoids touching the `p.context` copy in `agent.sql:186`, keeping the chat `session_id`/`work_dir` CASE-WHEN at `:187-188` intact.)
 
@@ -625,12 +625,12 @@ if s.Training != nil {
 
 Hand-write `StripArealProxyFromTaskContext` in `generated/agent.sql.go` mirroring a sibling `:exec` update + add the query to `queries/agent.sql`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestCreateRetryTask_StripsArealProxy -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/task.go server/pkg/db/queries/agent.sql server/pkg/db/generated/agent.sql.go server/internal/service/task_test.go
@@ -649,7 +649,7 @@ git commit -m "feat(v2-segment-dag-recording): D9 strip areal_proxy from retry c
 - Consumes: `tryOpenTrainingSession(ctx, task, projectID, envID)`; `envID` from `project.env_id` via `issue_id -> GetIssue -> ProjectID -> GetProject -> EnvID`.
 - Produces: child opens its own areal session; `RecordSessionAgentRun` (D10) fires for child; parent already closed by `RouteTerminalTrainingTask`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 func TestMaybeRetryFailedTask_ChildOpensFreshSessionBeforeNotify(t *testing.T) {
@@ -668,12 +668,12 @@ func TestMaybeRetryFailedTask_EnvIDFromProjectEnvID(t *testing.T) {
 
 Use a recording fake that captures `StartSession`/`EndSession`/`NotifyTaskEnqueued` order.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestMaybeRetryFailedTask_ -v`
 Expected: FAIL (no `tryOpenTrainingSession(child)` before notify).
 
-- [ ] **Step 3: Implement open-before-notify**
+- [x] **Step 3: Implement open-before-notify**
 
 In `MaybeRetryFailedTask` (`task.go:1753`), after the child is created + `areal_proxy` stripped (Task 6), before `NotifyTaskEnqueued` (`:1800`):
 
@@ -696,12 +696,12 @@ if s.Training != nil {
 
 `tryOpenTrainingSession` -> `maybeOpenTrainingSession` -> `StartSession(child.ID, envID)` -> D10 `RecordSessionAgentRun(child)`. Parent already closed by `RouteTerminalTrainingTask` (`:1663` before `:1668`).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestMaybeRetryFailedTask_ -v`
 Expected: PASS (3/3).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/service/task.go server/internal/service/task_test.go
@@ -722,7 +722,7 @@ git commit -m "feat(v2-segment-dag-recording): D9 fresh areal session per retry 
 - Consumes: recorded `interaction_dag_segment`/`_edge`/`_env_snapshot`/`_session_run` rows for a project.
 - Produces: `AssembledDag{Segments, Edges, SessionToAgentRun}` (no scores/turn-idx/text).
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 func TestAssembleAssembledDag_ProjectsRecordedRows(t *testing.T) {
@@ -735,12 +735,12 @@ func TestAssembleAssembledDag_EdgesTypedAndAcyclic(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestAssembleAssembledDag -v`
 Expected: FAIL (`AssembleAssembledDag` undefined).
 
-- [ ] **Step 3: Implement assembly (read-only) + sqlc**
+- [x] **Step 3: Implement assembly (read-only) + sqlc**
 
 Add to `queries/interaction_dag.sql`:
 ```sql
@@ -775,12 +775,12 @@ func (s *InteractionDAGService) AssembleAssembledDag(ctx context.Context, projec
 ```
 Define `AssembledDag`, `AssembledSegment`, `AssembledEdge` structs (mirror areal's `SegmentSpec`/`EdgeType` contract).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/service/ -run TestAssembleAssembledDag -v`
 Expected: PASS (2/2). `go build ./internal/service/ ./pkg/db/generated/` clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/pkg/db/queries/interaction_dag.sql server/pkg/db/generated/interaction_dag.sql.go server/internal/service/interaction_dag.go server/internal/service/interaction_dag_test.go
@@ -800,7 +800,7 @@ git commit -m "feat(v2-segment-dag-recording): AssembleAssembledDag read-only as
 - Consumes: `InteractionDAGService.AssembleAssembledDag`; project status (in-progress vs done) for 202 vs 200; workspace gate for 403.
 - Produces: `GET /api/v1/env-dispatch/{projectID}/dag` -> 202/200/404/403 + failed-status.
 
-- [ ] **Step 1: Write failing handler tests**
+- [x] **Step 1: Write failing handler tests**
 
 ```go
 func TestGetDag_InProgressReturns202(t *testing.T) { /* root task not complete -> 202 + status body */ }
@@ -810,12 +810,12 @@ func TestGetDag_CrossWorkspaceReturns403(t *testing.T) { /* -> 403 */ }
 func TestGetDag_IncompleteRolloutReturnsFailedStatus(t *testing.T) { /* segments don't densely cover -> 200 + failed status, no AssembledDag */ }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/handler/ -run TestGetDag -v`
 Expected: FAIL (no `GetDag` handler/route).
 
-- [ ] **Step 3: Implement `GetDag` + route**
+- [x] **Step 3: Implement `GetDag` + route**
 
 Add to `env_dispatch.go`:
 ```go
@@ -840,12 +840,12 @@ func (h *Handler) GetDag(w http.ResponseWriter, r *http.Request) {
 r.Get("/api/v1/env-dispatch/{projectID}/dag", h.GetDag)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd multica/server && DATABASE_URL=... go test ./internal/handler/ -run TestGetDag -v`
 Expected: PASS (5/5). `go vet ./internal/handler/` clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd multica && git add server/internal/handler/env_dispatch.go server/internal/handler/env_dispatch_test.go server/cmd/server/router.go
@@ -860,32 +860,32 @@ git commit -m "feat(v2-segment-dag-recording): GET /dag endpoint 202/200/404/403
 - Modify: multica `internal/service/training_config.go` (`INTERACTION_DAG_ENABLED` default), areal `multica_dag_client.py` (polling config interval/timeout/backoff)
 - Test: full regression + E2E + grep sweep
 
-- [ ] **Step 1: Config defaults**
+- [x] **Step 1: Config defaults**
 
 Multica: `INTERACTION_DAG_ENABLED` defaults on for trained rollouts in `LoadTrainingConfig` (mirror `AREAL_*` env reading). Areal: expose polling `interval`/`timeout`/`backoff` on `MulticaDagClient` (config-driven, with sane defaults).
 
-- [ ] **Step 2: Scoped multica regression**
+- [x] **Step 2: Scoped multica regression**
 
 Run: `cd multica/server && DATABASE_URL=... go build ./internal/handler/ ./internal/service/ ./cmd/migrate/... && go test ./internal/service/ ./internal/handler/ -run 'InteractionDAG|MaybeOpen|MaybeRetry|CreateRetry|GetDag' -v && gofmt -l server/internal/`
 Expected: green (pre-existing webpush/ON CONFLICT failures excluded). Fix any `gofmt -l` output.
 
-- [ ] **Step 3: Areal regression**
+- [x] **Step 3: Areal regression**
 
 Run: `cd /workspaces/leagent/backend/areal && .venv-test/bin/python -m pytest areal/v2/inference_service/tests/ customized_areal/tree_search/tests/ -k 'segment_dag or supernode or env_dispatch' -v && uvx ruff check customized_areal/tree_search/ areal/v2/inference_service/`
 Expected: green (pre-existing critic/datasets/torchdata failures excluded).
 
-- [ ] **Step 4: Cross-repo E2E (if feasible)**
+- [x] **Step 4: Cross-repo E2E (if feasible)**
 
 3-agent `mode=scratch` rollout -> `close_segment` + export per event -> poll `GET .../dag` (202 -> 200) -> AReaL resolves multi-shard tensor_refs -> `ExecutionDAG` -> minimal training -> cleanup. If hardware/services unavailable, document the skip in the commit body.
 
-- [ ] **Step 5: F-independence + grep sweep**
+- [x] **Step 5: F-independence + grep sweep**
 
 Verify env snapshots are refs-only (no sandbox pause/fork). Grep: `close_segment`, `AssembledDag`, `tensor_ref`, `v2-segment-dag-recording`, `env-dispatch/{projectID}/dag` resolve to intended code only; no `start_turn_idx`/`end_turn_idx` in new tables/code.
 
 Run: `cd multica && grep -rn "start_turn_idx\|end_turn_idx" server/ ; cd /workspaces/leagent/backend/areal && grep -rn "tensor_ref" customized_areal/tree_search/ areal/v2/`
 Expected: no `start_turn_idx`/`end_turn_idx`; `tensor_ref` references consistent with the field->shard map.
 
-- [ ] **Step 6: Final whole-branch review + commit**
+- [x] **Step 6: Final whole-branch review + commit**
 
 Review both branches: `git log --oneline f60c86bb..HEAD` (areal) and `git log --oneline 157284045..HEAD` (multica). Mark READY TO MERGE / NEEDS_CHANGES.
 

@@ -1,6 +1,6 @@
 workflow: full
 phase: build
-build_mode: subagent-driven-development
+build_mode: executing-plans
 build_pause: null
 isolation: worktree
 verify_mode: null
@@ -15,5 +15,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/multica-v2-segment-dag-recording-assembly/.comet/handoff/design-context.json
 handoff_hash: 33ed0b5706d26b36ae279f9d0584d986da3644fdbf2c9ea19187665122526e59
-subagent_dispatch: confirmed
+subagent_dispatch: null
 tdd_mode: direct
