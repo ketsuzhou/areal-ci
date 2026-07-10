@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: executing-plans
+build_pause: null
+isolation: worktree
+verify_mode: null
+base_ref: a6072e994522a295669e8deb756d242e1adb60ff
+design_doc: docs/superpowers/specs/2026-07-09-env-checkpoint-resume-trigger-design.md
+plan: docs/superpowers/plans/2026-07-09-env-checkpoint-resume-trigger.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-09
+verified_at: null
+archived: false
+handoff_context: openspec/changes/env-checkpoint-resume-trigger/.comet/handoff/design-context.json
+handoff_hash: d2619b9ec16f6183d1d6310fecd46265540c03ce8c937cd2aa041b1cb493c019
