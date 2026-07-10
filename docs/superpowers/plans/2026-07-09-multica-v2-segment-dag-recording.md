@@ -541,8 +541,10 @@ func TestInteractionDAG_NonTrainedRolloutRecordsNothing(t *testing.T) {
 func TestInteractionDAG_RecordingErrorIsBestEffort(t *testing.T) {
 	// Inject a failing DAG fake; Assert: run continues, error logged, no panic.
 }
-func TestInteractionDAG_SquadBriefingClosesSegment(t *testing.T) {
-	// Assert: CloseSegmentForEvent(closing_event="squad_briefing") at the env_dispatch claim path.
+func TestInteractionDAG_SquadContextHandoffClosesProducerSegment(t *testing.T) {
+	// Assert: the producer/parent session is closed with closing_event="squad_briefing"
+	// and the eventual parent->child edge remains type="delegation". Do NOT close
+	// the receiver/child session at daemon claim time.
 }
 ```
 
@@ -553,7 +555,7 @@ Expected: FAIL (gating not asserted; squad seam absent).
 
 - [ ] **Step 3: Implement gating + squad seam**
 
-Gating is already in place via the `s.Training != nil && s.Training.DAG.Enabled()` guards (Task 3/4). Add the squad-briefing hook at the env_dispatch claim path (`service/env_dispatch.go` `dispatchOne`, where `SandboxRefs` are in scope) calling `CloseSegmentForEvent(ctx, projectID, sessionID, proxyKey, "squad_briefing", envSnapshot)` with `sandbox_ids` populated from the in-scope `SandboxRefs`. Best-effort: all hooks `slog.Warn` on error and continue (already the pattern in Task 4).
+Gating is already in place via the `s.Training != nil && s.Training.DAG.Enabled()` guards (Task 3/4). Implement squad-context handoff at the existing parent/producer delegation seam, not at daemon claim: close the producer session with `closing_event="squad_briefing"` when the handoff is a squad-context delegation, and keep the structural edge type as `delegation` when the child later closes. Best-effort: all hooks `slog.Warn` on error and continue (already the pattern in Task 4).
 
 - [ ] **Step 4: Run tests to verify they pass**
 

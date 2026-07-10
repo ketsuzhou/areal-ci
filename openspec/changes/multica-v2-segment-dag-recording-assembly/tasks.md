@@ -13,7 +13,9 @@
 - [ ] 1.3 Failing tests: a mention records a `mention` edge without closing a segment.
 - [ ] 1.4 Failing tests: a completion calls `close_segment` + export on the child run and
   records a `completion` edge.
-- [ ] 1.5 Failing tests: a squad briefing closes a segment via `close_segment` + export.
+- [ ] 1.5 Failing tests: a squad-context handoff closes the producer/parent segment via
+  `close_segment` + export with `closing_event = "squad_briefing"` while the structural edge
+  remains `delegation`.
 - [ ] 1.6 Failing tests: a leaf run (no communication event) yields exactly one leaf segment
   with `closing_event = None`.
 - [ ] 1.7 Failing tests: concurrent fan-out delegation produces multiple `delegation` edges and
