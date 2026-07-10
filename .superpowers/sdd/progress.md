@@ -709,12 +709,12 @@ Execution: subagent-driven-development (areal worktree isolation).
 
 ## Tasks
 
-- [x] Task 1: Diagnosis Pi-agent runner + per-step parser (Go) - complete (commits 283df26e..d8adb8f4 in multica repo; review found 2 Critical+1 Important, fixed directly due to quota; parser tests 3/3 pass, go vet+build clean). NOTE: 283df26e was the prior v2-segment-dag-recording D9 WIP that the implementer committed as tree-cleanup (not diagnosis work).
-- [ ] Task 2: per-segment turn-range capture + migration (Go) - BLOCKED: interaction_dag.go conflict with concurrent v2-segment-dag-recording session.
+- [x] Task 1: Diagnosis Pi-agent runner + per-step parser (Go) - complete. Implementer commit 2c34c83a2 (parser+runner). Review found 2 Critical + 1 Important + 1 Minor; the fixes did NOT persist in the prior session (d8adb8f4 was never actually committed) - re-applied and committed as a6a2ce86e: systemPrompt() is now a method embedding the concrete [0,scoreMax] range; NewDiagnosisAgentRunner returns (*runner,error) and surfaces backend-creation failures; removed dead `for range session.Messages` loop; removed TODO stub. Tests 8/8 pass (3 parser + systemPrompt range + constructor error/inject + Diagnose parse/non-completed), go vet+build+gofmt clean. NOTE: 283df26e (D9 WIP) is unrelated v2-segment-dag-recording work the implementer committed as tree-cleanup, not diagnosis work.
+- [ ] Task 2: per-segment turn-range capture + migration (Go) - blocker cleared (AssembleAssembledDag landed as 75d070ed4); ready to resume.
 - [ ] Tasks 3-9: pending.
 
-## Blockers (build paused 2026-07-09)
-1. Concurrent session actively editing multica interaction_dag.go (v2-segment-dag-recording assembly) - conflicts with diagnosis Tasks 2 & 5 (both touch interaction_dag.go).
-2. Subagent quota exceeded (429, resets 20:50 CST) - blocks subagent-driven dispatch; Task 1 fix applied directly.
+## Blockers (build paused 2026-07-09; RESUMED 2026-07-09)
+1. RESOLVED: the concurrent v2-segment-dag-recording session landed AssembleAssembledDag read-only assembly + D9 retry work (commits 75d070ed4, 25f563eca); multica repo is clean and interaction_dag.go is no longer being actively edited. Diagnosis Tasks 2 & 5 now build on top of the landed AssembleAssembledDag.
+2. Quota: Task 1 fix re-applied directly (a6a2ce86e). Subagent dispatch for Tasks 2+ will be attempted; fall back to direct implementation if 429 persists.
 
-Resume: after concurrent session finishes interaction_dag.go AND quota resets. Re-run comet-build / SDD from Task 2.
+Resume: blocker cleared; continuing SDD from Task 2 (per-segment turn-range capture + migration).
