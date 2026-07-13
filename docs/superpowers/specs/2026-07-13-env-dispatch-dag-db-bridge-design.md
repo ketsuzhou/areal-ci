@@ -76,8 +76,13 @@ handles GET.
 ### `multica/db_bridge/executor.py`
 
 - Forward `multica_api` channels to `multica_upstream_url`, injecting
-  `MULTICA_UPSTREAM_API_KEY` and stripping caller-supplied auth (reuse the existing
-  `upstream_api_key` / `_BRIDGE_CRED_HEADERS` pattern from `multica_server.py`).
+  `BRIDGE_MULTICA_UPSTREAM_API_KEY` (read into `BridgeConfig.multica_upstream_api_key`)
+  as `Authorization: Bearer <key>` and stripping caller-supplied
+  `Authorization` / `x-api-key` / `x-admin-api-key` via a new `relay.strip_credentials`
+  helper. The env var is deliberately distinct from `MulticaConfig`'s
+  `MULTICA_UPSTREAM_API_KEY` (which authenticates the multica_server LLM relay to the
+  AReaL gateway) since the executor forwards to the multica Go server -- a different
+  upstream needing its own token.
 - `gateway` group unchanged - `rl_close_segment` is forwarded to `gateway_upstream_url`
   with the session-key `Authorization` passed through end-to-end (mirrors `rl_set_reward`).
   **No executor change for `rl_close_segment`.**
@@ -116,7 +121,7 @@ handles GET.
 ```
 MulticaDagClient (areal) -- GET .../dag, base=AREAL_BRIDGE_STUB_URL -->
 areal stub -- insert --> rpc_env_dispatch_dag -- claim --> multica executor
-  -- GET .../dag + MULTICA_UPSTREAM_API_KEY --> multica Go server (GetDag)
+  -- GET .../dag + BRIDGE_MULTICA_UPSTREAM_API_KEY --> multica Go server (GetDag)
   -- 202/200/404 --> (response written back) --> client
 client: 202 -> re-poll (new row); 200 -> AssembledDag; 404 -> DagNotFound
 ```
