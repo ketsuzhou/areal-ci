@@ -3,12 +3,12 @@ phase: verify
 build_mode: subagent-driven-development
 build_pause: null
 isolation: branch
-verify_mode: null
+verify_mode: full
 base_ref: fb9a195cd10504c6cc3e762b49753bf86235a11d
 design_doc: docs/superpowers/specs/2026-07-08-multica-v2-segment-dag-design.md
 plan: docs/superpowers/plans/2026-07-08-multica-v2-segment-dag.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-07-13-multica-v2-segment-dag-training-verify.md
 branch_status: pending
 created_at: 2026-07-08
 verified_at: null
