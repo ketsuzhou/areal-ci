@@ -103,10 +103,13 @@ The multica server requires `Authorization: Bearer <MULTICA_API_KEY>`. Under the
   If the stub serves multiple users, the client sends `X-Bridge-User-Id` (the stub already
   supports this via `BRIDGE_USER_ID`).
 - The **executor** attaches the upstream credential when forwarding to multica. db_bridge
-  already has this pattern (`upstream_api_key` / `ENV_MULTICA_UPSTREAM_API_KEY` in
-  `config.py`, and `_BRIDGE_CRED_HEADERS` stripping in `multica_server.py`). Reuse it: the
-  multica-side executor injects `MULTICA_UPSTREAM_API_KEY` and strips any caller-supplied
-  auth.
+  already has this pattern (`upstream_api_key` in `config.py` and credential stripping in
+  `multica_server.py`). Reuse it: the multica-side executor injects
+  `BRIDGE_MULTICA_UPSTREAM_API_KEY` (read into `BridgeConfig.multica_upstream_api_key`) and
+  strips caller auth via `relay.strip_credentials` (`authorization` / `x-api-key` /
+  `x-admin-api-key`). The env var is deliberately distinct from
+  `MULTICA_UPSTREAM_API_KEY` (which authenticates the multica_server LLM relay to the AReaL
+  gateway) to avoid the config-constant collision discovered in build.
 
 So `MulticaDagClient` is changed to read `AREAL_BRIDGE_STUB_URL` (not `MULTICA_BASE_URL`)
 for its base, and to stop sending `MULTICA_API_KEY` on the bridged call. `MULTICA_BASE_URL`
@@ -120,7 +123,9 @@ from `MULTICA_BASE_URL`. Change the base to `AREAL_BRIDGE_STUB_URL` (default) wi
 constructor override for tests. Keep the existing error mapping:
 
 - `200` -> parse `AssembledDag`, return.
-- `202` -> sleep, re-poll (unchanged).
+- `202` -> sleep, re-poll. Bridge transients `502`/`503`/`504` (relay error / stub timeout)
+  are also re-polled up to the wall-clock deadline; the `200`/`404`/`403` mapping is
+  unchanged.
 - `404` -> `DagNotFound` (unchanged).
 - `403` -> `DagForbidden` (unchanged).
 - timeout -> `DagTimeout` (unchanged; now driven by client wall-clock, not bridge per-row
@@ -174,7 +179,7 @@ areal-side stub  ── insert ──▶  rpc_env_dispatch_dag  (Supabase, share
   │  poll row for response               │  claim (FOR UPDATE SKIP LOCKED)
   ▼                                      ▼
 multica-side executor  ── GET ──▶  multica Go server
-  │  + MULTICA_UPSTREAM_API_KEY          (env_dispatch.go: GetDag)
+  │  + BRIDGE_MULTICA_UPSTREAM_API_KEY   (env_dispatch.go: GetDag)
   │  to BRIDGE_MULTICA_UPSTREAM_URL      │
   │                                      ▼
   ◀── write response (202 / 200 / 404) ──
