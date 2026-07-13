@@ -50,7 +50,7 @@ small protocols only; it does not import a sandbox-vendor SDK.
 
 ## AReaL → db_bridge → Multica API Surface
 
-`agents/swe_lego_client.py` wraps the unified env-dispatch API through
+`agents/multica_client.py` wraps the unified env-dispatch API through
 `MulticaEnvDispatchClient`. AReaL addresses db_bridge, which proxies these endpoints to
 Multica. AReaL never calls Multica directly for env-dispatch.
 

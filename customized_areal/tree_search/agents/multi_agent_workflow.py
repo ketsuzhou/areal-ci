@@ -19,6 +19,8 @@ import asyncio
 import logging
 from typing import Any
 
+from customized_areal.tree_search.agents.multica_client import MulticaEnvDispatchClient
+
 from areal.api.workflow_api import RolloutWorkflow
 
 logger = logging.getLogger("MultiAgentEnvDispatchWorkflow")
@@ -37,17 +39,17 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
     def __init__(
         self,
         *,
-        dispatch_client,
         dag_client,
         assembler,
         resolver,
         session_remover,
+        dispatch_client: MulticaEnvDispatchClient | None = None,
         poll_timeout: float = 3600.0,
         poll_interval: float = 1.0,
         group_size: int = 1,
         base_env_id: str = "",
     ):
-        self._dispatch = dispatch_client
+        self._dispatch = dispatch_client or MulticaEnvDispatchClient()
         self._dag_client = dag_client
         self._assembler = assembler
         self._resolver = resolver

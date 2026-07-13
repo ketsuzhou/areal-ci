@@ -2,6 +2,8 @@
 comet_change: multica-v2-segment-dag-training
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-13-multica-v2-segment-dag-training
+status: final
 ---
 
 # Design: Multica v2 Segment-DAG Training (Change 1 - Data Path)

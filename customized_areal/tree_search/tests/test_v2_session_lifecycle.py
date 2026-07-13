@@ -19,7 +19,7 @@ import httpx
 import orjson
 import pytest
 
-from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
+from customized_areal.tree_search.agents.multi_agent_workflow import (
     MultiAgentEnvDispatchWorkflow,
 )
 from customized_areal.tree_search.agents.multica_dag_client import AssembledDag

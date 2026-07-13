@@ -105,6 +105,16 @@ the parent's "200 on success or failed": the distinguishing axis is dense covera
 state. Reconcile with the parent's polling requirement on apply. AReal's assembler also
 validates dense coverage (U5 gap-check) as a second line of defense.
 
+
+### D16 - Squad-context handoff closes the producer segment [new]
+
+A squad briefing is not a request to close the receiver's empty session at daemon-claim time.
+When a trained squad leader/parent hands work to another agent, Multica closes the producer's
+existing AReaL session segment (the session that emitted the handoff) and records
+`closing_event = "squad_briefing"`; the graph edge remains `delegation`. The child/receiver opens
+and later closes its own session normally after it has model output. This preserves the v2 segment
+contract (no synthetic zero-turn segments) while retaining squad-specific event provenance.
+
 ### D15 - `/dag` cross-workspace `403` [new]
 
 The `/dag` endpoint enforces workspace isolation: a caller requesting a `project_id` outside

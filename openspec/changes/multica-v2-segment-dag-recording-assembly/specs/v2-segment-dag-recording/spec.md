@@ -7,15 +7,20 @@
 Multica SHALL record interaction-DAG segments only for trained rollouts (a `TrainAgentID` is
 set on the env dispatch) and only while `INTERACTION_DAG_ENABLED` is on. For each communication
 event (delegation, mention, completion, squad briefing) on a trained rollout, Multica SHALL
-call `close_segment` + per-segment export on the relevant run and record a segment carrying
-`trajectory_id`, `tensor_ref`, `closing_event`, and a ref-only `env_snapshot`. A leaf run with
+call `close_segment` + per-segment export on the producer/parent run whose session has emitted
+the handoff/completion, then record a segment carrying `trajectory_id`, `tensor_ref`,
+`closing_event`, and a ref-only `env_snapshot`. For squad-context handoff, the edge remains a
+`delegation` edge while the producer segment records `closing_event = "squad_briefing"`; Multica
+MUST NOT close the receiver/child session before it has emitted its own model turn. A leaf run with
 no communication event SHALL yield exactly one leaf segment with `closing_event = None`.
 Non-trained rollouts SHALL record nothing and SHALL incur no recording overhead.
 
 #### Scenario: Trained rollout records a segment per communication event
 - **WHEN** a trained rollout fires a delegation, mention, completion, or squad-briefing event
-- **THEN** Multica calls `close_segment` + export and records a segment with `trajectory_id` +
-  `tensor_ref` + `closing_event` + `env_snapshot` for that event
+- **THEN** Multica calls `close_segment` + export on the producer session and records a segment
+  with `trajectory_id` + `tensor_ref` + `closing_event` + `env_snapshot` for that event
+- **AND** squad-context handoff records `closing_event = "squad_briefing"` on the producer
+  segment while preserving the structural edge type as `delegation`
 
 #### Scenario: Leaf run yields one leaf segment
 - **WHEN** a trained run completes with no communication event
