@@ -3,7 +3,7 @@
 - Change: sub-project-g-multica-interaction-dag
 - Phase: design
 - Mode: compact
-- Context hash: 056ceaab30dd8f5d0665a883a8b485c870e4656cb45688a20d92431db3280093
+- Context hash: 632d1d366796beff22519a19ab78c9e37ed4231d15bfe450b57d9e76857170f1
 
 Generated-by: comet-handoff.sh
 
@@ -12,167 +12,185 @@ OpenSpec remains the canonical capability spec. This handoff is a deterministic,
 ## openspec/changes/sub-project-g-multica-interaction-dag/proposal.md
 
 - Source: openspec/changes/sub-project-g-multica-interaction-dag/proposal.md
-- Lines: 1-66
-- SHA256: 58cf502f13ea25dac09d42cdb21bbb4ed5735bafc656d3d4175e729c3e55a6bd
+- Lines: 1-89
+- SHA256: ca370b2a9800c3981f25a5b891920f1e3c3b46f0e83c15fbd366841dd696a4ec
+
+[TRUNCATED]
 
 ```md
+> **Re-scoped 2026-07-13.** This container was originally the Multica-side
+> interaction-DAG producer; that scope was superseded and delivered by the
+> `multica-v2-segment-dag-*` arc (recording-assembly + training). The container
+> is reused for a new, unrelated scope: hardening the AReaL-side v2 segment-DAG
+> assembly/checkpoint path against lossy-serialization and topology-loss bug
+> classes. The change name is retained by operator decision; it no longer
+> describes the scope.
+
 ## Why
 
-AReaL already designs and implements the **consumer** side of a multi-agent interaction
-DAG (`ExecutionDAG` / `SuperNode` / `SuperNodeAssembler` in
-`customized_areal/tree_search/agents/`), and
-`docs/superpowers/specs/2026-06-30-supernode-multica-dag-rollout-design.md` locks the
-`DagResult` contract Multica must produce at task completion (decision D14: "Multica
-provides segment specs at task completion"). But the **Multica-side producer is explicitly
-deferred and unimplemented** (design §10 Out of scope; risk row: "Multica-side endpoints do
-not exist yet"). Without it, AReaL cannot run collaborative multi-agent DAG rollouts —
-there is no source for the segments, typed edges, per-run turn indices, and env snapshots
-the assembler consumes. This change implements that deferred producer: Multica converts its
-own agent interactions into the DAG during execution and returns it to AReaL when the task
-finishes.
+The v2 segment-DAG arc landed the AReaL consumer path
+(`SuperNodeAssembler.assemble_from_refs`, `distribute_reward_over_dag`,
+`segment_dag_trainer`) and, as a side effect, fixed two latent SuperNode bugs
+that had been flagged for "Phase 1b/2": lossy checkpoint serialization and
+multi-edge parent non-determinism. Auditing the landed v2 path surfaced two
+**residual integrity gaps** in the same bug class. They are not yet live
+failures, but they will silently corrupt training data or checkpoint resume
+when the v2 path grows a consumer that trips them:
+
+1. **`SuperNode.visit_count` is dropped by the "lossless" serializer.**
+   `SuperNode.to_dict()` / `from_dict()` (execution_dag.py:119-178) serialize
+   every field *except* `visit_count`. The field is mutated by `branch_backup`
+   (dag_backup.py:88-110) as a running MCTS branch-value aggregate, so a
+   checkpoint save/restore zeros it - a fork segment resumed from checkpoint
+   loses its visit count. (The *canonical* visit count used by critic/advantage
+   is the separate persisted `tree_store._visit_counts` dict, already saved -
+   so this is a narrower, branch-backup-specific loss, but still a real
+   round-trip hole in the envelope that is documented as lossless.)
+
+2. **`assemble_from_refs` does not populate `SuperNode.incoming_edges` /
+   `outgoing_edges`.** Only the tests-only `assemble()` path populates these
+   tuples (supernode_assembler.py:336-345). The live v2 path
+   (`assemble_from_refs`, :108-194) leaves them `()`, carrying topology only in
+   `ExecutionDAG.edges`. Today this is harmless because the v2 path never
+   checkpoint-serializes assembled SuperNodes and its backup
+   (`distribute_reward_over_dag`) reads `dag.edges` directly. But `to_dict()`
+   reads topology from those tuples - so the moment a v2-assembled DAG is
+   checkpointed (or any consumer reads the tuples instead of the DAG), topology
+   serializes as empty. It is a latent footgun sitting exactly where the
+   original lossy-serialization bug sat.
+
+This change closes both gaps proactively, before the v2 path grows consumers
+that trip them, and pins the v2 path with regression tests against both bug
+classes.
 
 ## What Changes
 
-- **Incremental interaction-DAG recording (Multica Go)**: as communication events fire
-  (delegation → sub-issue, mention, completion → notify-parent, squad briefing), Multica
-  records communication-bounded segments with per-run turn indices and typed edges
-  (`DELEGATION` / `MENTION` / `COMPLETION`), matching AReaL's `EdgeType`. Segments are
-  recorded during execution, not inferred afterward.
-- **Lightweight team env snapshots per segment**: each segment records a ref-only
-  `TeamEnvSnapshot` (sandbox_instance ids + issue-subtree ref). No sandbox pause/fork —
-  deliberately independent of Sub-project F.
-- **`DagResult` assembly + polling return endpoint**: at root-task completion Multica
-  assembles `DagResult` (`session_ids`, `session_to_agent_run`, `segments`, `edges`,
-  `env_snapshots`) and serves it via `GET /api/v1/env-dispatch/{projectID}/dag` — `202`
-  in-progress, `200` + `DagResult` when done. Reuses the existing env-dispatch path
-  (`project_id` as the root handle).
-- **AReaL client adapter**: extend `MulticaEnvDispatchClient` (or add a thin
-  `MulticaDagClient`) to poll the endpoint and return `DagResult`. `SuperNodeAssembler` and
-  `ExecutionDAG` are unchanged consumers.
-- **Migration**: new tables for interaction-DAG segments, edges, and per-segment env
-  snapshots, keyed by `project_id` / `agent_run_id`.
+- **Lossless `visit_count` serialization**: add `visit_count` to
+  `SuperNode.to_dict()` / `from_dict()` (execution_dag.py) so the envelope is
+  truly lossless. `from_dict` tolerates a missing key (older checkpoints) by
+  defaulting to 0.
+- **Topology-complete `assemble_from_refs`**: after the edge-adding loop,
+  populate each SuperNode's `incoming_edges` / `outgoing_edges` tuples in
+  `assemble_from_refs()` (supernode_assembler.py), mirroring the pattern in
+  `assemble()` (:336-345). No behavior change to the live backup path (which
+  reads `dag.edges`); this only makes the SuperNodes serialization-correct.
+- **v2-path regression tests**: add (a) a round-trip test
+  (`assemble_from_refs` -> `to_dict` -> `from_dict` asserts edges,
+  `incoming_edges`/`outgoing_edges`, `visit_count`, env fields preserved) and
+  (b) a fan-in credit test (`assemble_from_refs` with multiple incoming
+  DELEGATION/COMPLETION edges -> `distribute_reward_over_dag` credits every
+  parent).
 
 ## Capabilities
 
 ### New Capabilities
 
-- `interaction-dag-return`: Multica records agent interactions as a communication-bounded
-  segment DAG during task execution and returns the assembled `DagResult` to AReaL at task
-  completion via a polling env-dispatch endpoint.
+- `v2-segment-dag-integrity`: the AReaL v2 segment-DAG assembly path produces
+  SuperNodes whose serialization is lossless (all fields round-trip, including
+  `visit_count`) and whose topology is complete (`incoming_edges` /
+  `outgoing_edges` populated, matching `ExecutionDAG.edges`).
 
 ### Modified Capabilities
 
-<!-- None. AReaL's SuperNodeAssembler / ExecutionDAG consumer is unchanged; this change
-     only adds the Multica producer plus a thin AReaL client adapter. -->
+<!-- None. -->
 
 ## Impact
 
-- **Multica (Go, primary)**: new service (`internal/service/interaction_dag.go`), handler
-  (`GET .../env-dispatch/{projectID}/dag`), per-run turn-index tracking at the agent-run
-  driving seam, env-snapshot capture at communication events, migration + generated DB
-  queries. Touches `internal/service/task.go` (delegation/mention/completion hooks),
-  `internal/handler/env_dispatch.go`, `internal/handler/squad_briefing.go`,
-  `internal/arealrl/client.go` (session↔agent_run mapping).
-- **AReaL (Python, secondary)**: thin client adapter in
-  `customized_areal/tree_search/agents/` (poll endpoint → `DagResult`);
-  `SuperNodeAssembler` / `ExecutionDAG` unchanged.
-- **Depends on**: the locked `DagResult` / `SegmentSpec` / `EdgeSpec` / `TeamEnvSnapshot`
-  contract from `2026-06-30-supernode-multica-dag-rollout-design.md`. Independent of
-  Sub-project F (env snapshots are refs-only; no sandbox pause/fork).
-- **Out of scope**: full sandbox snapshot/fork (F), verifier / reward backup
-  (E / 2026-06-30 Phase 2), immutable branching (2026-06-26 phase1), AReaL consumer
-  changes.
+- **AReaL (Python, primary)**: `customized_areal/tree_search/agents/execution_dag.py`
+  (`SuperNode.to_dict` / `from_dict`), `supernode_assembler.py`
 ```
+
+Full source: openspec/changes/sub-project-g-multica-interaction-dag/proposal.md
 
 ## openspec/changes/sub-project-g-multica-interaction-dag/design.md
 
 - Source: openspec/changes/sub-project-g-multica-interaction-dag/design.md
-- Lines: 1-189
-- SHA256: 8c589558c6562a7d8d627e1801f28597a029244f386d541efb04cb7aa1fafe2f
+- Lines: 1-150
+- SHA256: 30fbd8a71c522d3cb3302d5077ccb3949d99b695ddc77b0e960b66cf4bdf85e3
 
 [TRUNCATED]
 
 ```md
 ## Context
 
-`customized_areal/tree_search/agents/` already implements the AReaL **consumer** of a
-multi-agent interaction DAG:
+The v2 segment-DAG arc landed two assembly paths in
+`customized_areal/tree_search/agents/supernode_assembler.py`:
 
-- `execution_dag.py` — torch-free `ExecutionDAG` of `SuperNode`s with typed `EdgeType`
-  (`DELEGATION` / `MENTION` / `COMPLETION`) and `to_records()` / `from_records()`.
-- `supernode_assembler.py` — `SuperNodeAssembler.assemble(sessions_nodes, dag_result)`
-  consumes a Multica-produced `DagResult`: `session_ids`, `session_to_agent_run`,
-  `segments: list[SegmentSpec]` (1-based inclusive `start_turn_idx` / `end_turn_idx` +
-  `closing_event` + `closing_event_target_segment`), `edges: list[EdgeSpec]`, and
-  `env_snapshots: dict[segment_id, TeamEnvSnapshot]`.
-- `multica_environment_protocol.md` + `2026-06-30-supernode-multica-dag-rollout-design.md`
-  lock the contract (D14: "Multica provides segment specs at task completion") and
-  explicitly defer the Multica-side producer (§10 Out of scope; risk: "Multica-side
-  endpoints do not exist yet").
+- `assemble_from_refs` (:108-194) - the **live v2 consumer path**. Resolves each
+  segment's `tensor_ref` via a `TensorResolver`, builds one `SuperNode` per
+  segment with `nodes=[]` (tensors attached to `metadata["tensors"]`), adds
+  typed edges to an `ExecutionDAG`, and stamps `completion_index` from
+  topological order. Used by `multi_agent_workflow.py` and `segment_dag_trainer.py`.
+- `assemble` (:196-413) - the **legacy path** (tests-only). Slices an agent's
+  `list[Node]` by `start_turn_idx` / `end_turn_idx` and runs a 6-step algorithm
+  including Step 5 parent-node-id flattening with the fan-in fix (first source
+  terminal -> `parent_node_id`, rest -> `extra_parent_node_ids`).
 
-Multica already originates every edge source — delegation creates sub-issues
-(`issue.parent_issue_id`), mention triggers (`internal/mention`), completion/notify-parent,
-squad briefing (`handler/squad_briefing.go`) — and already calls `/rl/start_session` per
-agent run (`internal/arealrl/client.go`). What is missing is recording these as
-segment + edge structure with per-run turn indices during execution and returning the
-assembled `DagResult` to AReaL at task completion.
+`SuperNode.to_dict()` / `from_dict()` (execution_dag.py:119-178) are the
+"single source of truth" for SuperNode serialization, reused by
+`TreeCheckpointManager._serialize_super_node` (checkpoint.py:258). They were
+made lossless as part of Phase 1a (`6d2f28e7`) - but `visit_count` was missed.
 
-Constraints: this change must produce exactly the `DagResult` AReaL already consumes (no
-consumer-side changes), must reuse the existing env-dispatch path, must use a polling
-return, and must stay independent of Sub-project F (env snapshots are refs-only).
+The v2 backup, `distribute_reward_over_dag` (dag_backup.py:39-85), walks
+`dag.edges` directly and already credits every parent on a fan-in join (with
+optional `CreditAssignment`). It does **not** read `SuperNode.incoming_edges` /
+`outgoing_edges`. So the v2 path is *backup-correct* but *serialization-incomplete*:
+the SuperNodes it builds cannot currently survive a `to_dict()` round-trip with
+their topology intact.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Implement the deferred Multica-side producer of the locked `DagResult` contract.
-- Incrementally record communication-bounded segments + typed edges + per-run turn indices
-  as communication events fire during execution.
-- Capture lightweight (ref-only) team env snapshots per segment.
-- Assemble and return `DagResult` at root-task completion via a polling env-dispatch
-  endpoint.
-- Add a thin AReaL client adapter to poll the endpoint; leave `SuperNodeAssembler` /
-  `ExecutionDAG` unchanged.
+- Make `SuperNode.to_dict()` / `from_dict()` truly lossless by including
+  `visit_count`.
+- Make `assemble_from_refs` produce topology-complete SuperNodes
+  (`incoming_edges` / `outgoing_edges` populated, consistent with
+  `ExecutionDAG.edges`).
+- Pin both properties with v2-path regression tests (round-trip + fan-in).
 
 **Non-Goals:**
 
-- Full sandbox snapshot/fork in env snapshots (deferred to F's pause-in-place checkpoints).
-- Verifier, reward backup, GAE/critic (E / 2026-06-30 Phase 2).
-- Immutable branching / fork-from-checkpoint (2026-06-26 phase1).
-- Any change to `SuperNodeAssembler` / `ExecutionDAG` / the per-turn proxy interaction
-  cache on the AReaL side.
+- Auditing for other latent bug classes (separate effort).
+- Any Multica-side change.
+- Removing or altering the legacy `assemble()` path (left as-is, tests-only).
+- Changing `distribute_reward_over_dag` or the training/backup control flow.
+- Full sandbox snapshots (Sub-project F), verifier/reward backup (E).
 
 ## Decisions
 
-### D1 — Incremental segment recording at communication events
+### D1 - Add `visit_count` to `to_dict()` / `from_dict()`
 
-Record segments + edges as communication events fire during execution, not reconstruct them
-at completion.
+Serialize `visit_count` alongside the other scalar fields, defaulting to 0 on
+read for backward compatibility with checkpoints written before this change.
 
-**Rationale:** `SegmentSpec` requires 1-based inclusive `start_turn_idx` / `end_turn_idx`
-whose terminal turn is the closing communication event; turn indices can only be captured
-as the agent runs. The 2026-06-30 design states "Multica decides segment boundaries at
-communication events during execution" and "Multica tracks turn indices as the agent runs."
+**Rationale:** `to_dict` / `from_dict` are documented as the lossless single
+source of truth; `visit_count` is the one field omitted. `branch_backup`
+(dag_backup.py:88-110) mutates `parent.visit_count` as a running MCTS
+branch-value aggregate, so a checkpoint save/restore currently zeros it.
 
-**Alternative considered:** reconstruct the DAG at completion by querying sub-issues /
-mentions / completions — rejected because per-run turn indices and exact segment-close
-ordering are not recoverable after the fact, and the contract demands turn ranges.
+**Backward compatibility:** `from_dict` reads `d.get("visit_count", 0)`, so old
+checkpoints (without the key) deserialize to 0 - the dataclass default and the
+correct value for a never-branched SuperNode. No migration of existing
+checkpoint files is needed.
 
-### D2 — Reuse the env-dispatch path + `GET /api/v1/env-dispatch/{projectID}/dag`
+**Alternative considered:** remove `SuperNode.visit_count` entirely and rely
+only on the persisted `tree_store._visit_counts` dict - rejected because
+`branch_backup` uses the field as its running aggregate and the dict is keyed
+by `node_id` with different update semantics (per-visit, not per-branch-return);
+conflating them changes MCTS value semantics. Keep both, serialize the field.
 
-Reuse `create_env_dispatch(mode="scratch")` to start the rollout (it already creates
-project / issue / agent_run and calls `/rl/start_session`), and add a polling
-`GET /api/v1/env-dispatch/{projectID}/dag` that returns `202` in-progress or
-`200` + `DagResult` when the root task completes. `project_id` is the root handle.
+### D2 - Populate `incoming_edges` / `outgoing_edges` in `assemble_from_refs`
 
-**Rationale:** env-dispatch already owns the project/issue/agent_run/session machinery;
-adding a result endpoint avoids a parallel `submit_root_task` / `collect_result`
-orchestration path and fits the existing protocol.
+After the edge-adding loop (:181-188), populate each SuperNode's edge tuples
+from `edag.edges`, mirroring the existing pattern in `assemble()` (:336-345):
 
-**Alternative considered:** a separate `MulticaDagClient` with `submit_root_task` /
-`collect_result` endpoints (assumed by the 2026-06-30 design, precedent
-`/api/v1/swe-lego/issues`) — rejected for v1 to avoid duplicating orchestration; the AReaL
-client can still expose a `MulticaDagClient` Protocol as a thin adapter over
+```python
+for super_node in edag.events:
+    super_node.incoming_edges = tuple(
+        (e.src, e.type) for e in edag.edges if e.dst == super_node.node_id
+    )
+    super_node.outgoing_edges = tuple(
 ```
 
 Full source: openspec/changes/sub-project-g-multica-interaction-dag/design.md
@@ -180,174 +198,131 @@ Full source: openspec/changes/sub-project-g-multica-interaction-dag/design.md
 ## openspec/changes/sub-project-g-multica-interaction-dag/tasks.md
 
 - Source: openspec/changes/sub-project-g-multica-interaction-dag/tasks.md
-- Lines: 1-146
-- SHA256: 555fbb3db6570a2463c76df6d36d94f2780f895997be3ed8cac35d9b0ccb1272
-
-[TRUNCATED]
+- Lines: 1-79
+- SHA256: 142149b665ee0e52db2065473be4c92481d95917bfd63f255be9c39c46aac2c7
 
 ```md
-## 1. Investigation — interaction seams and turn-index source
+## 1. Investigation - confirm impact and test foundation
 
-- [ ] 1.1 Confirm where Multica drives each assistant turn (proxy `/chat/completions`
-  boundary) and define the per-`agent_run_id` turn-counter seam for `start_turn_idx` /
-  `end_turn_idx`.
-- [ ] 1.2 Confirm the delegation seam (`issue.parent_issue_id`, `internal/service/task.go`)
-  emits a `DELEGATION` edge source and closes the parent run's current segment.
-- [ ] 1.3 Confirm the mention seam (`internal/mention`) emits a `MENTION` peer edge without
-  closing a segment.
-- [ ] 1.4 Confirm the completion / notify-parent seam emits a `COMPLETION` edge and closes
-  the child run's current segment.
-- [ ] 1.5 Confirm the squad-briefing seam (`handler/squad_briefing.go`) closes a segment.
-- [ ] 1.6 Confirm `session_id ↔ agent_run_id` is captured at `/rl/start_session` time
-  (`internal/arealrl/client.go`).
-- [ ] 1.7 Confirm the root-task completion signal (agent-run terminal status vs. a
-  rollout-complete marker) used to flip the DAG endpoint from `202` to `200`.
-- [ ] 1.8 Document findings; commit: `docs(G): T1 interaction-DAG seam confirmation`.
+- [ ] 1.1 Confirm whether `branch_backup` (dag_backup.py:88-110) is on a current
+  v2-path execution, or only a near-future tree-search-branching phase. Decide
+  whether a `branch_backup` + checkpoint-resume end-to-end test is in scope for
+  Task 4 or deferred.
+- [ ] 1.2 Grep-confirm no non-test consumer of `assemble_from_refs` SuperNodes
+  reads `incoming_edges` / `outgoing_edges` tuples today (`event_codec.py`,
+  `customized_grouped_workflow.py`); document that populating them is
+  non-behavioral to the live backup.
+- [ ] 1.3 Confirm the existing test foundation (`test_assembler_ref_resolve.py`,
+  `test_checkpoint_super.py`, `test_segment_dag_training_path.py`) and choose
+  which file each new test extends.
+- [ ] 1.4 Document findings; commit: `docs(G): T1 v2-path hardening investigation`.
 
-## 2. Migration + DB queries
+## 2. Lossless `visit_count` serialization (TDD)
 
-- [ ] 2.1 Add migration: `interaction_dag_segment` (segment_id, project_id, agent_run_id,
-  issue_id, task_id, start_turn_idx, end_turn_idx, closing_event, closing_event_target,
-  created_at), `interaction_dag_edge` (src_segment_id, dst_segment_id, type), and
-  `interaction_dag_env_snapshot` (segment_id, sandbox_ids, issue_snapshot_id, env_state).
-- [ ] 2.2 Generate / add DB query files: `CreateSegment`, `CloseSegment` (set
-  end_turn_idx + closing_event), `AddEdge`, `CaptureEnvSnapshot`, `RecordSessionAgentRun`,
-  `ListSegmentsForProject`, `ListEdgesForProject`, `ListEnvSnapshotsForProject`,
-  `GetDagStatus` (project_id → in_progress|done|failed).
-- [ ] 2.3 Ensure `DELETE /api/v1/env-dispatch/{projectID}` cascades to the new tables.
-- [ ] 2.4 Commit: `feat(interaction-dag): migration + queries for segments edges snapshots`.
+**Files:** `customized_areal/tree_search/agents/execution_dag.py`,
+`customized_areal/tree_search/tests/test_checkpoint_super.py`.
 
-## 3. Incremental recording service (TDD)
+- [ ] 2.1 Failing test: a `SuperNode` with `visit_count=3` round-trips through
+  `to_dict()` -> `from_dict()` with `visit_count` preserved (currently resets
+  to 0).
+- [ ] 2.2 Failing test: `from_dict()` on a dict without `visit_count` (old
+  checkpoint shape) deserializes to 0 (backward compatibility).
+- [ ] 2.3 Add `visit_count` to `to_dict()` (emit the int) and `from_dict()`
+  (`d.get("visit_count", 0)`).
+- [ ] 2.4 Commit: `fix(supernode): serialize visit_count in to_dict/from_dict`.
 
-**Files:** `internal/service/interaction_dag.go`,
-`internal/service/interaction_dag_test.go`.
+## 3. Topology-complete `assemble_from_refs` (TDD)
 
-- [ ] 3.1 Failing tests: delegation closes parent segment + opens child + records
-  `DELEGATION` edge with correct turn indices.
-- [ ] 3.2 Failing tests: mention records `MENTION` edge without closing a segment.
-- [ ] 3.3 Failing tests: completion closes child segment + records `COMPLETION` edge.
-- [ ] 3.4 Failing tests: squad briefing closes a segment.
-- [ ] 3.5 Failing tests: leaf run (no communication event) yields one leaf segment with
-  `closing_event = None`.
-- [ ] 3.6 Failing tests: concurrent fan-out delegation (planner → multiple workers)
-  produces multiple `DELEGATION` edges and a deterministic, acyclic segment set.
-- [ ] 3.7 Failing tests: `RecordSessionAgentRun` captures `session_id ↔ agent_run_id`.
-- [ ] 3.8 Failing tests: a recording error is logged and the run continues (best-effort).
-- [ ] 3.9 Implement `InteractionDAGService` (start run, record turn, close segment on
-  event, add edge, capture snapshot) behind a feature flag.
-- [ ] 3.10 Wire hooks from task/mention/completion/squad-briefing seams to the service for
-  trained rollouts only.
-- [ ] 3.11 Commit: `feat(interaction-dag): incremental segment + edge recording`.
+**Files:** `customized_areal/tree_search/agents/supernode_assembler.py`,
+`customized_areal/tree_search/tests/test_assembler_ref_resolve.py`.
 
-## 4. Lightweight env snapshot capture (TDD)
+- [ ] 3.1 Failing test: `assemble_from_refs` on a 3-segment DAG with
+  DELEGATION + COMPLETION edges populates each SuperNode's
+  `incoming_edges` / `outgoing_edges` to match `edag.edges` (currently `()`).
+- [ ] 3.2 Failing test: a leaf segment (no incoming/outgoing edges) has empty
+  tuples (regression guard).
+- [ ] 3.3 Implement: after the edge-adding loop, populate
+  `incoming_edges` / `outgoing_edges` from `edag.edges` (mirror `assemble()`
+  :336-345).
+- [ ] 3.4 Assert no behavior change to `distribute_reward_over_dag` (it reads
+  `dag.edges`): existing fan-in / backup tests still pass.
+- [ ] 3.5 Commit: `fix(assembler): populate incoming/outgoing_edges in assemble_from_refs`.
 
-**Files:** `internal/service/interaction_dag.go`,
-`internal/service/interaction_dag_test.go`.
+## 4. v2-path round-trip + fan-in regression tests
 
-- [ ] 4.1 Failing tests: `CaptureEnvSnapshot` records `sandbox_ids` (sandbox_instance ids
-  per team agent) + `issue_snapshot_id` + minimal `env_state` at the closing event.
-- [ ] 4.2 Failing tests: snapshot is ref-only — no sandbox pause/fork is invoked.
-- [ ] 4.3 Failing tests: missing snapshot for a segment is detectable (assembler
-  dense-coverage path).
-- [ ] 4.4 Implement snapshot capture reusing existing sandbox_instance refs; no F
-  dependency.
-- [ ] 4.5 Commit: `feat(interaction-dag): ref-only team env snapshots`.
+**Files:** `customized_areal/tree_search/tests/test_assembler_ref_resolve.py`
+(or `test_segment_dag_training_path.py`).
 
-## 5. DagResult assembly (TDD)
+- [ ] 4.1 Round-trip test: `assemble_from_refs` -> per-SuperNode
+  `to_dict()` -> `from_dict()` asserts `incoming_edges` /
+  `outgoing_edges` / `visit_count` / `closing_event` / `sandbox_ids` /
+  `env_state` / `metadata["tensors"]` all survive. Seed `visit_count` on a
+  fork segment to assert non-zero round-trip.
+- [ ] 4.2 Fan-in credit test: `assemble_from_refs` with a segment having two
+  incoming DELEGATION edges -> `distribute_reward_over_dag` credits both
+  parent segments (not just one).
+- [ ] 4.3 Commit: `test(supernode): v2-path round-trip + fan-in regression`.
 
-**Files:** `internal/service/interaction_dag.go`,
-`internal/service/interaction_dag_test.go`.
+## 5. Full regression + grep sweep
 
-- [ ] 5.1 Failing tests: `AssembleDagResult(project_id)` returns `session_ids`,
-  `session_to_agent_run`, `segments`, `edges`, `env_snapshots` exactly matching the AReaL
-  `DagResult` shape.
-- [ ] 5.2 Failing tests: segments carry 1-based inclusive `start_turn_idx` / `end_turn_idx`
-  with terminal = closing-event turn.
-- [ ] 5.3 Failing tests: edges carry `src` / `dst` / `type` with `EdgeType` string values
-  `delegation` / `mention` / `completion`.
-- [ ] 5.4 Failing tests: assembled DAG is acyclic (topological order valid).
+- [ ] 5.1 `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/ -k
+  'assembler or checkpoint or supernode or dag'` (per repo test-invocation
+  note; do not trust `uv run pytest` - stale venv).
+- [ ] 5.2 `ruff check` (from PATH, not `.venv-test/bin/ruff`) on touched files.
+- [ ] 5.3 grep sweep: `visit_count` resolves in `to_dict` / `from_dict` +
+  `branch_backup`; `incoming_edges` / `outgoing_edges` populated in both
+  `assemble` and `assemble_from_refs`.
+- [ ] 5.4 Final whole-branch review -> READY TO MERGE / NEEDS_CHANGES.
+- [ ] 5.5 Commit: `docs(G): T5 full regression + grep sweep`.
+
+## Test runners / constraints
+
+- AReaL tests run from `backend/areal`. Prefer `.venv-test/bin/python -m pytest`
+  (the `uv run pytest` venv path is stale per repo test-invocation note).
+- Use `ruff` from PATH (not `.venv-test/bin/ruff`).
+- No GPU / distributed tests required (pure-Python data-model + tests).
 ```
 
-Full source: openspec/changes/sub-project-g-multica-interaction-dag/tasks.md
+## openspec/changes/sub-project-g-multica-interaction-dag/specs/v2-segment-dag-integrity/spec.md
 
-## openspec/changes/sub-project-g-multica-interaction-dag/specs/interaction-dag-return/spec.md
-
-- Source: openspec/changes/sub-project-g-multica-interaction-dag/specs/interaction-dag-return/spec.md
-- Lines: 1-72
-- SHA256: 8847a9201d6a1e86478719511fce6db3e3936f04566eaa829085726bbcb118a4
+- Source: openspec/changes/sub-project-g-multica-interaction-dag/specs/v2-segment-dag-integrity/spec.md
+- Lines: 1-34
+- SHA256: 13f0202f80e70ee7a83f84d4a9095170ae9b538e746601ac93e33a5a7501f2c1
 
 ```md
 ## ADDED Requirements
 
-### Requirement: Incremental interaction-DAG recording at communication events
-The system SHALL record agent interactions as a communication-bounded segment DAG during task execution. A segment MUST span the turns since the previous communication event up to and including the closing-event turn, with 1-based inclusive `start_turn_idx` / `end_turn_idx` whose terminal turn is the closing communication event. Typed edges MUST match AReaL's `EdgeType`: `DELEGATION` (parent-issue run → child sub-issue run), `MENTION` (peer trigger, topology-only), and `COMPLETION` (child run → parent run continuation). Recording MUST happen during execution, not reconstructed after completion.
+### Requirement: Lossless SuperNode serialization
+The system SHALL serialize every `SuperNode` field through `to_dict()` and restore it through `from_dict()` with no loss. The serialized envelope MUST include `visit_count` alongside the identity, topology, env, reward, and turn fields. `from_dict()` MUST tolerate a missing `visit_count` key (older checkpoints) by defaulting to 0.
 
-#### Scenario: Delegation closes parent segment and opens child
-- **WHEN** a trained agent run delegates by creating a sub-issue
-- **THEN** the system closes the delegating run's current segment at the delegating turn, opens a child segment for the new run, and records a `DELEGATION` edge from the parent segment to the child segment
+#### Scenario: visit_count survives a round-trip
+- **WHEN** a `SuperNode` with `visit_count` set to a non-zero value is serialized via `to_dict()` and restored via `from_dict()`
+- **THEN** the restored `SuperNode`'s `visit_count` MUST equal the original value
 
-#### Scenario: Mention records a peer edge without closing a segment
-- **WHEN** a trained agent run mentions or triggers another agent
-- **THEN** the system records a `MENTION` edge between the runs without closing the mentioning run's current segment
+#### Scenario: Old checkpoints without visit_count deserialize to zero
+- **WHEN** `from_dict()` reads a dict that does not contain a `visit_count` key
+- **THEN** the restored `SuperNode`'s `visit_count` MUST be 0
 
-#### Scenario: Completion closes child segment and links to parent
-- **WHEN** a child run completes and notifies its parent
-- **THEN** the system closes the child run's current segment at the completing turn and records a `COMPLETION` edge from the child segment to the parent's continuation segment
+### Requirement: Topology-complete v2-assembled SuperNodes
+The `SuperNodeAssembler.assemble_from_refs` path SHALL populate each assembled `SuperNode`'s `incoming_edges` and `outgoing_edges` tuples so they are consistent with the `ExecutionDAG.edges` of the containing DAG. A SuperNode serialized via `to_dict()` after v2 assembly MUST retain its full edge topology.
 
-#### Scenario: Leaf run has no closing event
-- **WHEN** a trained run ends with no communication event
-- **THEN** the system records one leaf segment with `closing_event` set to null and no outgoing edges
+#### Scenario: v2 assembly populates edge tuples
+- **WHEN** `assemble_from_refs` builds an `ExecutionDAG` with typed edges between segments
+- **THEN** every assembled `SuperNode`'s `incoming_edges` and `outgoing_edges` MUST match the edges in the `ExecutionDAG` (same sources/destinations and edge types)
 
-#### Scenario: Recorded DAG is acyclic
-- **WHEN** the system records segments and edges
-- **THEN** the resulting directed graph MUST be acyclic, with every edge flowing from a cause segment to an effect segment in topological order
+#### Scenario: v2-assembled topology survives serialization
+- **WHEN** a SuperNode produced by `assemble_from_refs` is serialized via `to_dict()` and restored via `from_dict()`
+- **THEN** the restored SuperNode's `incoming_edges` and `outgoing_edges` MUST equal the originals
 
-### Requirement: Per-run turn-index tracking
-The system SHALL maintain a per-`agent_run_id` turn counter as it drives each assistant turn through the inference proxy. One assistant turn MUST equal one turn. The closing communication event's turn index MUST be stamped as the segment's `end_turn_idx`.
+#### Scenario: Leaf segment has empty edge tuples
+- **WHEN** a segment with no incoming or outgoing edges is assembled
+- **THEN** its `incoming_edges` and `outgoing_edges` MUST both be empty
 
-#### Scenario: Turn indices align with areal node positions
-- **WHEN** Multica records a segment's `start_turn_idx` / `end_turn_idx`
-- **THEN** the indices MUST densely cover `[1, len(nodes)]` for that run with no gaps or overlaps, matching the 1-based positions of the `list[Node]` AReaL builds from the proxy interaction cache
+### Requirement: v2-path fan-in credit is preserved
+The v2 assembly path MUST NOT regress fan-in reward credit. When a segment has multiple incoming blocking edges (DELEGATION or COMPLETION), `distribute_reward_over_dag` MUST credit every parent segment.
 
-#### Scenario: Concurrent fan-out delegation stays acyclic
-- **WHEN** a planner delegates to multiple workers at once
-- **THEN** the system records multiple `DELEGATION` edges from the planner's closing segment to each child segment deterministically, and the DAG remains acyclic
-
-### Requirement: Lightweight ref-only team env snapshots
-The system SHALL capture a `TeamEnvSnapshot` per segment at the closing communication event containing `sandbox_ids` (current sandbox_instance ids per team agent), `issue_snapshot_id` (issue-subtree ref), and minimal `env_state`. The snapshot MUST be reference-only: the system MUST NOT pause, snapshot, or fork any sandbox to produce it.
-
-#### Scenario: Snapshot records refs only
-- **WHEN** a segment's closing event fires
-- **THEN** the system records the team's current sandbox_instance ids and issue-subtree ref without invoking any sandbox pause or fork operation
-
-#### Scenario: Independent of environment checkpointing
-- **WHEN** Sub-project F environment checkpointing is not available
-- **THEN** the system still captures ref-only team env snapshots for every segment
-
-### Requirement: Polling DagResult return at task completion
-The system SHALL expose `GET /api/v1/env-dispatch/{projectID}/dag` that returns `202` with a status body while the root task is in progress and `200` with an assembled `DagResult` when the root task completes (success or failed). The `DagResult` MUST contain `session_ids`, `session_to_agent_run`, `segments`, `edges`, and `env_snapshots` matching the contract AReaL's `SuperNodeAssembler` consumes.
-
-#### Scenario: In-progress poll
-- **WHEN** AReaL polls the endpoint before the root task completes
-- **THEN** the system returns `202` with a status body indicating the task is in progress
-
-#### Scenario: Completed poll returns DagResult
-- **WHEN** the root task has completed
-- **THEN** the system returns `200` with a `DagResult` that `SuperNodeAssembler.assemble` reconstructs losslessly into the `ExecutionDAG`
-
-#### Scenario: Unknown project rejected
-- **WHEN** a caller polls a project_id that does not exist
-- **THEN** the system returns `404`
-
-#### Scenario: Cross-workspace access rejected
-- **WHEN** a caller polls a project_id outside its workspace
-- **THEN** the system returns `403`
-
-### Requirement: Session-to-agent-run mapping
-The system SHALL record the `session_id` to `agent_run_id` mapping at `/rl/start_session` time for every agent run in a trained rollout and include it in the returned `DagResult`.
-
-#### Scenario: Mapping captured at session start
-- **WHEN** Multica starts an RL session for an agent run
-- **THEN** the system records the `session_id ↔ agent_run_id` pair and emits it in `session_to_agent_run` of the `DagResult`
+#### Scenario: Fan-in join credits all parents on the v2 path
+- **WHEN** `assemble_from_refs` produces a segment with two incoming DELEGATION edges and `distribute_reward_over_dag` distributes a terminal reward backward
+- **THEN** both parent segments MUST receive non-zero credit
 ```
 
