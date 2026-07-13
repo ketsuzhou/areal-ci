@@ -1,0 +1,17 @@
+workflow: full
+phase: build
+build_mode: executing-plans
+build_pause: null
+isolation: worktree
+verify_mode: null
+base_ref: 853e5cbcda6929e80961ed778194c1402fb7d9ba
+design_doc: docs/superpowers/specs/2026-07-13-env-dispatch-dag-db-bridge-design.md
+plan: docs/superpowers/plans/2026-07-13-env-dispatch-dag-db-bridge.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-07-13
+verified_at: null
+archived: false
+handoff_context: openspec/changes/env-dispatch-dag-db-bridge/.comet/handoff/design-context.json
+handoff_hash: a8a80465935ae065bffa2d62fca7017f96719b1a311a69aee6c62882b50bd91e
