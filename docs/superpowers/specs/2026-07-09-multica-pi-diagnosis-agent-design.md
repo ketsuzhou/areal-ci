@@ -146,20 +146,34 @@ slices `task_message` precisely. Alternatives rejected: return the whole agent_r
 and let the agent infer boundaries (imprecise); fetch from areal's `tensor_ref` trajectory
 (couples Multica diagnosis to areal's store).
 
-### D4 - Keying: `(segment_id, seq)`
+### D4 - Keying: `(segment_id, seq)` -> aggregate to `SuperNode.process_reward`
 
-Rewards are keyed by `(segment_id, seq)`. AReal maps `segment_id` -> `SuperNode` (existing
-mapping) and `seq` -> `Node` within it, writing `process_reward`. The alignment between
-`task_message.seq` (Multica's per-task sequence) and AReal's `Node` index (from the trajectory)
-is verified in the areal consumer task; if they diverge, the key is reconciled there (not by
-fabricating defaults).
+Rewards are keyed by `(segment_id, seq)` at the **diagnosis-emission** granularity
+(per-LLM-output turn). AReal maps `segment_id` -> `SuperNode`. The v2 GAE
+(`events_from_nodes`) consumes a **per-segment** `SuperNode.process_reward` (one
+GAE step per segment; `assemble_from_refs` builds SuperNodes with `nodes=[]`, so
+there are no per-turn DAG Nodes to write to). So AReal **aggregates** the
+segment's per-turn step rewards into a per-segment `SuperNode.process_reward` =
+`mean(scores) / score_max` in `[0, 1]` (`score_max` served by `/dag` so AReal
+does not guess Multica's scale - boundary canonicalization). Per-turn scores
+remain stored in `interaction_dag_step_reward` + `/dag step_rewards[]` for future
+per-token credit use. Absent/unscored segments stay `0.0` (sparse, never
+fabricated). Resolved in Task 7 (user-approved aggregate-to-SuperNode option;
+the design's original "seq -> Node" did not fit the v2 tensor-ref GAE path).
 
 ### D5 - Trigger sequencing
 
-Diagnosis runs at root-task terminal, **before** `/dag` returns 200, so rewards are present on
-the first done-poll. If diagnosis exceeds its timeout, `/dag` stays 202 (in-progress) until it
-finishes or the timeout elapses; on soft-failure, `/dag` returns 200 with an empty
-`step_rewards[]` (areal falls back to sparse `process_reward`).
+Diagnosis runs **synchronously** at root-task terminal - wired into
+`RouteTerminalTrainingTask` after `maybeTriggerCheckpoint` and before the close
+hook (`SetReward`/`EndSession`), so `step_rewards` are written before the task's
+rewards are delivered. **Correction** (verified in Task 4): `CompleteAgentTask`
+persists terminal status *before* `RouteTerminalTrainingTask`, so `/dag` sees a
+terminal (200, not 202) status during the synchronous diagnosis - the rewards
+land before the first done-poll that observes 200, but `/dag` does not stay 202
+*during* diagnosis. A strict 202-while-diagnosis-in-progress would require a
+diagnosis-in-progress flag (deferred gap). On soft-failure (`Diagnose` error),
+no rewards are written and `/dag` returns 200 with an empty `step_rewards[]`
+(AReal falls back to sparse `process_reward = 0.0`).
 
 ## Error handling / boundary conditions
 

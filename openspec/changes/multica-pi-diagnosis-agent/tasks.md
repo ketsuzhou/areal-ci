@@ -51,7 +51,7 @@ ordering), tests.
 - [x] 3.3 Failing tests: a diagnosis soft-failure (timeout/parse error) is logged and does
   NOT block task completion or the `/dag` done transition (best-effort, sparse-reward
   fallback).
-- [ ] 3.4 Failing tests: the diagnosis agent views the *whole* project segment DAG (all
+- [x] 3.4 Failing tests: the diagnosis agent views the *whole* project segment DAG (all
   agents), distinct from the per-agent critic terminal.
 - [x] 3.5 Implement the trigger wiring behind the flag.
 - [x] 3.6 Commit: `feat(diagnosis-agent): trigger at collaborative-task completion`
@@ -98,10 +98,10 @@ ordering), tests.
 - [ ] 4.4 Failing tests: `/dag` stays `202` in-progress while diagnosis runs, then `200`
   done with rewards (bounded by the diagnosis timeout); soft-failure -> `200` done + empty
   `step_rewards[]`.
-- [ ] 4.5 Implement the step-reward table + `AssembleAssembledDag` extension + `/dag`
+- [x] 4.5 Implement the step-reward table + `AssembleAssembledDag` extension + `/dag`
   serving; extend areal `AssembledDag`/`SegmentSpec` to carry `step_rewards[]` (refines
   in-flight `v2-segment-dag-recording` - reconcile on apply).
-- [ ] 4.6 Commit: `feat(diagnosis-agent): project-scoped per-step reward delivery via AssembledDag`.
+- [x] 4.6 Commit: `feat(diagnosis-agent): project-scoped per-step reward delivery via AssembledDag`.
 
 > **Task 5 (plan, Go-side) split note:** 4.1-4.3 + the multica-Go portion of 4.5 (table
 > already existed as migration 161; `AssembleAssembledDag` extension + `/dag` serving +
@@ -122,31 +122,31 @@ ordering), tests.
 `customized_areal/tree_search/config.py` (≈L151–178),
 `customized_areal/tree_search/distilling/config.py`, tests.
 
-- [ ] 5.1 Failing tests: AReal reads `step_rewards[]` from the `AssembledDag` and maps
+- [x] 5.1 Failing tests: AReal reads `step_rewards[]` from the `AssembledDag` and maps
   `(segment_id, seq)` -> `SuperNode` / `Node` -> `process_reward` on the node (consumed by
   `dag_advantage.py`).
-- [ ] 5.2 Failing tests: rewards with no matching `SuperNode`/`Node` are dropped + logged
+- [x] 5.2 Failing tests: rewards with no matching `SuperNode`/`Node` are dropped + logged
   (absence distinguishable, no default-fill).
-- [ ] 5.3 Failing tests: with empty `step_rewards[]`, process reward is sparse/zero (matches
+- [x] 5.3 Failing tests: with empty `step_rewards[]`, process reward is sparse/zero (matches
   `enable_judge_process_reward=False`), NOT a re-introduced judge.
-- [ ] 5.4 Verify `critic_score.py` usage: confirm whether `ExternalDiagnoseProvider` /
+- [x] 5.4 Verify `critic_score.py` usage: confirm whether `ExternalDiagnoseProvider` /
   `diagnose_episode` is still needed by the critic; keep it if so (non-goal #3).
-- [ ] 5.5 Remove the `enable_judge_process_reward` branch in `customized_grouped_workflow.py`
+- [x] 5.5 Remove the `enable_judge_process_reward` branch in `customized_grouped_workflow.py`
   and delete `judge_prompt.py`; remove `enable_judge_process_reward` /
   `judge_process_reward_beta` / `judge_model_name` / `judge_max_concurrency` flags.
-- [ ] 5.6 Commit: `refactor(tree-search): consume multica per-step rewards, remove flat judge`.
+- [x] 5.6 Commit: `refactor(tree-search): consume multica per-step rewards, remove flat judge`.
 
 ## 6. Config + flags + spec
 
 **Files:** `server/internal/daemon/config.go` / env, `openspec/changes/multica-pi-diagnosis-
 agent/specs/diagnosis-process-reward/spec.md`.
 
-- [ ] 6.1 Add `DIAGNOSIS_AGENT_ENABLED` (default off) + `DIAGNOSIS_AGENT_*` (path/model/
+- [x] 6.1 Add `DIAGNOSIS_AGENT_ENABLED` (default off) + `DIAGNOSIS_AGENT_*` (path/model/
   timeout/score_max) env config, composing with `s.Training` / `INTERACTION_DAG_ENABLED`.
-- [ ] 6.2 Confirm `specs/diagnosis-process-reward/spec.md` matches the implemented behavior
+- [x] 6.2 Confirm `specs/diagnosis-process-reward/spec.md` matches the implemented behavior
   (trigger/gating, tool surface, turn-range capture, per-LLM-output output, AssembledDag
   delivery, soft-fail, critic coexistence).
-- [ ] 6.3 Commit: `feat(diagnosis-agent): config + spec`.
+- [x] 6.3 Commit: `feat(diagnosis-agent): config + spec`.
 
 ## 7. Integration + E2E
 
@@ -160,11 +160,22 @@ agent/specs/diagnosis-process-reward/spec.md`.
   fixed episode (diagnostic, not a gate).
 - [ ] 7.4 Commit: `test(diagnosis-agent): integration + E2E`.
 
+> **Task 9 integration/E2E (7.1-7.4) deferred to a hardware environment.** These
+> require a live trained 3-agent `mode=scratch` rollout (multica daemon + areal
+> + GPU cluster) - per AReaL CLAUDE.md, integration tests need multi-node
+> hardware, which is unavailable in the build sandbox. The unit-level coverage
+> that IS runnable is green: Go `internal/service` suite + handler `GetDag`/
+> diagnosis tests pass (the handler `AgentActivity`/`Credential`/`Transport`
+> failures are pre-existing DB-dependent 500s in untouched files); the areal
+> `tree_search` suite passes (379+ tests, 16 new for Tasks 7-8). 7.1-7.4 + 4.4
+> (strict `/dag` 202-during-diagnosis, needs an in-progress flag) are the only
+> unchecked items and are deferred to a GPU-equipped verify run.
+
 ## 8. Sweep + docs
 
-- [ ] 8.1 Grep sweep: `enable_judge_process_reward` / `judge_prompt` / `judge_model_name`
+- [x] 8.1 Grep sweep: `enable_judge_process_reward` / `judge_prompt` / `judge_model_name`
   resolve only to intended removals; no dangling refs.
-- [ ] 8.2 Confirm `design.md` Open Questions (Q1–Q4) are resolved (Q1 per-LLM-output, Q2
+- [x] 8.2 Confirm `design.md` Open Questions (Q1–Q4) are resolved (Q1 per-LLM-output, Q2
   AssembledDag-attached, Q3 task_message + stored turn range, Q4 coexist) and update if any
   drifted.
-- [ ] 8.3 Commit: `docs(diagnosis-agent): sweep + finalize design`.
+- [x] 8.3 Commit: `docs(diagnosis-agent): sweep + finalize design`.

@@ -65,7 +65,9 @@ SHALL cover its agent run's full turn range.
 The diagnosis agent SHALL emit one reward per LLM output (turn), scored as an integer in
 `[0, score_max]` reflecting that turn's contribution to completing the task, in a structured
 output parsed by Multica (mirroring `judge_prompt.py`'s score discipline). Each reward SHALL be
-keyed by `(segment_id, seq)` so AReal can attach it to the corresponding `SuperNode`/`Node`.
+keyed by `(segment_id, seq)` so AReal can attach it to the corresponding
+`SuperNode` (per-segment `process_reward`, aggregated from the segment's per-turn
+scores; the v2 GAE consumes one reward per segment).
 Unparseable or partial output SHALL yield no rewards for the affected turns (not fabricated
 scores).
 
