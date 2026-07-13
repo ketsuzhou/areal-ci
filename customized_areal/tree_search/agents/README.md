@@ -55,7 +55,7 @@ inside the differentiable helpers) so the package unit-tests without the trainin
 
 | Module                     | Role                                                                                                                                                                                                                       |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `swe_lego_client.py`       | `MulticaEnvDispatchClient` — thin HTTP client for the unified env-dispatch API: `POST /api/v1/env`, `DELETE /api/v1/env/{envID}`, `POST /api/v1/env-dispatch`, `DELETE /api/v1/env-dispatch/{projectID}` (spec §6).        |
+| `multica_client.py`        | `MulticaEnvDispatchClient` — thin HTTP client for the unified env-dispatch API: `POST /api/v1/env`, `DELETE /api/v1/env/{envID}`, `POST /api/v1/env-dispatch`, `DELETE /api/v1/env-dispatch/{projectID}` (spec §6).        |
 | `swe_lego_issue_runner.py` | `run_swe_lego_issue` — per-issue orchestration (spec §5.1): atomic env-dispatch, open one RL session per rollout, drive per-lane branching, verify+reward each terminal run, always-cleanup.                               |
 | `self_play_runner.py`      | `run_self_play` — mirrors the SWE-Lego runner but dispatches a `SelfPlayQuery` from `query_bank` as a chat message (`domain=self_play`, `dispatch_type=message`); returns `SelfPlayResult` with per-agent rewards/success. |
 

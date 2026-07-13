@@ -1210,7 +1210,7 @@ as leaf `SuperNode`s before insertion into `MCTSTreeStore`.
 
 | Module                                          | Responsibility                                                                                                                   |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `agents/swe_lego_client.py`                     | Thin HTTP client for Multica's unified `env-dispatch` API.                                                                       |
+| `agents/multica_client.py`                     | Thin HTTP client for Multica's unified `env-dispatch` API.                                                                       |
 | `agents/swe_lego_issue_runner.py`               | Per-SWE-Lego-issue loop: create env-dispatch, open RL sessions, drive lanes, verify/reward terminal runs, and clean up projects. |
 | `agents/self_play_runner.py`                    | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue.                          |
 | `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration.                                    |

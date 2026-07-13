@@ -70,7 +70,7 @@ from customized_areal.tree_search.agents.harvest import (
 from customized_areal.tree_search.agents.integration import (
     finalize_with_verifier,
 )
-from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
+from customized_areal.tree_search.agents.multi_agent_workflow import (
     MultiAgentEnvDispatchWorkflow,
 )
 from customized_areal.tree_search.agents.rl_session import (

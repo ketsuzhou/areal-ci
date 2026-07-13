@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from customized_areal.tree_search.agents.multi_agent_env_dispatch import (
+from customized_areal.tree_search.agents.multi_agent_workflow import (
     MultiAgentEnvDispatchWorkflow,
+)
+from customized_areal.tree_search.agents.multica_client import (
+    MulticaEnvDispatchClient,
 )
 from customized_areal.tree_search.config import (
     AdvantageMode,
@@ -35,8 +38,10 @@ def _make(tmp_path, **multica_kwargs):
     )
 
 
-def test_multica_enabled_constructs_multi_agent_workflow(tmp_path):
-    dispatch = SimpleNamespace()
+def test_multica_enabled_constructs_multi_agent_workflow(tmp_path, monkeypatch):
+    # MulticaEnvDispatchClient is constructed directly by the workflow and
+    # reads its base URL / API key from the environment.
+    monkeypatch.setenv("MULTICA_BASE_URL", "http://multica.test")
     dag_client = SimpleNamespace()
     assembler = SimpleNamespace()
     resolver = SimpleNamespace()
@@ -46,7 +51,6 @@ def test_multica_enabled_constructs_multi_agent_workflow(tmp_path):
         tmp_path,
         multica_dag_enabled=True,
         multica_dag_client=dag_client,
-        multica_dispatch_client=dispatch,
         multica_assembler=assembler,
         multica_resolver=resolver,
         multica_session_remover=session_remover,
@@ -55,9 +59,10 @@ def test_multica_enabled_constructs_multi_agent_workflow(tmp_path):
     # self.workflow is the constructed MultiAgentEnvDispatchWorkflow...
     assert isinstance(wf.workflow, MultiAgentEnvDispatchWorkflow)
     # ...wired with the supplied components (dag_client is the get_dag poller;
-    # dispatch_client is the create_env_dispatch client - distinct concerns).
+    # dispatch_client is a directly-constructed MulticaEnvDispatchClient - the
+    # create_env_dispatch concern, distinct from the dag poller).
     assert wf.workflow._dag_client is dag_client
-    assert wf.workflow._dispatch is dispatch
+    assert isinstance(wf.workflow._dispatch, MulticaEnvDispatchClient)
     assert wf.workflow._assembler is assembler
     assert wf.workflow._resolver is resolver
     assert wf.workflow._session_remover is session_remover

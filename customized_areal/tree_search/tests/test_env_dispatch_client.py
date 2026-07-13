@@ -4,11 +4,11 @@ import json
 import httpx
 import pytest
 
-from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue
-from customized_areal.tree_search.agents.swe_lego_client import (
+from customized_areal.tree_search.agents.multica_client import (
     MulticaCheckpointError,
     MulticaEnvDispatchClient,
 )
+from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue
 
 
 def _transport(handler):
