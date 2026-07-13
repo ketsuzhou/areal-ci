@@ -44,17 +44,41 @@ reads `task_message` (migration 026).
 terminal path, ≈L1357/182/1567), `server/internal/service/training.go` (close-hook
 ordering), tests.
 
-- [ ] 3.1 Failing tests: at collaborative-task (root/project) terminal the diagnosis agent
+- [x] 3.1 Failing tests: at collaborative-task (root/project) terminal the diagnosis agent
   fires with the project's segment DAG, **before** `/dag` returns `200` done.
-- [ ] 3.2 Failing tests: trigger is gated by `DIAGNOSIS_AGENT_ENABLED` AND `s.Training` AND
+- [x] 3.2 Failing tests: trigger is gated by `DIAGNOSIS_AGENT_ENABLED` AND `s.Training` AND
   `INTERACTION_DAG_ENABLED`; a non-trained / non-recorded task runs no diagnosis.
-- [ ] 3.3 Failing tests: a diagnosis soft-failure (timeout/parse error) is logged and does
+- [x] 3.3 Failing tests: a diagnosis soft-failure (timeout/parse error) is logged and does
   NOT block task completion or the `/dag` done transition (best-effort, sparse-reward
   fallback).
 - [ ] 3.4 Failing tests: the diagnosis agent views the *whole* project segment DAG (all
   agents), distinct from the per-agent critic terminal.
-- [ ] 3.5 Implement the trigger wiring behind the flag.
-- [ ] 3.6 Commit: `feat(diagnosis-agent): trigger at collaborative-task completion`.
+- [x] 3.5 Implement the trigger wiring behind the flag.
+- [x] 3.6 Commit: `feat(diagnosis-agent): trigger at collaborative-task completion`
+  (multica dev e7c38ff26, SDD review APPROVED).
+
+> **Task 4 (trigger) split note:** 3.1-3.3 + 3.5 + 3.6 are DONE - the trigger fires
+> `Diagnose(projectID)` + `RecordStepRewards` at root-task terminal (agent_id ==
+> train_agent_id) BEFORE the RL close hook (SetReward/EndSession), gated on
+> `Diagnosis != nil` (DIAGNOSIS_AGENT_ENABLED) ∧ `DAG.Enabled()` (INTERACTION_DAG_ENABLED)
+> ∧ `s.Training`, with soft-fail (Diagnose err logged, no rewards, close hook proceeds).
+> Wired in `RouteTerminalTrainingTask` after `maybeTriggerCheckpoint`, before the
+> close-hook/critic-spawn decision (so rewards land before SetReward/EndSession in both
+> the no-critic-close and critic-deferred-close paths). Review APPROVED (246 tests pass).
+> **3.4 left unchecked:** "views the whole project segment DAG" requires the runner to
+> actually fetch+render the DAG - but `DiagnosisAgentRunner.Diagnose` still has a
+> placeholder prompt (Task 1; `--no-tools`); Task 3's read-only tools are NOT yet wired
+> into the runner. The TRIGGER provides the project-scoped root invocation; the runner's
+> DAG-viewing (rich-prompt assembly) is a separate piece (no explicit task - flag for
+> resolution, likely fold into Task 7 integration). **Two deferred gaps (NOT Task 4):**
+> (1) Diagnose placeholder prompt; (2) strict 4.4 "/dag 202 while diagnosis runs" -
+> `CompleteAgentTask` persists terminal status before `RouteTerminalTrainingTask`, so /dag
+> sees terminal (200) during the synchronous diagnosis; strict 202 needs a
+> diagnosis-in-progress flag. Task 4 guarantees step_rewards are written before the close
+> hook. **3 test-strengthening notes deferred to final review/Task 7:** the ordering test
+> calls helpers manually (not via real `RouteTerminalTrainingTask`, which needs the DB-backed
+> `setupRetryTestDB` harness); soft-fail + close-hook-fires combo; RecordStepRewards-error
+> path. Task 7's integration test (7.1) will exercise the real RTT path end-to-end.
 
 ## 4. Project-scoped reward delivery via AssembledDag (Multica, TDD)
 
