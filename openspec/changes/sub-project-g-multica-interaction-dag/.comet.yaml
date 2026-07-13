@@ -1,8 +1,8 @@
 workflow: full
-phase: build
-build_mode: null
+phase: verify
+build_mode: executing-plans
 build_pause: null
-isolation: null
+isolation: branch
 verify_mode: null
 base_ref: 853e5cbcda6929e80961ed778194c1402fb7d9ba
 design_doc: docs/superpowers/specs/2026-07-13-v2-segment-dag-path-hardening-design.md
@@ -15,3 +15,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/sub-project-g-multica-interaction-dag/.comet/handoff/design-context.json
 handoff_hash: 632d1d366796beff22519a19ab78c9e37ed4231d15bfe450b57d9e76857170f1
+build_command: .venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_assembler_ref_resolve.py customized_areal/tree_search/tests/test_checkpoint_super.py -q
+verify_command: .venv-test/bin/python -m pytest customized_areal/tree_search/tests/test_assembler_ref_resolve.py customized_areal/tree_search/tests/test_checkpoint_super.py customized_areal/tree_search/tests/test_dag_backup.py customized_areal/tree_search/tests/test_execution_dag.py customized_areal/tree_search/tests/test_supernode_assembler.py customized_areal/tree_search/tests/test_segment_dag_trainer.py customized_areal/tree_search/tests/test_segment_dag_training_path.py -q
