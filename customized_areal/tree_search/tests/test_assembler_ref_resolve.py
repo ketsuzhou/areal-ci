@@ -1,6 +1,6 @@
 import pytest
 
-from customized_areal.tree_search.agents.execution_dag import DAGError
+from customized_areal.tree_search.agents.execution_dag import DAGError, EdgeType, SuperNode
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     EdgeSpec,
@@ -135,3 +135,32 @@ def test_assemble_from_refs_env_snapshot_stamped():
     assert node.sandbox_ids == ["sb-1", "sb-2"]
     assert node.issue_snapshot_id == "isnap-1"
     assert node.env_state == {"foo": 1}
+
+
+def test_assemble_from_refs_populates_edge_tuples():
+    """v2-assembled SuperNodes carry topology in incoming_edges /
+    outgoing_edges (not just edag.edges) so a to_dict() round-trip preserves it."""
+    dag = _dag()  # seg-1 --completion--> seg-2
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+
+    seg1 = edag.get("seg-1")
+    seg2 = edag.get("seg-2")
+    assert seg1.outgoing_edges == (("seg-2", EdgeType.COMPLETION),)
+    assert seg1.incoming_edges == ()
+    assert seg2.incoming_edges == (("seg-1", EdgeType.COMPLETION),)
+    assert seg2.outgoing_edges == ()
+
+
+def test_assemble_from_refs_leaf_segment_has_empty_edge_tuples():
+    """A segment with no edges has empty edge tuples (regression guard)."""
+    dag = AssembledDag(
+        segments=[
+            SegmentSpec("seg-solo", "ar", "i", 0, {"shard_id": "s"}, None, {}),
+        ],
+        edges=[],
+        session_to_agent_run={"s": "ar"},
+    )
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    solo = edag.get("seg-solo")
+    assert solo.incoming_edges == ()
+    assert solo.outgoing_edges == ()

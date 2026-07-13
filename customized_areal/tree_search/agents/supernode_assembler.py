@@ -191,6 +191,16 @@ class SuperNodeAssembler:
         # topological_order raises DAGError if the graph contains a cycle.
         for idx, super_node in enumerate(edag.topological_order()):
             super_node.completion_index = idx
+        # Populate incoming_edges / outgoing_edges on each SuperNode so the
+        # topology survives a to_dict() round-trip (to_dict reads the tuples,
+        # not edag.edges). Mirrors assemble() :336-345.
+        for super_node in edag.events:
+            super_node.incoming_edges = tuple(
+                (e.src, e.type) for e in edag.edges if e.dst == super_node.node_id
+            )
+            super_node.outgoing_edges = tuple(
+                (e.dst, e.type) for e in edag.edges if e.src == super_node.node_id
+            )
         return edag
 
     def assemble(
