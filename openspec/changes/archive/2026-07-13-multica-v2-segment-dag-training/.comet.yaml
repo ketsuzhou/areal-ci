@@ -12,7 +12,7 @@ verification_report: docs/superpowers/reports/2026-07-13-multica-v2-segment-dag-
 branch_status: handled
 created_at: 2026-07-08
 verified_at: 2026-07-13
-archived: false
+archived: true
 handoff_context: openspec/changes/multica-v2-segment-dag-training/.comet/handoff/design-context.json
 handoff_hash: bff52d85bda76bd960f923c9bbf9de236e5b0c1c6ed03a881c14d0f2c707f2a2
 build_command: .venv-test/bin/python -m pytest areal/v2/inference_service/tests/ -q

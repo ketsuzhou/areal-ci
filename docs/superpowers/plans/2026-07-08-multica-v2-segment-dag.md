@@ -1,3 +1,7 @@
+---
+archived-with: 2026-07-13-multica-v2-segment-dag-training
+status: final
+---
 # Multica v2 Segment-DAG Training (Change 1 - Data Path) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
