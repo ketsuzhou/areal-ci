@@ -18,58 +18,58 @@
 **Files:** `customized_areal/tree_search/agents/execution_dag.py`,
 `customized_areal/tree_search/tests/test_checkpoint_super.py`.
 
-- [ ] 2.1 Failing test: a `SuperNode` with `visit_count=3` round-trips through
+- [x] 2.1 Failing test: a `SuperNode` with `visit_count=3` round-trips through
   `to_dict()` -> `from_dict()` with `visit_count` preserved (currently resets
   to 0).
-- [ ] 2.2 Failing test: `from_dict()` on a dict without `visit_count` (old
+- [x] 2.2 Failing test: `from_dict()` on a dict without `visit_count` (old
   checkpoint shape) deserializes to 0 (backward compatibility).
-- [ ] 2.3 Add `visit_count` to `to_dict()` (emit the int) and `from_dict()`
+- [x] 2.3 Add `visit_count` to `to_dict()` (emit the int) and `from_dict()`
   (`d.get("visit_count", 0)`).
-- [ ] 2.4 Commit: `fix(supernode): serialize visit_count in to_dict/from_dict`.
+- [x] 2.4 Commit: `fix(supernode): serialize visit_count in to_dict/from_dict`.
 
 ## 3. Topology-complete `assemble_from_refs` (TDD)
 
 **Files:** `customized_areal/tree_search/agents/supernode_assembler.py`,
 `customized_areal/tree_search/tests/test_assembler_ref_resolve.py`.
 
-- [ ] 3.1 Failing test: `assemble_from_refs` on a 3-segment DAG with
+- [x] 3.1 Failing test: `assemble_from_refs` on a 3-segment DAG with
   DELEGATION + COMPLETION edges populates each SuperNode's
   `incoming_edges` / `outgoing_edges` to match `edag.edges` (currently `()`).
-- [ ] 3.2 Failing test: a leaf segment (no incoming/outgoing edges) has empty
+- [x] 3.2 Failing test: a leaf segment (no incoming/outgoing edges) has empty
   tuples (regression guard).
-- [ ] 3.3 Implement: after the edge-adding loop, populate
+- [x] 3.3 Implement: after the edge-adding loop, populate
   `incoming_edges` / `outgoing_edges` from `edag.edges` (mirror `assemble()`
   :336-345).
-- [ ] 3.4 Assert no behavior change to `distribute_reward_over_dag` (it reads
+- [x] 3.4 Assert no behavior change to `distribute_reward_over_dag` (it reads
   `dag.edges`): existing fan-in / backup tests still pass.
-- [ ] 3.5 Commit: `fix(assembler): populate incoming/outgoing_edges in assemble_from_refs`.
+- [x] 3.5 Commit: `fix(assembler): populate incoming/outgoing_edges in assemble_from_refs`.
 
 ## 4. v2-path round-trip + fan-in regression tests
 
 **Files:** `customized_areal/tree_search/tests/test_assembler_ref_resolve.py`
 (or `test_segment_dag_training_path.py`).
 
-- [ ] 4.1 Round-trip test: `assemble_from_refs` -> per-SuperNode
+- [x] 4.1 Round-trip test: `assemble_from_refs` -> per-SuperNode
   `to_dict()` -> `from_dict()` asserts `incoming_edges` /
   `outgoing_edges` / `visit_count` / `closing_event` / `sandbox_ids` /
   `env_state` / `metadata["tensors"]` all survive. Seed `visit_count` on a
   fork segment to assert non-zero round-trip.
-- [ ] 4.2 Fan-in credit test: `assemble_from_refs` with a segment having two
+- [x] 4.2 Fan-in credit test: `assemble_from_refs` with a segment having two
   incoming DELEGATION edges -> `distribute_reward_over_dag` credits both
   parent segments (not just one).
-- [ ] 4.3 Commit: `test(supernode): v2-path round-trip + fan-in regression`.
+- [x] 4.3 Commit: `test(supernode): v2-path round-trip + fan-in regression`.
 
 ## 5. Full regression + grep sweep
 
-- [ ] 5.1 `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/ -k
+- [x] 5.1 `.venv-test/bin/python -m pytest customized_areal/tree_search/tests/ -k
   'assembler or checkpoint or supernode or dag'` (per repo test-invocation
   note; do not trust `uv run pytest` - stale venv).
-- [ ] 5.2 `ruff check` (from PATH, not `.venv-test/bin/ruff`) on touched files.
-- [ ] 5.3 grep sweep: `visit_count` resolves in `to_dict` / `from_dict` +
+- [x] 5.2 `ruff check` (from PATH, not `.venv-test/bin/ruff`) on touched files.
+- [x] 5.3 grep sweep: `visit_count` resolves in `to_dict` / `from_dict` +
   `branch_backup`; `incoming_edges` / `outgoing_edges` populated in both
   `assemble` and `assemble_from_refs`.
-- [ ] 5.4 Final whole-branch review -> READY TO MERGE / NEEDS_CHANGES.
-- [ ] 5.5 Commit: `docs(G): T5 full regression + grep sweep`.
+- [x] 5.4 Final whole-branch review -> READY TO MERGE / NEEDS_CHANGES.
+- [x] 5.5 Commit: `docs(G): T5 full regression + grep sweep`.
 
 ## Test runners / constraints
 
