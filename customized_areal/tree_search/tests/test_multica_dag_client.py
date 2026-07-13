@@ -8,6 +8,7 @@ from customized_areal.tree_search.agents.multica_dag_client import (
     DagNotFound,
     DagTimeout,
     MulticaDagClient,
+    StepReward,
 )
 
 
@@ -153,3 +154,28 @@ def test_get_dag_uses_client_defaults_without_overrides(monkeypatch):
     )
     with pytest.raises(DagTimeout):
         client.get_dag("proj-1")  # no timeout/interval kwargs
+
+
+def test_assembled_dag_from_dict_parses_step_rewards_and_score_max():
+    payload = _dag_payload()
+    payload["step_rewards"] = [
+        {"segment_id": "seg-1", "seq": 1, "score": 8, "rationale": "good"},
+        {"segment_id": "seg-1", "seq": 2, "score": 6, "rationale": "ok"},
+    ]
+    payload["score_max"] = 10
+    dag = AssembledDag.from_dict(payload)
+    assert dag.score_max == 10
+    assert len(dag.step_rewards) == 2
+    assert isinstance(dag.step_rewards[0], StepReward)
+    assert dag.step_rewards[0].segment_id == "seg-1"
+    assert dag.step_rewards[0].seq == 1
+    assert dag.step_rewards[0].score == 8
+    assert dag.step_rewards[0].rationale == "good"
+
+
+def test_assembled_dag_from_dict_defaults_step_rewards_absent():
+    # When the diagnosis agent did not run, /dag omits step_rewards + score_max.
+    # Absence stays distinguishable: empty list + 0 (no fabricated defaults).
+    dag = AssembledDag.from_dict(_dag_payload())
+    assert dag.step_rewards == []
+    assert dag.score_max == 0

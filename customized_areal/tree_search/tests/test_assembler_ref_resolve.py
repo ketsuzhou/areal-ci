@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from customized_areal.tree_search.agents.execution_dag import DAGError
@@ -5,6 +7,7 @@ from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     EdgeSpec,
     SegmentSpec,
+    StepReward,
 )
 from customized_areal.tree_search.agents.supernode_assembler import SuperNodeAssembler
 
@@ -135,3 +138,69 @@ def test_assemble_from_refs_env_snapshot_stamped():
     assert node.sandbox_ids == ["sb-1", "sb-2"]
     assert node.issue_snapshot_id == "isnap-1"
     assert node.env_state == {"foo": 1}
+
+
+def _dag_with_rewards() -> AssembledDag:
+    """_dag() with seg-1 carrying two diagnosis step rewards (scores 8, 6)."""
+    dag = _dag()
+    dag.step_rewards = [
+        StepReward(segment_id="seg-1", seq=1, score=8, rationale="good"),
+        StepReward(segment_id="seg-1", seq=2, score=6, rationale="ok"),
+    ]
+    dag.score_max = 10
+    return dag
+
+
+def test_assemble_from_refs_aggregates_step_rewards_to_process_reward():
+    dag = _dag_with_rewards()
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    # mean([8, 6]) / score_max(10) = 0.7 -> SuperNode.process_reward (per-segment
+    # GAE reward; dag_advantage.events_from_nodes consumes super_node.process_reward).
+    assert edag.get("seg-1").process_reward == pytest.approx(0.7)
+    # seg-2 has no step_rewards -> sparse 0.0 (no fabricated default).
+    assert edag.get("seg-2").process_reward == 0.0
+
+
+def test_assemble_from_refs_score_max_zero_is_sparse():
+    # score_max 0 means diagnosis scoring was not configured: no normalization,
+    # process_reward stays 0.0 (absence distinguishable, not a fabricated reward).
+    dag = _dag_with_rewards()
+    dag.score_max = 0
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    assert edag.get("seg-1").process_reward == 0.0
+
+
+class _ListHandler(logging.Handler):
+    """Captures LogRecords directly on a named logger (robust to root-handler
+    config - caplog's root handler does not always catch a fresh stdlib logger
+    with no root handlers installed)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def test_assemble_from_refs_drops_unmatched_step_rewards():
+    # A step reward whose segment_id has no matching segment is dropped + logged,
+    # not applied and not fatal. The matching rewards still land and the ghost
+    # creates no spurious SuperNode.
+    dag = _dag_with_rewards()
+    dag.step_rewards.append(
+        StepReward(segment_id="seg-ghost", seq=1, score=9, rationale="x")
+    )
+    asm_logger = logging.getLogger("SuperNodeAssembler")
+    handler = _ListHandler()
+    prev_level = asm_logger.level
+    asm_logger.addHandler(handler)
+    asm_logger.setLevel(logging.WARNING)
+    try:
+        edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    finally:
+        asm_logger.removeHandler(handler)
+        asm_logger.setLevel(prev_level)
+    assert edag.get("seg-1").process_reward == pytest.approx(0.7)
+    assert len(edag.events) == 2  # ghost dropped, no spurious SuperNode
+    assert any("seg-ghost" in r.getMessage() for r in handler.records)
