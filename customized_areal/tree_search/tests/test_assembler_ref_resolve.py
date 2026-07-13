@@ -1,6 +1,11 @@
 import pytest
 
-from customized_areal.tree_search.agents.execution_dag import DAGError, EdgeType, SuperNode
+from customized_areal.tree_search.agents.dag_backup import distribute_reward_over_dag
+from customized_areal.tree_search.agents.execution_dag import (
+    DAGError,
+    EdgeType,
+    SuperNode,
+)
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     EdgeSpec,
@@ -164,3 +169,61 @@ def test_assemble_from_refs_leaf_segment_has_empty_edge_tuples():
     solo = edag.get("seg-solo")
     assert solo.incoming_edges == ()
     assert solo.outgoing_edges == ()
+
+
+def test_assemble_from_refs_round_trip_preserves_topology_and_visit_count():
+    """assemble_from_refs -> to_dict -> from_dict preserves edges, edge tuples,
+    visit_count, closing_event, and tensors (the v2-path lossless invariant)."""
+    dag = AssembledDag(
+        segments=[
+            SegmentSpec("seg-a", "ar", "i", 0, {"shard_id": "a"}, "completion", {}),
+            SegmentSpec("seg-b", "ar", "i", 1, {"shard_id": "b"}, None, {}),
+        ],
+        edges=[EdgeSpec("seg-a", "seg-b", "completion")],
+        session_to_agent_run={"s": "ar"},
+    )
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    # Seed visit_count on seg-a (as branch_backup would) to assert non-zero
+    # round-trip - the field that was previously dropped by to_dict/from_dict.
+    edag.get("seg-a").visit_count = 4
+
+    a = SuperNode.from_dict(edag.get("seg-a").to_dict())
+    b = SuperNode.from_dict(edag.get("seg-b").to_dict())
+    # Topology survives (tuples populated by assemble_from_refs).
+    assert a.outgoing_edges == (("seg-b", EdgeType.COMPLETION),)
+    assert a.incoming_edges == ()
+    assert b.incoming_edges == (("seg-a", EdgeType.COMPLETION),)
+    assert b.outgoing_edges == ()
+    # visit_count survives (serialized by to_dict/from_dict).
+    assert a.visit_count == 4
+    assert b.visit_count == 0
+    # closing_event + tensors survive.
+    assert a.closing_event == EdgeType.COMPLETION
+    assert b.closing_event is None
+    assert a.metadata["tensors"]["input_ids"] == [1, 2]
+    assert b.metadata["tensors"]["input_ids"] == [1, 2]
+
+
+def test_assemble_from_refs_fan_in_credits_all_parents():
+    """A segment with two incoming COMPLETION edges (fan-in join) ->
+    distribute_reward_over_dag credits every parent (Bug #2 class, v2 path)."""
+    dag = AssembledDag(
+        segments=[
+            SegmentSpec("seg-child-a", "ar-a", "i", 0, {"shard_id": "ca"}, "completion", {}),
+            SegmentSpec("seg-child-b", "ar-b", "i", 0, {"shard_id": "cb"}, "completion", {}),
+            SegmentSpec("seg-parent", "ar-c", "i", 1, {"shard_id": "p"}, None, {}),
+        ],
+        edges=[
+            EdgeSpec("seg-child-a", "seg-parent", "completion"),
+            EdgeSpec("seg-child-b", "seg-parent", "completion"),
+        ],
+        session_to_agent_run={"s-a": "ar-a", "s-b": "ar-b", "s-c": "ar-c"},
+    )
+    edag = SuperNodeAssembler().assemble_from_refs(dag, FakeResolver())
+    credit = distribute_reward_over_dag(
+        edag, terminal_reward=1.0, terminal_node_id="seg-parent"
+    )
+    # Default (no fan_in_credit): split equally across the two parents -> 0.5 each.
+    assert credit["seg-child-a"] > 0.0
+    assert credit["seg-child-b"] > 0.0
+    assert credit["seg-child-a"] == credit["seg-child-b"] == 0.5
