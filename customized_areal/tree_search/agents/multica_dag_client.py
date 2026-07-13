@@ -1,12 +1,15 @@
-"""HTTP client for fetching Multica's assembled DAG.
+"""HTTP client for fetching Multica's assembled DAG via the db_bridge stub.
 
-Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` until it returns 200 with the
-assembled DAG (structure only - no scores, no turn indices, no message text), or
-raises ``DagNotFound`` (404) / ``DagForbidden`` (403) / ``DagTimeout``.
+Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` (through the areal-side
+bridge stub at ``AREAL_BRIDGE_STUB_URL``) until it returns 200 with the assembled
+DAG (structure only - no scores, no turn indices, no message text), or raises
+``DagNotFound`` (404) / ``DagForbidden`` (403) / ``DagTimeout``. Bridge-level
+transient responses (202 not-ready, 502/503/504) are re-polled, not raised.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -81,9 +84,12 @@ class AssembledDag:
 
 
 class MulticaDagClient:
-    """Synchronous client that polls Multica for an assembled DAG.
+    """Synchronous client that polls the db_bridge stub for an assembled DAG.
 
-    Polling is config-driven with sane defaults: ``poll_interval`` (initial
+    The base URL defaults to ``base_url`` or the ``AREAL_BRIDGE_STUB_URL`` env
+    var (the areal-side bridge stub that forwards to multica). No API key is
+    sent: the stub is loopback and the multica executor injects the upstream
+    key. Polling is config-driven with sane defaults: ``poll_interval`` (initial
     seconds between polls, default 2.0), ``poll_timeout`` (overall deadline,
     default 300.0), ``poll_backoff`` (interval growth factor, default 1.5), and
     ``poll_max_interval`` (backoff cap, default 10.0). ``http_timeout`` (default
@@ -93,8 +99,7 @@ class MulticaDagClient:
 
     def __init__(
         self,
-        base_url: str,
-        api_key: str,
+        base_url: str | None = None,
         *,
         poll_interval: float = 2.0,
         poll_timeout: float = 300.0,
@@ -103,8 +108,13 @@ class MulticaDagClient:
         http_timeout: float = 10.0,
         _transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._base = base_url.rstrip("/")
-        self._api_key = api_key
+        self._base = (
+            base_url or os.environ.get("AREAL_BRIDGE_STUB_URL") or ""
+        ).rstrip("/")
+        if not self._base:
+            raise ValueError(
+                "MulticaDagClient requires base_url or AREAL_BRIDGE_STUB_URL"
+            )
         self._transport = _transport
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
@@ -120,15 +130,11 @@ class MulticaDagClient:
         interval: float | None = None,
     ) -> AssembledDag:
         url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
-        headers = {"Authorization": f"Bearer {self._api_key}"}
         # Per-call overrides fall back to the client's configured defaults.
         poll_timeout = timeout if timeout is not None else self._poll_timeout
         poll_interval = interval if interval is not None else self._poll_interval
         deadline = time.monotonic() + poll_timeout
-        client_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "timeout": self._http_timeout,
-        }
+        client_kwargs: dict[str, Any] = {"timeout": self._http_timeout}
         if self._transport is not None:
             client_kwargs["transport"] = self._transport
         current_interval = poll_interval
@@ -137,7 +143,10 @@ class MulticaDagClient:
                 resp = client.get(url)
                 if resp.status_code == 200:
                     return AssembledDag.from_dict(resp.json())
-                if resp.status_code == 202:
+                # 202 = not ready yet; 502/503/504 = bridge/transient (timeout,
+                # relay error, unavailable). All are re-polled up to the
+                # wall-clock deadline, then DagTimeout.
+                if resp.status_code in (202, 502, 503, 504):
                     if time.monotonic() >= deadline:
                         raise DagTimeout(
                             f"dag for {project_id} not ready in {poll_timeout}s"

@@ -47,7 +47,7 @@ def test_get_dag_polls_until_200():
         return httpx.Response(200, json=_dag_payload())
 
     client = MulticaDagClient(
-        "http://multica", "key", _transport=httpx.MockTransport(handler)
+        "http://multica", _transport=httpx.MockTransport(handler)
     )
     dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
@@ -63,7 +63,6 @@ def test_get_dag_polls_until_200():
 def test_get_dag_404_raises():
     client = MulticaDagClient(
         "http://multica",
-        "key",
         _transport=httpx.MockTransport(lambda r: httpx.Response(404)),
     )
     with pytest.raises(DagNotFound):
@@ -73,7 +72,6 @@ def test_get_dag_404_raises():
 def test_get_dag_403_raises():
     client = MulticaDagClient(
         "http://multica",
-        "key",
         _transport=httpx.MockTransport(lambda r: httpx.Response(403)),
     )
     with pytest.raises(DagForbidden):
@@ -83,7 +81,6 @@ def test_get_dag_403_raises():
 def test_get_dag_timeout_raises():
     client = MulticaDagClient(
         "http://multica",
-        "key",
         _transport=httpx.MockTransport(lambda r: httpx.Response(202)),
     )
     with pytest.raises(DagTimeout):
@@ -93,7 +90,6 @@ def test_get_dag_timeout_raises():
 def test_get_dag_other_status_raises_dag_error():
     client = MulticaDagClient(
         "http://multica",
-        "key",
         _transport=httpx.MockTransport(lambda r: httpx.Response(500, text="boom")),
     )
     with pytest.raises(DagError) as exc_info:
@@ -118,7 +114,6 @@ def test_get_dag_backoff_grows_interval(monkeypatch):
 
     client = MulticaDagClient(
         "http://multica",
-        "key",
         poll_interval=1.0,
         poll_backoff=2.0,
         poll_max_interval=5.0,
@@ -147,9 +142,48 @@ def test_get_dag_uses_client_defaults_without_overrides(monkeypatch):
 
     client = MulticaDagClient(
         "http://multica",
-        "key",
         poll_timeout=0.0,  # immediate timeout
         _transport=httpx.MockTransport(handler),
     )
     with pytest.raises(DagTimeout):
         client.get_dag("proj-1")  # no timeout/interval kwargs
+
+
+def test_get_dag_reads_bridge_stub_url_from_env_and_sends_no_auth(monkeypatch):
+    """The DAG fetch is bridged: the base URL comes from AREAL_BRIDGE_STUB_URL and
+    no Authorization is sent (the multica executor injects the upstream key)."""
+    monkeypatch.setenv("AREAL_BRIDGE_STUB_URL", "http://127.0.0.1:9101")
+    seen: dict = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient(_transport=httpx.MockTransport(handler))  # no base_url
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)
+    assert seen["url"].startswith("http://127.0.0.1:9101")
+    assert seen["auth"] is None  # no caller auth; executor injects the upstream key
+
+
+def test_get_dag_504_repolls_until_200():
+    """A bridge 504 (timeout) is transient: re-poll rather than raise."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            return httpx.Response(504, json={"detail": "bridge timed out"})
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient("http://stub", _transport=httpx.MockTransport(handler))
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)
+    assert calls["n"] == 2  # re-polled past the 504
+
+
+def test_get_dag_requires_base_url_or_env(monkeypatch):
+    monkeypatch.delenv("AREAL_BRIDGE_STUB_URL", raising=False)
+    with pytest.raises(ValueError):
+        MulticaDagClient()

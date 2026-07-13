@@ -78,7 +78,7 @@ def _seg(segment_id: str, agent_run_id: str, shard_id: str) -> dict:
 
 def _dag_client(handler) -> MulticaDagClient:
     return MulticaDagClient(
-        "http://multica", "key", _transport=httpx.MockTransport(handler)
+        "http://multica", _transport=httpx.MockTransport(handler)
     )
 
 
