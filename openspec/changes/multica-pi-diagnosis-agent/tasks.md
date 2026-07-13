@@ -3,16 +3,17 @@
 **Files:** new `server/internal/service/diagnosis_agent.go` (+ `_test.go`); mirrors
 `server/internal/service/evolution_review_provider.go`.
 
-- [ ] 1.1 Failing tests: `NewDiagnosisAgentRunner(DiagnosisAgentConfig{Provider,
+- [x] 1.1 Failing tests: `NewDiagnosisAgentRunner(DiagnosisAgentConfig{Provider,
   ExecutablePath, Model, Timeout, Backend})` launches a Pi agent with a diagnosis system
   prompt and returns structured per-step rewards (one score per LLM output).
-- [ ] 1.2 Failing tests: the diagnosis system prompt enforces score-in-`[0, score_max]`
+- [x] 1.2 Failing tests: the diagnosis system prompt enforces score-in-`[0, score_max]`
   per LLM output and structured output (parsing mirrors `judge_prompt.py`'s discipline);
   unparseable output yields an empty reward set + error, not fabricated scores.
-- [ ] 1.3 Failing tests: timeout / non-zero exit / missing rewards are logged and surfaced
+- [x] 1.3 Failing tests: timeout / non-zero exit / missing rewards are logged and surfaced
   as a soft failure (never panics); `Backend` is injectable for tests.
-- [ ] 1.4 Implement the runner + prompt + `parse_step_rewards` parser.
-- [ ] 1.5 Commit: `feat(diagnosis-agent): Pi-agent runner + per-step reward parsing`.
+- [x] 1.4 Implement the runner + prompt + `parse_step_rewards` parser.
+- [x] 1.5 Commit: `feat(diagnosis-agent): Pi-agent runner + per-step reward parsing`
+  (multica dev a6a2ce86e; re-applied after prior-session fix did not persist).
 
 ## 2. Tool surface + per-segment turn-range capture (Multica, TDD)
 
@@ -62,12 +63,12 @@ ordering), tests.
 `server/internal/handler/env_dispatch.go` (`/dag`); areal `AssembledDag`/`SegmentSpec`
 (`customized_areal/tree_search/agents/multica_dag_client.py`); tests.
 
-- [ ] 4.1 Failing tests: the diagnosis agent's per-step rewards are written to
+- [x] 4.1 Failing tests: the diagnosis agent's per-step rewards are written to
   `interaction_dag_step_reward(segment_id, seq, score, rationale)`, keyed by
   `(segment_id, seq)`.
-- [ ] 4.2 Failing tests: `AssembleAssembledDag(project_id)` includes a `step_rewards[]`
+- [x] 4.2 Failing tests: `AssembleAssembledDag(project_id)` includes a `step_rewards[]`
   structure (one entry per scored LLM output) alongside segments + edges.
-- [ ] 4.3 Failing tests: `GET /api/v1/env-dispatch/{project}/dag` serves `step_rewards[]`
+- [x] 4.3 Failing tests: `GET /api/v1/env-dispatch/{project}/dag` serves `step_rewards[]`
   on `200` done; when diagnosis did not run / soft-failed, `step_rewards[]` is empty (absent
   rewards, not zero-filled).
 - [ ] 4.4 Failing tests: `/dag` stays `202` in-progress while diagnosis runs, then `200`
@@ -77,6 +78,16 @@ ordering), tests.
   serving; extend areal `AssembledDag`/`SegmentSpec` to carry `step_rewards[]` (refines
   in-flight `v2-segment-dag-recording` - reconcile on apply).
 - [ ] 4.6 Commit: `feat(diagnosis-agent): project-scoped per-step reward delivery via AssembledDag`.
+
+> **Task 5 (plan, Go-side) split note:** 4.1-4.3 + the multica-Go portion of 4.5 (table
+> already existed as migration 161; `AssembleAssembledDag` extension + `/dag` serving +
+> `RecordStepRewards` upsert) are DONE - committed `11d07dbc0` on multica `dev`, SDD task
+> review APPROVED (build/vet/tests exit 0, no regressions). **4.4** (202-while-diagnosis ->
+> 200) is plan Task 4 (trigger) - diagnosis firing is what produces the 202 window. The
+> **areal-Python portion of 4.5** (`AssembledDag`/`SegmentSpec` carry `step_rewards[]`) is
+> plan Task 6 / openspec group 5. **4.6** commit landed as the Go-side
+> `feat(diagnosis-agent): project-scoped step_rewards via AssembledDag + /dag` (message per
+> the Task 5 brief); the areal-side commit lands with group 5.6.
 
 ## 5. AReaL consumer + flat-judge removal (Python, TDD)
 
