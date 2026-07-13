@@ -1,3 +1,4 @@
+
 ## 1. U7.2 - Wire recorder into the trained-rollout path (TDD)
 
 **Files:** `server/internal/service/training.go`, `server/internal/service/task.go`,

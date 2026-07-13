@@ -213,3 +213,4 @@ customized_areal/.env
 customized_areal/commands.sh
 customized_areal/tpfc/scripts/call_sglang_teacher.py
 customized_areal/half_gpu.py
+customized_areal/dataset/*
