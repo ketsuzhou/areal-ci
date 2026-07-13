@@ -46,6 +46,7 @@ def test_super_node_checkpoint_round_trip_is_lossless(tmp_path, monkeypatch):
         value=0.7,
         process_reward=0.25,
         outcome_reward=1.0,
+        visit_count=3,
         sandbox_ids=["sb-a", "sb-b"],
         issue_snapshot_id="iss-snap",
         env_state={"phase": "plan"},
@@ -72,6 +73,7 @@ def test_super_node_checkpoint_round_trip_is_lossless(tmp_path, monkeypatch):
     assert r.value == 0.7
     assert r.process_reward == 0.25
     assert r.outcome_reward == 1.0
+    assert r.visit_count == 3
     assert r.sandbox_ids == ["sb-a", "sb-b"]
     assert r.issue_snapshot_id == "iss-snap"
     assert r.env_state == {"phase": "plan"}
@@ -79,3 +81,16 @@ def test_super_node_checkpoint_round_trip_is_lossless(tmp_path, monkeypatch):
     # Nodes and their indices round-trip too.
     assert [n.node_id for n in r.nodes] == ["n1", "n2"]
     assert loaded.get_node("n2").parent_node_id == "n1"
+
+
+def test_from_dict_tolerates_missing_visit_count():
+    """Old checkpoints written before visit_count serialization have no key;
+    from_dict must default to 0 (the dataclass default)."""
+    legacy = {
+        "node_id": "sup-old",
+        "agent_id": "planner",
+        "issue_id": "iss-1",
+        "task_id": "task-1",
+    }
+    restored = SuperNode.from_dict(legacy)
+    assert restored.visit_count == 0
