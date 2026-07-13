@@ -20,22 +20,22 @@
 `server/internal/service/interaction_dag.go` (`CloseSegmentForEvent`); new migration;
 reads `task_message` (migration 026).
 
-- [ ] 2.1 Failing tests: `get_interaction_dag(project_id)` returns segments + edges
+- [x] 2.1 Failing tests: `get_interaction_dag(project_id)` returns segments + edges
   (`segment_id`, `agent_run_id`, `closing_event`, `closing_event_target_segment`, edge
   `type`) - the supernode-granularity flow; read-only.
-- [ ] 2.2 Failing tests: `get_segment_messages(segment_id)` slices `task_message` by
+- [x] 2.2 Failing tests: `get_segment_messages(segment_id)` slices `task_message` by
   `(task_id, seq ∈ [start_seq, end_seq])`, respecting a per-call byte/turn budget (mirror
   `evolution_review_provider.go`'s `maxEvolutionReview*Bytes` caps).
-- [ ] 2.3 Failing tests: `get_task_context(task_id)` returns task goal / gold context used
+- [x] 2.3 Failing tests: `get_task_context(task_id)` returns task goal / gold context used
   to ground "contribution to completing the task".
-- [ ] 2.4 Failing tests: tools reject writes (read-only) and enforce project/workspace
+- [x] 2.4 Failing tests: tools reject writes (read-only) and enforce project/workspace
   scoping (no cross-workspace segment access).
-- [ ] 2.5 Failing tests: `CloseSegmentForEvent` captures `start_seq`/`end_seq` from the
+- [x] 2.5 Failing tests: `CloseSegmentForEvent` captures `start_seq`/`end_seq` from the
   exported trajectory and stores them on the `interaction_dag_segment` row; a leaf segment
   covers its agent run's full turn range. (Resolves Q3.)
-- [ ] 2.6 Implement the tool handlers; extend `CloseSegmentForEvent` to record the turn
+- [x] 2.6 Implement the tool handlers; extend `CloseSegmentForEvent` to record the turn
   range; add the `start_seq`/`end_seq` migration.
-- [ ] 2.7 Commit: `feat(diagnosis-agent): read-only tools + per-segment turn-range capture`.
+- [x] 2.7 Commit: `feat(diagnosis-agent): read-only tools + per-segment turn-range capture`.
 
 ## 3. Trigger at collaborative-task completion (Multica, TDD)
 
