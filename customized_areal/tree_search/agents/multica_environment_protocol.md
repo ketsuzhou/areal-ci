@@ -51,8 +51,15 @@ small protocols only; it does not import a sandbox-vendor SDK.
 ## AReaL → db_bridge → Multica API Surface
 
 `agents/multica_client.py` wraps the unified env-dispatch API through
-`MulticaEnvDispatchClient`. AReaL addresses db_bridge, which proxies these endpoints to
-Multica. AReaL never calls Multica directly for env-dispatch.
+`MulticaEnvDispatchClient`, and `agents/multica_dag_client.py` polls the assembled
+DAG. AReaL addresses the db_bridge stub on the AReaL host, which relays these
+endpoints to Multica. AReaL never calls Multica directly for env-dispatch.
+
+These endpoints ride the db_bridge `multica_api` group: the **stub** runs on the
+AReaL host (areal side) and the **executor** runs on the multica host, forwarding
+each request to the real multica Go server over loopback. The executor injects
+`BRIDGE_MULTICA_UPSTREAM_API_KEY` as `Authorization: Bearer <key>` and strips any
+caller-supplied credentials, so AReaL's own tokens never reach Multica.
 
 | AReaL call                             | db_bridge → Multica endpoint                         | Purpose                                                                                                                                                             |
 | -------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -60,6 +67,23 @@ Multica. AReaL never calls Multica directly for env-dispatch.
 | `delete_env(env_id=...)`               | `DELETE <db_bridge>/api/v1/env/{envID}`              | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
 | `create_env_dispatch(...)`             | `POST <db_bridge>/api/v1/env-dispatch`               | Unified dispatch primitive. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
 | `cleanup_env_dispatch(project_id=...)` | `DELETE <db_bridge>/api/v1/env-dispatch/{projectID}` | Cascade cleanup for one rollout project: issues, chat sessions, tasks, and associated runtime state. `404` is treated as success.                                   |
+| `get_dag(project_id=...)`              | `GET <db_bridge>/api/v1/env-dispatch/{projectID}/dag` | Poll the assembled segment DAG: `202` not-ready, `200` assembled DAG, `404` unknown project, `403` cross-workspace. Bridge `502`/`503`/`504` are re-polled. |
+
+The DAG poller (`MulticaDagClient`) is repointed at the AReaL-side stub via
+`AREAL_BRIDGE_STUB_URL` (not `MULTICA_BASE_URL`) and sends no `Authorization` --
+the multica executor injects the upstream key. It re-polls `202` and bridge
+transient responses (`502`/`503`/`504`) up to the configured wall-clock deadline,
+then raises `DagTimeout`; `404` maps to `DagNotFound` and `403` to `DagForbidden`.
+
+### Segment close (no reward) via the gateway group
+
+Closing a segment without reward (`POST /rl/close_segment`) flows through the
+db_bridge `gateway` group, not `multica_api`: the multica `arealrl` client posts
+to the db_bridge stub (le-agent side) with the session-key
+`Authorization: Bearer <proxy_key>`, and the AReaL-side executor forwards it to
+the real AReaL gateway. The session key passes through end to end, mirroring
+`set_reward`; the channel is registered as `rl_close_segment` so the stub no
+longer 404s.
 
 `create_env_dispatch` accepts these key fields:
 
