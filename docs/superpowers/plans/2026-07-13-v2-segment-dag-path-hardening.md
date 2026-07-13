@@ -2,6 +2,7 @@
 change: sub-project-g-multica-interaction-dag
 design-doc: docs/superpowers/specs/2026-07-13-v2-segment-dag-path-hardening-design.md
 base-ref: 853e5cbcda6929e80961ed778194c1402fb7d9ba
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 # v2 Segment-DAG Path Hardening Implementation Plan
@@ -32,6 +33,7 @@ No new files. Four existing files are modified:
 - **`customized_areal/tree_search/tests/test_checkpoint_super.py`** - Augment the lossless round-trip test + add a backward-compat test for `visit_count`.
 - **`customized_areal/tree_search/tests/test_assembler_ref_resolve.py`** - Add tuple-population, leaf-empty, round-trip, and fan-in tests; extend imports (`EdgeType`, `SuperNode`).
 
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 ## Task 1: Confirm investigation findings (pre-flight)
@@ -69,6 +71,7 @@ git add openspec/changes/sub-project-g-multica-interaction-dag/tasks.md
 git commit -m "docs(G): T1 v2-path hardening investigation confirmed"
 ```
 
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 ## Task 2: Lossless `visit_count` serialization (TDD)
@@ -154,6 +157,7 @@ git add customized_areal/tree_search/agents/execution_dag.py \
 git commit -m "fix(supernode): serialize visit_count in to_dict/from_dict"
 ```
 
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 ## Task 3: Topology-complete `assemble_from_refs` (TDD)
@@ -270,6 +274,7 @@ git add customized_areal/tree_search/agents/supernode_assembler.py \
 git commit -m "fix(assembler): populate incoming/outgoing_edges in assemble_from_refs"
 ```
 
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 ## Task 4: v2-path round-trip + fan-in regression tests
@@ -378,6 +383,7 @@ git add customized_areal/tree_search/tests/test_assembler_ref_resolve.py
 git commit -m "test(supernode): v2-path round-trip + fan-in regression"
 ```
 
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
 ---
 
 ## Task 5: Full regression + grep sweep

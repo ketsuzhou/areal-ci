@@ -2,6 +2,8 @@
 comet_change: sub-project-g-multica-interaction-dag
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-13-sub-project-g-multica-interaction-dag
+status: final
 ---
 
 # v2 Segment-DAG Path Hardening — Technical Design
