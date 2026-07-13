@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 build_mode: subagent-driven-development
 build_pause: null
 isolation: branch
@@ -15,3 +15,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/multica-v2-segment-dag-training/.comet/handoff/design-context.json
 handoff_hash: bff52d85bda76bd960f923c9bbf9de236e5b0c1c6ed03a881c14d0f2c707f2a2
+build_command: .venv-test/bin/python -m pytest areal/v2/inference_service/tests/ -q
+verify_command: .venv-test/bin/python -m pytest areal/v2/inference_service/tests/ customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_assembler_ref_resolve.py customized_areal/tree_search/tests/test_segment_dag_trainer.py customized_areal/tree_search/tests/test_segment_dag_training_path.py -q
