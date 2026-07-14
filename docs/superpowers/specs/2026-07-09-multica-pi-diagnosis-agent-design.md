@@ -2,6 +2,8 @@
 comet_change: multica-pi-diagnosis-agent
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-14-multica-pi-diagnosis-agent
+status: final
 ---
 
 # Design: Multica Pi Diagnosis Agent (per-step process reward)

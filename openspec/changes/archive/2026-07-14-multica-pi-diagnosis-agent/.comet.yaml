@@ -13,6 +13,6 @@ verification_report: docs/superpowers/reports/2026-07-10-multica-pi-diagnosis-ag
 branch_status: handled
 created_at: 2026-07-09
 verified_at: 2026-07-14
-archived: false
+archived: true
 handoff_context: openspec/changes/multica-pi-diagnosis-agent/.comet/handoff/design-context.json
 handoff_hash: 13e8460723ed0fd4e17e08dafcce38ac8e4f03f5c0e7c4c83b890bbbdeefc580

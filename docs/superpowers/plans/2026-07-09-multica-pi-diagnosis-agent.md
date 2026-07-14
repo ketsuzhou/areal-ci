@@ -2,6 +2,7 @@
 change: multica-pi-diagnosis-agent
 design-doc: docs/superpowers/specs/2026-07-09-multica-pi-diagnosis-agent-design.md
 base-ref: f2256a7aa2cf4f1aad1e410e5519994098901611
+archived-with: 2026-07-14-multica-pi-diagnosis-agent
 ---
 
 # Multica Pi Diagnosis Agent Implementation Plan
@@ -52,6 +53,7 @@ base-ref: f2256a7aa2cf4f1aad1e410e5519994098901611
 - Modify `tree_search/config.py` (≈L151–178) + `tree_search/distilling/config.py` - remove judge flags.
 - Modify tests: `tests/test_multica_dag_client*`, `tests/test_assembler_ref_resolve.py`, `tests/test_v2_session_lifecycle.py`; delete judge-specific tests.
 
+archived-with: 2026-07-14-multica-pi-diagnosis-agent
 ---
 
 ## Task 1: Diagnosis Pi-agent runner + structured-output parser (Go)
