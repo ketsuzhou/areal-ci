@@ -14,6 +14,35 @@
 - [ ] 1.4 Implement the runner + prompt + `parse_step_rewards` parser.
 - [ ] 1.5 Commit: `feat(diagnosis-agent): Pi-agent runner + per-step reward parsing`.
 
+## 1b. Rich-prompt Diagnose: wire read-only tools into the runner (Multica, TDD)
+
+**Files:** `server/internal/service/diagnosis_agent.go` (+ `_test.go`);
+`server/internal/service/training.go` (`Diagnoser` seam + `maybeDiagnoseProject`
+call site).
+
+Plan gap: Task 1 shipped `Diagnose` with a placeholder prompt. Wire Task 2's
+read-only Go helpers (`GetInteractionDAG` / `GetSegmentMessages` /
+`GetTaskContext`) into `Diagnose` so the agent views the segment DAG + per-segment
+LLM messages + task context and scores each LLM output. Prompt-based (mirrors
+`evolution_review_provider.go`): the runner fetches the data, embeds it as a JSON
+payload, and runs the Pi agent with `--no-tools`.
+
+- [x] 1b.1 Failing tests: `Diagnose(ctx, projectID, workspaceID)` fetches the
+  interaction DAG + per-segment messages + root-task context and embeds them in the
+  prompt sent to the backend (assert the prompt contains `segment_id`, message
+  content, goal/gold).
+- [x] 1b.2 Failing tests: `Diagnose` parses the backend's JSON step rewards as before
+  (clamped to `[0, score_max]`); non-completed / empty / store-error surfaces as an
+  error.
+- [x] 1b.3 Failing tests: stores-not-configured, invalid project/workspace UUID, and
+  empty DAG (no segments) each surface as an error (no panic).
+- [x] 1b.4 Failing tests: the segment list is capped (`maxDiagnosisSegments`) so a
+  large DAG cannot overflow the prompt.
+- [x] 1b.5 Implement: extend `DiagnosisAgentConfig`/runner with `DAGStore` +
+  `MessageStore`; add `workspaceID` to the `Diagnoser` seam; build the JSON payload
+  + send via `--no-tools`.
+- [x] 1b.6 Commit: `feat(diagnosis-agent): rich-prompt Diagnose over interaction DAG`.
+
 ## 2. Tool surface + per-segment turn-range capture (Multica, TDD)
 
 **Files:** new `server/internal/service/diagnosis_tools.go` (+ `_test.go`);
