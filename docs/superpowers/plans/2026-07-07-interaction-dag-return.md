@@ -35,7 +35,14 @@ base-ref: 1117158676e77268810fc4f7c5a6652c4be28428
 
 **Files (multica):** `internal/service/task.go`, `internal/mention/`, `internal/handler/squad_briefing.go`, `internal/arealrl/client.go`, `internal/handler/env_dispatch.go`, `internal/service/env_dispatch.go`.
 
-- [ ] 1.1 Confirm the assistant-turn driving seam (proxy `/chat/completions` boundary) and where to maintain the per-`agent_run_id` turn counter. Record the exact call site.
+- [x] 1.1 **DONE (inline investigation):** Multica does NOT proxy `/chat/completions`.
+  Training mode: sandboxed agent (`pi -p --provider areal`) routes LLM via `db_bridge` →
+  shared Supabase → AReaL gateway. `task_message.seq` counts agent *events* (text/tool_use/
+  tool_result/thinking/error — `daemon.go` `seq.Add(1)` per event), NOT LLM turns, so
+  `seq ≠ AReaL turn_idx` (1 Node = 1 `/chat/completions`). Turn-index source = shared
+  `interaction_id` (D5 revised): AReaL returns it in the response `id`; `pi` surfaces it via
+  its `message_end` event; the daemon stamps `task_message.interaction_id`; turns are
+  numbered per session as the 1-based ordinal of interaction_ids. See design D5 + Task 2b.
 - [ ] 1.2 Confirm delegation seam (`issue.parent_issue_id` creation in `service/task.go`) — the hook point that closes the parent segment + opens a child + records a `DELEGATION` edge.
 - [ ] 1.3 Confirm mention seam (`internal/mention`) — hook point for a `MENTION` edge (no segment close).
 - [ ] 1.4 Confirm completion/notify-parent seam — hook point that closes the child segment + records a `COMPLETION` edge.
@@ -50,16 +57,39 @@ base-ref: 1117158676e77268810fc4f7c5a6652c4be28428
 
 - [ ] 2.1 Write SQL queries: `CreateSegment`, `CloseSegment`, `AddEdge`, `CaptureEnvSnapshot`, `RecordSessionAgentRun`, `SetDagStatus`, `ListSegmentsForProject`, `ListEdgesForProject`, `ListEnvSnapshotsForProject`, `GetDagStatus`.
 - [ ] 2.2 Generate sqlc code (`make` / project codegen command).
-- [ ] 2.3 Add migration creating `interaction_dag_segment`, `interaction_dag_edge`, `interaction_dag_env_snapshot`, `interaction_dag_session`, `interaction_dag_status` (idempotent `IF NOT EXISTS`).
+- [ ] 2.3 Add migration creating `interaction_dag_segment` (incl.
+  `closing_event_interaction_id`), `interaction_dag_edge`, `interaction_dag_env_snapshot`,
+  `interaction_dag_session`, `interaction_dag_status`, `interaction_dag_turn` (session_id,
+  agent_run_id, interaction_id, turn_idx, UNIQUE(session_id, interaction_id)) — the
+  per-session ordered interaction_id→turn_idx map. Also `ALTER task_message ADD
+  interaction_id UUID` + index `(task_id, interaction_id)`. Idempotent `IF NOT EXISTS`.
 - [ ] 2.4 Ensure `DELETE /api/v1/env-dispatch/{projectID}` cleanup cascades to the new tables (FK `ON DELETE CASCADE` or explicit delete).
 - [ ] 2.5 Verify migration applies + queries compile; commit (multica): `feat(interaction-dag): migration + queries for segments edges snapshots`.
+
+## Task 2b: interaction_id surfacing (cross-repo — D5 revised)
+
+The turn index depends on `interaction_id` flowing AReaL → `pi` → daemon → task_message.
+
+- [ ] 2b.1 **AReaL proxy:** ensure `/chat/completions` response carries `interaction_id`
+  (the `Node.node_id`) as the response `id` (confirm already exposed; else echo it). Test:
+  response body `id` == cached `Node.node_id`.
+- [ ] 2b.2 **pi areal provider:** extract response `interaction_id`, emit it in the
+  `message_end` stream event (add `ID`/`InteractionID`; today `pi` consumes `message_end`
+  internally, emits no per-turn `agent.Message`).
+- [ ] 2b.3 **Multica daemon:** handle `message_end` interaction_id; stamp `interaction_id`
+  onto the turn's `task_message` rows (text/tool_use/tool_result of that turn share it);
+  add the arm to `switch msg.Type` in `daemon.go`.
+- [ ] 2b.4 **Multica:** per session, number turns = 1-based ordinal of distinct
+  `interaction_id`s in creation order; expose `interaction_id → turn_idx`. Test: ordinal
+  matches AReaL `list[Node]` enumerate order for a 2-turn run.
+- [ ] 2b.5 Commit (per repo): `feat(interaction-dag): surface interaction_id for turn indexing`.
 
 ## Task 3: Incremental recording service — TDD (multica)
 
 **Files (multica):** `internal/service/interaction_dag.go`, `internal/service/interaction_dag_test.go`.
 
 **Interfaces:**
-- Produces: `InteractionDAGService` with `StartRun`, `RecordTurn`, `CloseSegment`, `AddEdge`, `CaptureEnvSnapshot`, `AssembleDagResult`, `Status`.
+- Produces: `InteractionDAGService` with `StartRun`, `RecordTurn(interaction_id)` (records the per-session ordinal turn_idx from the interaction_id→ordinal map), `CloseSegment(closing_interaction_id, event, target_segment_id)` (resolves `end_turn_idx` = ordinal of `closing_interaction_id`), `AddEdge`, `CaptureEnvSnapshot`, `AssembleDagResult`, `Status`.
 
 - [ ] 3.1 **Red:** `TestInteractionDAG_Delegation_ClosesParentOpensChild` — delegation closes parent segment at the delegating turn, opens child at next turn, records `DELEGATION` edge, turn indices correct.
 - [ ] 3.2 **Red:** `TestInteractionDAG_Mention_AddsEdgeNoClose` — `MENTION` edge recorded, no segment closed.

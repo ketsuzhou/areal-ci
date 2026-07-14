@@ -23,12 +23,16 @@ The system SHALL record agent interactions as a communication-bounded segment DA
 - **WHEN** the system records segments and edges
 - **THEN** the resulting directed graph MUST be acyclic, with every edge flowing from a cause segment to an effect segment in topological order
 
-### Requirement: Per-run turn-index tracking
-The system SHALL maintain a per-`agent_run_id` turn counter as it drives each assistant turn through the inference proxy. One assistant turn MUST equal one turn. The closing communication event's turn index MUST be stamped as the segment's `end_turn_idx`.
+### Requirement: Per-run turn-index via shared interaction_id
+The system SHALL NOT derive turn indices from `task_message.seq` (which counts agent events, not LLM turns). Instead, the agent (`pi`) SHALL surface the `interaction_id` that AReaL's proxy assigns to each `/chat/completions` response (equal to the resulting `Node.node_id`) via its `message_end` stream event; the Multica daemon SHALL stamp that `interaction_id` onto the turn's `task_message` rows. The system SHALL number turns per session as the 1-based ordinal of `interaction_id`s in creation order, and MUST stamp the closing communication event's turn ordinal as the segment's `end_turn_idx`. One assistant turn (one `/chat/completions` response) MUST equal one turn.
+
+#### Scenario: interaction_id is surfaced and stamped per turn
+- **WHEN** the agent completes an LLM turn
+- **THEN** `pi` emits the response `interaction_id` in its `message_end` event, the daemon records it on the turn's `task_message` rows, and the turn is counted exactly once per session
 
 #### Scenario: Turn indices align with areal node positions
 - **WHEN** Multica records a segment's `start_turn_idx` / `end_turn_idx`
-- **THEN** the indices MUST densely cover `[1, len(nodes)]` for that run with no gaps or overlaps, matching the 1-based positions of the `list[Node]` AReaL builds from the proxy interaction cache
+- **THEN** the indices MUST densely cover `[1, len(nodes)]` for that run with no gaps or overlaps, matching the 1-based positions of the `list[Node]` AReaL builds from the proxy interaction cache, because both sides number LLM responses in the same execution order
 
 #### Scenario: Concurrent fan-out delegation stays acyclic
 - **WHEN** a planner delegates to multiple workers at once
