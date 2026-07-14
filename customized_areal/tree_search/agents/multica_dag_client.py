@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -66,13 +66,34 @@ class EdgeSpec:
 
 
 @dataclass
+class StepReward:
+    """One per-LLM-output diagnosis reward, keyed by ``(segment_id, seq)``.
+
+    Emitted by the Multica Pi diagnosis agent at collaborative-task terminal and
+    served via ``/dag`` ``step_rewards[]``. ``score`` is an integer in
+    ``[0, score_max]`` (clamped by the diagnosis runner). AReaL normalizes the
+    per-turn scores into a per-segment ``SuperNode.process_reward``.
+    """
+
+    segment_id: str
+    seq: int
+    score: int
+    rationale: str
+
+
+@dataclass
 class AssembledDag:
-    """The fully assembled DAG from Multica: segments, edges, and the
-    session_id -> agent_run_id mapping areal uses to attribute trajectories."""
+    """The fully assembled DAG from Multica: segments, edges, the
+    session_id -> agent_run_id mapping areal uses to attribute trajectories, and
+    the diagnosis agent's per-turn step rewards."""
 
     segments: list[SegmentSpec]
     edges: list[EdgeSpec]
     session_to_agent_run: dict[str, str]
+    # Diagnosis per-LLM-output rewards + scoring scale (served by /dag). Absent
+    # when the diagnosis agent did not run: empty list + 0 (never fabricated).
+    step_rewards: list[StepReward] = field(default_factory=list)
+    score_max: int = 0
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AssembledDag:
@@ -80,6 +101,8 @@ class AssembledDag:
             segments=[SegmentSpec(**s) for s in d.get("segments", [])],
             edges=[EdgeSpec(**e) for e in d.get("edges", [])],
             session_to_agent_run=d.get("session_to_agent_run", {}),
+            step_rewards=[StepReward(**sr) for sr in d.get("step_rewards", [])],
+            score_max=d.get("score_max", 0),
         )
 
 
@@ -177,4 +200,5 @@ __all__ = [
     "EdgeSpec",
     "MulticaDagClient",
     "SegmentSpec",
+    "StepReward",
 ]

@@ -148,35 +148,6 @@ class Config:
     # the previous entropy-only behavior.
     branch_td_threshold: float = 0.0
 
-    # LLM-judge step-level process reward.
-    #
-    # When ``enable_judge_process_reward`` is True, a larger judge model
-    # evaluates each step of a full episode (given the whole trajectory and the
-    # gold answer) and assigns a per-turn integer credit in
-    # ``[0, critic_score_max]``. Those raw per-node scores are accumulated in the
-    # tree store (one score per episode that traverses a -- possibly shared --
-    # node) and converted into a dense per-turn process reward ``r_t`` that feeds
-    # both the actor (GAE advantages) and the critic (regression targets):
-    #
-    #   jbar_t = mean_raw_t / sum_t mean_raw_t            (per-episode credit dist.)
-    #   r_t    = beta * jbar_t                            (intermediate turns)
-    #   r_T    = (1 - beta) * outcome_reward + beta * jbar_T   (terminal turn)
-    #
-    # The episode return is ``beta + (1 - beta) * outcome_reward`` which lies in
-    # ``[0, 1]`` for any ``beta``; therefore the generative critic's ``[0, 1]``
-    # output range matches and ``critic_target_scale`` stays ``1.0`` (no
-    # remapping needed). When the mode is disabled or the judge yields no usable
-    # signal, the reward construction falls back to the sparse terminal-only
-    # behaviour, so training is byte-for-byte unchanged.
-    #
-    # The judge reuses the teacher/diagnose OpenAI-compatible client (the
-    # ``diagnose_*`` fields below). ``judge_model_name`` overrides the model used
-    # for judging when set (otherwise the diagnose model is used).
-    enable_judge_process_reward: bool = False
-    judge_process_reward_beta: float = 0.2
-    judge_model_name: str = ""
-    judge_max_concurrency: int = 4
-
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
         if self.critic_loss_weight < 0:
@@ -271,15 +242,6 @@ class Config:
             )
         if self.critic_mc_c <= 0:
             raise ValueError(f"critic_mc_c must be > 0, got {self.critic_mc_c}")
-        if not 0.0 <= self.judge_process_reward_beta <= 1.0:
-            raise ValueError(
-                "judge_process_reward_beta must be in [0, 1], got "
-                f"{self.judge_process_reward_beta}"
-            )
-        if self.judge_max_concurrency < 1:
-            raise ValueError(
-                f"judge_max_concurrency must be >= 1, got {self.judge_max_concurrency}"
-            )
         if self.enable_generative_critic:
             # The generative critic supplies bootstrapped state values, so the
             # actor advantage must be GAE or the variance-aware HYBRID_GAE

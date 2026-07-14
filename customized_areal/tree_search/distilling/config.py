@@ -23,9 +23,6 @@ class AgentConfig:
         train_id: Training run ID to tag agent runs with.
         user_id: User ID for authentication.
         model_name: Model name for LLM calls. None uses the agent default.
-        judge_model_name: Model name for the judge LLM.
-        judge_base_url: Base URL for the judge LLM API.
-        judge_api_key: API key for the judge LLM.
     """
 
     trial_name: str = field(
@@ -43,18 +40,6 @@ class AgentConfig:
     model_name: str | None = field(
         default=None,
         metadata={"help": "Model name for LLM calls. None uses the agent default."},
-    )
-    judge_model_name: str | None = field(
-        default=None,
-        metadata={"help": "Model name for the judge LLM."},
-    )
-    judge_base_url: str | None = field(
-        default=None,
-        metadata={"help": "Base URL for the judge LLM API."},
-    )
-    judge_api_key: str | None = field(
-        default=None,
-        metadata={"help": "API key for the judge LLM."},
     )
 
 

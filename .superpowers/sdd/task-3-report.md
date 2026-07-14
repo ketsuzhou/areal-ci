@@ -1,41 +1,47 @@
-# Task 3 Report — Document the bridged env-dispatch deployment config
+# Task 3 Fix Report
 
-**Status:** DONE **Commit:** 392295ad8b62e60e5c5b6ae9726f519242cf6d45 (branch `main`,
-multica repo)
+## Status
+DONE
 
-## Files changed
+## Files Changed
+- `server/internal/service/diagnosis_tools.go`: Implemented GetTaskContext, added per-turn budget, updated comments on budget constants
+- `server/internal/service/diagnosis_tools_test.go`: Updated TestGetTaskContext with 4 subtests
+- `server/internal/service/interaction_dag.go`: Added GetIssueForTask to MessageStore interface, added compile check for MessageStore
+- `server/pkg/db/generated/issue.sql.go`: Added GetIssueForTask hand-written query
 
-- `multica/db_bridge/README.md` — added `env_dispatch` and `env_dispatch_delete` rows to
-  the "How it works" channel table (executor host label `le-agent`). Re-padded the whole
-  table so all columns stay aligned to the new widest cells; cell contents are verbatim
-  from the brief.
-- `multica/db_bridge/.env.areal.example` — appended the exact comment block documenting
-  `MULTICA_BASE_URL=http://127.0.0.1:9101` (local AReaL stub), `MULTICA_API_KEY` relayed
-  as `Authorization: Bearer`, and the httpx timeout \<= 600s env_dispatch channel
-  timeout note.
-
-No code, no tests changed (docs-only, per brief).
-
-## Verification — `grep -n "env_dispatch" README.md .env.areal.example`
-
-```
-README.md:131:| `env_dispatch`        | `/api/v1/env-dispatch`             | `leagent_api` | AReaL     | le-agent      |
-README.md:132:| `env_dispatch_delete` | `/api/v1/env-dispatch/{projectID}` | `leagent_api` | AReaL     | le-agent      |
-.env.areal.example:70:# `env_dispatch` / `env_dispatch_delete`. Point the AReaL env-dispatch client at
-.env.areal.example:76:# Keep the client's httpx timeout <= the env_dispatch channel timeout (600s) so
+## GetIssueForTask Query
+```sql
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.forked_from_issue_id, i.forked_at_seq, i.forked_at_task_id
+FROM issue i
+JOIN agent_task_queue atq ON atq.issue_id = i.id
+WHERE atq.id::text = $1::text
 ```
 
-## Commit
+## TaskContext Goal/Gold Mapping
+- **Goal**: Uses issue.Description if present and non-empty; otherwise uses issue.Title
+- **GoldContext**: Uses issue.AcceptanceCriteria (converted to string) if present; otherwise empty string
 
-```
-[main 392295ad8] docs(db_bridge): document bridged env-dispatch deployment config
- 2 files changed, 20 insertions(+), 8 deletions(-)
-```
+## Workspace-Scoping Approach
+1. Retrieve issue via GetIssueForTask
+2. Check if issue.WorkspaceID matches the requested workspaceID
+3. If not, return pgx.ErrNoRows
+
+## Test Additions
+- TestGetTaskContext now includes:
+  - Returns task context with description as goal and acceptance_criteria as gold
+  - Returns task context with title as goal when description is empty
+  - Returns pgx.ErrNoRows for cross-workspace access
+  - Returns error when task not found
+
+## Commit Hash
+1392ac75ef2b443266f725b731b37b523fd02a2e
+
+## Test Summary
+- TestGetSegmentMessages: 3/3 pass
+- TestGetInteractionDAG: 1/1 pass
+- TestGetTaskContext: 4/4 pass
+- go vet: clean
+- go build: clean
 
 ## Concerns
-
-- The brief's markdown rows are wider than the pre-existing README table. To satisfy
-  both "use the exact rows verbatim" and "keep the table columns aligned," I re-padded
-  the header, separator, and all existing rows to the new max widths. Cell contents are
-  unchanged/verbatim; only inter-column whitespace on prior rows changed (accounts for
-  the 8 deletions in the diff).
+- The per-turn budget is implemented but not tested due to test setup constraints (segment.EndSeq was hardcoded to 5 in the test data)

@@ -8,6 +8,7 @@ from customized_areal.tree_search.agents.multica_dag_client import (
     DagNotFound,
     DagTimeout,
     MulticaDagClient,
+    StepReward,
 )
 
 
@@ -46,9 +47,7 @@ def test_get_dag_polls_until_200():
             return httpx.Response(202, json={"status": "in_progress"})
         return httpx.Response(200, json=_dag_payload())
 
-    client = MulticaDagClient(
-        "http://multica", _transport=httpx.MockTransport(handler)
-    )
+    client = MulticaDagClient("http://multica", _transport=httpx.MockTransport(handler))
     dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
     assert dag.segments[0].segment_id == "seg-1"
@@ -187,3 +186,28 @@ def test_get_dag_requires_base_url_or_env(monkeypatch):
     monkeypatch.delenv("AREAL_BRIDGE_STUB_URL", raising=False)
     with pytest.raises(ValueError):
         MulticaDagClient()
+
+
+def test_assembled_dag_from_dict_parses_step_rewards_and_score_max():
+    payload = _dag_payload()
+    payload["step_rewards"] = [
+        {"segment_id": "seg-1", "seq": 1, "score": 8, "rationale": "good"},
+        {"segment_id": "seg-1", "seq": 2, "score": 6, "rationale": "ok"},
+    ]
+    payload["score_max"] = 10
+    dag = AssembledDag.from_dict(payload)
+    assert dag.score_max == 10
+    assert len(dag.step_rewards) == 2
+    assert isinstance(dag.step_rewards[0], StepReward)
+    assert dag.step_rewards[0].segment_id == "seg-1"
+    assert dag.step_rewards[0].seq == 1
+    assert dag.step_rewards[0].score == 8
+    assert dag.step_rewards[0].rationale == "good"
+
+
+def test_assembled_dag_from_dict_defaults_step_rewards_absent():
+    # When the diagnosis agent did not run, /dag omits step_rewards + score_max.
+    # Absence stays distinguishable: empty list + 0 (no fabricated defaults).
+    dag = AssembledDag.from_dict(_dag_payload())
+    assert dag.step_rewards == []
+    assert dag.score_max == 0

@@ -198,3 +198,46 @@ was intended instead, D5/D7 keying simplifies - flagged as Open Question Q1.
    process-reward source.
 5. Rollback: disable `DIAGNOSIS_AGENT_ENABLED`; areal falls back to sparse process reward
   (judge is removed, so no automatic revert to judging - document this as a one-way step).
+
+## Implementation Divergence (resolved during build; recorded for design-doc honesty)
+
+The Open Questions (Q1-Q4) and the D5/D7 keying language above were written before the v2
+segment-DAG consumer path was confirmed. They were resolved during the build phase; this
+section records the resolutions so the high-level design does not contradict the
+implementation. The detailed, authoritative statements live in
+`specs/diagnosis-process-reward/spec.md` (Requirement: Per-LLM-output reward output) and in
+`docs/superpowers/specs/2026-07-09-multica-pi-diagnosis-agent-design.md` (D4/D5); this
+section defers to them.
+
+- **Q1 (granularity) - RESOLVED (per-segment aggregate).** The diagnosis agent still *emits*
+  one score per LLM output (turn), keyed `(segment_id, seq)`, stored in
+  `interaction_dag_step_reward`. But AReal's v2 GAE path (`assemble_from_refs` ->
+  `events_from_nodes`) builds `SuperNode`s with `nodes=[]` and consumes **one** reward per
+  segment (`SuperNode.process_reward`). So AReal **aggregates** the segment's per-turn scores
+  into a per-segment `SuperNode.process_reward = mean(scores) / score_max` in `[0, 1]`,
+  rather than writing per-turn `Node.process_reward` as D5/D7 originally described. Per-turn
+  scores remain stored for future per-token credit. User-approved (Task 7). This supersedes
+  the D5/D7 "maps `(segment_id, turn_idx)` -> SuperNode / turn, writes `process_reward` on
+  the node" wording, which assumed per-turn DAG Nodes that the v2 path does not create.
+
+- **Q2 (delivery mechanism) - RESOLVED (AssembledDag attachment).** Rewards are attached to
+  `AssembledDag.step_rewards[]` (one `(segment_id, seq, score)` per scored LLM output) and
+  served via the existing `/dag` endpoint; AReal reads them at DAG-poll time. The close-hook
+  `SetStepRewards` alternative (D6) was not taken - rewards co-locate with the DAG AReal
+  already polls (`score_max` is served alongside so AReal does not guess Multica's scale -
+  boundary canonicalization).
+
+- **Q3 (message store) - RESOLVED (task_message, seq-sliced).** Per-segment LLM messages are
+  queried via `MessagesForTaskInRange(task_id, start_seq, end_seq)` over `task_message`,
+  where `start_seq`/`end_seq` are captured at segment close (migration 161). No transcript
+  reconstruction needed.
+
+- **Q4 (critic coexistence) - RESOLVED (both, parallel - D1 default).** The scalar critic
+  (outcome reward) and the diagnosis agent (process reward) coexist as parallel paths at the
+  close hook; diagnosis does not subsume the critic. `Diagnoser` is a separate interface from
+  the critic; `maybeDiagnoseProject` fires at project/root-task completion (views the whole
+  segment DAG), distinct from the per-trained-agent critic terminal.
+
+These resolutions are reflected in the spec delta and the Superpowers design doc; the
+high-level D5/D7 wording above is retained for history and superseded by this section where
+they differ.

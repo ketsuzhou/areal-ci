@@ -24,6 +24,7 @@ Node.parent_node_id IS set in place (Step 5's contract). All failures raise DAGE
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -35,6 +36,8 @@ from customized_areal.tree_search.agents.execution_dag import (
     SuperNode,
 )
 from customized_areal.tree_search.agents.multica_dag_client import AssembledDag
+
+logger = logging.getLogger("SuperNodeAssembler")
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,21 @@ class TensorResolver(Protocol):
     def resolve(self, tensor_ref: dict[str, Any]) -> dict[str, Any]: ...
 
 
+def _aggregate_process_reward(scores: list[int], score_max: int) -> float:
+    """Normalized mean of a segment's diagnosis step scores -> ``[0, 1]``.
+
+    The diagnosis agent scores each LLM output (turn) in ``[0, score_max]``;
+    the v2 GAE consumes a per-segment ``SuperNode.process_reward`` (one GAE
+    step per segment), so the per-turn scores are aggregated to a segment
+    reward. Returns 0.0 when the segment was not scored (sparse - diagnosis
+    did not run / did not cover it) or when ``score_max`` is 0 (diagnosis
+    scoring not configured). Absence stays 0.0 - never a fabricated reward.
+    """
+    if not scores or score_max <= 0:
+        return 0.0
+    return (sum(scores) / len(scores)) / score_max
+
+
 class SuperNodeAssembler:
     """Assemble SuperNodes from Multica's segment specs + proxy interactions."""
 
@@ -152,6 +170,25 @@ class SuperNodeAssembler:
             for session_id, agent_run_id in dag.session_to_agent_run.items()
         }
 
+        # Index diagnosis step rewards by segment_id so each SuperNode's
+        # process_reward can be the normalized mean of its per-turn scores.
+        # score_max (served by /dag) is the diagnosis agent's scoring scale; 0
+        # means diagnosis scoring was not configured -> sparse (0.0). Rewards
+        # whose segment_id has no matching segment are dropped + logged (never
+        # applied to a wrong SuperNode, never fatal).
+        segment_ids = {seg.segment_id for seg in dag.segments}
+        scores_by_segment: dict[str, list[int]] = {}
+        for sr in dag.step_rewards:
+            if sr.segment_id not in segment_ids:
+                logger.warning(
+                    "dropping step reward for unknown segment %r (seq=%d); "
+                    "no matching SuperNode",
+                    sr.segment_id,
+                    sr.seq,
+                )
+                continue
+            scores_by_segment.setdefault(sr.segment_id, []).append(sr.score)
+
         edag = ExecutionDAG()
         for seg in dag.segments:
             tensors = resolver.resolve(seg.tensor_ref)
@@ -177,6 +214,12 @@ class SuperNodeAssembler:
                 },
             )
             edag.add_event(super_node)
+            # Aggregate the segment's per-turn diagnosis scores into the
+            # per-segment GAE reward (events_from_nodes consumes
+            # super_node.process_reward). 0.0 when unscored or score_max is 0.
+            super_node.process_reward = _aggregate_process_reward(
+                scores_by_segment.get(seg.segment_id, []), dag.score_max
+            )
 
         for edge in dag.edges:
             edag.add_edge(
