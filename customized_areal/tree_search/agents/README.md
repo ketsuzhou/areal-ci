@@ -635,3 +635,297 @@ frontier crossing multiple lanes. No special handling is needed: as long as `mes
 is sorted by real completion time, `messages[:cut]` is exactly that cross-lane cut.
 Known v1 approximation: two independent turns that finish almost simultaneously are
 serialized in an arbitrary-but-deterministic order.
+
+## Reward backprop under shared vs. isolated agent environments
+
+The framework-B machinery above assumes a **shared environment**: every agent observes the
+same joint state, so the global completion-ordered trajectory *is* the
+information-dependency order, and reward may back up across lanes along wall-clock time.
+This section contrasts that with the **multica** paradigm this project uses for multi-agent
+collaboration, where each agent runs against an **isolated** environment and agents exchange
+information only through the multica message pipe. The two paradigms legitimize *different*
+backprop paths, and applying one paradigm's rule inside the other produces spurious credit.
+
+### Paradigm 1 - shared environment (time-order backprop)
+
+All agents observe the **same** environment. When agent A acts and changes it, agent B sees
+that change on its next observation; there is no information shielding between agents. Under
+this assumption the wall-clock action order *is* the information-dependency order - a later
+turn's state genuinely contains every earlier turn's effect, whichever lane produced it - so
+reward may be backed up from the terminal state along the single global completion-ordered
+trajectory, across lanes, and every step's value is correctly updated by every later step's
+reward. This is framework B as drawn above, and it is what `compute_global_gae` over
+`events_from_nodes(ordered_nodes)` does.
+
+### Paradigm 2 - isolated environments, multica information pipe
+
+Each agent has its **own** isolated environment; the only channel by which one agent's state
+influences another is an explicit **multica** message. Within one supernode segment the
+reward-backprop path between nodes must therefore **match the information-dependency path**:
+a later node's reward may update an earlier node's value only if the later node actually
+consumed the earlier node's output - through its own env's prior state, or via a multica
+message. A higher reward downstream changes an upstream value *iff* upstream information
+reached downstream. In this codebase that is exactly what `distribute_reward_over_dag` does:
+it backs a terminal reward up along `EdgeType` edges (`delegation` / `mention` /
+`completion`), and those edges *are* the multica information channels.
+
+### The failure mode: time-order backprop inside isolated environments
+
+If Paradigm 2's isolated environments are nevertheless backed up by Paradigm 1's rule -
+pure wall-clock time order - the two paradigms clash. Take two parallel agents A and B whose
+actions interleave in wall-clock time but share **no** multica message in this stretch (they
+are causally independent). Completion order is `A1 (t1) -> B1 (t2) -> A2 (t3) -> B2 (t4)`,
+and A's second step earns a high reward.
+
+- Under Paradigm 1 (shared env) backing A2's reward through B1 is **correct**: A2 observed
+  B1's effect on the shared environment, so A2's reward legitimately updates B1's value.
+- Under Paradigm 2 (isolated env) the same edge is **spurious**: A2's decision did not
+  depend on B1 at all - B1 changed B's isolated environment, which A cannot see, and no
+  multica message carried B1's information to A. Pure time-order backprop routes A2's high
+  reward straight back through B1 anyway, altering B1's value based on an outcome A reached
+  with **no** input from B.
+
+The three diagrams below share the wall-clock timeline `A1, B1, A2, B2` and differ only in
+the backprop rule. Solid arrows are the forward time order; dashed arrows are reward
+backprop; the thick red arrow is the spurious credit.
+
+**(a) Paradigm 1 - shared environment: time-order backprop is valid.** A2 observed B1's
+change on the shared environment, so A2's reward may update B1's value.
+
+```mermaid
+flowchart LR
+    A1["A step 1<br/>(t1)"]:::a --> B1["B step 1<br/>(t2)"]:::b --> A2["A step 2<br/>(t3) high reward"]:::astar --> B2["B step 2<br/>(t4)"]:::b
+
+    A2 -. "reward backs up - VALID<br/>(shared env: A2 observed<br/>B1's change)" .-> B1
+    B1 -. "reward backs up" .-> A1
+    B2 -. "reward backs up" .-> A2
+
+    classDef a fill:transparent,stroke:#447;
+    classDef astar fill:transparent,stroke:#3a3,stroke-width:2px;
+    classDef b fill:transparent,stroke:#747;
+```
+
+**(b) Paradigm 2 (correct) - isolated environments: backprop follows information dependency
+(multica), not wall-clock.** With no A↔B multica message in this stretch, backprop stays
+within each lane; A2's reward updates A1 but **not** B1, however much the two lanes
+interleave in time.
+
+```mermaid
+flowchart LR
+    subgraph LANE_A["agent A - isolated env"]
+        direction LR
+        A1["A step 1<br/>(t1)"]:::a --> A2["A step 2<br/>(t3) high reward"]:::astar
+    end
+    subgraph LANE_B["agent B - isolated env"]
+        direction LR
+        B1["B step 1<br/>(t2)"]:::b --> B2["B step 2<br/>(t4)"]:::b
+    end
+
+    A2 -. "reward backs up<br/>(matches info dep:<br/>A2 built on A1)" .-> A1
+    B2 -. "reward backs up<br/>(matches info dep:<br/>B2 built on B1)" .-> B1
+
+    classDef a fill:transparent,stroke:#447;
+    classDef astar fill:transparent,stroke:#3a3,stroke-width:2px;
+    classDef b fill:transparent,stroke:#747;
+```
+
+**(c) Paradigm 2 (wrong) - isolated environments, but pure time-order backprop: spurious
+cross-lane credit.** Solid arrows are wall-clock time order, **not** information dependency;
+the bug is backing reward up along this order as if it were information order. The thick red
+edge A2→B1 credits B1 with A2's high reward even though A2 never read B1.
+
+```mermaid
+flowchart LR
+    A1["A step 1<br/>(t1)"]:::a --> B1["B step 1<br/>(t2)"]:::b --> A2["A step 2<br/>(t3) high reward"]:::astar --> B2["B step 2<br/>(t4)"]:::b
+
+    A2 ==>|"✗ SPURIOUS credit<br/>(isolated env: A2 never read B1,<br/>no multica msg A↔B)"| B1
+    B1 -. "reward backs up" .-> A1
+    B2 -. "reward backs up" .-> A2
+
+    linkStyle 3 stroke:#b55,stroke-width:3px;
+    classDef a fill:transparent,stroke:#447;
+    classDef astar fill:transparent,stroke:#3a3,stroke-width:2px;
+    classDef b fill:transparent,stroke:#747;
+```
+
+The fix is (b), not (c): in the multica setting the reward-backprop graph is the
+**information-dependency graph** - the multica message DAG (`EdgeType` edges) plus each
+agent's own in-lane state evolution - not the wall-clock completion-ordered timeline. Two
+parallel agents with no multica edge between them must not propagate reward to each other,
+however much their actions interleave in time. This is the criterion that selects
+`distribute_reward_over_dag` (edge-based) over `compute_global_gae` (time-order) for the
+multica path.
+
+## Why the two-layer (isolated-env) MDP converges faster
+
+The isolated-environment prior is not just a bookkeeping choice for where reward backs up -
+it **factors the single global MDP into a two-layer (hierarchical) MDP**, and that
+factorization is what makes the policy easier to learn. This section gives (a) a provable
+horizon reduction, (b) a concrete numeric instance of it, and (c) three supporting
+mechanisms, then states the condition under which the claim holds.
+
+### The factorization
+
+Under the prior, the flat problem `M = (S, A, P, R, γ)` (state = full joint frontier, action
+= next turn, horizon `T`, one terminal reward `R`) factors as:
+
+- **Inner MDP** `M_k = (S_k, A_k, P_k, R_k, γ)` - one per agent segment. `S_k` = agent `k`'s
+  own isolated environment; horizon `h_k` (the turns in one segment); reward `R_k` = the
+  verifier's per-`session_id` `outcome_reward` for that segment. Its initial state is set by
+  the outer action.
+- **Outer MDP** `M_O = (S_O, A_O, P_O, γ_O)` - state = the supernode-segment frontier;
+  action = delegate (spawn segment `k` with a task); horizon `N` segments. `T = N · h̄`, but
+  no sub-problem has horizon larger than `max(N, h̄)`, which is far below `T`.
+
+The multica pipe is the **boundary channel**: outer action -> inner initial state; inner
+terminal output -> outer next state.
+
+```mermaid
+flowchart TB
+    subgraph OUTER["outer MDP - segment level (horizon N)"]
+        direction LR
+        O0(("s_O")):::o --> D0["delegate<br/>segment k"]:::d --> O1(("s_O'")):::o --> D1["delegate<br/>segment k+1"]:::d --> O2(("s_O''")):::o
+    end
+    subgraph IK["inner MDP - agent k (horizon h_k)"]
+        direction LR
+        K1["turn 1"]:::i --> K2["turn 2"]:::i --> KR["reward R_k"]:::r
+    end
+    subgraph IK1["inner MDP - agent k+1 (horizon h_k)"]
+        direction LR
+        J1["turn 1"]:::i --> J2["turn 2"]:::i --> JR["reward R_next"]:::r
+    end
+    D0 -. "multica msg =<br/>inner init + task" .-> K1
+    KR -. "segment output =<br/>outer next state" .-> O1
+    D1 -. "multica msg" .-> J1
+    JR -. "segment output" .-> O2
+
+    classDef o fill:transparent,stroke:#447,stroke-width:2px;
+    classDef d fill:transparent,stroke:#747,stroke-width:2px;
+    classDef i fill:transparent,stroke:#557;
+    classDef r fill:transparent,stroke:#3a3,stroke-width:2px;
+```
+
+The flat MDP (framework B) is the degenerate single layer: one chain of `T` turns, one
+terminal reward, credit assigned over the whole `T`.
+
+Flat vs. layered horizon - the same `T = N · h̄` turns arranged two ways. In the flat MDP
+the single terminal reward `R` backs up over all `T` steps (one long backward arrow); in the
+two-layer MDP each segment's `R_k` backs up over only its own `h_k` steps (many short
+backward arrows):
+
+```mermaid
+flowchart TB
+    subgraph FLAT["flat MDP (framework B): one chain of T turns, one terminal reward"]
+        direction LR
+        F1["turn 1"]:::t --> F2["turn 2"]:::t --> FD["..."]:::d --> FT["turn T · reward R"]:::r
+        FT -. "credit backs up over all T steps" .-> F1
+    end
+    subgraph LAYERED["two-layer MDP: N short segments, each with its own reward"]
+        direction TB
+        subgraph SEG1["segment 1"]
+            direction LR
+            A1["turn"]:::t --> A2["turn"]:::t --> AR["R_1"]:::r
+            AR -. "h_1 steps" .-> A1
+        end
+        subgraph SEG2["segment 2"]
+            direction LR
+            B1["turn"]:::t --> B2["turn"]:::t --> BR["R_2"]:::r
+            BR -. "h_2 steps" .-> B1
+        end
+        subgraph SEGN["segment N"]
+            direction LR
+            N1["turn"]:::t --> N2["turn"]:::t --> NR["R_N"]:::r
+            NR -. "h_N steps" .-> N1
+        end
+    end
+
+    classDef t fill:transparent,stroke:#557;
+    classDef r fill:transparent,stroke:#3a3,stroke-width:2px;
+    classDef d fill:transparent,stroke:#aaa;
+```
+
+Long backup = a long credit-assignment distance (many steps from action to reward) and a
+sparse signal (one reward per `T` turns); short backups = a short distance and a dense
+signal (one reward per `h_k` turns) - formalized in the horizon proof below.
+
+### Proof: effective-horizon reduction
+
+Define the **credit-assignment distance** `d(a)` as the number of transitions between an
+action and the reward it influences - the "intermediate steps from the action to task
+completion."
+
+- **flat MDP** - every action can reach only the terminal reward `R` at the end of the whole
+  trajectory, so `d_flat(a_t) = T − t`. Average `= (T − 1) / 2`; worst case `= T − 1` (the
+  first turn).
+- **two-layer** - an action in segment `j` can reach only that segment's reward `R_j`, so
+  `d_layer(a in seg j) = h_j − t`. Average `= (h̄ − 1) / 2`; worst case `= h̄ − 1`.
+
+Both shrink by a factor `≈ T / h̄ = N`. The flat-vs-layered diagram above is this proof in
+pictures: the backward arrows *are* the credit-assignment distances - one arrow of length `T`
+versus `N` arrows of length `h_k`.
+
+**Formal consequence.** Tabular finite-horizon sample complexity to find an `ε`-optimal
+policy is `Õ(S · A · H³ / ε²)` (Sidford et al. 2018; Azar et al. 2011), with `H` the episode
+horizon. The flat MDP has `H = T`; each inner MDP has `H = h_k`. So the horizon reduction
+alone yields `≈ (T / h_k)³ = N³` fewer samples - and since sample complexity grows
+(super-linearly) with horizon in essentially every known RL bound, the qualitative
+conclusion holds well beyond the tabular regime.
+
+### Concrete instance
+
+Two agents, two steps each, wall-clock order `a_1, b_1, a_2, b_2` (`T = 4`, `h = 2`); flat
+reward `R` at the end of turn 4, segment rewards `R_A` / `R_B` at the end of each segment:
+
+| turn | flat `d` (to `R`)        | layered `d` (to `R_k`) |
+| ---- | ------------------------ | ---------------------- |
+| `a1` | `3` (through `b1,a2,b2`) | `1` (through `a2`)     |
+| `b1` | `2`                      | `1`                    |
+| `a2` | `1`                      | `0`                    |
+| `b2` | `0`                      | `0`                    |
+| avg  | `1.5`                    | `0.5`                  |
+
+`a1` waits 3 steps for its reward in the flat MDP but only 1 in the layered one - the 2 extra
+steps are exactly `B`'s segment, interposed between `A`'s action and `A`'s reward by the flat
+linearization. Distance ratio `1.5 / 0.5 = 3`; horizon ratio `T / h = 2`, so the tabular `H³`
+scaling gives `≈ 8×` fewer samples for the inner policy.
+
+### Three supporting mechanisms (real, not quantified here)
+
+- **Reward density / information rate.** The flat MDP emits one reward per `T` turns; each
+  inner MDP emits one per `h_k` turns - `T / h_k` times denser. More reward signal per
+  trajectory means more gradient information per sample, independent of the distance argument
+  above.
+- **Information prior -> smaller hypothesis class.** The inner policy's input is its own env
+  plus the delegated task (the multica message), **not** the full joint frontier. That other
+  agents' envs are irrelevant is built into the architecture rather than learned - a smaller
+  hypothesis class (better sample complexity in the PAC sense).
+- **Non-stationarity removal (MARL).** From agent `A`'s viewpoint the flat MDP's transition
+  `P(s' | s, a)` implicitly contains `B`'s policy - how the joint state evolves depends on
+  how `B` acts - and `B`'s policy shifts throughout co-training, so `A`'s environment is
+  **non-stationary**. That breaks the single-agent MDP convergence guarantees (the core
+  difficulty of multi-agent RL; centralized-training-decentralized-execution and hierarchical
+  decomposition are the standard remedies). The two-layer inner MDP is `A` alone: `P_k`
+  depends only on `A`'s env and action, `B`'s policy never enters, so it is a **stationary**
+  single-agent MDP. This complements rather than repeats the horizon proof: the horizon proof
+  gives the sample-complexity *rate* (`Õ(S · A · H³ / ε²)`), and stationarity is the
+  *precondition* under which that rate bound holds - a non-stationary environment has no such
+  guarantee to invoke.
+
+### Where this lives in code
+
+The two formulations correspond to the two mechanisms already contrasted above:
+`compute_global_gae` over `events_from_nodes(ordered_nodes)` is the **flat** time-order
+backup - credit propagates over the full `T`-step trajectory (long horizon);
+`distribute_reward_over_dag` along `EdgeType` edges, fed by the verifier's per-`session_id`
+`outcome_reward` (the observable `R_k`), is the **layered / local** backup - credit
+propagates only within each segment's `h_k` steps (short horizon). The horizon reduction is
+the formal reason the multica path prefers the latter.
+
+### Caveat: the speedup is conditional on the prior
+
+The horizon argument holds when the prior is valid - rewards decompose over (approximately)
+independent segments and agents couple only through multica edges. If the problem is in fact
+one tightly-coupled MDP, forcing a two-layer split pushes the coupling into the outer MDP,
+which may then be *harder* to learn. The multica setting benefits because agent environments
+really are isolated and information really does flow through the message pipe - the structure
+the prior assumes.
