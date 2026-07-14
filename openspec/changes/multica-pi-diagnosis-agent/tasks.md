@@ -95,7 +95,7 @@ ordering), tests.
 - [x] 4.3 Failing tests: `GET /api/v1/env-dispatch/{project}/dag` serves `step_rewards[]`
   on `200` done; when diagnosis did not run / soft-failed, `step_rewards[]` is empty (absent
   rewards, not zero-filled).
-- [ ] 4.4 Failing tests: `/dag` stays `202` in-progress while diagnosis runs, then `200`
+- [~] 4.4 Failing tests: `/dag` stays `202` in-progress while diagnosis runs, then `200`
   done with rewards (bounded by the diagnosis timeout); soft-failure -> `200` done + empty
   `step_rewards[]`.
 - [x] 4.5 Implement the step-reward table + `AssembleAssembledDag` extension + `/dag`
@@ -152,13 +152,13 @@ agent/specs/diagnosis-process-reward/spec.md`.
 
 **Files:** `server/internal/service/` integration tests; cross-repo E2E.
 
-- [ ] 7.1 Integration: a trained 3-agent `mode=scratch` rollout -> segments recorded ->
+- [~] 7.1 Integration: a trained 3-agent `mode=scratch` rollout -> segments recorded ->
   diagnosis agent fires -> `step_rewards` written -> `/dag` serves them.
-- [ ] 7.2 E2E: rollout -> diagnosis `step_rewards` -> AReal resolve -> `ExecutionDag` with
+- [~] 7.2 E2E: rollout -> diagnosis `step_rewards` -> AReal resolve -> `ExecutionDag` with
   `process_reward` on nodes -> minimal training step -> cleanup.
-- [ ] 7.3 Sanity: compare diagnosis per-step rewards vs. the removed judge's scores on one
+- [~] 7.3 Sanity: compare diagnosis per-step rewards vs. the removed judge's scores on one
   fixed episode (diagnostic, not a gate).
-- [ ] 7.4 Commit: `test(diagnosis-agent): integration + E2E`.
+- [~] 7.4 Commit: `test(diagnosis-agent): integration + E2E`.
 
 > **Task 9 integration/E2E (7.1-7.4) deferred to a hardware environment.** These
 > require a live trained 3-agent `mode=scratch` rollout (multica daemon + areal

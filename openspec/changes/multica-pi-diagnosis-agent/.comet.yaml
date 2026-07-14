@@ -2,6 +2,7 @@ workflow: full
 phase: build
 build_mode: subagent-driven-development
 build_pause: null
+build_command: go -C /workspaces/leagent/backend/areal/multica/server build ./internal/service/ ./internal/handler/ && PYTHONPATH=. /workspaces/leagent/backend/areal/.venv-test/bin/python -m compileall -q customized_areal/tree_search
 isolation: worktree
 verify_mode: null
 base_ref: a6072e994522a295669e8deb756d242e1adb60ff
