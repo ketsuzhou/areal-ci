@@ -74,7 +74,10 @@ class MulticaEnvDispatchClient:
     def _failure_message(self, operation: str, response: httpx.Response) -> str:
         if response.status_code == 401:
             return f"{operation} failed: status=401. {login_guidance(self._base_url)}"
-        return f"{operation} failed: status={response.status_code}"
+        return (
+            f"{operation} failed: status={response.status_code} "
+            f"body={self._safe_response_body(response)}"
+        )
 
     async def _request(
         self, operation: str, method: str, path: str, **kwargs
@@ -82,10 +85,11 @@ class MulticaEnvDispatchClient:
         try:
             return await self._client.request(method, path, **kwargs)
         except httpx.RequestError:
-            raise RuntimeError(f"{operation} failed: network request failed") from None
+            pass
+        raise RuntimeError(f"{operation} failed: network request failed")
 
     def _safe_response_body(self, response: httpx.Response) -> str:
-        return response.text[:4096].replace(self._api_key, "[REDACTED]")
+        return response.text.replace(self._api_key, "[REDACTED]")[:4096]
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -177,9 +177,10 @@ def _auth_request(
     try:
         return client.request(method, endpoint, **kwargs)
     except httpx.RequestError:
-        raise MulticaAuthError(
-            f"MultiCA authentication network request failed for {endpoint}"
-        ) from None
+        pass
+    raise MulticaAuthError(
+        f"MultiCA authentication network request failed for {endpoint}"
+    )
 
 
 def login(

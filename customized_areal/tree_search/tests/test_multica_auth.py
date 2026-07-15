@@ -242,6 +242,7 @@ def test_login_network_failure_is_sanitized_and_preserves_credentials(tmp_path):
 
     assert "mul_sensitive" not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert not hasattr(exc_info.value, "request")
     assert path.read_bytes() == before
 

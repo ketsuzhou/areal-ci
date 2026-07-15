@@ -119,6 +119,7 @@ def test_get_dag_transport_error_drops_request_and_pat():
 
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert not hasattr(exc_info.value, "request")
 
 

@@ -132,6 +132,29 @@ def test_create_env_dispatch_error_never_leaks_pat():
             )
         )
     assert secret not in str(exc_info.value)
+    assert "failed for [REDACTED]" in str(exc_info.value)
+
+
+def test_create_env_dispatch_redacts_before_truncating_error_body():
+    secret = "mul_boundary_secret"
+    prefix = "x" * 4090
+    client = MulticaEnvDispatchClient(
+        base_url="http://multica",
+        api_key=secret,
+        transport=_transport(
+            lambda request: httpx.Response(500, text=f"{prefix}{secret}")
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch", dispatch_type="issue", agent_id="agent-1"
+            )
+        )
+
+    assert secret not in str(exc_info.value)
+    assert "mul_bo" not in str(exc_info.value)
 
 
 def test_create_env_dispatch_transport_error_drops_request_and_pat():
@@ -154,6 +177,7 @@ def test_create_env_dispatch_transport_error_drops_request_and_pat():
 
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert not hasattr(exc_info.value, "request")
 
 
