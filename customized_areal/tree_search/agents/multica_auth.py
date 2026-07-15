@@ -100,6 +100,10 @@ def load_saved_api_key(
         ) from exc
     if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
         raise MulticaAuthError("MultiCA credential path must be a regular file")
+    if stat.S_IMODE(file_stat.st_mode) & 0o077:
+        raise MulticaAuthError(
+            f"MultiCA credential file permissions are too broad; run `chmod 600 {path}`"
+        )
 
     try:
         with path.open() as stream:
@@ -164,6 +168,20 @@ def _response_json(
     return payload
 
 
+def _auth_request(
+    client: httpx.Client,
+    method: str,
+    endpoint: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    try:
+        return client.request(method, endpoint, **kwargs)
+    except httpx.RequestError:
+        raise MulticaAuthError(
+            f"MultiCA authentication network request failed for {endpoint}"
+        ) from None
+
+
 def login(
     base_url: str,
     email: str,
@@ -183,14 +201,18 @@ def login(
     if transport is not None:
         client_kwargs["transport"] = transport
     with httpx.Client(**client_kwargs) as client:
-        send_response = client.post("/auth/send-code", json={"email": normalized_email})
+        send_response = _auth_request(
+            client, "POST", "/auth/send-code", json={"email": normalized_email}
+        )
         _response_json(send_response, endpoint="/auth/send-code", expected_status=200)
 
         raw_code = code() if callable(code) else code
         normalized_code = raw_code.strip()
         if not normalized_code:
             raise MulticaAuthError("Verification code cannot be empty")
-        verify_response = client.post(
+        verify_response = _auth_request(
+            client,
+            "POST",
             "/auth/verify-code",
             json={"email": normalized_email, "code": normalized_code},
         )
@@ -204,7 +226,9 @@ def login(
             )
 
         resolved_hostname = hostname or socket.gethostname() or "unknown"
-        token_response = client.post(
+        token_response = _auth_request(
+            client,
+            "POST",
             "/api/tokens",
             json={
                 "name": f"AReaL ({resolved_hostname})",
@@ -221,8 +245,11 @@ def login(
                 "MultiCA token response did not include a personal access token"
             )
 
-        me_response = client.get(
-            "/api/me", headers={"Authorization": f"Bearer {api_key}"}
+        me_response = _auth_request(
+            client,
+            "GET",
+            "/api/me",
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         me_payload = _response_json(
             me_response, endpoint="/api/me", expected_status=200

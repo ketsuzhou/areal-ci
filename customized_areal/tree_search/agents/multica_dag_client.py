@@ -166,7 +166,10 @@ class MulticaDagClient:
         current_interval = poll_interval
         with httpx.Client(**client_kwargs) as client:
             while True:
-                resp = client.get(url, headers=headers)
+                try:
+                    resp = client.get(url, headers=headers)
+                except httpx.RequestError:
+                    raise DagError("MultiCA DAG network request failed") from None
                 if resp.status_code == 200:
                     return AssembledDag.from_dict(resp.json())
                 # 202 = not ready yet; gateway-like 502/503/504 responses are

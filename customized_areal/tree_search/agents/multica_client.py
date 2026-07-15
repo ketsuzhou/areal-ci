@@ -76,6 +76,17 @@ class MulticaEnvDispatchClient:
             return f"{operation} failed: status=401. {login_guidance(self._base_url)}"
         return f"{operation} failed: status={response.status_code}"
 
+    async def _request(
+        self, operation: str, method: str, path: str, **kwargs
+    ) -> httpx.Response:
+        try:
+            return await self._client.request(method, path, **kwargs)
+        except httpx.RequestError:
+            raise RuntimeError(f"{operation} failed: network request failed") from None
+
+    def _safe_response_body(self, response: httpx.Response) -> str:
+        return response.text[:4096].replace(self._api_key, "[REDACTED]")
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -128,8 +139,12 @@ class MulticaEnvDispatchClient:
         if per_agent_env:
             payload["per_agent_env"] = per_agent_env
 
-        resp = await self._client.post(
-            "/api/v1/env-dispatch", json=payload, headers=self._headers()
+        resp = await self._request(
+            "create_env_dispatch",
+            "POST",
+            "/api/v1/env-dispatch",
+            json=payload,
+            headers=self._headers(),
         )
         if resp.status_code != 201:
             raise RuntimeError(self._failure_message("create_env_dispatch", resp))
@@ -137,8 +152,11 @@ class MulticaEnvDispatchClient:
 
     async def cleanup_env_dispatch(self, *, project_id: str) -> None:
         """DELETE /api/v1/env-dispatch/{projectID} — cascades to issues/chat/tasks."""
-        resp = await self._client.delete(
-            f"/api/v1/env-dispatch/{project_id}", headers=self._headers()
+        resp = await self._request(
+            "cleanup_env_dispatch",
+            "DELETE",
+            f"/api/v1/env-dispatch/{project_id}",
+            headers=self._headers(),
         )
         if resp.status_code not in (200, 204, 404):
             raise RuntimeError(self._failure_message("cleanup_env_dispatch", resp))
@@ -174,25 +192,35 @@ class MulticaEnvDispatchClient:
             payload["entropy_score"] = entropy_score
         if save_timeout_ms is not None:
             payload["save_timeout_ms"] = save_timeout_ms
-        resp = await self._client.post(
-            "/api/v1/env-checkpoints", json=payload, headers=self._headers()
+        resp = await self._request(
+            "create_checkpoint",
+            "POST",
+            "/api/v1/env-checkpoints",
+            json=payload,
+            headers=self._headers(),
         )
         if resp.status_code == 201:
             return resp.json()
         if resp.status_code in (403, 404, 409):
-            raise MulticaCheckpointError(resp.status_code, "")
+            raise MulticaCheckpointError(
+                resp.status_code, self._safe_response_body(resp)
+            )
         raise RuntimeError(self._failure_message("create_checkpoint", resp))
 
     async def list_checkpoints(self, *, project_id: str) -> list[dict]:
         """GET /api/v1/projects/{project_id}/env-checkpoints."""
-        resp = await self._client.get(
+        resp = await self._request(
+            "list_checkpoints",
+            "GET",
             f"/api/v1/projects/{project_id}/env-checkpoints",
             headers=self._headers(),
         )
         if resp.status_code == 200:
             return resp.json().get("checkpoints", [])
         if resp.status_code in (403, 404, 409):
-            raise MulticaCheckpointError(resp.status_code, "")
+            raise MulticaCheckpointError(
+                resp.status_code, self._safe_response_body(resp)
+            )
         raise RuntimeError(self._failure_message("list_checkpoints", resp))
 
     async def maybe_create_entropy_checkpoint(

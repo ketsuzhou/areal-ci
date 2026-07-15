@@ -134,6 +134,29 @@ def test_create_env_dispatch_error_never_leaks_pat():
     assert secret not in str(exc_info.value)
 
 
+def test_create_env_dispatch_transport_error_drops_request_and_pat():
+    secret = "mul_dispatch_secret"
+
+    def handler(request):
+        raise httpx.ConnectError(f"failed for {secret}", request=request)
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://multica",
+        api_key=secret,
+        transport=_transport(handler),
+    )
+    with pytest.raises(RuntimeError, match="network request failed") as exc_info:
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch", dispatch_type="issue", agent_id="agent-1"
+            )
+        )
+
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert not hasattr(exc_info.value, "request")
+
+
 def test_cleanup_env_dispatch_hits_renamed_url():
     seen = {}
 
@@ -300,9 +323,11 @@ def test_checkpoint_conflict_raises_typed_error():
     secret = "mul_checkpoint_secret"
 
     def handler(req):
-        return httpx.Response(409, json={"error": secret})
+        return httpx.Response(409, text=f"checkpoint failed for {secret}")
 
-    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    c = MulticaEnvDispatchClient(
+        base_url="http://x", api_key=secret, transport=_transport(handler)
+    )
     with pytest.raises(MulticaCheckpointError) as exc_info:
         asyncio.run(
             c.create_checkpoint(
@@ -316,6 +341,7 @@ def test_checkpoint_conflict_raises_typed_error():
     assert exc_info.value.status_code == 409
     assert secret not in str(exc_info.value)
     assert secret not in exc_info.value.body
+    assert exc_info.value.body == "checkpoint failed for [REDACTED]"
 
 
 def test_maybe_create_entropy_checkpoint_creates_when_above_threshold():

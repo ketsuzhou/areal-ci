@@ -42,6 +42,7 @@ def test_multica_enabled_constructs_multi_agent_workflow(tmp_path, monkeypatch):
     # MulticaEnvDispatchClient is constructed directly by the workflow and
     # reads its base URL / API key from the environment.
     monkeypatch.setenv("MULTICA_BASE_URL", "http://multica.test")
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_test")
     dag_client = SimpleNamespace()
     assembler = SimpleNamespace()
     resolver = SimpleNamespace()

@@ -98,6 +98,15 @@ def test_load_saved_api_key_rejects_symlink(tmp_path):
         load_saved_api_key("http://multica:8080", credentials_path=path)
 
 
+def test_load_saved_api_key_rejects_group_or_world_access(tmp_path):
+    path = tmp_path / "credentials.json"
+    save_credentials("http://multica:8080", "mul_saved", credentials_path=path)
+    path.chmod(0o644)
+
+    with pytest.raises(MulticaAuthError, match="chmod 600"):
+        load_saved_api_key("http://multica:8080", credentials_path=path)
+
+
 def test_resolve_api_key_missing_credentials_points_to_login(tmp_path, monkeypatch):
     monkeypatch.delenv("MULTICA_API_KEY", raising=False)
 
@@ -209,6 +218,31 @@ def test_login_failure_does_not_replace_existing_credentials(
     assert "secret details" not in str(exc_info.value)
     assert "jwt_temp" not in str(exc_info.value)
     assert "mul_created" not in str(exc_info.value)
+    assert path.read_bytes() == before
+
+
+def test_login_network_failure_is_sanitized_and_preserves_credentials(tmp_path):
+    path = tmp_path / "credentials.json"
+    save_credentials("http://multica:8080", "mul_existing", credentials_path=path)
+    before = path.read_bytes()
+
+    def handler(request):
+        raise httpx.ConnectError(
+            "connection failed with mul_sensitive", request=request
+        )
+
+    with pytest.raises(MulticaAuthError, match="network request failed") as exc_info:
+        login(
+            "http://multica:8080",
+            "user@example.com",
+            "123456",
+            credentials_path=path,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert "mul_sensitive" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert not hasattr(exc_info.value, "request")
     assert path.read_bytes() == before
 
 

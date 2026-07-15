@@ -65,6 +65,12 @@ The clients prefer an explicit `api_key`, then `MULTICA_API_KEY`, then the PAT i
 `agents/credentials.json`. The saved PAT is accepted only when its recorded base URL
 matches the configured MultiCA server.
 
+For Ray, Slurm, or other distributed launches, every worker must receive a
+network-reachable (non-loopback) `MULTICA_BASE_URL`. Inject `MULTICA_API_KEY` through
+the launcher's worker environment or secret mechanism, or mount the same checkout-local
+`agents/credentials.json` path on every worker. Logging in only on the submission host
+is insufficient when workers do not share that filesystem.
+
 | AReaL call                             | Direct Multica endpoint                                        | Purpose                                                                                                                                                             |
 | -------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `create_base_env(image_ref=...)`       | `POST <MULTICA_BASE_URL>/api/v1/env`                            | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
@@ -81,7 +87,7 @@ deadline, then raises `DagTimeout`; `404` maps to `DagNotFound`, `403` to
 
 Closing a segment without reward (`POST /rl/close_segment`) flows through the
 db_bridge `gateway` group, not `multica_api`: the multica `arealrl` client posts
-to the db_bridge stub (le-agent side) with the session-key
+to the db_bridge stub (MultiCA side) with the session-key
 `Authorization: Bearer <proxy_key>`, and the AReaL-side executor forwards it to
 the real AReaL gateway. The session key passes through end to end, mirroring
 `set_reward`; the channel is registered as `rl_close_segment` so the stub no

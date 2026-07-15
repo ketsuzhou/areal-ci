@@ -103,6 +103,25 @@ def test_get_dag_other_status_raises_dag_error():
     assert "500" in str(exc_info.value)
 
 
+def test_get_dag_transport_error_drops_request_and_pat():
+    secret = "mul_dag_secret"
+
+    def handler(request):
+        raise httpx.ConnectError(f"failed for {secret}", request=request)
+
+    client = MulticaDagClient(
+        "http://multica",
+        api_key=secret,
+        _transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(DagError, match="network request failed") as exc_info:
+        client.get_dag("proj-1")
+
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert not hasattr(exc_info.value, "request")
+
+
 def test_get_dag_backoff_grows_interval(monkeypatch):
     """The poll interval grows by the backoff factor up to the configured cap."""
     sleeps: list[float] = []
