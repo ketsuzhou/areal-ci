@@ -57,9 +57,11 @@ endpoints to Multica. AReaL never calls Multica directly for env-dispatch.
 
 These endpoints ride the db_bridge `multica_api` group: the **stub** runs on the
 AReaL host (areal side) and the **executor** runs on the multica host, forwarding
-each request to the real multica Go server over loopback. The executor injects
-`BRIDGE_MULTICA_UPSTREAM_API_KEY` as `Authorization: Bearer <key>` and strips any
-caller-supplied credentials, so AReaL's own tokens never reach Multica.
+each request to the real multica Go server over loopback. Both clients attach
+`MULTICA_API_KEY` as `Authorization: Bearer <key>`. The stub encrypts that header
+with `BRIDGE_HEADER_ENCRYPTION_KEY` before enqueueing it; the executor decrypts
+it in memory, removes alternate credential headers, forwards it to Multica, and
+redacts the stored value after terminal success or failure.
 
 | AReaL call                             | db_bridge → Multica endpoint                         | Purpose                                                                                                                                                             |
 | -------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
