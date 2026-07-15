@@ -4,6 +4,8 @@ import json
 import httpx
 import pytest
 
+from customized_areal.tree_search.agents import multica_auth
+from customized_areal.tree_search.agents.multica_auth import save_credentials
 from customized_areal.tree_search.agents.multica_client import (
     MulticaCheckpointError,
     MulticaEnvDispatchClient,
@@ -13,6 +15,11 @@ from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIss
 
 def _transport(handler):
     return httpx.MockTransport(handler)
+
+
+@pytest.fixture(autouse=True)
+def _default_multica_api_key(monkeypatch):
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_test")
 
 
 def test_create_env_dispatch_scratch_swe_lego():
@@ -65,6 +72,66 @@ def test_create_env_dispatch_sends_environment_api_key(monkeypatch):
         )
     )
     assert project_id == "p1"
+
+
+def test_create_env_dispatch_sends_saved_api_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("MULTICA_API_KEY")
+    path = tmp_path / "credentials.json"
+    save_credentials("http://multica", "mul_saved", credentials_path=path)
+    monkeypatch.setattr(multica_auth, "DEFAULT_CREDENTIALS_PATH", path)
+
+    def handler(request):
+        assert request.headers["authorization"] == "Bearer mul_saved"
+        return httpx.Response(201, json={"project_id": "p1"})
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://multica", transport=_transport(handler)
+    )
+    project_id = asyncio.run(
+        client.create_env_dispatch(
+            mode="scratch", dispatch_type="issue", agent_id="agent-1"
+        )
+    )
+    assert project_id == "p1"
+
+
+def test_create_env_dispatch_401_points_to_login_without_leaking_pat():
+    secret = "mul_dispatch_secret"
+
+    def handler(request):
+        return httpx.Response(401, text=f"rejected {secret}")
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://multica",
+        api_key=secret,
+        transport=_transport(handler),
+    )
+    with pytest.raises(RuntimeError, match="multica_auth login") as exc_info:
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch", dispatch_type="issue", agent_id="agent-1"
+            )
+        )
+    assert secret not in str(exc_info.value)
+
+
+def test_create_env_dispatch_error_never_leaks_pat():
+    secret = "mul_dispatch_secret"
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://multica",
+        api_key=secret,
+        transport=_transport(
+            lambda request: httpx.Response(500, text=f"failed for {secret}")
+        ),
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch", dispatch_type="issue", agent_id="agent-1"
+            )
+        )
+    assert secret not in str(exc_info.value)
 
 
 def test_cleanup_env_dispatch_hits_renamed_url():
@@ -230,8 +297,10 @@ def test_list_checkpoints_returns_items():
 
 
 def test_checkpoint_conflict_raises_typed_error():
+    secret = "mul_checkpoint_secret"
+
     def handler(req):
-        return httpx.Response(409, json={"error": "checkpoint save timed out"})
+        return httpx.Response(409, json={"error": secret})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     with pytest.raises(MulticaCheckpointError) as exc_info:
@@ -245,6 +314,8 @@ def test_checkpoint_conflict_raises_typed_error():
             )
         )
     assert exc_info.value.status_code == 409
+    assert secret not in str(exc_info.value)
+    assert secret not in exc_info.value.body
 
 
 def test_maybe_create_entropy_checkpoint_creates_when_above_threshold():

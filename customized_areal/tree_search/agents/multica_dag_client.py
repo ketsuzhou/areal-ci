@@ -1,10 +1,8 @@
-"""HTTP client for fetching Multica's assembled DAG via the db_bridge stub.
+"""HTTP client for fetching MultiCA's assembled DAG directly.
 
-Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` (through the areal-side
-bridge stub at ``AREAL_BRIDGE_STUB_URL``) until it returns 200 with the assembled
-DAG (structure only - no scores, no turn indices, no message text), or raises
-``DagNotFound`` (404) / ``DagForbidden`` (403) / ``DagTimeout``. Bridge-level
-transient responses (202 not-ready, 502/503/504) are re-polled, not raised.
+Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` on ``MULTICA_BASE_URL``
+with the caller's MultiCA PAT until it returns an assembled DAG, or raises a
+typed DAG error. Transient responses are re-polled up to the configured deadline.
 """
 
 from __future__ import annotations
@@ -15,6 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from customized_areal.tree_search.agents.multica_auth import (
+    login_guidance,
+    normalize_base_url,
+    resolve_api_key,
+)
 
 
 class DagError(Exception):
@@ -107,12 +111,11 @@ class AssembledDag:
 
 
 class MulticaDagClient:
-    """Synchronous client that polls the db_bridge stub for an assembled DAG.
+    """Synchronous client that polls MultiCA directly for an assembled DAG.
 
-    The base URL defaults to ``base_url`` or the ``AREAL_BRIDGE_STUB_URL`` env
-    var (the areal-side bridge stub that forwards to multica). The caller key
-    defaults to ``api_key`` or ``MULTICA_API_KEY`` and passes through the bridge
-    as bearer authentication. Polling uses ``poll_interval`` (initial
+    The base URL defaults to ``base_url`` or ``MULTICA_BASE_URL``. Credentials
+    resolve from ``api_key``, ``MULTICA_API_KEY``, then the saved PAT created by
+    :mod:`multica_auth`. Polling uses ``poll_interval`` (initial
     seconds between polls, default 2.0), ``poll_timeout`` (overall deadline,
     default 300.0), ``poll_backoff`` (interval growth factor, default 1.5), and
     ``poll_max_interval`` (backoff cap, default 10.0). ``http_timeout`` (default
@@ -132,14 +135,11 @@ class MulticaDagClient:
         http_timeout: float = 10.0,
         _transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._base = (
-            base_url or os.environ.get("AREAL_BRIDGE_STUB_URL") or ""
-        ).rstrip("/")
-        if not self._base:
-            raise ValueError(
-                "MulticaDagClient requires base_url or AREAL_BRIDGE_STUB_URL"
-            )
-        self._api_key = api_key or os.environ.get("MULTICA_API_KEY")
+        resolved_base_url = base_url or os.environ.get("MULTICA_BASE_URL") or ""
+        if not resolved_base_url:
+            raise ValueError("MulticaDagClient requires base_url or MULTICA_BASE_URL")
+        self._base = normalize_base_url(resolved_base_url)
+        self._api_key = resolve_api_key(self._base, api_key)
         self._transport = _transport
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
@@ -155,9 +155,7 @@ class MulticaDagClient:
         interval: float | None = None,
     ) -> AssembledDag:
         url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
-        headers = (
-            {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        )
+        headers = {"Authorization": f"Bearer {self._api_key}"}
         # Per-call overrides fall back to the client's configured defaults.
         poll_timeout = timeout if timeout is not None else self._poll_timeout
         poll_interval = interval if interval is not None else self._poll_interval
@@ -171,9 +169,8 @@ class MulticaDagClient:
                 resp = client.get(url, headers=headers)
                 if resp.status_code == 200:
                     return AssembledDag.from_dict(resp.json())
-                # 202 = not ready yet; 502/503/504 = bridge/transient (timeout,
-                # relay error, unavailable). All are re-polled up to the
-                # wall-clock deadline, then DagTimeout.
+                # 202 = not ready yet; gateway-like 502/503/504 responses are
+                # transient. All are re-polled to the wall-clock deadline.
                 if resp.status_code in (202, 502, 503, 504):
                     if time.monotonic() >= deadline:
                         raise DagTimeout(
@@ -193,7 +190,12 @@ class MulticaDagClient:
                     raise DagNotFound(project_id)
                 if resp.status_code == 403:
                     raise DagForbidden(project_id)
-                raise DagError(f"unexpected {resp.status_code}: {resp.text}")
+                if resp.status_code == 401:
+                    raise DagError(
+                        "MultiCA authentication failed: status=401. "
+                        + login_guidance(self._base)
+                    )
+                raise DagError(f"unexpected status={resp.status_code}")
 
 
 __all__ = [

@@ -48,34 +48,34 @@ small protocols only; it does not import a sandbox-vendor SDK.
 - Cleanup flows through Multica env-dispatch; `404` means the resource is already gone
   and is treated as success.
 
-## AReaL → db_bridge → Multica API Surface
+## AReaL → Multica API Surface
 
 `agents/multica_client.py` wraps the unified env-dispatch API through
 `MulticaEnvDispatchClient`, and `agents/multica_dag_client.py` polls the assembled
-DAG. AReaL addresses the db_bridge stub on the AReaL host, which relays these
-endpoints to Multica. AReaL never calls Multica directly for env-dispatch.
+DAG. Both address `MULTICA_BASE_URL` directly and attach a MultiCA PAT as
+`Authorization: Bearer <key>`. Obtain and save the PAT explicitly before starting
+training:
 
-These endpoints ride the db_bridge `multica_api` group: the **stub** runs on the
-AReaL host (areal side) and the **executor** runs on the multica host, forwarding
-each request to the real multica Go server over loopback. Both clients attach
-`MULTICA_API_KEY` as `Authorization: Bearer <key>`. The stub encrypts that header
-with `BRIDGE_HEADER_ENCRYPTION_KEY` before enqueueing it; the executor decrypts
-it in memory, removes alternate credential headers, forwards it to Multica, and
-redacts the stored value after terminal success or failure.
+```bash
+uv run python -m customized_areal.tree_search.agents.multica_auth login \
+  --base-url "$MULTICA_BASE_URL"
+```
 
-| AReaL call                             | db_bridge → Multica endpoint                         | Purpose                                                                                                                                                             |
-| -------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_base_env(image_ref=...)`       | `POST <db_bridge>/api/v1/env`                        | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
-| `delete_env(env_id=...)`               | `DELETE <db_bridge>/api/v1/env/{envID}`              | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
-| `create_env_dispatch(...)`             | `POST <db_bridge>/api/v1/env-dispatch`               | Unified dispatch primitive. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
-| `cleanup_env_dispatch(project_id=...)` | `DELETE <db_bridge>/api/v1/env-dispatch/{projectID}` | Cascade cleanup for one rollout project: issues, chat sessions, tasks, and associated runtime state. `404` is treated as success.                                   |
-| `get_dag(project_id=...)`              | `GET <db_bridge>/api/v1/env-dispatch/{projectID}/dag` | Poll the assembled segment DAG: `202` not-ready, `200` assembled DAG, `404` unknown project, `403` cross-workspace. Bridge `502`/`503`/`504` are re-polled. |
+The clients prefer an explicit `api_key`, then `MULTICA_API_KEY`, then the PAT in
+`agents/credentials.json`. The saved PAT is accepted only when its recorded base URL
+matches the configured MultiCA server.
 
-The DAG poller (`MulticaDagClient`) is repointed at the AReaL-side stub via
-`AREAL_BRIDGE_STUB_URL` (not `MULTICA_BASE_URL`) and sends no `Authorization` --
-the multica executor injects the upstream key. It re-polls `202` and bridge
-transient responses (`502`/`503`/`504`) up to the configured wall-clock deadline,
-then raises `DagTimeout`; `404` maps to `DagNotFound` and `403` to `DagForbidden`.
+| AReaL call                             | Direct Multica endpoint                                        | Purpose                                                                                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_base_env(image_ref=...)`       | `POST <MULTICA_BASE_URL>/api/v1/env`                            | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
+| `delete_env(env_id=...)`               | `DELETE <MULTICA_BASE_URL>/api/v1/env/{envID}`                  | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
+| `create_env_dispatch(...)`             | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch`                   | Unified dispatch primitive. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
+| `cleanup_env_dispatch(project_id=...)` | `DELETE <MULTICA_BASE_URL>/api/v1/env-dispatch/{projectID}`     | Cascade cleanup for one rollout project: issues, chat sessions, tasks, and associated runtime state. `404` is treated as success.                                   |
+| `get_dag(project_id=...)`              | `GET <MULTICA_BASE_URL>/api/v1/env-dispatch/{projectID}/dag`    | Poll the assembled segment DAG: `202` not-ready, `200` assembled DAG, `404` unknown project, `403` cross-workspace. Transient `502`/`503`/`504` responses are re-polled. |
+
+The DAG poller re-polls transient responses up to the configured wall-clock
+deadline, then raises `DagTimeout`; `404` maps to `DagNotFound`, `403` to
+`DagForbidden`, and `401` reports the explicit login command without exposing the PAT.
 
 ### Segment close (no reward) via the gateway group
 
@@ -122,15 +122,12 @@ sequenceDiagram
     participant S as Remote sandbox server
     participant R as Agent runtime
 
-    A->>G: POST /api/v1/env (image_ref)
-    G->>M: forward
+    A->>M: POST /api/v1/env (image_ref, MultiCA PAT)
     M->>S: create/bootstrap sandbox from image
     S-->>M: sandbox_id
-    M-->>G: env_id (wraps sandbox_id)
-    G-->>A: env_id
+    M-->>A: env_id (wraps sandbox_id)
 
-    A->>G: POST /api/v1/env-dispatch (mode=scratch, env_id, group_size, issue/message)
-    G->>M: forward
+    A->>M: POST /api/v1/env-dispatch (mode=scratch, env_id, group_size, issue/message)
     M->>S: fork/allocate per-lane sandboxes
     S-->>M: sandbox_ids
     loop each rollout lane
@@ -140,8 +137,7 @@ sequenceDiagram
         G-->>M: session_id + api_key (provider=areal)
         M->>R: start agent run with api_key (provider=areal)
     end
-    M-->>G: rollouts[env_id, project_id, issue_id, chat_session_id, agent_run_id, session_id]
-    G-->>A: rollouts[env_id, project_id, issue_id, chat_session_id, agent_run_id, session_id]
+    M-->>A: rollouts[env_id, project_id, issue_id, chat_session_id, agent_run_id, session_id]
 
     loop each rollout lane
         R->>G: model inference (api_key, provider=areal)
@@ -152,8 +148,7 @@ sequenceDiagram
     G->>A: forward
     M->>G: end_session(session_id) or export_trajectories(session_id)
     G->>A: forward
-    A->>G: DELETE /api/v1/env-dispatch/{projectID} (per rollout)
-    G->>M: forward
+    A->>M: DELETE /api/v1/env-dispatch/{projectID} (per rollout)
     M->>S: delete lane sandboxes and runtime resources
 ```
 
@@ -224,8 +219,7 @@ sequenceDiagram
     participant R as Agent runtime
     participant D as ExecutionDAG/SuperNodes
 
-    A->>G: POST /api/v1/env-dispatch (mode=scratch, ...)
-    G->>M: forward
+    A->>M: POST /api/v1/env-dispatch (mode=scratch, MultiCA PAT)
     M->>G: start_session(agent_run_id, issue_id)
     G->>A: forward
     A-->>G: session_id + api_key (provider=areal)
@@ -233,8 +227,7 @@ sequenceDiagram
     M->>R: start agent run with api_key (provider=areal)
     R->>G: model inference (api_key)
     G->>A: forward
-    M-->>G: rollout(agent_run_id, issue_id, env_id, session_id)
-    G-->>A: rollout(agent_run_id, issue_id, env_id, session_id)
+    M-->>A: rollout(agent_run_id, issue_id, env_id, session_id)
     A->>D: stamp session_id on SuperNode(s)
     D-->>A: session_map for verifier rewards
 ```
@@ -310,20 +303,17 @@ runners (structural typing).
 ```mermaid
 sequenceDiagram
     participant A as AReaL branch selector
-    participant G as db_bridge
     participant M as Multica API
     participant S as Remote sandbox server
 
     A->>A: select branch point by entropy / TD gate (Node.env_id, Node.need_branch)
 
-    A->>G: POST /api/v1/env-dispatch (mode=branch, env_id=source_env_id, group_size=1)
-    G->>M: forward
+    A->>M: POST /api/v1/env-dispatch (mode=branch, env_id=source_env_id, group_size=1)
     M->>S: fork source sandbox server-side
     S-->>M: sandbox_id
     M->>M: copy issue/chat subtree server-side
     M->>S: start child agent run
-    M-->>G: rollouts[0].env_id (child env_id, wraps sandbox_id)
-    G-->>A: rollouts[0].env_id (child env_id)
+    M-->>A: rollouts[0].env_id (child env_id, wraps sandbox_id)
 ```
 
 Branch materialization is a single env-dispatch call:

@@ -1,6 +1,8 @@
 import httpx
 import pytest
 
+from customized_areal.tree_search.agents import multica_auth
+from customized_areal.tree_search.agents.multica_auth import save_credentials
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     DagError,
@@ -10,6 +12,11 @@ from customized_areal.tree_search.agents.multica_dag_client import (
     MulticaDagClient,
     StepReward,
 )
+
+
+@pytest.fixture(autouse=True)
+def _default_multica_api_key(monkeypatch):
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_test")
 
 
 def _dag_payload() -> dict:
@@ -148,9 +155,13 @@ def test_get_dag_uses_client_defaults_without_overrides(monkeypatch):
         client.get_dag("proj-1")  # no timeout/interval kwargs
 
 
-def test_get_dag_reads_bridge_url_and_api_key_from_env(monkeypatch):
-    monkeypatch.setenv("AREAL_BRIDGE_STUB_URL", "http://127.0.0.1:9101")
-    monkeypatch.setenv("MULTICA_API_KEY", "mul_env")
+def test_get_dag_reads_direct_url_and_saved_api_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("MULTICA_BASE_URL", "http://multica:8080")
+    monkeypatch.delenv("AREAL_BRIDGE_STUB_URL", raising=False)
+    monkeypatch.delenv("MULTICA_API_KEY")
+    path = tmp_path / "credentials.json"
+    save_credentials("http://multica:8080", "mul_saved", credentials_path=path)
+    monkeypatch.setattr(multica_auth, "DEFAULT_CREDENTIALS_PATH", path)
     seen: dict = {}
 
     def handler(request):
@@ -158,11 +169,11 @@ def test_get_dag_reads_bridge_url_and_api_key_from_env(monkeypatch):
         seen["auth"] = request.headers.get("authorization")
         return httpx.Response(200, json=_dag_payload())
 
-    client = MulticaDagClient(_transport=httpx.MockTransport(handler))  # no base_url
+    client = MulticaDagClient(_transport=httpx.MockTransport(handler))
     dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
-    assert seen["url"].startswith("http://127.0.0.1:9101")
-    assert seen["auth"] == "Bearer mul_env"
+    assert seen["url"].startswith("http://multica:8080")
+    assert seen["auth"] == "Bearer mul_saved"
 
 
 def test_get_dag_explicit_api_key_overrides_environment(monkeypatch):
@@ -173,11 +184,26 @@ def test_get_dag_explicit_api_key_overrides_environment(monkeypatch):
         return httpx.Response(200, json=_dag_payload())
 
     client = MulticaDagClient(
-        "http://stub",
+        "http://multica",
         api_key="mul_explicit",
         _transport=httpx.MockTransport(handler),
     )
     client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+
+def test_get_dag_401_points_to_login_without_leaking_pat():
+    secret = "mul_dag_secret"
+    client = MulticaDagClient(
+        "http://multica",
+        api_key=secret,
+        _transport=httpx.MockTransport(
+            lambda request: httpx.Response(401, text=f"rejected {secret}")
+        ),
+    )
+
+    with pytest.raises(DagError, match="multica_auth login") as exc_info:
+        client.get_dag("proj-1", timeout=1.0, interval=0.0)
+    assert secret not in str(exc_info.value)
 
 
 def test_get_dag_504_repolls_until_200():
@@ -197,6 +223,7 @@ def test_get_dag_504_repolls_until_200():
 
 
 def test_get_dag_requires_base_url_or_env(monkeypatch):
+    monkeypatch.delenv("MULTICA_BASE_URL", raising=False)
     monkeypatch.delenv("AREAL_BRIDGE_STUB_URL", raising=False)
     with pytest.raises(ValueError):
         MulticaDagClient()

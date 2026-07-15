@@ -17,6 +17,10 @@ import os
 
 import httpx
 
+from customized_areal.tree_search.agents.multica_auth import (
+    login_guidance,
+    resolve_api_key,
+)
 from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue
 from customized_areal.tree_search.env_checkpoint import (
     should_create_entropy_checkpoint,
@@ -57,16 +61,20 @@ class MulticaEnvDispatchClient:
             raise ValueError(
                 "MulticaEnvDispatchClient requires base_url or MULTICA_BASE_URL"
             )
-        self._api_key = api_key or os.environ.get("MULTICA_API_KEY")
+        self._api_key = resolve_api_key(self._base_url, api_key)
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=timeout, transport=transport
         )
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
+
+    def _failure_message(self, operation: str, response: httpx.Response) -> str:
+        if response.status_code == 401:
+            return f"{operation} failed: status=401. {login_guidance(self._base_url)}"
+        return f"{operation} failed: status={response.status_code}"
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -124,9 +132,7 @@ class MulticaEnvDispatchClient:
             "/api/v1/env-dispatch", json=payload, headers=self._headers()
         )
         if resp.status_code != 201:
-            raise RuntimeError(
-                f"create_env_dispatch failed: status={resp.status_code} body={resp.text[:200]}"
-            )
+            raise RuntimeError(self._failure_message("create_env_dispatch", resp))
         return resp.json()["project_id"]
 
     async def cleanup_env_dispatch(self, *, project_id: str) -> None:
@@ -135,9 +141,7 @@ class MulticaEnvDispatchClient:
             f"/api/v1/env-dispatch/{project_id}", headers=self._headers()
         )
         if resp.status_code not in (200, 204, 404):
-            raise RuntimeError(
-                f"cleanup_env_dispatch failed: status={resp.status_code} body={resp.text[:200]}"
-            )
+            raise RuntimeError(self._failure_message("cleanup_env_dispatch", resp))
 
     # Back-compat alias for the old runner signature.
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None:
@@ -176,10 +180,8 @@ class MulticaEnvDispatchClient:
         if resp.status_code == 201:
             return resp.json()
         if resp.status_code in (403, 404, 409):
-            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
-        raise RuntimeError(
-            f"create_checkpoint failed: status={resp.status_code} body={resp.text[:200]}"
-        )
+            raise MulticaCheckpointError(resp.status_code, "")
+        raise RuntimeError(self._failure_message("create_checkpoint", resp))
 
     async def list_checkpoints(self, *, project_id: str) -> list[dict]:
         """GET /api/v1/projects/{project_id}/env-checkpoints."""
@@ -190,10 +192,8 @@ class MulticaEnvDispatchClient:
         if resp.status_code == 200:
             return resp.json().get("checkpoints", [])
         if resp.status_code in (403, 404, 409):
-            raise MulticaCheckpointError(resp.status_code, resp.text[:200])
-        raise RuntimeError(
-            f"list_checkpoints failed: status={resp.status_code} body={resp.text[:200]}"
-        )
+            raise MulticaCheckpointError(resp.status_code, "")
+        raise RuntimeError(self._failure_message("list_checkpoints", resp))
 
     async def maybe_create_entropy_checkpoint(
         self,
