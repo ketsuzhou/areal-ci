@@ -110,9 +110,9 @@ class MulticaDagClient:
     """Synchronous client that polls the db_bridge stub for an assembled DAG.
 
     The base URL defaults to ``base_url`` or the ``AREAL_BRIDGE_STUB_URL`` env
-    var (the areal-side bridge stub that forwards to multica). No API key is
-    sent: the stub is loopback and the multica executor injects the upstream
-    key. Polling is config-driven with sane defaults: ``poll_interval`` (initial
+    var (the areal-side bridge stub that forwards to multica). The caller key
+    defaults to ``api_key`` or ``MULTICA_API_KEY`` and passes through the bridge
+    as bearer authentication. Polling uses ``poll_interval`` (initial
     seconds between polls, default 2.0), ``poll_timeout`` (overall deadline,
     default 300.0), ``poll_backoff`` (interval growth factor, default 1.5), and
     ``poll_max_interval`` (backoff cap, default 10.0). ``http_timeout`` (default
@@ -124,6 +124,7 @@ class MulticaDagClient:
         self,
         base_url: str | None = None,
         *,
+        api_key: str | None = None,
         poll_interval: float = 2.0,
         poll_timeout: float = 300.0,
         poll_backoff: float = 1.5,
@@ -138,6 +139,7 @@ class MulticaDagClient:
             raise ValueError(
                 "MulticaDagClient requires base_url or AREAL_BRIDGE_STUB_URL"
             )
+        self._api_key = api_key or os.environ.get("MULTICA_API_KEY")
         self._transport = _transport
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
@@ -153,6 +155,9 @@ class MulticaDagClient:
         interval: float | None = None,
     ) -> AssembledDag:
         url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
+        headers = (
+            {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        )
         # Per-call overrides fall back to the client's configured defaults.
         poll_timeout = timeout if timeout is not None else self._poll_timeout
         poll_interval = interval if interval is not None else self._poll_interval
@@ -163,7 +168,7 @@ class MulticaDagClient:
         current_interval = poll_interval
         with httpx.Client(**client_kwargs) as client:
             while True:
-                resp = client.get(url)
+                resp = client.get(url, headers=headers)
                 if resp.status_code == 200:
                     return AssembledDag.from_dict(resp.json())
                 # 202 = not ready yet; 502/503/504 = bridge/transient (timeout,

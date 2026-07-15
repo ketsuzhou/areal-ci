@@ -49,6 +49,24 @@ def test_create_env_dispatch_scratch_swe_lego():
     assert project_id == "p1"
 
 
+def test_create_env_dispatch_sends_environment_api_key(monkeypatch):
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_dispatch")
+
+    def handler(request):
+        assert request.headers["authorization"] == "Bearer mul_dispatch"
+        return httpx.Response(201, json={"project_id": "p1"})
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://stub", transport=_transport(handler)
+    )
+    project_id = asyncio.run(
+        client.create_env_dispatch(
+            mode="scratch", dispatch_type="issue", agent_id="agent-1"
+        )
+    )
+    assert project_id == "p1"
+
+
 def test_cleanup_env_dispatch_hits_renamed_url():
     seen = {}
 

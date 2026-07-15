@@ -148,10 +148,9 @@ def test_get_dag_uses_client_defaults_without_overrides(monkeypatch):
         client.get_dag("proj-1")  # no timeout/interval kwargs
 
 
-def test_get_dag_reads_bridge_stub_url_from_env_and_sends_no_auth(monkeypatch):
-    """The DAG fetch is bridged: the base URL comes from AREAL_BRIDGE_STUB_URL and
-    no Authorization is sent (the multica executor injects the upstream key)."""
+def test_get_dag_reads_bridge_url_and_api_key_from_env(monkeypatch):
     monkeypatch.setenv("AREAL_BRIDGE_STUB_URL", "http://127.0.0.1:9101")
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_env")
     seen: dict = {}
 
     def handler(request):
@@ -163,7 +162,22 @@ def test_get_dag_reads_bridge_stub_url_from_env_and_sends_no_auth(monkeypatch):
     dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
     assert seen["url"].startswith("http://127.0.0.1:9101")
-    assert seen["auth"] is None  # no caller auth; executor injects the upstream key
+    assert seen["auth"] == "Bearer mul_env"
+
+
+def test_get_dag_explicit_api_key_overrides_environment(monkeypatch):
+    monkeypatch.setenv("MULTICA_API_KEY", "mul_env")
+
+    def handler(request):
+        assert request.headers["authorization"] == "Bearer mul_explicit"
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient(
+        "http://stub",
+        api_key="mul_explicit",
+        _transport=httpx.MockTransport(handler),
+    )
+    client.get_dag("proj-1", timeout=5.0, interval=0.0)
 
 
 def test_get_dag_504_repolls_until_200():
