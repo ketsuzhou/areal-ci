@@ -12,8 +12,12 @@ stdlib :mod:`logging` so the module stays importable without torch.
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import logging
 import os
+import sys
+import time
 
 import httpx
 
@@ -53,6 +57,8 @@ class MulticaEnvDispatchClient:
         transport: httpx.BaseTransport | None = None,
         timeout: float = 120.0,
         api_key: str | None = None,
+        workspace_slug: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self._base_url = (base_url or os.environ.get("MULTICA_BASE_URL") or "").rstrip(
             "/"
@@ -62,6 +68,15 @@ class MulticaEnvDispatchClient:
                 "MulticaEnvDispatchClient requires base_url or MULTICA_BASE_URL"
             )
         self._api_key = resolve_api_key(self._base_url, api_key)
+        # Workspace identification for user-PAT auth. A workspace-bound task
+        # token carries its workspace in X-Workspace-ID (set server-side by the
+        # auth middleware), so these stay None in production. A user PAT must
+        # identify the workspace explicitly via ?workspace_slug / ?workspace_id
+        # (resolveWorkspaceUUID priority 2/3 in middleware/workspace.go).
+        if workspace_slug and workspace_id:
+            raise ValueError("pass at most one of workspace_slug or workspace_id")
+        self._workspace_slug = workspace_slug or None
+        self._workspace_id = workspace_id or None
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=timeout, transport=transport
         )
@@ -70,6 +85,14 @@ class MulticaEnvDispatchClient:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
+
+    def _params(self) -> dict[str, str]:
+        """Workspace query params for user-PAT auth (empty for task-token auth)."""
+        if self._workspace_slug:
+            return {"workspace_slug": self._workspace_slug}
+        if self._workspace_id:
+            return {"workspace_id": self._workspace_id}
+        return {}
 
     def _failure_message(self, operation: str, response: httpx.Response) -> str:
         if response.status_code == 401:
@@ -82,6 +105,11 @@ class MulticaEnvDispatchClient:
     async def _request(
         self, operation: str, method: str, path: str, **kwargs
     ) -> httpx.Response:
+        workspace_params = self._params()
+        if workspace_params:
+            merged = dict(kwargs.get("params") or {})
+            merged.update(workspace_params)
+            kwargs["params"] = merged
         try:
             return await self._client.request(method, path, **kwargs)
         except httpx.RequestError:
@@ -104,6 +132,7 @@ class MulticaEnvDispatchClient:
         squad_id: str | None = None,
         group_size: int = 1,
         domain: str | None = None,
+        train_agent_id: str | None = None,
         issue: SweLegoIssue | None = None,
         message: str | None = None,
         per_agent_env: dict[str, dict] | None = None,
@@ -114,6 +143,12 @@ class MulticaEnvDispatchClient:
         dispatch itself), ``branch`` (fork ``env_id`` = source env), or ``resume``
         (resume from a checkpoint, with ``env_id`` = the checkpoint id). There is
         no separate env-boot or checkpoint-resume endpoint.
+
+        ``train_agent_id`` selects the single training target (spec §4.1): the
+        named agent is trainable, all other agents in the dispatch are not. Empty
+        means no training session. For a single-agent dispatch it must equal
+        ``agent_id``; for a squad dispatch (``squad_id`` set) it must be a squad
+        member. The server enforces these rules in ``validate()``.
         """
         payload: dict = {
             "mode": mode,
@@ -128,6 +163,8 @@ class MulticaEnvDispatchClient:
             payload["squad_id"] = squad_id
         if domain is not None:
             payload["domain"] = domain
+        if train_agent_id:
+            payload["train_agent_id"] = train_agent_id
         if issue is not None:
             payload["issue"] = {
                 "title": issue.issue_title,
@@ -168,6 +205,21 @@ class MulticaEnvDispatchClient:
     # Back-compat alias for the old runner signature.
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None:
         await self.cleanup_env_dispatch(project_id=project_id)
+
+    async def get_dag(self, *, project_id: str) -> httpx.Response:
+        """GET /api/v1/env-dispatch/{projectID}/dag - assembled DAG (spec §6.3).
+
+        Returns the raw response so the debug main can print transient states
+        (202 not-ready) and the assembled payload alike. Production DAG polling
+        uses :class:`MulticaDagClient`; this exposes the same endpoint on the
+        async client for debugging.
+        """
+        return await self._request(
+            "get_dag",
+            "GET",
+            f"/api/v1/env-dispatch/{project_id}/dag",
+            headers=self._headers(),
+        )
 
     async def create_checkpoint(
         self,
@@ -258,3 +310,218 @@ class MulticaEnvDispatchClient:
             entropy_score=entropy,
             save_timeout_ms=save_timeout_ms,
         )
+
+
+async def _poll_dag(
+    client: MulticaEnvDispatchClient,
+    project_id: str,
+    timeout: float,
+    interval: float,
+) -> None:
+    """Periodically GET the DAG endpoint and print each response.
+
+    Stops on a 200 (assembled) or any terminal status (404/403/401/...); keeps
+    polling on 202 / 502 / 503 / 504 (not-ready / gateway) up to ``timeout``.
+    """
+    print(
+        f"polling dag for project_id={project_id} "
+        f"(timeout={timeout}s, interval={interval}s)"
+    )
+    deadline = time.monotonic() + timeout
+    while True:
+        resp = await client.get_dag(project_id=project_id)
+        print(f"dag -> status={resp.status_code} body={resp.text[:2048]}")
+        if resp.status_code == 200:
+            print("dag assembled")
+            return
+        if resp.status_code not in (202, 502, 503, 504):
+            print(f"dag poll stopped: terminal status {resp.status_code}")
+            return
+        if time.monotonic() >= deadline:
+            print(f"dag poll timed out after {timeout}s")
+            return
+        await asyncio.sleep(interval)
+
+
+async def _debug_run(args: argparse.Namespace) -> int:
+    """Exercise create -> poll-dag -> list-checkpoints -> cleanup against a live MultiCA."""
+    message = args.message
+    dispatch_type = "message" if message is not None else args.dispatch_type
+    if dispatch_type == "message" and not message:
+        message = (
+            f"Debug probe {os.urandom(4).hex()}: list the files in the "
+            "current working directory and report the operating system."
+        )
+    domain = args.domain or "self_play"
+    issue: SweLegoIssue | None = None
+    if dispatch_type == "issue" and message is None:
+        issue = SweLegoIssue(
+            repo_url="https://github.com/example/debug-repo",
+            base_commit="main",
+            issue_date="2026-01-01",
+            issue_text="Debug dispatch fired from multica_client __main__.",
+            issue_title="Debug issue",
+            acceptance_criteria="Client can reach the MultiCA env-dispatch API.",
+            fail_to_pass=["test_debug"],
+            pass_to_pass=[],
+        )
+
+    client = MulticaEnvDispatchClient(
+        base_url=args.base_url,
+        api_key=args.api_key,
+        timeout=args.timeout,
+        workspace_slug=args.workspace_slug,
+        workspace_id=args.workspace_id,
+    )
+    try:
+        print(
+            f"dispatch -> base_url={args.base_url} mode={args.mode} "
+            f"dispatch_type={dispatch_type} agent_id={args.agent_id} "
+            f"train_agent_id={args.train_agent_id or '(none)'} "
+            f"workspace={args.workspace_slug or args.workspace_id or '(none)'}"
+        )
+        project_id = await client.create_env_dispatch(
+            mode=args.mode,
+            env_id=args.env_id,
+            dispatch_type=dispatch_type,
+            agent_id=args.agent_id,
+            domain=domain,
+            train_agent_id=args.train_agent_id,
+            issue=issue,
+            message=message,
+        )
+        print(f"created project_id={project_id}")
+
+        await _poll_dag(
+            client, project_id, args.dag_timeout, args.dag_poll_interval
+        )
+
+        checkpoints = await client.list_checkpoints(project_id=project_id)
+        print(f"checkpoints({len(checkpoints)}): {checkpoints}")
+
+        if args.keep:
+            print("--keep set; skipping cleanup")
+        else:
+            await client.cleanup_env_dispatch(project_id=project_id)
+            print(f"cleaned up project_id={project_id}")
+        return 0
+    finally:
+        await client.aclose()
+
+
+def build_debug_parser() -> argparse.ArgumentParser:
+    """Build the debug CLI without deployment-specific repository defaults."""
+    parser = argparse.ArgumentParser(
+        description="Debug the MultiCA env-dispatch client against a live server"
+    )
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("MULTICA_BASE_URL"),
+        help="MultiCA API base URL (defaults to MULTICA_BASE_URL)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("MULTICA_API_KEY"),
+        help="MultiCA API key (defaults to MULTICA_API_KEY or saved credentials)",
+    )
+    parser.add_argument(
+        "--workspace-slug",
+        default=os.environ.get("MULTICA_WORKSPACE_SLUG"),
+        help="workspace slug (defaults to MULTICA_WORKSPACE_SLUG); alternative to --workspace-id",
+    )
+    parser.add_argument(
+        "--workspace-id",
+        default=os.environ.get("MULTICA_WORKSPACE_ID"),
+        help="workspace UUID (defaults to MULTICA_WORKSPACE_ID); alternative to --workspace-slug",
+    )
+    parser.add_argument(
+        "--mode",
+        default="scratch",
+        choices=["scratch", "branch", "resume"],
+        help="env-dispatch mode (default: scratch)",
+    )
+    parser.add_argument(
+        "--dispatch-type",
+        default="message",
+        help="dispatch_type payload field (default: message; use issue for swe_lego)",
+    )
+    parser.add_argument(
+        "--agent-id",
+        default=os.environ.get("MULTICA_AGENT_ID"),
+        help="agent_id payload field (defaults to MULTICA_AGENT_ID)",
+    )
+    parser.add_argument(
+        "--train-agent-id",
+        default=None,
+        help="train_agent_id: the training target (default: none; must equal agent_id "
+        "for single-agent training, or be a squad member when --squad-id is set)",
+    )
+    parser.add_argument(
+        "--domain",
+        default=None,
+        help="domain (swe_lego|self_play); default: self_play",
+    )
+    parser.add_argument(
+        "--env-id",
+        default=None,
+        help="source env_id (required for branch/resume modes)",
+    )
+    parser.add_argument(
+        "--message",
+        default=None,
+        help="message content; defaults to a random debug query for message dispatch",
+    )
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="skip cleanup so the created project can be inspected",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="HTTP request timeout in seconds (default: 120)",
+    )
+    parser.add_argument(
+        "--dag-timeout",
+        type=float,
+        default=60.0,
+        help="max seconds to poll the DAG endpoint after create (default: 60)",
+    )
+    parser.add_argument(
+        "--dag-poll-interval",
+        type=float,
+        default=3.0,
+        help="seconds between DAG polls (default: 3)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the debug flow after validating explicit deployment coordinates."""
+    parser = build_debug_parser()
+    args = parser.parse_args(argv)
+    if not args.base_url:
+        parser.error("--base-url or MULTICA_BASE_URL is required")
+    if not args.agent_id:
+        parser.error("--agent-id or MULTICA_AGENT_ID is required")
+    workspace_selectors = bool(args.workspace_slug) + bool(args.workspace_id)
+    if workspace_selectors != 1:
+        parser.error(
+            "exactly one of --workspace-slug/MULTICA_WORKSPACE_SLUG or "
+            "--workspace-id/MULTICA_WORKSPACE_ID is required"
+        )
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    try:
+        return asyncio.run(_debug_run(args))
+    except (RuntimeError, MulticaCheckpointError) as exc:
+        print(f"MultiCA debug run failed: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

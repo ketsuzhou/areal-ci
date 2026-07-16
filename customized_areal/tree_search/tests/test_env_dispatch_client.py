@@ -9,6 +9,8 @@ from customized_areal.tree_search.agents.multica_auth import save_credentials
 from customized_areal.tree_search.agents.multica_client import (
     MulticaCheckpointError,
     MulticaEnvDispatchClient,
+    build_debug_parser,
+    main,
 )
 from customized_areal.tree_search.agents.reward.swe_lego_types import SweLegoIssue
 
@@ -284,6 +286,47 @@ def test_create_env_dispatch_omits_per_agent_env_when_empty():
     assert "per_agent_env" not in seen["body"]
 
 
+def test_create_env_dispatch_serializes_train_agent_id():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"project_id": "p1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    asyncio.run(
+        c.create_env_dispatch(
+            mode="scratch",
+            dispatch_type="message",
+            squad_id="sq",
+            domain="self_play",
+            train_agent_id="agent-1",
+            message="hi",
+        )
+    )
+    assert seen["body"]["train_agent_id"] == "agent-1"
+
+
+def test_create_env_dispatch_omits_train_agent_id_when_empty():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"project_id": "p1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    asyncio.run(
+        c.create_env_dispatch(
+            mode="scratch",
+            dispatch_type="message",
+            squad_id="sq",
+            domain="self_play",
+            message="hi",
+        )
+    )
+    assert "train_agent_id" not in seen["body"]
+
+
 def test_create_checkpoint_posts_sync_timeout_fields():
     seen = {}
 
@@ -434,3 +477,36 @@ def test_maybe_create_entropy_checkpoint_skips_when_below_threshold():
     )
     assert result is None
     assert called["count"] == 0
+
+
+def test_debug_parser_has_no_shared_deployment_defaults(monkeypatch):
+    for key in (
+        "MULTICA_BASE_URL",
+        "MULTICA_WORKSPACE_SLUG",
+        "MULTICA_WORKSPACE_ID",
+        "MULTICA_AGENT_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    args = build_debug_parser().parse_args([])
+
+    assert args.base_url is None
+    assert args.workspace_slug is None
+    assert args.workspace_id is None
+    assert args.agent_id is None
+
+
+def test_debug_main_requires_deployment_coordinates(monkeypatch, capsys):
+    for key in (
+        "MULTICA_BASE_URL",
+        "MULTICA_WORKSPACE_SLUG",
+        "MULTICA_WORKSPACE_ID",
+        "MULTICA_AGENT_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--agent-id", "agent"])
+
+    assert exc.value.code == 2
+    assert "--base-url" in capsys.readouterr().err
