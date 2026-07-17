@@ -33,9 +33,9 @@
 
 ## 7. Channel-first facades and concurrency-safe cleanup
 
-- [ ] 7.1 Channel-to-project resolver + GetEnvDispatchChannelDag, DeleteEnvDispatchChannel, ListChannelEnvCheckpoints handlers
-- [ ] 7.2 Register channel-first routes in cmd/server/router.go
-- [ ] 7.3 Serialized cleanup: lock env+bindings, mark deleting, compensate in-flight provisioning, delete in FK-safe order, idempotent
+- [x] 7.1 Channel-to-project resolver + GetEnvDispatchChannelDag, DeleteEnvDispatchChannel, ListChannelEnvCheckpoints handlers
+- [x] 7.2 Register channel-first routes in cmd/server/router.go
+- [x] 7.3 Serialized cleanup: lock env+bindings, mark deleting, compensate in-flight provisioning, delete in FK-safe order, idempotent
 
 ## 8. AReaL message client channel-first
 
