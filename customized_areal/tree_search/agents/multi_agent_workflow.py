@@ -64,7 +64,7 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         # Multica task = one project). create_env_dispatch returns the top-level
         # project_id directly; the empty-trajectory check is deferred to the
         # assembler (it returns None when the polled DAG has no segments).
-        project_id = await self._dispatch.create_env_dispatch(
+        handle = await self._dispatch.create_env_dispatch(
             mode="scratch",
             env_id=self.base_env_id,
             dispatch_type="message",
@@ -84,13 +84,13 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         try:
             dag = await asyncio.to_thread(
                 self._dag_client.get_dag,
-                project_id,
+                handle,
                 timeout=self.poll_timeout,
                 interval=self.poll_interval,
             )
         except DagTimeout:
             logger.warning(
-                "AssembledDag poll timed out for project %s; rejecting", project_id
+                "AssembledDag poll timed out for %s; rejecting", handle.primary_id
             )
             return None
         edag = await asyncio.to_thread(

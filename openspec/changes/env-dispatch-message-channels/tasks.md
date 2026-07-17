@@ -39,9 +39,9 @@
 
 ## 8. AReaL message client channel-first
 
-- [ ] 8.1 EnvDispatchHandle (channel_id primary for message, project_id for issue)
-- [ ] 8.2 create_env_dispatch returns handle; DAG/checkpoint/cleanup route by dispatch_type
-- [ ] 8.3 multi_agent_workflow + multica_dag_client pass handle; issue callers stay source-compatible
+- [x] 8.1 EnvDispatchHandle (channel_id primary for message, project_id for issue)
+- [x] 8.2 create_env_dispatch returns handle; DAG/checkpoint/cleanup route by dispatch_type
+- [x] 8.3 multi_agent_workflow + multica_dag_client pass handle; issue callers stay source-compatible
 
 ## 9. Regression verification and protocol documentation
 

@@ -7,6 +7,7 @@ import pytest
 from customized_areal.tree_search.agents import multica_auth
 from customized_areal.tree_search.agents.multica_auth import save_credentials
 from customized_areal.tree_search.agents.multica_client import (
+    EnvDispatchHandle,
     MulticaCheckpointError,
     MulticaEnvDispatchClient,
     build_debug_parser,
@@ -44,7 +45,7 @@ def test_create_env_dispatch_scratch_swe_lego():
         fail_to_pass=["f"],
         pass_to_pass=["p"],
     )
-    project_id = asyncio.run(
+    handle = asyncio.run(
         c.create_env_dispatch(
             mode="scratch",
             env_id="base",
@@ -55,7 +56,9 @@ def test_create_env_dispatch_scratch_swe_lego():
             issue=issue,
         )
     )
-    assert project_id == "p1"
+    assert handle.project_id == "p1"
+    assert handle.dispatch_type == "issue"
+    assert handle.channel_id is None
 
 
 def test_create_env_dispatch_sends_environment_api_key(monkeypatch):
@@ -68,12 +71,12 @@ def test_create_env_dispatch_sends_environment_api_key(monkeypatch):
     client = MulticaEnvDispatchClient(
         base_url="http://stub", transport=_transport(handler)
     )
-    project_id = asyncio.run(
+    handle = asyncio.run(
         client.create_env_dispatch(
             mode="scratch", dispatch_type="issue", agent_id="agent-1"
         )
     )
-    assert project_id == "p1"
+    assert handle.project_id == "p1"
 
 
 def test_create_env_dispatch_sends_saved_api_key(monkeypatch, tmp_path):
@@ -89,12 +92,82 @@ def test_create_env_dispatch_sends_saved_api_key(monkeypatch, tmp_path):
     client = MulticaEnvDispatchClient(
         base_url="http://multica", transport=_transport(handler)
     )
-    project_id = asyncio.run(
+    handle = asyncio.run(
         client.create_env_dispatch(
             mode="scratch", dispatch_type="issue", agent_id="agent-1"
         )
     )
-    assert project_id == "p1"
+    assert handle.project_id == "p1"
+
+
+def test_create_env_dispatch_message_returns_channel_first_handle():
+    """A message dispatch must surface channel_id and route channel-first."""
+    seen_paths: list[str] = []
+
+    def handler(req):
+        seen_paths.append(req.url.path)
+        if req.method == "POST":
+            return httpx.Response(
+                201,
+                json={
+                    "channel_id": "c1",
+                    "project_id": "p1",
+                    "rollouts": [
+                        {"channel_id": "c1", "project_id": "p1", "env_id": "e1"}
+                    ],
+                },
+            )
+        if req.method == "GET" and req.url.path.endswith("/dag"):
+            return httpx.Response(200, json={"nodes": []})
+        if req.method == "GET" and req.url.path.endswith("/env-checkpoints"):
+            return httpx.Response(200, json={"checkpoints": []})
+        if req.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    handle = asyncio.run(
+        c.create_env_dispatch(
+            mode="scratch",
+            dispatch_type="message",
+            agent_id="ag",
+            domain="self_play",
+            message="hi",
+        )
+    )
+    assert handle.channel_id == "c1"
+    assert handle.project_id == "p1"
+    assert handle.env_id == "e1"
+    assert handle.dispatch_type == "message"
+    assert handle.primary_id == "c1"
+
+    asyncio.run(c.get_dag(handle=handle))
+    asyncio.run(c.list_checkpoints(handle=handle))
+    asyncio.run(c.cleanup_env_dispatch(handle=handle))
+
+    assert seen_paths == [
+        "/api/v1/env-dispatch/channels/c1/dag",
+        "/api/v1/channels/c1/env-checkpoints",
+        "/api/v1/env-dispatch/channels/c1",
+    ]
+
+
+def test_create_env_dispatch_message_missing_channel_id_raises():
+    def handler(req):
+        # Message dispatch response without channel_id is a contract violation.
+        return httpx.Response(201, json={"project_id": "p1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    with pytest.raises(RuntimeError, match="missing channel_id"):
+        asyncio.run(
+            c.create_env_dispatch(
+                mode="scratch",
+                dispatch_type="message",
+                agent_id="ag",
+                domain="self_play",
+                message="hi",
+            )
+        )
 
 
 def test_create_env_dispatch_401_points_to_login_without_leaking_pat():
@@ -191,7 +264,16 @@ def test_cleanup_env_dispatch_hits_renamed_url():
         return httpx.Response(204)
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    asyncio.run(c.cleanup_env_dispatch(project_id="p1"))
+    asyncio.run(
+        c.cleanup_env_dispatch(
+            handle=EnvDispatchHandle(
+                channel_id=None,
+                project_id="p1",
+                env_id="",
+                dispatch_type="issue",
+            )
+        )
+    )
     assert seen["path"] == "/api/v1/env-dispatch/p1"
 
 
@@ -200,7 +282,7 @@ def test_create_env_dispatch_squad_omits_agent_and_env():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"project_id": "p1"})
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -250,7 +332,7 @@ def test_create_env_dispatch_serializes_per_agent_env_specs():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"project_id": "p1"})
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -271,7 +353,7 @@ def test_create_env_dispatch_omits_per_agent_env_when_empty():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"project_id": "p1"})
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -291,7 +373,7 @@ def test_create_env_dispatch_serializes_train_agent_id():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"project_id": "p1"})
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -312,7 +394,7 @@ def test_create_env_dispatch_omits_train_agent_id_when_empty():
 
     def handler(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"project_id": "p1"})
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
     asyncio.run(
@@ -380,7 +462,16 @@ def test_list_checkpoints_returns_items():
         )
 
     c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
-    items = asyncio.run(c.list_checkpoints(project_id="p1"))
+    items = asyncio.run(
+        c.list_checkpoints(
+            handle=EnvDispatchHandle(
+                channel_id=None,
+                project_id="p1",
+                env_id="",
+                dispatch_type="issue",
+            )
+        )
+    )
     assert len(items) == 2
     assert items[0]["id"] == "cp-1"
     assert items[1]["save_status"] == "timed_out"

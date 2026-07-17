@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass
 
 import httpx
 
@@ -31,6 +32,31 @@ from customized_areal.tree_search.env_checkpoint import (
 )
 
 logger = logging.getLogger("MulticaEnvDispatchClient")
+
+
+@dataclass(frozen=True, slots=True)
+class EnvDispatchHandle:
+    """Immutable handle for one env-dispatch result.
+
+    Message dispatch is channel-first: ``channel_id`` is the primary public
+    identifier and the project is the internal owner of env/DAG/checkpoint
+    state. Issue dispatch is project-first (``channel_id`` is None). Callers
+    pass this handle to DAG polling, checkpoint listing, and cleanup so the
+    client routes by ``dispatch_type`` rather than inferring message mode from
+    a missing/present arbitrary string. Checkpoint *creation* stays
+    project-internal (``project_id``).
+    """
+
+    channel_id: str | None
+    project_id: str
+    env_id: str
+    dispatch_type: str
+
+    @property
+    def primary_id(self) -> str:
+        """The public identifier AReaL polls/cleans: channel_id for message,
+        project_id for issue."""
+        return self.channel_id if self.dispatch_type == "message" else self.project_id
 
 
 class MulticaCheckpointError(RuntimeError):
@@ -136,7 +162,7 @@ class MulticaEnvDispatchClient:
         issue: SweLegoIssue | None = None,
         message: str | None = None,
         per_agent_env: dict[str, dict] | None = None,
-    ) -> str:
+    ) -> EnvDispatchHandle:
         """POST /api/v1/env-dispatch — unified dispatch (spec §6.3).
 
         ``mode`` selects the dispatch kind: ``scratch`` (fresh env, booted by the
@@ -189,35 +215,93 @@ class MulticaEnvDispatchClient:
         )
         if resp.status_code != 201:
             raise RuntimeError(self._failure_message("create_env_dispatch", resp))
-        return resp.json()["project_id"]
+        data = resp.json()
+        project_id = data.get("project_id") or ""
+        if not project_id:
+            raise RuntimeError(
+                "create_env_dispatch failed: response missing project_id"
+            )
+        channel_id = data.get("channel_id") or None
+        if dispatch_type == "message" and not channel_id:
+            raise RuntimeError(
+                "create_env_dispatch failed: "
+                "message dispatch response missing channel_id"
+            )
+        env_id = ""
+        rollouts = data.get("rollouts") or []
+        if rollouts:
+            env_id = rollouts[0].get("env_id") or ""
+        return EnvDispatchHandle(
+            channel_id=channel_id,
+            project_id=project_id,
+            env_id=env_id,
+            dispatch_type=dispatch_type,
+        )
 
-    async def cleanup_env_dispatch(self, *, project_id: str) -> None:
-        """DELETE /api/v1/env-dispatch/{projectID} — cascades to issues/chat/tasks."""
+    def _dispatch_lifecycle_prefix(self, handle: EnvDispatchHandle) -> str:
+        """Resolve the dispatch-scoped REST prefix for a handle.
+
+        Message dispatches are channel-first: their lifecycle routes through
+        ``/api/v1/env-dispatch/channels/{channelID}``. Issue dispatches stay
+        project-first: ``/api/v1/env-dispatch/{projectID}``. Routing is driven
+        only by ``handle.dispatch_type`` - never by inferring message mode from
+        the presence/absence of an arbitrary string.
+        """
+        if handle.dispatch_type == "message":
+            if not handle.channel_id:
+                raise RuntimeError(
+                    "env-dispatch handle missing channel_id for message dispatch"
+                )
+            return f"/api/v1/env-dispatch/channels/{handle.channel_id}"
+        if not handle.project_id:
+            raise RuntimeError(
+                "env-dispatch handle missing project_id for issue dispatch"
+            )
+        return f"/api/v1/env-dispatch/{handle.project_id}"
+
+    async def cleanup_env_dispatch(self, *, handle: EnvDispatchHandle) -> None:
+        """DELETE the dispatch-scoped resource - cascades to issues/chat/tasks.
+
+        Message dispatch deletes ``/api/v1/env-dispatch/channels/{channelID}``;
+        issue dispatch deletes ``/api/v1/env-dispatch/{projectID}``. A 404 is
+        treated as success so cleanup is idempotent across retries.
+        """
         resp = await self._request(
             "cleanup_env_dispatch",
             "DELETE",
-            f"/api/v1/env-dispatch/{project_id}",
+            self._dispatch_lifecycle_prefix(handle),
             headers=self._headers(),
         )
         if resp.status_code not in (200, 204, 404):
             raise RuntimeError(self._failure_message("cleanup_env_dispatch", resp))
 
-    # Back-compat alias for the old runner signature.
+    # Back-compat alias for callers that still resolve an issue dispatch to its
+    # project_id (the legacy swe_lego path). New code should pass the handle
+    # returned by ``create_env_dispatch`` directly to ``cleanup_env_dispatch``.
     async def cleanup_swe_lego_issue(self, *, project_id: str) -> None:
-        await self.cleanup_env_dispatch(project_id=project_id)
+        await self.cleanup_env_dispatch(
+            handle=EnvDispatchHandle(
+                channel_id=None,
+                project_id=project_id,
+                env_id="",
+                dispatch_type="issue",
+            )
+        )
 
-    async def get_dag(self, *, project_id: str) -> httpx.Response:
-        """GET /api/v1/env-dispatch/{projectID}/dag - assembled DAG (spec §6.3).
+    async def get_dag(self, *, handle: EnvDispatchHandle) -> httpx.Response:
+        """GET the dispatch-scoped assembled DAG (spec §6.3).
 
-        Returns the raw response so the debug main can print transient states
-        (202 not-ready) and the assembled payload alike. Production DAG polling
-        uses :class:`MulticaDagClient`; this exposes the same endpoint on the
-        async client for debugging.
+        Message dispatch queries ``/api/v1/env-dispatch/channels/{channelID}/dag``;
+        issue dispatch queries ``/api/v1/env-dispatch/{projectID}/dag``. Returns
+        the raw response so the debug main can print transient states (202
+        not-ready) and the assembled payload alike. Production DAG polling uses
+        :class:`MulticaDagClient`; this exposes the same endpoint on the async
+        client for debugging.
         """
         return await self._request(
             "get_dag",
             "GET",
-            f"/api/v1/env-dispatch/{project_id}/dag",
+            f"{self._dispatch_lifecycle_prefix(handle)}/dag",
             headers=self._headers(),
         )
 
@@ -263,12 +347,21 @@ class MulticaEnvDispatchClient:
             )
         raise RuntimeError(self._failure_message("create_checkpoint", resp))
 
-    async def list_checkpoints(self, *, project_id: str) -> list[dict]:
-        """GET /api/v1/projects/{project_id}/env-checkpoints."""
+    async def list_checkpoints(self, *, handle: EnvDispatchHandle) -> list[dict]:
+        """GET the dispatch-scoped env-checkpoints.
+
+        Message dispatch queries ``/api/v1/channels/{channelID}/env-checkpoints``;
+        issue dispatch queries ``/api/v1/projects/{projectID}/env-checkpoints``.
+        """
+        path = (
+            f"/api/v1/channels/{handle.channel_id}/env-checkpoints"
+            if handle.dispatch_type == "message"
+            else f"/api/v1/projects/{handle.project_id}/env-checkpoints"
+        )
         resp = await self._request(
             "list_checkpoints",
             "GET",
-            f"/api/v1/projects/{project_id}/env-checkpoints",
+            path,
             headers=self._headers(),
         )
         if resp.status_code == 200:
@@ -314,7 +407,7 @@ class MulticaEnvDispatchClient:
 
 async def _poll_dag(
     client: MulticaEnvDispatchClient,
-    project_id: str,
+    handle: EnvDispatchHandle,
     timeout: float,
     interval: float,
 ) -> None:
@@ -323,13 +416,10 @@ async def _poll_dag(
     Stops on a 200 (assembled) or any terminal status (404/403/401/...); keeps
     polling on 202 / 502 / 503 / 504 (not-ready / gateway) up to ``timeout``.
     """
-    print(
-        f"polling dag for project_id={project_id} "
-        f"(timeout={timeout}s, interval={interval}s)"
-    )
+    print(f"polling dag for handle={handle} (timeout={timeout}s, interval={interval}s)")
     deadline = time.monotonic() + timeout
     while True:
-        resp = await client.get_dag(project_id=project_id)
+        resp = await client.get_dag(handle=handle)
         print(f"dag -> status={resp.status_code} body={resp.text[:2048]}")
         if resp.status_code == 200:
             print("dag assembled")
@@ -380,7 +470,7 @@ async def _debug_run(args: argparse.Namespace) -> int:
             f"train_agent_id={args.train_agent_id or '(none)'} "
             f"workspace={args.workspace_slug or args.workspace_id or '(none)'}"
         )
-        project_id = await client.create_env_dispatch(
+        handle = await client.create_env_dispatch(
             mode=args.mode,
             env_id=args.env_id,
             dispatch_type=dispatch_type,
@@ -390,20 +480,18 @@ async def _debug_run(args: argparse.Namespace) -> int:
             issue=issue,
             message=message,
         )
-        print(f"created project_id={project_id}")
+        print(f"created handle: {handle}")
 
-        await _poll_dag(
-            client, project_id, args.dag_timeout, args.dag_poll_interval
-        )
+        await _poll_dag(client, handle, args.dag_timeout, args.dag_poll_interval)
 
-        checkpoints = await client.list_checkpoints(project_id=project_id)
+        checkpoints = await client.list_checkpoints(handle=handle)
         print(f"checkpoints({len(checkpoints)}): {checkpoints}")
 
         if args.keep:
             print("--keep set; skipping cleanup")
         else:
-            await client.cleanup_env_dispatch(project_id=project_id)
-            print(f"cleaned up project_id={project_id}")
+            await client.cleanup_env_dispatch(handle=handle)
+            print(f"cleaned up handle: {handle}")
         return 0
     finally:
         await client.aclose()
