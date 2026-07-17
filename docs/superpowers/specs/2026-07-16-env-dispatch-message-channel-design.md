@@ -1,6 +1,15 @@
+---
+comet_change: env-dispatch-message-channels
+role: technical-design
+canonical_spec: openspec
+---
+
 # EnvDispatch Message Channels Design
 
 **Date:** 2026-07-16
+
+OpenSpec canonical spec: `openspec/changes/env-dispatch-message-channels/specs/env-dispatch-message-channels/spec.md`.
+This document is the deep technical design; requirements/scenarios live in the OpenSpec delta.
 
 ## Goal
 
