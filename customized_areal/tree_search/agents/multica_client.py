@@ -470,6 +470,7 @@ async def _debug_run(args: argparse.Namespace) -> int:
         workspace_slug=args.workspace_slug,
         workspace_id=args.workspace_id,
     )
+    handle: EnvDispatchHandle | None = None
     try:
         print(
             f"dispatch -> base_url={args.base_url} mode={args.mode} "
@@ -491,16 +492,28 @@ async def _debug_run(args: argparse.Namespace) -> int:
 
         await _poll_dag(client, handle, args.dag_timeout, args.dag_poll_interval)
 
-        checkpoints = await client.list_checkpoints(handle=handle)
-        print(f"checkpoints({len(checkpoints)}): {checkpoints}")
+        # list_checkpoints is diagnostic only. An env-checkpoints-disabled server
+        # answers 404 here; that must not skip cleanup of the real dispatch.
+        try:
+            checkpoints = await client.list_checkpoints(handle=handle)
+            print(f"checkpoints({len(checkpoints)}): {checkpoints}")
+        except Exception as exc:  # noqa: BLE001 - keep cleanup on the rails
+            print(f"list_checkpoints failed (non-fatal): {type(exc).__name__}: {exc}")
 
-        if args.keep:
-            print("--keep set; skipping cleanup")
-        else:
-            await client.cleanup_env_dispatch(handle=handle)
-            print(f"cleaned up handle: {handle}")
         return 0
     finally:
+        # Always clean up the created env-dispatch, even if polling or
+        # list_checkpoints raised, so a mid-run error never leaks a real cloud
+        # resource. --keep intentionally leaves it for inspection.
+        if handle is not None:
+            if args.keep:
+                print("--keep set; skipping cleanup")
+            else:
+                try:
+                    await client.cleanup_env_dispatch(handle=handle)
+                    print(f"cleaned up handle: {handle}")
+                except Exception as exc:  # noqa: BLE001 - diagnostic
+                    print(f"cleanup_env_dispatch failed: {type(exc).__name__}: {exc}")
         await client.aclose()
 
 
