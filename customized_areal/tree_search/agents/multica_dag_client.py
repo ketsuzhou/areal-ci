@@ -1,8 +1,10 @@
 """HTTP client for fetching MultiCA's assembled DAG directly.
 
-Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` on ``MULTICA_BASE_URL``
-with the caller's MultiCA PAT until it returns an assembled DAG, or raises a
-typed DAG error. Transient responses are re-polled up to the configured deadline.
+Polls the dispatch-scoped assembled-DAG endpoint on ``MULTICA_BASE_URL`` with
+the caller's MultiCA PAT until it returns an assembled DAG, or raises a typed DAG
+error. Message dispatches poll ``GET /api/v1/env-dispatch/channels/{channel_id}/dag``;
+issue dispatches poll ``GET /api/v1/env-dispatch/{project_id}/dag``. Transient
+responses are re-polled up to the configured deadline.
 """
 
 from __future__ import annotations

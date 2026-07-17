@@ -353,11 +353,18 @@ class MulticaEnvDispatchClient:
         Message dispatch queries ``/api/v1/channels/{channelID}/env-checkpoints``;
         issue dispatch queries ``/api/v1/projects/{projectID}/env-checkpoints``.
         """
-        path = (
-            f"/api/v1/channels/{handle.channel_id}/env-checkpoints"
-            if handle.dispatch_type == "message"
-            else f"/api/v1/projects/{handle.project_id}/env-checkpoints"
-        )
+        if handle.dispatch_type == "message":
+            if not handle.channel_id:
+                raise RuntimeError(
+                    "env-dispatch handle missing channel_id for message dispatch"
+                )
+            path = f"/api/v1/channels/{handle.channel_id}/env-checkpoints"
+        else:
+            if not handle.project_id:
+                raise RuntimeError(
+                    "env-dispatch handle missing project_id for issue dispatch"
+                )
+            path = f"/api/v1/projects/{handle.project_id}/env-checkpoints"
         resp = await self._request(
             "list_checkpoints",
             "GET",

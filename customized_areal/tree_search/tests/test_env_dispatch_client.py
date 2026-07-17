@@ -141,6 +141,9 @@ def test_create_env_dispatch_message_returns_channel_first_handle():
     assert handle.dispatch_type == "message"
     assert handle.primary_id == "c1"
 
+    # Only the lifecycle routes are asserted below; the create POST was already
+    # recorded above and is cleared so the assertion is exact.
+    seen_paths.clear()
     asyncio.run(c.get_dag(handle=handle))
     asyncio.run(c.list_checkpoints(handle=handle))
     asyncio.run(c.cleanup_env_dispatch(handle=handle))
@@ -475,6 +478,40 @@ def test_list_checkpoints_returns_items():
     assert len(items) == 2
     assert items[0]["id"] == "cp-1"
     assert items[1]["save_status"] == "timed_out"
+
+
+def test_list_checkpoints_message_handle_routes_channel_first():
+    def handler(req):
+        assert req.url.path == "/api/v1/channels/c1/env-checkpoints"
+        return httpx.Response(200, json={"checkpoints": [{"id": "cp-1"}]})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    items = asyncio.run(
+        c.list_checkpoints(
+            handle=EnvDispatchHandle(
+                channel_id="c1", project_id="p1", env_id="e1", dispatch_type="message"
+            )
+        )
+    )
+    assert items == [{"id": "cp-1"}]
+
+
+def test_list_checkpoints_message_handle_missing_channel_id_raises():
+    c = MulticaEnvDispatchClient(
+        base_url="http://x",
+        transport=_transport(lambda r: httpx.Response(200, json={})),
+    )
+    with pytest.raises(RuntimeError, match="missing channel_id"):
+        asyncio.run(
+            c.list_checkpoints(
+                handle=EnvDispatchHandle(
+                    channel_id=None,
+                    project_id="p1",
+                    env_id="",
+                    dispatch_type="message",
+                )
+            )
+        )
 
 
 def test_checkpoint_conflict_raises_typed_error():
