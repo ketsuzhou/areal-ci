@@ -101,7 +101,7 @@ class LocalScheduler(Scheduler):
         self,
         gpu_devices: list[int] | None = None,
         log_dir: str | None = None,
-        startup_timeout: float = 30.0,
+        startup_timeout: float = 120.0,
         health_check_interval: float = 1.0,
         *,
         experiment_name: str | None = None,
@@ -320,31 +320,11 @@ class LocalScheduler(Scheduler):
         worker_id = f"{role}/{idx}"
         guard_url = f"http://{format_hostport(target_wi.worker.ip, int(target_wi.worker.worker_ports[0]))}"
 
-        alloc_payload: dict[str, object] = {"count": 1}
-        if role == "proxy-rollout":
-            pinned_raw = os.environ.get("AREAL_PROXY_ROLLOUT_PORT")
-            if pinned_raw:
-                try:
-                    preferred = [
-                        int(p.strip()) for p in pinned_raw.split(",") if p.strip()
-                    ]
-                    if not preferred:
-                        logger.warning(
-                            f"AREAL_PROXY_ROLLOUT_PORT={pinned_raw!r} parsed to empty list"
-                        )
-                    else:
-                        alloc_payload["preferred_ports"] = preferred
-                        logger.info(f"proxy-rollout/{idx} preferred ports: {preferred}")
-                except ValueError as e:
-                    logger.warning(
-                        f"Ignoring invalid AREAL_PROXY_ROLLOUT_PORT={pinned_raw!r}: {e}"
-                    )
-
         try:
             # 1. Allocate a port on the target guard
             async with session.post(
                 f"{guard_url}/alloc_ports",
-                json=alloc_payload,
+                json={"count": 1},
             ) as alloc_resp:
                 if alloc_resp.status != 200:
                     error_text = await alloc_resp.text()

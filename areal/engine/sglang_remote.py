@@ -120,24 +120,11 @@ class SGLangBackend:
         output_tokens = [x[1] for x in meta_info["output_token_logprobs"]]
         output_logprobs = [x[0] for x in meta_info["output_token_logprobs"]]
 
-        output_top_logprobs = None
-        if "output_top_logprobs" in meta_info:
-            raw_top_logprobs = meta_info["output_top_logprobs"]
-            output_top_logprobs = []
-            for pos_top_logprobs in raw_top_logprobs:
-                position_logprobs = []
-                if pos_top_logprobs is not None:
-                    for token_key, logprob in pos_top_logprobs.items():
-                        if isinstance(token_key, int):
-                            position_logprobs.append((token_key, logprob))
-                output_top_logprobs.append(position_logprobs)
-
         return HttpGenerationResult(
             output_tokens=output_tokens,
             output_logprobs=output_logprobs,
             stop_reason=stop_reason,
             routed_experts=routed_experts,
-            output_top_logprobs=output_top_logprobs,
         )
 
     def build_score_request(

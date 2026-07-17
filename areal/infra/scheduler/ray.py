@@ -58,7 +58,7 @@ class RayWorkerInfo:
 class RayScheduler(Scheduler):
     def __init__(
         self,
-        startup_timeout: float = 30.0,
+        startup_timeout: float = 120.0,
         *,
         exp_config: BaseExperimentConfig | None = None,
         n_gpus_per_node: int = 8,

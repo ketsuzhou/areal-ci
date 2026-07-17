@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import warnings
 from dataclasses import MISSING as dataclass_missing
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -872,7 +873,18 @@ class MegatronEngineConfig:
     exp_avg_sq_dtype: str = "float32"
 
     # Checkpointing Configuration
-    async_save: bool = False
+    async_save: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If True, Megatron checkpoint saves run in background processes and "
+                "save_checkpoint() returns immediately after weights are durably "
+                "staged off the GPU. Pending saves are drained before the next "
+                "load_checkpoint() and during engine.destroy(). Reduces per-save "
+                "sync wait on large MoE checkpoints."
+            ),
+        },
+    )
     use_checkpoint_opt_param_scheduler: bool = True
 
     # Deterministic Option
@@ -909,6 +921,45 @@ class MegatronEngineConfig:
         default=False,
         metadata={"help": "Fuse token rearrangement ops during token dispatching."},
     )
+    moe_router_fusion: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable fusion for MoE TopK routing and aux-loss computation. "
+            "Requires TransformerEngine >= 2.7.0.",
+        },
+    )
+    moe_router_bias_update_rate: float = field(
+        default=0.0,
+        metadata={
+            "help": "Update rate for auxiliary-loss-free MoE load balancing "
+            "(DeepSeek V3 style). Controls how fast expert_bias adjusts. "
+            "Default 0.0 disables bias updates; set a positive value such as "
+            "1e-3 to enable.",
+        },
+    )
+    moe_z_loss_coeff: float | None = field(
+        default=None,
+        metadata={
+            "help": "Scaling coefficient for router z-loss. Complements "
+            "auxiliary-loss-free load balancing for router stability. A starting "
+            "value of 1e-3 is recommended. None disables z-loss.",
+        },
+    )
+
+    # Precision & Loss
+    enable_fp32_lm_head: bool = field(
+        default=False,
+        metadata={
+            "help": "Cast lm_head output to FP32 before loss computation for "
+            "numerical stability."
+        },
+    )
+    cross_entropy_loss_fusion: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable fused cross-entropy loss kernel for better performance."
+        },
+    )
 
     # FP8 Training Configuration
     fp8_config: FP8EngineConfig | None = None
@@ -926,6 +977,34 @@ class MegatronEngineConfig:
         default=False,
         metadata={
             "help": "Use mbridge's save method to save gpu memory when saving weights."
+        },
+    )
+
+    use_bridge_for_update_weights: bool = field(
+        default=False,
+        metadata={
+            "help": "When True and bridge_type='megatron-bridge', delegate live "
+            "weight sync to bridge.export_hf_weights instead of the hand-rolled "
+            "convert_to_hf registry. Required for models without a registry entry "
+            "(e.g. Qwen3.5). FP8 paths fall back to the registry automatically.",
+        },
+    )
+
+    disable_grad_buffers_cpu_backup: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "When offloading with torch_memory_saver, skip CPU backup for "
+                "Megatron gradient buffers (they are recomputed each step). "
+            )
+        },
+    )
+
+    enable_mtp: bool = field(
+        default=False,
+        metadata={
+            "help": "Keep the model's Multi-Token-Prediction (MTP) head "
+            "(bridge_type=megatron-bridge only). Default False drops it.",
         },
     )
 
@@ -1095,9 +1174,30 @@ class TrainEngineConfig:
     gradient_checkpointing: bool = field(
         default=False, metadata={"help": "Enable gradient checkpointing"}
     )
-    dtype: str = field(default="bfloat16", metadata={"help": "Parameter data type."})
+    dtype: str = field(
+        default="bfloat16",
+        metadata={"help": "Forward/backward compute dtype."},
+    )
     grad_reduce_dtype: str = field(
         default="float32", metadata={"help": "Gradient reduction data type."}
+    )
+    optimizer_dtype: str = field(
+        default="float32",
+        metadata={
+            "help": (
+                "Underlying parameter storage dtype, also the dtype of optimizer "
+                "states (exp_avg, exp_avg_sq) since torch.optim.AdamW inherits "
+                "dtype from model.parameters(). "
+                "Default 'float32' maintains fp32 master weights matching "
+                "DeepSpeed ZeRO-3 and Megatron precision-aware optimizer behavior. "
+                "FSDP2's MixedPrecisionPolicy(param_dtype=`dtype`) will still "
+                "cast forward/backward computation to `dtype` (e.g. bfloat16). "
+                "Set to 'bfloat16' together with optimizer.type='adam_bf16' to "
+                "reduce memory at the cost of needing Kahan summation for stability. "
+                "Currently FSDP-only; Megatron uses use_precision_aware_optimizer "
+                "instead and ignores this field."
+            )
+        },
     )
     optimizer: OptimizerConfig | None = field(
         default=None,
@@ -1191,6 +1291,12 @@ class TrainEngineConfig:
         default=3600.0,
         metadata={"help": "Gateway setup timeout in seconds for controller v2."},
     )
+    workers_ready_timeout: float = field(
+        default=120.0,
+        metadata={
+            "help": "Timeout (seconds) for initialize() to wait for guards to be ready."
+        },
+    )
     scheduling_strategy: SchedulingStrategy = field(
         default_factory=SchedulingStrategy,
         metadata={
@@ -1217,6 +1323,27 @@ class TrainEngineConfig:
         if self._version not in ("v1", "v2"):
             raise ValueError(
                 f"_version must be either 'v1' or 'v2', got '{self._version}'"
+            )
+
+        # Canonicalize common aliases so getattr(torch, ...) works at runtime.
+        # Storage map omits fp16 since float16 is not a valid optimizer_dtype;
+        # leaving "fp16" un-canonicalized makes the validation error below
+        # echo what the user typed instead of a silently rewritten value.
+        _compute_aliases = {"fp32": "float32", "bf16": "bfloat16", "fp16": "float16"}
+        _storage_aliases = {"fp32": "float32", "bf16": "bfloat16"}
+        if self.optimizer_dtype in _storage_aliases:
+            self.optimizer_dtype = _storage_aliases[self.optimizer_dtype]
+        if self.dtype in _compute_aliases:
+            self.dtype = _compute_aliases[self.dtype]
+
+        if self.optimizer_dtype not in ("float32", "bfloat16"):
+            raise ValueError(
+                f"optimizer_dtype must be 'float32' or 'bfloat16', "
+                f"got {self.optimizer_dtype!r}"
+            )
+        if self.dtype not in ("float32", "bfloat16", "float16"):
+            raise ValueError(
+                f"dtype must be one of float32/bfloat16/float16, got {self.dtype!r}"
             )
 
 
@@ -1278,8 +1405,10 @@ class RejectionSamplingConfig:
             "'ratio': direct importance ratio π_proximal/π_behave. "
             "'kl_k1': KL estimator k1 = log(r), forward KL unbiased estimator (can be negative). "
             "'kl_k2': KL estimator k2 = 0.5 * (log r)^2, non-negative quadratic approximation. "
-            "'kl_k3': KL estimator k3 = r - log(r) - 1, non-negative exact forward KL estimator.",
-            "choices": ["ratio", "kl_k1", "kl_k2", "kl_k3"],
+            "'kl_k3': KL estimator k3 = r - log(r) - 1, non-negative exact forward KL estimator. "
+            "'binary_kl': KPop (symmetric binary KL divergence) — masks tokens where either "
+            "KL(proximal||behave) or KL(behave||proximal) exceeds the upper bound.",
+            "choices": ["ratio", "kl_k1", "kl_k2", "kl_k3", "binary_kl"],
         },
     )
     agg: str = field(
@@ -1523,16 +1652,10 @@ class PPOActorConfig(TrainEngineConfig):
             "Only effective when use_decoupled_loss=True. Options: "
             "'recompute' (default): Standard decoupled PPO, recompute proximal policy via forward pass. "
             "'loglinear': Use log-linear interpolation to approximate proximal policy (skip forward pass). "
-            "'metrics': Like 'recompute', but also compute approximation metrics for evaluation.",
+            "'metrics': Like 'recompute', but also compute approximation metrics for evaluation. "
+            "'reuse_train_logp': Reuse training forward-pass logprobs as the proximal "
+            "logp (skip the extra forward; requires ppo_n_minibatches=1).",
             "choices": PROX_LOGP_METHODS_ALL,
-        },
-    )
-    enable_remote_rollout: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable OpenRouter remote rollout via model='remote:<provider/model>'. "
-            "Requires actor.recompute_logprob=true or actor.use_decoupled_loss=true, "
-            "because remote completions carry placeholder logprobs that must be recomputed."
         },
     )
 
@@ -1566,6 +1689,38 @@ class PPOActorConfig(TrainEngineConfig):
 
     def __post_init__(self):
         """Validate PPO actor configuration."""
+        reward_norm = self.reward_norm
+        if isinstance(reward_norm, (dict, DictConfig)):
+            reward_mean_level = reward_norm.get("mean_level")
+            reward_group_size = reward_norm.get("group_size")
+        else:
+            reward_mean_level = getattr(reward_norm, "mean_level", None)
+            reward_group_size = getattr(reward_norm, "group_size", None)
+
+        if reward_mean_level == "group" and reward_group_size == 1:
+            warnings.warn(
+                "PPO reward_norm uses mean_level='group' with group_size=1: "
+                "singleton group centering erases the task reward. Disable reward "
+                "centering (mean_level=None) or use group_size >= 2.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        from areal.utils.constants import ProxLogpMethod
+
+        if (
+            ProxLogpMethod(self.prox_logp_method) == ProxLogpMethod.REUSE_TRAIN_LOGP
+            and self.ppo_n_minibatches > 1
+        ):
+            logger.warning(
+                "prox_logp_method='reuse_train_logp' requires ppo_n_minibatches=1, "
+                f"but got ppo_n_minibatches={self.ppo_n_minibatches}. "
+                "With multiple minibatches, weights change between steps, so the "
+                "training forward logprobs would differ from the original policy. "
+                "Forcing ppo_n_minibatches=1; note this changes training dynamics "
+                "to a single optimizer step per PPO update."
+            )
+            self.ppo_n_minibatches = 1
         # Warn if rejection_sampling is configured but use_decoupled_loss is False
         if not self.use_decoupled_loss and self.rejection_sampling is not None:
             logger.warning(
@@ -1601,18 +1756,6 @@ class PPOActorConfig(TrainEngineConfig):
                     "SAPO is not compatible with `use_decoupled_loss=True`. "
                     "Please set `actor.use_decoupled_loss=false` in your configuration."
                 )
-
-        # Warn if remote rollout is enabled but no recompute path is active.
-        # Remote completions carry placeholder logprobs that would corrupt
-        # PPO ratios without recompute; see the OpenRouter remote rollout
-        # design spec for the full rationale.
-        if self.enable_remote_rollout and not self.should_compute_prox_logp():
-            logger.warning(
-                "enable_remote_rollout=True but neither recompute_logprob nor "
-                "use_decoupled_loss is active. Remote completions carry placeholder "
-                "logprobs; set actor.recompute_logprob=true or "
-                "actor.use_decoupled_loss=true to avoid corrupting PPO ratios."
-            )
 
         # Validate CISPO configuration
         if self.use_cispo_loss:
@@ -1711,6 +1854,16 @@ class vLLMConfig:
     )
     enable_sleep_mode: bool = False
     uvicorn_log_level: str = "warning"
+    # GDN prefill backend for hybrid models like Qwen3.5; "triton" avoids the
+    # FlashInfer GDN-kernel hang (vLLM #38916). None leaves vLLM's default, so
+    # no flag is emitted and non-GDN models are unaffected.
+    gdn_prefill_backend: str | None = field(
+        default=None,
+        metadata={
+            "help": "GDN prefill backend for hybrid models like Qwen3.5.",
+            "choices": ["triton", "flashinfer"],
+        },
+    )
     # lora
     enable_lora: bool = False
     max_lora_rank: int = 16  # vllm's default
@@ -1867,6 +2020,7 @@ class SGLangConfig:
         dist_init_addr: str | None = None,
         n_nodes: int = 1,
         node_rank: int = 0,
+        pp_size: int = 1,
     ):
         args = SGLangConfig.build_args(
             sglang_config=sglang_config,
@@ -1877,15 +2031,14 @@ class SGLangConfig:
             dist_init_addr=dist_init_addr,
             n_nodes=n_nodes,
             node_rank=node_rank,
+            pp_size=pp_size,
         )
 
         return SGLangConfig.build_cmd_from_args(args)
 
     @staticmethod
     def build_cmd_from_args(args: dict[str, Any]):
-        return get_py_cmd(
-            "areal.experimental.inference_service.sglang.launch_server", args
-        )
+        return get_py_cmd("areal.v2.inference_service.sglang.launch_server", args)
 
     @staticmethod
     def build_args(
@@ -1897,6 +2050,7 @@ class SGLangConfig:
         dist_init_addr: str | None = None,
         n_nodes: int = 1,
         node_rank: int = 0,
+        pp_size: int = 1,
     ):
         # Map "all-linear" to "all"
         args: dict = conf_as_dict(sglang_config)
@@ -1926,6 +2080,8 @@ class SGLangConfig:
             dist_init_addr=dist_init_addr,
             **args,
         )
+        if pp_size > 1:
+            args["pp_size"] = pp_size
         if host is not None:
             args["host"] = host
         if port is not None:
@@ -1965,7 +2121,7 @@ class AgentConfig:
         default_factory=lambda: (
             SchedulingSpec(
                 gpu=0,
-                cmd="python -m areal.experimental.agent_service.guard",
+                cmd="python -m areal.v2.agent_service.guard",
             ),
         ),
         metadata={
@@ -2020,6 +2176,30 @@ class AgentConfig:
             "The 'concat' style exports only the final concatenated trajectory from the root. "
             "It is only suitable for linear conversation histories without token mismatching (whether valid depends on the tokenizer).",
             "choices": ["individual", "concat"],
+        },
+    )
+    message_preprocessors: list[str] = field(
+        default_factory=list,
+        metadata={
+            "help": (
+                "List of message preprocessor class paths applied, in order, to "
+                "Anthropic-compatible `/v1/messages` requests after translating "
+                "them to OpenAI-compatible requests. Native OpenAI "
+                "`/chat/completions` and `/responses` requests are not "
+                "preprocessed. Each entry is a dotted import path to a callable "
+                "class."
+            ),
+        },
+    )
+    prefix_matcher: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Dotted import path to a custom prefix matcher function for "
+                "InteractionCache parent-child matching. The function must accept "
+                "two list[dict] arguments (candidate prefix, full messages) and "
+                "return bool. When None, exact element-wise equality is used."
+            ),
         },
     )
     subproc_max_workers: int = field(
@@ -2116,6 +2296,12 @@ class InferenceEngineConfig:
             "help": "Timeout in seconds of connecting to remote servers or launching local servers."
         },
     )
+    workers_ready_timeout: float = field(
+        default=120.0,
+        metadata={
+            "help": "Timeout (seconds) for initialize() to wait for guards to be ready."
+        },
+    )
     request_timeout: float = field(
         default=3600, metadata={"help": "Timeout for HTTP requests."}
     )
@@ -2157,6 +2343,15 @@ class InferenceEngineConfig:
     use_lora: bool = field(
         default=False,
         metadata={"help": "Whether to use LoRA. Should be same as actors LORA option."},
+    )
+    lora_name: str = field(
+        default="",
+        metadata={
+            "help": "LoRA adapter name the rollout backend serves. Generation "
+            "requests select the adapter by this name (plus the weight version). "
+            "Usually left empty and auto-filled from gconfig.lora_name by "
+            "PPOConfig.__post_init__ so load and request sides stay in sync."
+        },
     )
     agent: AgentConfig = field(
         default_factory=lambda: AgentConfig(
@@ -2387,18 +2582,6 @@ class SwanlabConfig:
             "choices": ["cloud", "local", "disabled", "offline"],
         },
     )
-    resume: str | None = field(
-        default=None,
-        metadata={
-            "help": "Resume mode for SwanLab run: 'must', 'allow', or 'never'. Must be used with 'id'.",
-        },
-    )
-    id: str | None = field(
-        default=None,
-        metadata={
-            "help": "SwanLab run ID to resume. Required when resume='must'.",
-        },
-    )
     # set None to prevent info-leak in docs
     api_key: str | None = None
 
@@ -2409,14 +2592,6 @@ class SwanlabConfig:
             raise ValueError(
                 f"Invalid swanlab mode: '{self.mode}'. Must be one of: {', '.join(valid_modes)}."
             )
-        if self.resume is not None:
-            valid_resume = ("must", "allow", "never")
-            if self.resume not in valid_resume:
-                raise ValueError(
-                    f"Invalid swanlab resume: '{self.resume}'. Must be one of: {', '.join(valid_resume)}."
-                )
-            if self.resume == "must" and self.id is None:
-                raise ValueError("swanlab.id is required when swanlab.resume='must'.")
         if self.api_key is None:
             self.api_key = os.getenv("SWANLAB_API_KEY")
 
@@ -2813,6 +2988,14 @@ class BaseExperimentConfig:
 
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
+    post_exit_hook: str = field(
+        default="",
+        metadata={
+            "help": "Shell command run after launcher shutdown. "
+            "LOG_DIR is injected; failures are logged and ignored."
+        },
+    )
+
     def __post_init__(self):
         """Validate training configuration."""
         if self.total_train_epochs <= 0:
@@ -2890,7 +3073,32 @@ class DPOConfig(BaseExperimentConfig):
 
 
 @dataclass
-class TeacherConfig(PPOActorConfig):
+class TeacherConfig:
+    engine_type: str = field(
+        default="rollout",
+        metadata={
+            "help": "Teacher engine type. 'rollout' uses inference engine scoring; "
+            "'train' uses the legacy train-engine teacher path.",
+            "choices": ["rollout", "train"],
+        },
+    )
+    rollout: InferenceEngineConfig | None = field(default=None)
+    train: PPOActorConfig | None = field(
+        default=None,
+        metadata={
+            "help": "Legacy train-engine teacher config. Required when engine_type='train'."
+        },
+    )
+    path: str = field(
+        default="",
+        metadata={
+            "help": "Teacher model path. If set, overrides shared rollout backend model path."
+        },
+    )
+    offload: bool = field(
+        default=False,
+        metadata={"help": "Whether to offload teacher rollout model between steps"},
+    )
     rl_loss_weight: float = field(
         default=1.0,
         metadata={"help": "RL loss weight"},
@@ -2900,6 +3108,22 @@ class TeacherConfig(PPOActorConfig):
         default=0.005,
         metadata={"help": "Distillation loss weight"},
     )
+
+    def __post_init__(self):
+        if self.rollout is not None and self.train is not None:
+            warnings.warn(
+                "Both teacher.rollout and teacher.train are configured; "
+                f"teacher.engine_type={self.engine_type!r} selects which one is used.",
+                stacklevel=2,
+            )
+        if self.engine_type == "rollout" and self.rollout is None:
+            raise ValueError(
+                "teacher.rollout must be provided when teacher.engine_type='rollout'."
+            )
+        if self.engine_type == "train" and self.train is None:
+            raise ValueError(
+                "teacher.train must be provided when teacher.engine_type='train'."
+            )
 
 
 @dataclass
@@ -2943,6 +3167,12 @@ class PPOConfig(BaseExperimentConfig):
         """Validate the eval generation config."""
         if self.eval_gconfig is None:
             self.eval_gconfig = self.gconfig.new()
+        # Propagate the LoRA adapter name to the rollout engine so the OpenAI-proxy
+        # generation path requests the same adapter the trainer loads. The request
+        # side (ArealOpenAI) cannot read gconfig.lora_name, so it must come from
+        # the engine config. Single source of truth: gconfig.lora_name.
+        if self.rollout.use_lora and not self.rollout.lora_name:
+            self.rollout.lora_name = self.gconfig.lora_name
         super().__post_init__()
 
 

@@ -96,15 +96,6 @@ class StalenessManager:
         This ensures that by the time samples are consumed, they won't exceed
         the maximum allowed staleness.
         """
-        concurrency_capacity, staleness_capacity = self.get_capacity_breakdown()
-        return min(concurrency_capacity, staleness_capacity)
-
-    def get_capacity_breakdown(self) -> tuple[int, int]:
-        """Return (concurrency_capacity, staleness_capacity) for diagnostics.
-
-        Unlike :meth:`get_capacity`, this returns both components separately
-        so callers can determine which constraint is the bottleneck.
-        """
         with self.lock:
             current_version = self.version_provider.get_version()
             # Calculate concurrency-based capacity
@@ -117,7 +108,9 @@ class StalenessManager:
             consumer_bs = max(1, self.consumer_batch_size)
             staleness_capacity = (ofp + current_version + 1) * consumer_bs - sample_cnt
 
-            return concurrency_capacity, staleness_capacity
+            # Return the minimum of both constraints
+            capacity = min(concurrency_capacity, staleness_capacity)
+            return capacity
 
     def on_version_recovered(self, version: int) -> None:
         """Adjust accepted count after checkpoint recovery.

@@ -125,6 +125,11 @@ def main(args: list[str] | None = None) -> None:
     except Exception:
         pass
 
+    # Allow default admin API key in trusted local environments. The forked
+    # workers (train-worker, router) bind to 0.0.0.0, which resolves to a
+    # non-loopback IP and would otherwise reject the default key.
+    os.environ.setdefault("AREAL_ALLOW_DEFAULT_ADMIN_KEY", "1")
+
     config, _ = load_expr_config(args, TPFCConfig)
 
     # Inject diagnose API key from environment if configured

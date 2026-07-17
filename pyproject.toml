@@ -8,7 +8,7 @@ description = "AReaL: A Large-Scale Asynchronous Reinforcement Learning System"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.12,<3.13"
-version = "1.0.4"
+version = "2.0.0"
 authors = [
     {name = "AReaL Team"},
 ]
@@ -46,7 +46,8 @@ dependencies = [
     "torchaudio",
     "torchvision",
     "torchdata",
-    # Transitive deps of torch that we want to install from local wheels
+    # Transitive deps of torch that we want to install from local wheels.
+    # Pins must match the filenames in [tool.uv.sources] below.
     "triton==3.5.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cusparselt-cu12==0.7.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-nccl-cu12==2.27.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -103,7 +104,6 @@ dependencies = [
     "aiofiles",
     "aiohttp>=3.13.3,<4",
     "httpx>=0.28.1",
-    "certifi",
     "pyzmq",
     "regex",
     "python_dateutil",
@@ -120,8 +120,8 @@ dependencies = [
     "trackio",
     "colorama",
     "colorlog",
-    "swanboard==0.1.9b3",
-    "swanlab[dashboard]==0.7.17",
+    "swanboard==0.1.9b1",
+    "swanlab[dashboard]==0.6.12",
     # Distributed computing
     "ray[default]",
     "redis",
@@ -132,19 +132,13 @@ dependencies = [
     "uvicorn",
     "uvloop>=0.21.0",
     "flask",
-    "tenacity",
+    "tenacity>=8.2.0",
     # Build and packaging tools
     "build>=1.2.1",
     "wheel>=0.43.0",
     "cookiecutter>2.1.1",
     "distro-info>=1.0",
     "python-debian>=0.1.49",
-    "scipy>=1.17.1",
-    "supabase>=2.28.3",
-    "sglang[tracing]==0.5.10.post1",
-    "daytona>=0.166.0",
-    "pipx>=1.11.1",
-    "claude-code>=0.0.1",
 ]
 
 [project.optional-dependencies]
@@ -192,12 +186,19 @@ cuda = [
 sandbox = [
     "daytona>=0.167.0",
 ]
+cli = [
+    "click>=8.1",
+    "colorlog",
+]
+
+[project.scripts]
+areal = "areal.v2.cli.main:cli"
 
 [project.urls]
-"Homepage" = "https://github.com/inclusionAI/AReaL"
-"Repository" = "https://github.com/inclusionAI/AReaL"
-"Documentation" = "https://inclusionai.github.io/AReaL/en/intro.html"
-"Bug Tracker" = "https://github.com/inclusionAI/AReaL/issues"
+"Homepage" = "https://github.com/areal-project/AReaL"
+"Repository" = "https://github.com/areal-project/AReaL"
+"Documentation" = "https://areal-project.github.io/AReaL/en/intro.html"
+"Bug Tracker" = "https://github.com/areal-project/AReaL/issues"
 
 [dependency-groups]
 dev = [
@@ -227,8 +228,9 @@ dev = [
 module-root = ""
 
 [tool.uv]
-# Restrict lock file resolution to supported environments
-# This prevents uv from failing when CUDA-only packages don't have wheels for macOS
+# Restrict lock file resolution to supported environments.
+# Local wheels in [tool.uv.sources] are linux x86_64 cp312 only, so we cannot
+# expand to aarch64/darwin like upstream does.
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
@@ -244,7 +246,8 @@ override-dependencies = [
     "nvidia-cudnn-cu12==9.16.0.29; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "flash-attn-4>=4.0.0b4",
 
-    # Required by megatron-bridge but are optional (as per docs) cuda-based installs
+    # Required by megatron-bridge but are optional (as per docs) cuda-based installs.
+    # Excluded via sys_platform == 'never' marker trick (matches upstream).
     "transformer-engine; sys_platform == 'never'",
     "nv-grouped-gemm; sys_platform == 'never'",
     "mamba-ssm; sys_platform == 'never'",
@@ -266,7 +269,8 @@ url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [tool.uv.sources]
-# Local wheels
+# Local wheels (reuse from ./wheels instead of fetching from PyPI/index).
+# Filenames must match the version pins in [project.dependencies] above.
 torch = { path = "wheels/torch-2.9.1+cu129-cp312-cp312-manylinux_2_28_x86_64.whl" }
 triton = { path = "wheels/triton-3.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" }
 nvidia-cudnn-cu12 = { path = "wheels/nvidia_cudnn_cu12-9.16.0.29-py3-none-manylinux_2_27_x86_64.whl" }
