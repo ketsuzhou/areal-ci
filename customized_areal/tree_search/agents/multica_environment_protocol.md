@@ -48,6 +48,216 @@ small protocols only; it does not import a sandbox-vendor SDK.
 - Cleanup flows through Multica env-dispatch; `404` means the resource is already gone
   and is treated as success.
 
+### Per-Agent Ephemeral Sandbox Pipeline (Phase 1–5)
+
+This is the end-to-end flow for a single-agent daemon-enabled scratch dispatch:
+AReaL calls `POST /api/v1/env-dispatch`, Multica pre-creates an offline agent
+runtime R′, boots a Cube sandbox with an in-sandbox daemon, the daemon registers
+and adopts R′, the task is routed to R′, the daemon claims and executes it, and
+the sandbox is reclaimed on terminal.
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant A as 🟦 AReaL<br/>(MulticaEnvDispatchClient)
+    participant H as 🟩 Multica Handler<br/>(EnvDispatch)
+    participant S as 🟩 EnvDispatchService<br/>(Dispatch)
+    participant DB as 🟨 Postgres<br/>(sqlc Queries)
+    participant LC as 🟩 EnvSandboxLifecycle<br/>Service
+    participant SD as 🟥 Sandboxd / Cube
+    participant D as 🟪 In-Sandbox Daemon
+    participant TS as 🟩 TaskService
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 1: Request ingress & validation
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(230, 245, 255)
+        Note over A,H: Phase 1 — Request ingress & validation
+        A->>H: POST /api/v1/env-dispatch<br/>Authorization: Bearer <PAT><br/>mode=scratch, agent_id, group_size=N,<br/>domain=self_play, message, train_agent_id
+        H->>H: requireUserID(w, r) → userID
+        H->>H: ctxWorkspaceID(r.Context()) → workspaceID
+        H->>H: json.Decode → EnvDispatchRequest<br/>UUID-shape validate: env_id, agent_id, …
+        H->>S: Dispatch(EnvDispatchInput)
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 2: Service validation & base env resolution
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(255, 245, 230)
+        Note over S,DB: Phase 2 — Validate & resolve/create base env
+        S->>S: validate(in) — mode, dispatch_type, group_size,<br/>agent_id/squad_id, train_agent_id,<br/>domain↔dispatch_type, issue/message
+        S->>S: validatePerAgentEnvSpecsDB — agent membership,<br/>template/base_env_id authorization
+        S->>DB: GetDefaultSelfPlayEnv(workspaceID)
+        alt no default configured
+            S->>LC: CreateSandboxInstance(template, DaemonEnabled=false)
+            LC->>DB: InsertSandboxInstance → ref
+            LC->>SD: EnqueueSandboxJob("create") + Notify
+            S->>DB: CreateEnv(sandboxIDs=[ref.InstanceID], mode=base)
+            S->>DB: SetDefaultSelfPlayEnv (conditional, first-writer-wins)
+        end
+        S->>DB: GetEnv(envID, workspaceID) → sourceEnv
+        S->>S: Mode↔env-kind cross-check<br/>(scratch→base, branch→state)
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 3: Per-rollout reset (concurrent resetOne × group_size)
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(230, 255, 230)
+        Note over S,LC: Phase 3 — resetOne (concurrent, semaphore-gated)
+        par concurrent resetOne per rollout lane
+            S->>S: createSandboxInstanceRefs(in, sourceEnv)
+
+            %% 3a: Pre-create R′
+            rect rgb(255, 255, 220)
+                Note over S,DB: 3a — PrecreateAgentRuntime (offline R′)
+                S->>DB: GetAgentInWorkspace(agentID) → provider
+                S->>S: daemonID = uuid.NewString()
+                S->>DB: PrecreateAgentRuntime(<br/>  workspaceID, daemonID, provider, ownerID<br/>) → runtimeID (R′), status=offline
+            end
+
+            %% 3b: Sandbox lifecycle create
+            rect rgb(255, 240, 240)
+                Note over S,SD: 3b — EnvSandboxLifecycle.Create
+                S->>LC: CreateSandboxInstance(<br/>  template, DaemonEnabled=true,<br/>  RuntimeEnv={MULTICA_DAEMON_ID: daemonID}<br/>)
+                LC->>DB: InsertSandboxInstance → ref
+                LC->>DB: MintSandboxRuntimeEnv →<br/>  SERVER_URL, PAT token,<br/>  WORKSPACE_ID, DAEMON_ENABLED=1,<br/>  PROFILE=instance-{uuid}
+                LC->>LC: overlay caller RuntimeEnv<br/>  (MULTICA_DAEMON_ID wins over minted keys)
+                LC->>SD: EnqueueSandboxJob("create", payload)<br/>  payload: template, limits, runtime,<br/>  runtime_env (with daemon bootstrap)
+                LC->>SD: NotifySandboxJobAvailable(nodeID, jobID)
+            end
+
+            %% 3c: Env + project creation
+            rect rgb(240, 240, 255)
+                Note over S,DB: 3c — Env row + Project
+                S->>DB: CreateEnv(workspaceID, [ref.InstanceID],<br/>  parentEnvID=sourceEnv.ID, mode=scratch)
+                S->>DB: CreateProject(workspaceID, name, envID)
+            end
+        end
+        S-->>S: WaitGroup.Wait — all resets complete<br/>(all-or-nothing: any failure → rollback all)
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 4: Cube boot & daemon registration
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(255, 230, 255)
+        Note over SD,D: Phase 4 — Cube boot & daemon registration
+        SD->>SD: Pull image, create Cube container
+        SD->>D: Inject runtime_env:<br/>  MULTICA_DAEMON_ID=<daemonID><br/>  SERVER_URL, PAT, WORKSPACE_ID,<br/>  DAEMON_ENABLED=1, PROFILE
+        D->>D: Probe installed agent CLIs<br/>  (detectAgentVersion × each agent)
+        D->>H: POST /api/daemon/register<br/>  {workspace_id, daemon_id,<br/>   runtimes: [{type, version, status}],<br/>   device_name, cli_version}
+        H->>DB: UpsertAgentRuntime(<br/>  workspaceID, daemonID, provider,<br/>  status=online, …<br/>) ON CONFLICT (workspace_id, daemon_id, provider)<br/>→ adopts pre-created R′ offline→online
+        H-->>D: 200 {runtimes: [{id: R′, …}], daemon_token}
+        D->>D: Cache daemon_token for workspace<br/>Store runtime_id=R′ in runtime map
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 5: Task dispatch (concurrent dispatchOne)
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(230, 255, 255)
+        Note over S,TS: Phase 5 — dispatchOne (concurrent per rollout)
+        par concurrent dispatchOne per rollout lane
+            S->>S: rolloutRuntimeID(in, r) → R′
+            S->>S: rolloutSandboxInstanceID(in, r) → instanceID
+
+            alt dispatch_type = issue (swe_lego)
+                S->>DB: CreateIssue(projectID, title, description,<br/>  acceptance_criteria, fail_to_pass, pass_to_pass)
+            else dispatch_type = message (self_play)
+                S->>DB: CreateChatSession(projectID, agentID)
+                S->>DB: CreateChatMessage(sessionID, "user", content)
+            end
+
+            S->>DB: EnqueueAgentRun(<br/>  workspaceID, agentID,<br/>  issueID|chatSessionID,<br/>  runtimeID=R′,<br/>  sandboxInstanceID=instanceID<br/>)
+            Note over DB: mergeEphemeralSandboxContext:<br/>  context.ephemeral_sandbox =<br/>  {sandbox_instance_id: instanceID}
+            Note over DB: maybeOpenTrainingSession:<br/>  task_id + train_agent_id →<br/>  training session with areal_proxy
+
+            S->>DB: SaveTrainingDispatch(projectID,<br/>  trainAgentID, criticAgentID, defaultReward)
+        end
+        S-->>S: best-effort: ≥1 dispatched → 201; all failed → 500
+        S-->>H: EnvDispatchResult {projectID, rollouts[]}
+        H-->>A: 201 {project_id, rollouts[{env_id, project_id,<br/>  issue_id, chat_session_id, agent_run_id}]}
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 6: Daemon poller → claim → execute
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(240, 255, 240)
+        Note over D,TS: Phase 6 — Daemon poller claim & execute
+        loop runRuntimePoller per runtime
+            D->>D: Acquire task slot (semaphore)
+            D->>D: drainInboxTask(runtimeID) — WS-pushed tasks
+            alt no inbox task
+                D->>H: POST /api/daemon/runtimes/{R′}/claim
+                H->>TS: ClaimTaskForRuntime(ctx, R′)
+                TS->>DB: claim next queued task for R′<br/>  (UPDATE … SET status='dispatched'<br/>   WHERE runtime_id=R′ AND status='queued'<br/>   ORDER BY priority, created_at LIMIT 1)
+                TS-->>H: task | nil
+                H-->>D: {task: {id, agent_id, context,<br/>  agent: {name, instructions, skills,<br/>    custom_env, custom_args, mcp_config}}}
+            end
+            alt task claimed
+                D->>D: Parse task context → areal_proxy,<br/>  ephemeral_sandbox, squad_id
+                D->>D: Launch agent pi process inside Cube<br/>  with provider=areal, api_key from context
+                Note over D: Agent executes: model inference<br/>via db_bridge, tool calls, etc.
+                D->>H: POST /api/daemon/runtimes/{R′}/tasks/{id}/start
+                D->>H: Stream messages, tool calls,<br/>  usage via WebSocket
+            else no task
+                D->>D: Sleep poll interval + jitter
+            end
+        end
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% PHASE 7: Terminal — complete / fail / cancel
+    %% ═══════════════════════════════════════════════════════════════════
+    rect rgb(255, 240, 230)
+        Note over D,SD: Phase 7 — Terminal cleanup
+        D->>H: Task terminal: complete | fail | cancel
+        H->>TS: RouteTerminalTrainingTask(task)
+
+        rect rgb(255, 220, 220)
+            Note over TS,SD: 7a — Ephemeral sandbox reclamation
+            TS->>TS: extractEphemeralSandbox(task.Context)
+            alt marker found (ephemeral rollout)
+                TS->>DB: HasOtherActiveTaskForRuntime(R′)<br/>  exclude=this task
+                alt no sibling/retry task on R′
+                    TS->>DB: SetAgentRuntimeOffline(R′)
+                    TS->>LC: DeleteSandboxInstance(workspaceID, instanceID)
+                    LC->>SD: EnqueueSandboxJob("delete") + Notify
+                    SD->>SD: Stop Cube, delete sandbox
+                else sibling still active
+                    Note over TS: Skip — sibling task still on R′
+                end
+            else no marker
+                Note over TS: Not an ephemeral rollout — skip
+            end
+        end
+
+        rect rgb(220, 240, 255)
+            Note over TS: 7b — Training session close
+            TS->>TS: maybeDiagnoseProject (Pi agent, soft-fail)
+            TS->>TS: maybeCloseTrainingSession →<br/>  db_bridge.set_reward + end_session
+        end
+    end
+```
+
+**Key rows and their lifecycle:**
+
+| Row | Created by | Status transitions | Reclaimed by |
+|-----|-----------|-------------------|--------------|
+| `agent_runtime` (R′) | `PrecreateAgentRuntime` | `offline` → `online` (UpsertAgentRuntime on daemon register) → `offline` (terminal cleanup) | `SetAgentRuntimeOffline` + 7d GC |
+| `sandbox_instance` | `InsertSandboxInstance` | `pending` → `creating` → `running` | `DeleteSandboxInstance` → sandboxd delete job |
+| `agent_task_queue` | `EnqueueAgentRun` (CreateAgentTask / CreateChatTask) | `queued` → `dispatched` → `running` → `completed`/`failed`/`cancelled` | Terminal: `RouteTerminalTrainingTask` → `maybeCleanupEphemeralSandbox` |
+| `environment` | `CreateEnv` | static (`mode=scratch`) | `DeleteEnv` on rollback or project cleanup |
+| `training_dispatch` | `SaveTrainingDispatch` | static | Cascades with project deletion |
+
+**Retry-safety guard:** `maybeCleanupEphemeralSandbox` queries
+`HasOtherActiveTaskForRuntime(R′)` excluding the current task before reclaiming.
+A retry child that inherited `runtime_id=R′` via `CreateRetryTask` keeps the
+sandbox alive; only the last terminal task on R′ triggers cleanup.
+
+**Offline-runtime sweeper backstop:** If the daemon never registers (Cube boot
+failure), the `runtime_sweeper` fails tasks whose runtime has been `offline` for
+\>5 min (`offlineRuntimeQueuedTTLSeconds=300`) with `failure_reason=runtime_offline`.
+
 ## AReaL → Multica API Surface
 
 `agents/multica_client.py` wraps the unified env-dispatch API through
@@ -75,9 +285,10 @@ is insufficient when workers do not share that filesystem.
 | -------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `create_base_env(image_ref=...)`       | `POST <MULTICA_BASE_URL>/api/v1/env`                            | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
 | `delete_env(env_id=...)`               | `DELETE <MULTICA_BASE_URL>/api/v1/env/{envID}`                  | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
-| `create_env_dispatch(...)`             | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch`                   | Unified dispatch primitive. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
-| `cleanup_env_dispatch(project_id=...)` | `DELETE <MULTICA_BASE_URL>/api/v1/env-dispatch/{projectID}`     | Cascade cleanup for one rollout project: issues, chat sessions, tasks, and associated runtime state. `404` is treated as success.                                   |
-| `get_dag(project_id=...)`              | `GET <MULTICA_BASE_URL>/api/v1/env-dispatch/{projectID}/dag`    | Poll the assembled segment DAG: `202` not-ready, `200` assembled DAG, `404` unknown project, `403` cross-workspace. Transient `502`/`503`/`504` responses are re-polled. |
+| `create_env_dispatch(...)` | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch` | Unified dispatch primitive. Returns an `EnvDispatchHandle` (`channel_id`, `project_id`, `env_id`, `dispatch_type`). For `dispatch_type="message"` the response carries a top-level `channel_id` (validated at the boundary); for `dispatch_type="issue"` `channel_id` is absent and `project_id` is the primary handle. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
+| `get_dag(handle=...)` | message: `GET .../api/v1/env-dispatch/channels/{channelID}/dag`; issue: `GET .../api/v1/env-dispatch/{projectID}/dag` | Poll the assembled segment DAG, routed by `handle.dispatch_type`: `202` not-ready, `200` assembled DAG, `404` unknown, `403` cross-workspace. Transient `502`/`503`/`504` are re-polled. |
+| `list_checkpoints(handle=...)` | message: `GET .../api/v1/channels/{channelID}/env-checkpoints`; issue: `GET .../api/v1/projects/{projectID}/env-checkpoints` | List env checkpoints for the dispatch, routed by `handle.dispatch_type`, newest first. |
+| `cleanup_env_dispatch(handle=...)` | message: `DELETE .../api/v1/env-dispatch/channels/{channelID}`; issue: `DELETE .../api/v1/env-dispatch/{projectID}` | Serialized cascade cleanup for one dispatch: channel/project, issues, chat sessions, tasks, bindings, env, and runtime state. `404` is treated as success (idempotent). |
 
 The DAG poller re-polls transient responses up to the configured wall-clock
 deadline, then raises `DagTimeout`; `404` maps to `DagNotFound`, `403` to
@@ -424,3 +635,85 @@ AReaL calls `should_create_entropy_checkpoint(entropy, threshold)` before
 hitting the create API. When logprobs are unavailable (`entropy is None`) or no
 threshold is configured, the checkpoint is skipped silently - the rollout
 continues without failing or creating a spurious checkpoint.
+
+## Channel-first message dispatch & branch collaboration
+
+`dispatch_type="message"` (self_play, multi-agent chat) is **channel-first**: the
+channel is the long-lived collaboration handle, and the dispatch lifecycle routes
+through it. `dispatch_type="issue"` (swe_lego) stays **project-first**. AReaL never
+infers which mode it is from the presence of an arbitrary string - it routes by the
+`dispatch_type` carried on the handle returned at creation.
+
+### EnvDispatchHandle
+
+`create_env_dispatch` returns an immutable `EnvDispatchHandle`:
+
+| Field           | Meaning                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `channel_id`    | Present for `dispatch_type="message"`; the primary handle. Absent for `dispatch_type="issue"`. |
+| `project_id`    | Always present; the primary handle for `dispatch_type="issue"`.                              |
+| `env_id`        | The lane env id from `rollouts[0].env_id` (empty if absent).                                 |
+| `dispatch_type` | `"message"` or `"issue"`; drives all downstream routing.                                      |
+
+`handle.primary_id` resolves to `channel_id` for message dispatches and
+`project_id` for issue dispatches. Message responses are validated at the creation
+boundary: a `dispatch_type="message"` response missing `channel_id` raises
+immediately rather than producing a half-formed handle.
+
+### Channel-first routes (Task 7)
+
+Message dispatches expose their lifecycle on the channel; issue dispatches keep the
+legacy project routes:
+
+| Operation          | Message route                                          | Issue route                                          |
+| ------------------ | ------------------------------------------------------ | ---------------------------------------------------- |
+| DAG poll           | `GET /api/v1/env-dispatch/channels/{channelID}/dag`    | `GET /api/v1/env-dispatch/{projectID}/dag`           |
+| List checkpoints   | `GET /api/v1/channels/{channelID}/env-checkpoints`     | `GET /api/v1/projects/{projectID}/env-checkpoints`   |
+| Cleanup            | `DELETE /api/v1/env-dispatch/channels/{channelID}`     | `DELETE /api/v1/env-dispatch/{projectID}`            |
+
+`create_checkpoint` stays project-internal (it carries `project_id` in its body) and
+is unchanged.
+
+### Leader-only wake on branch
+
+A `mode="branch"` message dispatch resumes a channel collaboration from a source
+trigger without re-running the whole squad. Only the **trigger agent** is woken:
+
+1. The branch source is validated pre-write: the source trigger, its source sandbox
+   binding, and the channel message roster are resolved before any state is copied.
+2. Channel history is copied transactionally into the branch (message ids remapped so
+   the branch can append without mutating the source channel).
+3. The trigger agent is provisioned from the **cloned source sandbox instance**
+   (`CloneSandboxInstance` on the source binding's `sandbox_instance_id`), not a fresh
+   sandbox and not a Fleet fork. The trigger is re-enqueued on the channel run.
+4. Peer (non-trigger) agents are left **pending** - they are not provisioned at branch
+   time. Their sandbox bindings are created in a pending state and materialized lazily
+   only when the collaboration actually mentions them (see below).
+
+This means a branch appends new message content without changing the trigger agent's
+prior state beyond the cloned filesystem, and without paying the cost of booting peers
+that may never participate.
+
+### Lazy agent provisioning
+
+Agents are not all provisioned at dispatch time. The dispatch records the
+`environment_agent_sandbox` binding for each agent in a pending state; a sandbox is
+materialized only when the collaboration routes to that agent (a mention or an
+explicit turn handoff). Provisioning uses a single-flight claim
+(`claimProvisioning`) so a concurrently-mentioned agent is booted exactly once. The
+binding's `SourceSandboxInstanceID` is the clone source for the trigger/mention path.
+
+### Branch errors
+
+Branch validation is pre-write, so a malformed branch fails fast before any channel
+history is copied or sandboxes are cloned:
+
+| Condition                                                | Outcome                                                                                |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Source trigger / channel / message roster not resolvable | 4xx before any write; no branch project, channel copy, or clone is created.            |
+| Source sandbox binding missing `sandbox_instance_id`     | Clone source cannot be resolved; the branch is rejected before provisioning.           |
+| Clone of the source sandbox instance fails               | Branch provisioning fails; the trigger agent is not enqueued and the error propagates. |
+| Branch message source fails shape validation             | `ValidateBranchMessageSource` rejects before `Dispatch` commits.                      |
+
+Because the copy and clone are server-side and ordered after validation, a failed
+branch leaves no orphaned channel copy or half-cloned trigger sandbox.

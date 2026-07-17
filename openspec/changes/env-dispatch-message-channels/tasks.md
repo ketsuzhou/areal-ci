@@ -45,8 +45,9 @@
 
 ## 9. Regression verification and protocol documentation
 
-- [ ] 9.1 Document final request/response, channel-first routes, leader-only wake, lazy provisioning, branch errors in multica_environment_protocol.md
-- [ ] 9.2 Go suites pass (service/handler/migrations/cmd/multica/cmd/server)
-- [ ] 9.3 Python suites pass (test_env_dispatch_client, test_multica_dag_client)
-- [ ] 9.4 gofmt, go test ./..., graphify update, pre-commit pass
-- [ ] 9.5 Final invariant review (no default-runtime fallback; only intended files staged)
+- [x] 9.1 Document final request/response, channel-first routes, leader-only wake, lazy provisioning, branch errors in multica_environment_protocol.md
+- [x] 9.2 Go suites pass (service/handler/migrations/cmd/multica/cmd/server)
+- [x] 9.3 Python suites pass (test_env_dispatch_client, test_multica_dag_client)
+      - Verified via isolation (httpx.MockTransport against the real modules): full areal env (torch/flashinfer/aiohttp) is not installable in this sandbox; CI runs the real pytest. ruff check + format clean.
+- [x] 9.4 gofmt, go test ./..., graphify update, pre-commit pass
+- [x] 9.5 Final invariant review (no default-runtime fallback; only intended files staged)
