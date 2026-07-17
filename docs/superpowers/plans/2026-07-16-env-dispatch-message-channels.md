@@ -1,6 +1,6 @@
 # EnvDispatch Message Channels Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make `dispatch_type=message` create a rollout-isolated project-backed group channel, wake only the selected agent in an isolated sandbox, lazily provision other squad members on first mention, and resume branches from a persisted collaboration trigger.
 
@@ -48,7 +48,7 @@
 - Produces: `envCollaborationTrigger`, `envAgentSandboxBinding`, `envDispatchChannelStore`, and transactional claim/update methods used by Tasks 3–7.
 - State transition contract: `pending|failed -> provisioning -> ready`, any active state -> `deleting`; only the transaction holding the row lock may change provisioning state.
 
-- [ ] **Step 1: Write migration and store tests that fail**
+- [x] **Step 1: Write migration and store tests that fail**
 
 Add tests named:
 
@@ -73,13 +73,13 @@ require.True(t, won)
 require.Equal(t, "provisioning", got.Status)
 ```
 
-- [ ] **Step 2: Run the focused tests and observe failure**
+- [x] **Step 2: Run the focused tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/migrations ./internal/handler -run 'Test(Migration183|EnvDispatchChannelStore)' -count=1`
 
 Expected: FAIL because migration 183 and the store types do not exist.
 
-- [ ] **Step 3: Add the migration**
+- [x] **Step 3: Add the migration**
 
 Use this schema, preserving the current `sandbox_job` check expression while adding `clone` to its accepted values:
 
@@ -116,7 +116,7 @@ CREATE INDEX environment_agent_sandbox_channel_idx
 
 The down migration drops the table, removes `environment.collaboration_trigger`, and restores the prior sandbox-job check verbatim.
 
-- [ ] **Step 4: Implement the focused pgx store**
+- [x] **Step 4: Implement the focused pgx store**
 
 Define the exact types and methods:
 
@@ -154,7 +154,7 @@ func (s envDispatchChannelStore) saveTrigger(context.Context, DBTX, string, envC
 
 `claimProvisioning` must use one `UPDATE ... WHERE status IN ('pending','failed') RETURNING ...`; if it returns no row, select the current row and return `won=false`. `loadTrigger` decodes JSON, validates all required UUIDs, validates `kind`, confirms the trigger channel/project belong to the env, and confirms the agent is a channel member.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/migrations ./internal/handler -run 'Test(Migration183|EnvDispatchChannelStore)' -count=1`
 
@@ -180,7 +180,7 @@ git -C multica/server commit -m "feat(env-dispatch): persist channel sandbox bin
 - Consumes: migration 183's `sandbox_job.job_type='clone'` support.
 - Produces: `CloneSandboxInstance(ctx, source, input, actor) (SandboxInstanceRef, error)` for Tasks 4 and 6.
 
-- [ ] **Step 1: Add failing clone lifecycle tests**
+- [x] **Step 1: Add failing clone lifecycle tests**
 
 Cover these exact cases:
 
@@ -199,13 +199,13 @@ POST   /sandboxes                               {"templateID":"snapshot-id", ...
 DELETE /templates/snapshot-id
 ```
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler ./cmd/multica -run 'Test(CloneSandboxInstance|CallCubeClone|CompleteCloneJob)' -count=1`
 
 Expected: FAIL because clone is unsupported.
 
-- [ ] **Step 3: Add the lifecycle contract and job payload**
+- [x] **Step 3: Add the lifecycle contract and job payload**
 
 Add:
 
@@ -230,7 +230,7 @@ func (s *EnvSandboxLifecycleService) CloneSandboxInstance(
 
 The method creates a new `sandbox_instance`, inserts a `clone` job whose payload contains `source_sandbox_instance_id`, `source_external_id`, and `create_payload`, waits using the existing lifecycle completion mechanism, and deletes the precreated runtime plus new instance when creation cannot be queued.
 
-- [ ] **Step 4: Implement Cube clone as snapshot/create/delete**
+- [x] **Step 4: Implement Cube clone as snapshot/create/delete**
 
 Add a `clone` case in `callCube` that uses the existing authenticated JSON helper. The control flow must be:
 
@@ -244,7 +244,7 @@ return cubeCreateSandbox(ctx, client, baseURL, payload)
 
 Sanitize returned errors using the same path as create/resume. Completion handling writes the newly returned external sandbox ID to the destination instance and never mutates the source instance.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler ./cmd/multica -run 'Test(CloneSandboxInstance|CallCubeClone|CompleteCloneJob)' -count=1`
 
@@ -268,7 +268,7 @@ git -C multica/server commit -m "feat(sandbox): clone instance state through san
 - Produces: `ResolveMessageRoster`, `CreateEnvDispatchChannel`, result `ChannelID`, and pending binding rows.
 - Consumes: Task 1 store.
 
-- [ ] **Step 1: Add failing roster and reset tests**
+- [x] **Step 1: Add failing roster and reset tests**
 
 Add table-driven tests for single agent, squad leader duplicated in members, non-agent squad members, cross-workspace members, and two-rollout isolation. Assert:
 
@@ -282,13 +282,13 @@ require.NotEqual(t, result.Rollouts[0].EnvID, result.Rollouts[1].EnvID)
 
 The adapter test verifies one group channel with `project_id`, caller membership, exact agent memberships, no Beckham session, and one binding row per agent.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'Test(ResolveMessageRoster|MessageResetCreates|CreateEnvDispatchChannel)' -count=1`
 
 Expected: FAIL because the channel orchestration seam is absent.
 
-- [ ] **Step 3: Define service types and dependency methods**
+- [x] **Step 3: Define service types and dependency methods**
 
 Add these fields and contracts:
 
@@ -314,7 +314,7 @@ CreateEnvDispatchChannel(ctx context.Context, workspaceID, userID, projectID, en
 DeleteChannel(ctx context.Context, workspaceID, channelID string) error
 ```
 
-- [ ] **Step 4: Implement channel creation without the public CreateChannel handler**
+- [x] **Step 4: Implement channel creation without the public CreateChannel handler**
 
 Inside one transaction, insert:
 
@@ -328,7 +328,7 @@ Then insert the caller as `member_type='user'`, each deduplicated roster member 
 
 Update `resetOne` so only message dispatch calls this adapter after project creation. Preserve issue reset byte-for-byte except for shared result-field initialization. Compensation order is channel, project, env, sandbox/runtime.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'Test(ResolveMessageRoster|MessageResetCreates|CreateEnvDispatchChannel)' -count=1`
 
@@ -353,7 +353,7 @@ git -C multica/server commit -m "feat(env-dispatch): create rollout group channe
 - Produces: `ProvisionEnvDispatchAgent`, `EnqueueEnvDispatchChannelRun`, initial trigger persistence, and the channel-first JSON response.
 - Consumes: Tasks 1–3.
 
-- [ ] **Step 1: Add failing leader-only tests**
+- [x] **Step 1: Add failing leader-only tests**
 
 Test names and required assertions:
 
@@ -366,13 +366,13 @@ func TestEnvDispatchMessageResponseIsChannelFirst(t *testing.T)
 
 Assert one ready leader binding, all peers pending, exactly one channel message containing request content, exactly one inbox/task for the leader, and `task.runtime_id == leaderBinding.RuntimeID != agent.DefaultRuntimeID`.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'Test(ScratchMessage|EnvDispatchMessageResponse)' -count=1`
 
 Expected: FAIL because message dispatch still creates a project chat run.
 
-- [ ] **Step 3: Implement explicit rollout-runtime provisioning**
+- [x] **Step 3: Implement explicit rollout-runtime provisioning**
 
 Define:
 
@@ -392,7 +392,7 @@ func (h *Handler) provisionEnvDispatchAgent(ctx context.Context, in ProvisionEnv
 
 It claims the binding, precreates a runtime/daemon, creates a fresh sandbox from `sandbox_config`, creates the chat session with the explicit project and runtime, inserts `channel_agent_session`, and marks ready. On any failure after runtime creation, delete the new sandbox/runtime/session, mark failed with a sanitized message, and return without enqueueing.
 
-- [ ] **Step 4: Replace message dispatch with channel enqueue**
+- [x] **Step 4: Replace message dispatch with channel enqueue**
 
 The scratch path must execute in this order:
 
@@ -414,7 +414,7 @@ err = deps.SaveCollaborationTrigger(ctx, envID, envCollaborationTrigger{
 
 Populate `LeaderRunID`, retain `AgentRunID=runID` for compatibility, and populate `AgentSandboxes` from binding rows.
 
-- [ ] **Step 5: Emit the channel-first response**
+- [x] **Step 5: Emit the channel-first response**
 
 Use:
 
@@ -438,7 +438,7 @@ type EnvRolloutResponse struct {
 
 Save and replay the complete new result through the existing idempotency ledger.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'Test(ScratchMessage|EnvDispatchMessageResponse|Idempotent)' -count=1`
 
@@ -461,7 +461,7 @@ git -C multica/server commit -m "feat(env-dispatch): wake only sandboxed channel
 - Consumes: Task 4 provisioning and Task 1 claim semantics.
 - Produces: `routeEnvDispatchChannelAgent` hook returning `(handled bool, err error)`.
 
-- [ ] **Step 1: Add failing mention tests**
+- [x] **Step 1: Add failing mention tests**
 
 Add:
 
@@ -474,13 +474,13 @@ func TestOrdinaryChannelMentionStillUsesExistingRuntimePath(t *testing.T)
 
 Run 16 goroutines against the same pending binding and assert one sandbox create, one runtime create, one `channel_agent_session`, and no task with the default runtime.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/handler -run 'Test(EnvDispatch.*Mention|OrdinaryChannelMention)' -count=1`
 
 Expected: FAIL because mention delivery immediately resolves the default agent runtime.
 
-- [ ] **Step 3: Add the routing hook before session creation**
+- [x] **Step 3: Add the routing hook before session creation**
 
 At the start of `enqueueChannelAgentPromptRangeWithTx`, call:
 
@@ -492,7 +492,7 @@ if handled { return result, nil }
 
 The hook returns `handled=false` only when no env-agent binding exists. If a binding exists, every state is handled locally: ready enqueues with its runtime; pending/failed provisions; provisioning waits/reloads with a bounded context; deleting returns `errEnvDispatchDeleting`. No branch may call `ensureChannelAgentSessionWithDB` for a bound agent.
 
-- [ ] **Step 4: Persist the continuation atomically with enqueue**
+- [x] **Step 4: Persist the continuation atomically with enqueue**
 
 The transaction that creates the channel prompt/inbox event must also save:
 
@@ -508,7 +508,7 @@ envCollaborationTrigger{
 
 If enqueue fails after first provisioning, compensate the just-created resources and return the binding to `failed`; if the binding was already ready, retain it and only roll back the enqueue transaction.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/handler -run 'Test(EnvDispatch.*Mention|OrdinaryChannelMention)' -count=1`
 
@@ -533,7 +533,7 @@ git -C multica/server commit -m "feat(channels): lazily provision env-dispatch a
 - Produces: `ValidateBranchMessageSource`, `CopyEnvDispatchChannel`, `ChannelCopyMap`, and remapped-trigger execution.
 - Consumes: Tasks 1–5 and clone lifecycle from Task 2.
 
-- [ ] **Step 1: Add pre-write validation and deep-copy tests**
+- [x] **Step 1: Add pre-write validation and deep-copy tests**
 
 Add tests named:
 
@@ -549,13 +549,13 @@ func TestBranchAppendsNewMessageWithoutChangingTriggerAgent(t *testing.T)
 
 For every 400 case, assert zero calls to fork env, create project, create channel, precreate runtime, and clone sandbox.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'TestBranch(Rejects|Copies|Wakes|Leaves|Appends)' -count=1`
 
 Expected: FAIL because branch only copies the project subtree/session today.
 
-- [ ] **Step 3: Define the copy map and validate before reset fan-out**
+- [x] **Step 3: Define the copy map and validate before reset fan-out**
 
 Add:
 
@@ -576,7 +576,7 @@ type ValidatedBranchMessageSource struct {
 
 `Dispatch` must call `ValidateBranchMessageSource` once before entering rollout reset goroutines. Compare sorted, deduplicated requested agent IDs with the source channel's agent members and return the service validation error mapped to HTTP 400 on any mismatch.
 
-- [ ] **Step 4: Deep-copy the channel in one transaction**
+- [x] **Step 4: Deep-copy the channel in one transaction**
 
 `CopyEnvDispatchChannel` creates the destination channel/project link, then copies in dependency order:
 
@@ -592,7 +592,7 @@ pending env-agent bindings, carrying source_sandbox_instance_id per source agent
 
 Preserve author, content, parts, source, external/client IDs where constraints permit, quote snapshots, trigger depth, timeline visibility, edit/delete timestamps, and sequence order. Historical inserts must use a store function that does not dispatch channel events.
 
-- [ ] **Step 5: Remap and execute the trigger**
+- [x] **Step 5: Remap and execute the trigger**
 
 Build the destination trigger as:
 
@@ -612,7 +612,7 @@ dst.RuntimeID = ""
 
 Provision the trigger agent using `CloneSandboxInstance` when its source binding is ready; create from saved policy otherwise. Enqueue a new destination task, set the new task/runtime IDs, and save the remapped trigger. Append request `message.content`, if non-empty, as nondispatching context before the continuation enqueue.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler -run 'TestBranch(Rejects|Copies|Wakes|Leaves|Appends)' -count=1`
 
@@ -636,7 +636,7 @@ git -C multica/server commit -m "feat(env-dispatch): resume branched channel col
 - Produces: channel-to-project resolver and three channel-first handlers.
 - Consumes: Task 1 deleting state and all existing project-first handler logic.
 
-- [ ] **Step 1: Add failing route tests**
+- [x] **Step 1: Add failing route tests**
 
 Cover:
 
@@ -649,13 +649,13 @@ func TestChannelCleanupSerializesWithProvisioning(t *testing.T)
 func TestProjectFirstRoutesRemainAvailable(t *testing.T)
 ```
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd multica/server && go test ./internal/handler ./cmd/server -run 'Test(Channel(Dag|Checkpoint|Cleanup)|ProjectFirstRoutes)' -count=1`
 
 Expected: FAIL with missing handlers/routes.
 
-- [ ] **Step 3: Extract shared project helpers and add facades**
+- [x] **Step 3: Extract shared project helpers and add facades**
 
 Register exactly:
 
@@ -667,7 +667,7 @@ r.Get("/api/v1/channels/{channelID}/env-checkpoints", h.ListChannelEnvCheckpoint
 
 Each handler parses `channelID`, verifies workspace access and `channel.project_id IS NOT NULL`, then calls the same unexported project helper used by the existing handler. Do not make an internal HTTP request.
 
-- [ ] **Step 4: Implement deletion serialization and compensation**
+- [x] **Step 4: Implement deletion serialization and compensation**
 
 Within a transaction, lock the env and binding rows, mark bindings `deleting`, and prevent new claims. After any in-flight provision reaches ready/failed, delete external sandboxes and runtimes, then database resources in this order:
 
@@ -680,7 +680,7 @@ environment
 
 Return 204 when already absent. Keep project cleanup behavior unchanged for compatibility.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd multica/server && go test ./internal/handler ./cmd/server -run 'Test(Channel(Dag|Checkpoint|Cleanup)|ProjectFirstRoutes)' -count=1`
 
@@ -704,7 +704,7 @@ git -C multica/server commit -m "feat(env-dispatch): add channel-first lifecycle
 - Produces: immutable `EnvDispatchHandle`; message callers use channel routes, issue callers retain project routes.
 - Consumes: Task 7 API.
 
-- [ ] **Step 1: Add failing client tests**
+- [x] **Step 1: Add failing client tests**
 
 Use this response fixture and assert the three channel-first paths:
 
@@ -725,13 +725,13 @@ assert seen_paths == [
 
 Also retain an issue-dispatch test that uses `/api/v1/env-dispatch/p1/dag`.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py -q`
 
 Expected: FAIL because `create_env_dispatch` returns a project string.
 
-- [ ] **Step 3: Add the handle and route selection**
+- [x] **Step 3: Add the handle and route selection**
 
 Add:
 
@@ -752,11 +752,11 @@ class EnvDispatchHandle:
 
 Change `create_env_dispatch(...) -> EnvDispatchHandle`, validate that message responses contain `channel_id`, and update cleanup/DAG/checkpoint methods to accept `handle`. Route by `handle.dispatch_type`; never infer message mode from a missing/present arbitrary string.
 
-- [ ] **Step 4: Update workflow ownership**
+- [x] **Step 4: Update workflow ownership**
 
 `multi_agent_workflow.py` stores the returned handle, passes `handle.project_id` only to project-internal payloads such as checkpoint creation, and passes the whole handle to DAG polling, checkpoint listing, and cleanup. `multica_dag_client.py` accepts either a handle or explicit `channel_id/project_id + dispatch_type` at its public boundary so existing issue users remain source-compatible.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py -q`
 
@@ -778,7 +778,7 @@ git commit -m "feat(tree-search): use channel-first env dispatch handles"
 - Consumes: complete implementation.
 - Produces: user-facing protocol examples and full verification evidence.
 
-- [ ] **Step 1: Document the final request/response and lifecycle**
+- [x] **Step 1: Document the final request/response and lifecycle**
 
 Document the exact message response, channel-first routes, leader-only initial wake, peer first-mention provisioning, and branch validation errors. Include this example:
 
@@ -799,19 +799,19 @@ Document the exact message response, channel-first routes, leader-only initial w
 }
 ```
 
-- [ ] **Step 2: Run focused Go suites**
+- [x] **Step 2: Run focused Go suites**
 
 Run: `cd multica/server && go test ./internal/service ./internal/handler ./internal/migrations ./cmd/multica ./cmd/server -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run focused Python suites**
+- [x] **Step 3: Run focused Python suites**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run formatting, static checks, and graph refresh**
+- [x] **Step 4: Run formatting, static checks, and graph refresh**
 
 Run:
 
@@ -824,7 +824,7 @@ pre-commit run --all-files
 
 Expected: Go tests pass; graph refresh completes; pre-commit passes. If hardware-only or external-service integration suites skip, record their exact skip reason in the handoff rather than changing markers.
 
-- [ ] **Step 5: Inspect the final diff for invariant violations**
+- [x] **Step 5: Inspect the final diff for invariant violations**
 
 Run:
 
@@ -838,7 +838,7 @@ rg -n "ensureChannelAgentSessionWithDB|DefaultRuntime|RuntimeID" multica/server/
 
 Expected: no whitespace errors; every EnvDispatch-bound path reaches the binding runtime before the ordinary default-runtime function; only intended files are staged.
 
-- [ ] **Step 6: Commit documentation**
+- [x] **Step 6: Commit documentation**
 
 ```bash
 git add customized_areal/tree_search/agents/multica_environment_protocol.md docs/superpowers/specs/2026-07-16-env-dispatch-message-channel-design.md
