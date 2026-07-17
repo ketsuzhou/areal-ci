@@ -5,7 +5,7 @@
 This module provides the base Guard functionality shared between:
 
 - ``areal.infra.rpc.rpc_server`` (RPC server = guard + data + engine)
-- ``areal.experimental.inference_service.guard`` (inference service guard)
+- ``areal.v2.inference_service.guard`` (inference service guard)
 
 Key components:
 
@@ -196,7 +196,7 @@ def create_app(state: GuardState) -> Flask:
 
         Expected JSON payload::
 
-            {"count": 5, "preferred_ports": [17727]}
+            {"count": 5}
         """
         try:
             data = request.get_json(silent=True)
@@ -213,22 +213,9 @@ def create_app(state: GuardState) -> Flask:
                     400,
                 )
 
-            preferred_ports = data.get("preferred_ports") or []
-            if not isinstance(preferred_ports, list) or not all(
-                isinstance(p, int) for p in preferred_ports
-            ):
-                return (
-                    jsonify({"error": "'preferred_ports' must be a list of integers"}),
-                    400,
-                )
-
             s = get_state()
             with s.allocated_ports_lock:
-                ports = find_free_ports(
-                    count,
-                    exclude_ports=s.allocated_ports,
-                    preferred_ports=preferred_ports,
-                )
+                ports = find_free_ports(count, exclude_ports=s.allocated_ports)
                 s.allocated_ports.update(ports)
 
             return jsonify({"status": "success", "ports": ports, "host": s.server_host})
@@ -603,10 +590,14 @@ def run_server(
     standalone guard entrypoints.  Handles SIGTERM, cleanup hooks,
     and forked-child cleanup on shutdown.
     """
+    import logging as _logging
+
     from werkzeug.serving import make_server
 
     from areal.api.cli_args import NameResolveConfig
     from areal.utils import name_resolve, names
+
+    _logging.getLogger("werkzeug").setLevel(_logging.WARNING)
 
     server = make_server(bind_host, port, app, threaded=True)
     state.server_port = server.socket.getsockname()[1]

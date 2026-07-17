@@ -683,7 +683,6 @@ def _pack_extra_data(
     extra_data: dict[str, Any] = {}
     seq_ids = trie.all_sequence_ids
     lens = [sequence_lens[sid].item() for sid in seq_ids]
-    batch_size = data["input_ids"].shape[0]
 
     # Pack tensors according to the order in trie.all_sequence_ids
     for key in packable_keys:
@@ -699,19 +698,9 @@ def _pack_extra_data(
             cursor += length
         extra_data[key] = packed
 
-    # For non-packable data, subset batch-dim tensors to this tree's sequences
+    # Copy non-packable data as-is
     for key in non_packable_keys:
-        value = data[key]
-        if torch.is_tensor(value) and value.ndim >= 2 and value.shape[0] == batch_size:
-            extra_data[key] = value[seq_ids]
-        else:
-            extra_data[key] = value
-
-    # Add cu_seqlens for per-sequence boundary info (used by loss function)
-    if "cu_seqlens" not in extra_data and len(lens) > 0:
-        cu = torch.cumsum(torch.tensor(lens, dtype=torch.int32), dim=0)
-        cu = torch.nn.functional.pad(cu, (1, 0), value=0).to(torch.int32)
-        extra_data["cu_seqlens"] = cu
+        extra_data[key] = data[key]
 
     return extra_data
 

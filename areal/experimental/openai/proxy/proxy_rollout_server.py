@@ -30,7 +30,6 @@ from pydantic import BaseModel
 
 from areal.api.cli_args import NameResolveConfig
 from areal.experimental.openai.client import ArealOpenAI
-from areal.experimental.openai.proxy.remote_rollout import RemoteRolloutClient
 from areal.infra.rpc.serialization import deserialize_value, serialize_value
 from areal.infra.utils.http import validate_admin_api_key
 from areal.utils import name_resolve, names, seeding
@@ -96,7 +95,6 @@ def _warn_once(msg: str) -> None:
 # Engine and client (created via /create_engine and /call with method "initialize")
 _engine: InferenceEngine | None = None
 _openai_client: ArealOpenAI | None = None
-_remote_client: RemoteRolloutClient | None = None
 
 # Session management
 _session_cache: dict[str, SessionData] = {}
@@ -271,7 +269,7 @@ async def alloc_ports(raw_request: Request):
 
 
 def _setup_openai_client():
-    global _openai_client, _remote_client, _session_timeout_seconds, _admin_api_key
+    global _openai_client, _session_timeout_seconds, _admin_api_key
     global _message_preprocessors, _prefix_matcher
     config = _engine.config
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
@@ -284,12 +282,6 @@ def _setup_openai_client():
         engine_max_tokens=agent_cfg.engine_max_tokens,
         chat_template_type=agent_cfg.chat_template_type,
         lora_name=config.lora_name,
-    )
-    _remote_client = RemoteRolloutClient(
-        tokenizer=tokenizer,
-        chat_template_type=agent_cfg.chat_template_type,
-        engine_max_tokens=agent_cfg.engine_max_tokens,
-        recompute_enabled=agent_cfg.should_compute_prox_logp(),
     )
     # Set session timeout from config
     _session_timeout_seconds = agent_cfg.session_timeout_seconds
@@ -496,7 +488,6 @@ def start_session(request: StartSessionRequest) -> StartSessionResponse:
         _session_cache[session_id] = SessionData(
             session_id=session_id,
             prefix_matcher=_prefix_matcher,
-            env_id=request.env_id,
         )
         _api_key_to_session[session_api_key] = session_id
         _session_to_api_key[session_id] = session_api_key
@@ -561,29 +552,6 @@ def set_reward(
 # =============================================================================
 # OpenAI-Compatible Endpoints
 # =============================================================================
-
-
-def _is_logprobs_unsupported(exc: Exception) -> bool:
-    """Heuristic: did the upstream provider reject the ``logprobs`` parameter?
-
-    Matches error messages that mention ``logprobs`` together with a phrase
-    indicating the parameter is not accepted (e.g. OpenAI ``BadRequestError``
-    "logprobs ... not supported", or a generic "unknown argument: logprobs").
-    Broad enough to catch provider-specific and generic exceptions, narrow
-    enough to leave unrelated errors alone.
-    """
-    msg = str(exc).lower()
-    if "logprobs" not in msg:
-        return False
-    return any(
-        phrase in msg
-        for phrase in (
-            "not supported",
-            "unsupported",
-            "unrecognized",
-            "unknown argument",
-        )
-    )
 
 
 async def _call_client_create(
@@ -661,29 +629,12 @@ async def _call_client_create(
     if stream:
         kwargs["stream"] = True
 
-    # Sub-project E: inject logprobs=True so AReaL can compute token-level
-    # entropy from captured trajectories. If the upstream rejects the
-    # parameter, retry once without it (graceful fallback). Other errors
-    # surface as HTTPException(500) exactly as before.
-    kwargs["logprobs"] = True
     try:
         return await create_fn(areal_cache=session_data.completions, **kwargs)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        if not _is_logprobs_unsupported(e):
-            if isinstance(e, ValueError):
-                raise HTTPException(status_code=500, detail=str(e))
-            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
-        logger.warning(
-            "upstream rejected logprobs=True; retrying without (session %s)",
-            session_id,
-        )
-        kwargs.pop("logprobs", None)
-        try:
-            return await create_fn(areal_cache=session_data.completions, **kwargs)
-        except ValueError as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
 @app.post(
@@ -699,40 +650,11 @@ async def chat_completions(
     Supports both streaming (stream=True) and non-streaming requests.
     For streaming requests, returns a StreamingResponse with Server-Sent Events
     in the OpenAI streaming format (data: {json}\\n\\n ... data: [DONE]\\n\\n).
-
-    Remote rollout: requests with model starting with "remote:" are routed
-    to OpenRouter via RemoteRolloutClient. model="default" uses the local
-    inference engine. Unknown models return 404.
     """
     if _openai_client is None:
         raise HTTPException(
             status_code=500,
             detail='Proxy server not initialized. Send requests to /create_engine then /call "initialize" first.',
-        )
-
-    model = request.get("model", "default")
-    if isinstance(model, str) and model.startswith("remote:"):
-        if _remote_client is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Remote rollout client not initialized.",
-            )
-        with _lock:
-            if session_id not in _session_cache:
-                raise HTTPException(
-                    status_code=410,
-                    detail=f"Session {session_id} already ended or expired",
-                )
-            session_data = _session_cache[session_id]
-        session_data.update_last_access()
-        return await _remote_client.create_completion(
-            dict(request), session_data.completions
-        )
-    if model != "default":
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown model {model!r}. Use 'default' for local inference "
-            "or 'remote:<provider/model>' for OpenRouter.",
         )
 
     # CompletionCreateParams is a TypedDict (dict subclass), so use dict access.
