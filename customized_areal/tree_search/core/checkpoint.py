@@ -214,6 +214,7 @@ class TreeCheckpointManager:
             "entropy_stats": node.entropy_stats,
             "need_branch": node.need_branch,
             "env_id": node.env_id,
+            "version_id": getattr(node, "version_id", -1),
         }
         if node.topk_ids is not None:
             data["topk_ids"] = node.topk_ids
@@ -246,6 +247,7 @@ class TreeCheckpointManager:
             entropy_stats=data.get("entropy_stats"),
             need_branch=bool(data.get("need_branch", False)),
             env_id=data.get("env_id"),
+            version_id=int(data.get("version_id", -1) or -1),
             topk_ids=data.get("topk_ids"),
             topk_logp=data.get("topk_logp"),
             teacher_logp=data.get("teacher_logp"),

@@ -34,6 +34,23 @@ def _lazy_torch():
     return torch
 
 
+def version_id_from_versions(versions: list[int]) -> int:
+    """Derive a node's scalar policy version from its per-token ``versions``.
+
+    The per-token ``versions`` list marks prompt tokens with -1 and response
+    tokens with the generation policy version (``engine.get_version()``). The
+    node-level ``version_id`` is that generation version (the max non-negative
+    version in the list), or -1 when nothing is tracked. Used at Node creation
+    so the versioned ΔV advantage (ARE-4) can tell new (latest-policy) nodes
+    from reused old ones without an extra engine round-trip.
+    """
+    best = -1
+    for v in versions or ():
+        if v is not None and v > best:
+            best = int(v)
+    return best
+
+
 @dataclass
 class Node:
     """A single turn in a multi-turn conversation tree.
@@ -76,6 +93,13 @@ class Node:
     # via ``env_dispatch(mode="branch", env_id=node.env_id)``.
     env_id: str | None = None
 
+    # Policy version that generated this node's response (ARE-4). Reuses the
+    # engine's per-token ``versions`` system (``engine.get_version()``); -1 =
+    # prompt / untracked. Written at Node creation. Distinguishes "new"
+    # (latest-policy) nodes from reused "old" nodes for the versioned ΔV
+    # advantage (V_latest new-only, adaptive horizon).
+    version_id: int = -1
+
     # Reward
     outcome_reward: float = 0.0
 
@@ -98,6 +122,12 @@ class Node:
     # critic's score distribution. Used as var_theta in the variance-aware
     # hybrid blend. 0.0 when the critic is one-hot or disabled.
     value_variance: float = 0.0
+
+    # ARE-4 ΔV advantage intermediates (for inspection/testing; recomputed each
+    # advantage pass and not serialized). v_own = blended baseline value;
+    # g_latest = new-only n-step return; advantage A = g_latest - v_own.
+    v_own: float | None = None
+    g_latest: float | None = None
 
     # Tree-computed advantages/returns (set by TreeAdvantageComputer or
     # GAEAdvantageComputer). Typed Any (not torch.Tensor) so this module imports
@@ -307,6 +337,17 @@ class MCTSTreeStore:
         self.current_train_id: str = os.environ.get("TRAIN_ID", "")
         self._rewards: dict[str, float] = {}
 
+        # Latest-policy-only MCTS stats (ARE-4 V_latest = new-only). Populated
+        # only when a backup is recorded with ``record_latest=True`` (the
+        # current/latest exploration). Kept separate from the all-version stats
+        # so V_latest excludes old-policy samples (no 1/n dilution). The
+        # current latest policy version is ``latest_version`` (-1 = untracked).
+        self.latest_version: int = -1
+        self._latest_visit_counts: dict[str, int] = {}
+        self._latest_total_values: dict[str, float] = {}
+        self._latest_sum_sq_values: dict[str, float] = {}
+        self._latest_q_values: dict[str, float] = {}
+
         self._turn_nodes: dict[str, str] = {}
         self._normalized_advantages: dict[str, float] = {}
         self._normalized_returns: dict[str, float] = {}
@@ -361,8 +402,16 @@ class MCTSTreeStore:
 
     # -- MCTS backup (unchanged algorithm; walks parent_node_id) ---------
 
-    def _backup_node(self, node_id: str, reward: float) -> None:
-        """Add one Monte-Carlo sample (``reward``) to a single node's stats."""
+    def _backup_node(
+        self, node_id: str, reward: float, record_latest: bool = False
+    ) -> None:
+        """Add one Monte-Carlo sample (``reward``) to a single node's stats.
+
+        When ``record_latest`` is True the sample is ALSO accumulated into the
+        latest-policy-only stats (ARE-4 V_latest = new-only). The all-version
+        stats are always updated, so callers that omit ``record_latest`` (the
+        legacy default) are byte-for-byte unchanged.
+        """
         self._visit_counts[node_id] = self._visit_counts.get(node_id, 0) + 1
         self._total_values[node_id] = self._total_values.get(node_id, 0.0) + reward
         self._sum_sq_values[node_id] = (
@@ -371,8 +420,23 @@ class MCTSTreeStore:
         self._q_values[node_id] = (
             self._total_values[node_id] / self._visit_counts[node_id]
         )
+        if record_latest:
+            self._latest_visit_counts[node_id] = (
+                self._latest_visit_counts.get(node_id, 0) + 1
+            )
+            self._latest_total_values[node_id] = (
+                self._latest_total_values.get(node_id, 0.0) + reward
+            )
+            self._latest_sum_sq_values[node_id] = (
+                self._latest_sum_sq_values.get(node_id, 0.0) + reward * reward
+            )
+            self._latest_q_values[node_id] = (
+                self._latest_total_values[node_id] / self._latest_visit_counts[node_id]
+            )
 
-    def _backup_path(self, terminal_node_id: str, reward: float) -> None:
+    def _backup_path(
+        self, terminal_node_id: str, reward: float, record_latest: bool = False
+    ) -> None:
         """Propagate one episode's return root-ward along the parent DAG.
 
         Walks ``parent_node_id`` plus ``extra_parent_node_ids`` across SuperNode
@@ -381,6 +445,8 @@ class MCTSTreeStore:
         cycles and ensures each ancestor is credited exactly once per episode
         even when several branches share it: on a cycle the walk silently stops
         (no raise) and already-visited nodes keep their accumulated reward.
+        ``record_latest`` (ARE-4) additionally accumulates the sample into the
+        latest-policy-only stats so V_latest can be computed new-only.
         """
         visited: set[str] = set()
         stack: list[str] = [terminal_node_id]
@@ -389,26 +455,34 @@ class MCTSTreeStore:
             if current in visited or current not in self._node_id_to_super:
                 continue
             visited.add(current)
-            self._backup_node(current, reward)
+            self._backup_node(current, reward, record_latest=record_latest)
             for parent_id in self._node_parent_ids(current):
                 if parent_id not in visited:
                     stack.append(parent_id)
 
-    def backup_episode_terminal(self, terminal_node_id: str, reward: float) -> None:
+    def backup_episode_terminal(
+        self, terminal_node_id: str, reward: float, record_latest: bool = False
+    ) -> None:
         """Public entry: root-ward backup of one episode's terminal return.
 
         Walks parent_node_id from terminal_node_id across SuperNode/agent
-        boundaries (causal flattening).
+        boundaries (causal flattening). ``record_latest=True`` (ARE-4) also
+        records the sample in the latest-policy-only stats.
         """
-        self._backup_path(terminal_node_id, float(reward))
+        self._backup_path(terminal_node_id, float(reward), record_latest=record_latest)
 
     def backup_path_returns(
-        self, terminal_node_id: str, returns_by_node_id: dict[str, float]
+        self,
+        terminal_node_id: str,
+        returns_by_node_id: dict[str, float],
+        record_latest: bool = False,
     ) -> None:
         """Root-ward backup assigning each node on the path its own return-to-go.
 
         Walks the parent DAG (``parent_node_id`` + ``extra_parent_node_ids``);
         the ``visited`` guard credits each node once per call.
+        ``record_latest=True`` (ARE-4) also records each node's return-to-go in
+        the latest-policy-only stats so V_latest is new-only.
         """
         visited: set[str] = set()
         stack: list[str] = [terminal_node_id]
@@ -419,7 +493,7 @@ class MCTSTreeStore:
             visited.add(current)
             g = returns_by_node_id.get(current)
             if g is not None:
-                self._backup_node(current, float(g))
+                self._backup_node(current, float(g), record_latest=record_latest)
             for parent_id in self._node_parent_ids(current):
                 if parent_id not in visited:
                     stack.append(parent_id)
@@ -427,13 +501,21 @@ class MCTSTreeStore:
     # -- Insertion -------------------------------------------------------
 
     def insert_super_batch(
-        self, supers: list[SuperNode], backup: bool = True, query_id: str = ""
+        self,
+        supers: list[SuperNode],
+        backup: bool = True,
+        query_id: str = "",
+        record_latest: bool = False,
     ) -> None:
         """Insert a batch of SuperNodes under ``query_id``.
 
         Indexes each SuperNode and each Node inside it. When ``backup`` is
         True, runs a root-ward backup per episode among freshly inserted nodes
         (same algorithm as the old insert_batch, but walking into SuperNodes).
+        ``record_latest=True`` (ARE-4) records the backup samples into the
+        latest-policy-only stats too, so V_latest can be computed new-only for
+        the current exploration; the default False leaves legacy callers
+        byte-for-byte unchanged.
         """
         inserted_node_ids: list[str] = []
         for super_node in supers:
@@ -468,9 +550,13 @@ class MCTSTreeStore:
                     outcome_reward = node.outcome_reward
                 self._rewards[node_id] = outcome_reward
         if backup:
-            self._backup_inserted_episodes(inserted_node_ids)
+            self._backup_inserted_episodes(
+                inserted_node_ids, record_latest=record_latest
+            )
 
-    def _backup_inserted_episodes(self, node_ids: list[str]) -> None:
+    def _backup_inserted_episodes(
+        self, node_ids: list[str], record_latest: bool = False
+    ) -> None:
         """Run a root-ward backup once per episode among freshly inserted nodes.
 
         Nodes that carry an ``episode_id`` are grouped by episode and backed up
@@ -505,7 +591,7 @@ class MCTSTreeStore:
             if prev is None or turn_idx >= prev[0]:
                 episode_terminal[ep_id] = (turn_idx, node_id, reward)
         for _turn_idx, terminal_id, reward in episode_terminal.values():
-            self._backup_path(terminal_id, reward)
+            self._backup_path(terminal_id, reward, record_latest=record_latest)
         if no_episode_ids:
             # A leaf is a node that no other empty-episode node points to as a
             # parent; back up once from each leaf so shared ancestors get one
@@ -518,7 +604,11 @@ class MCTSTreeStore:
                         has_child.add(parent_id)
             for node_id in no_episode_ids:
                 if node_id not in has_child:
-                    self._backup_path(node_id, self._rewards.get(node_id, 0.0))
+                    self._backup_path(
+                        node_id,
+                        self._rewards.get(node_id, 0.0),
+                        record_latest=record_latest,
+                    )
 
     # -- Per-Node accessors (unchanged signatures) -----------------------
 
@@ -575,25 +665,20 @@ class MCTSTreeStore:
     def get_sum_sq_value(self, node_id: str) -> float:
         return self._sum_sq_values.get(node_id, 0.0)
 
-    def get_loo_value_and_variance(
-        self, node_id: str, excluded_reward: float
+    @staticmethod
+    def _loo_from_stats(
+        visit: int, total: float, sum_sq: float, excluded_reward: float
     ) -> tuple[float, float, int]:
-        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size.
+        """Leave-one-out MC value/variance-of-the-mean from raw aggregates.
 
-        Returns (loo_mean, var_of_mean, n_loo). var_of_mean is the larger of:
-          - the sample-variance-of-the-mean after removing ``excluded_reward``
-            (clamped to >= 0; divided by n_loo for the mean's variance), and
-          - a Beta(a, b) prior floor where a = s' + 1, b = (n_loo - s') + 1,
-            s' = sum of rewards excluding the LOO sample (clamped to [0, n_loo]).
-            This floor prevents zero-variance estimates when all LOO samples agree.
-        n_loo < 2 returns (0.0, -1.0, max(n_loo, 0)) -- not enough samples.
+        Shared by the all-version (:meth:`get_loo_value_and_variance`) and the
+        latest-policy-only (:meth:`get_latest_loo_value_and_variance`, ARE-4)
+        helpers so both use identical numerics.
         """
-        n = self._visit_counts.get(node_id, 0)
+        n = visit
         n_loo = n - 1
         if n_loo < 2:
             return 0.0, -1.0, max(n_loo, 0)
-        total = self._total_values.get(node_id, 0.0)
-        sum_sq = self._sum_sq_values.get(node_id, 0.0)
         s_prime = total - excluded_reward
         q_prime = sum_sq - excluded_reward * excluded_reward
         loo_mean = s_prime / n_loo
@@ -609,6 +694,93 @@ class MCTSTreeStore:
         if var_floor > var_mc:
             var_mc = var_floor
         return loo_mean, var_mc, n_loo
+
+    def get_loo_value_and_variance(
+        self, node_id: str, excluded_reward: float
+    ) -> tuple[float, float, int]:
+        """Leave-one-out MC value, variance-of-the-mean, and LOO sample size.
+
+        Returns (loo_mean, var_of_mean, n_loo). var_of_mean is the larger of:
+          - the sample-variance-of-the-mean after removing ``excluded_reward``
+            (clamped to >= 0; divided by n_loo for the mean's variance), and
+          - a Beta(a, b) prior floor where a = s' + 1, b = (n_loo - s') + 1,
+            s' = sum of rewards excluding the LOO sample (clamped to [0, n_loo]).
+            This floor prevents zero-variance estimates when all LOO samples agree.
+        n_loo < 2 returns (0.0, -1.0, max(n_loo, 0)) -- not enough samples.
+        """
+        return self._loo_from_stats(
+            self._visit_counts.get(node_id, 0),
+            self._total_values.get(node_id, 0.0),
+            self._sum_sq_values.get(node_id, 0.0),
+            excluded_reward,
+        )
+
+    def get_latest_loo_value_and_variance(
+        self, node_id: str, excluded_reward: float
+    ) -> tuple[float, float, int]:
+        """Leave-one-out MC value/variance over LATEST-policy samples only.
+
+        ARE-4 V_latest = new-only: old-policy samples are excluded so V_latest
+        reflects only the latest exploration branch (no 1/n dilution). Same
+        numerics as :meth:`get_loo_value_and_variance` but over the
+        latest-only aggregates populated via ``record_latest=True`` backups.
+        """
+        return self._loo_from_stats(
+            self._latest_visit_counts.get(node_id, 0),
+            self._latest_total_values.get(node_id, 0.0),
+            self._latest_sum_sq_values.get(node_id, 0.0),
+            excluded_reward,
+        )
+
+    # -- Latest-policy version tracking (ARE-4) --------------------------
+
+    def set_latest_version(self, version: int) -> None:
+        """Record the current latest policy version (ARE-4).
+
+        Nodes whose ``version_id`` equals it are "new" (latest-policy); all
+        others are reused "old" nodes. Drives V_latest (new-only), the
+        adaptive horizon, and the path-off skip.
+        """
+        self.latest_version = int(version)
+
+    def get_latest_version(self) -> int:
+        return self.latest_version
+
+    def _node_version_id(self, node_id: str) -> int:
+        node = self.get_node(node_id)
+        if node is None:
+            return -1
+        if isinstance(node, dict):
+            return int(node.get("version_id", -1) or -1)
+        return int(getattr(node, "version_id", -1) or -1)
+
+    def is_latest_version(self, node_id: str) -> bool:
+        """True iff this node was generated by the latest policy version."""
+        if self.latest_version < 0:
+            return False
+        return self._node_version_id(node_id) == self.latest_version
+
+    def is_on_latest_path(self, node_id: str) -> bool:
+        """True iff a latest-exploration backup has reached this node (ARE-4).
+
+        New (latest-version) nodes are always on the path. Old nodes are on the
+        path iff at least one latest-only MC sample has been backed up through
+        them (``record_latest=True``); old nodes with no latest data are
+        "path-off" -> advantage 0 / skipped this round. When version tracking
+        is off (``latest_version < 0``) every node is treated as on-path so the
+        computer degrades gracefully instead of zeroing every advantage.
+        """
+        if self.latest_version < 0:
+            return True
+        if self.is_latest_version(node_id):
+            return True
+        return self._latest_visit_counts.get(node_id, 0) >= 1
+
+    def get_latest_q_value(self, node_id: str, default: float = 0.0) -> float:
+        return self._latest_q_values.get(node_id, default)
+
+    def get_latest_visit_count(self, node_id: str) -> int:
+        return self._latest_visit_counts.get(node_id, 0)
 
     def set_normalized_advantage(self, node_id: str, value: float) -> None:
         self._normalized_advantages[node_id] = value
@@ -776,3 +948,9 @@ class MCTSTreeStore:
         self._normalized_returns.clear()
         self._values.clear()
         self._value_variances.clear()
+        # ARE-4 latest-policy-only stats.
+        self.latest_version = -1
+        self._latest_visit_counts.clear()
+        self._latest_total_values.clear()
+        self._latest_sum_sq_values.clear()
+        self._latest_q_values.clear()

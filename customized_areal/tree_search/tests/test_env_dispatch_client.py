@@ -351,6 +351,44 @@ def test_create_env_dispatch_serializes_per_agent_env_specs():
     assert seen["body"]["per_agent_env"] == {"agent-1": {"template": "python"}}
 
 
+def test_create_env_dispatch_serializes_per_agent_env_runtime():
+    """A nested external-model runtime policy is passed through verbatim.
+
+    The client performs generic per_agent_env serialization, so the nested
+    runtime object (base_url/api_key/model) reaches the server unchanged. The
+    API key is intentionally present in the request body - the server needs it
+    to start the sandbox - and non-disclosure is enforced server-side on
+    responses, errors, and logs, not on the outbound request.
+    """
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"project_id": "p1", "channel_id": "c1"})
+
+    c = MulticaEnvDispatchClient(base_url="http://x", transport=_transport(handler))
+    runtime_policy = {
+        "agent-1": {
+            "runtime": {
+                "base_url": "https://provider.invalid/v1",
+                "api_key": "synthetic-secret-for-tests",
+                "model": "model-a",
+            }
+        }
+    }
+    asyncio.run(
+        c.create_env_dispatch(
+            mode="scratch",
+            dispatch_type="message",
+            squad_id="sq",
+            domain="self_play",
+            message="hi",
+            per_agent_env=runtime_policy,
+        )
+    )
+    assert seen["body"]["per_agent_env"] == runtime_policy
+
+
 def test_create_env_dispatch_omits_per_agent_env_when_empty():
     seen = {}
 

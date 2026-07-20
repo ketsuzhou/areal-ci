@@ -77,7 +77,7 @@ from customized_areal.tree_search.config import (
     LossMode,
     SampleSource,
 )
-from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.core.tree_store import Node, version_id_from_versions
 from customized_areal.tree_search.core.uncertainty import should_discard_query
 
 from areal.api import RolloutWorkflow
@@ -473,6 +473,7 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
             turn_idx=turn_idx,
             node_id=interaction_id,
             parent_node_id=pn_id,
+            version_id=version_id_from_versions(versions),
             topk_ids=topk_ids if topk_ids else None,
             topk_logp=topk_logp if topk_logp else None,
         )
@@ -744,6 +745,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         hybrid_critic_var_floor: float = 1e-3,
         hybrid_critic_error_var: float = 0.05,
         branch_td_threshold: float = 0.0,
+        versioned_rho: float = 1.0,
+        versioned_n_min: int = 1,
+        versioned_n_max: int = 10,
         multica_dag_enabled: bool = False,
         multica_dag_client=None,
         multica_assembler=None,
@@ -776,6 +780,10 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         self.hybrid_critic_var_floor = hybrid_critic_var_floor
         self.hybrid_critic_error_var = hybrid_critic_error_var
         self.branch_td_threshold = branch_td_threshold
+        # ARE-4 ΔV advantage (advantage_mode=VERSIONED_BACKUP) hyperparameters.
+        self.versioned_rho = versioned_rho
+        self.versioned_n_min = versioned_n_min
+        self.versioned_n_max = versioned_n_max
         # Resolved blend weight passed to ``compute_critic_targets``: either the
         # fixed float ``critic_mc_weight`` or an adaptive controller. The
         # controller is stateful and persists across rollouts so its critic-error
@@ -894,6 +902,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             critic_error_var=self.hybrid_critic_error_var,
             critic_error_var_fn=critic_error_var_fn,
         )
+        from customized_areal.tree_search.core.advantage import (
+            VersionedBackupAdvantageComputer,
+        )
+
+        self.versioned_backup_advantage_computer = VersionedBackupAdvantageComputer(
+            self.tree_store,
+            gamma=self.critic_gamma,
+            lam=self.critic_lambda,
+            judge_score_max=self.critic_score_max,
+            mc_min_visits=self.hybrid_mc_min_visits,
+            critic_var_floor=self.hybrid_critic_var_floor,
+            critic_error_var=self.hybrid_critic_error_var,
+            critic_error_var_fn=critic_error_var_fn,
+            rho=self.versioned_rho,
+            n_min=self.versioned_n_min,
+            n_max=self.versioned_n_max,
+        )
         # Lazily constructed on first use (needs the tokenizer).
         self._critic_value_client = None
         # Multica DAG rollout (Phase 1b/2). Declared now so callers can pass
@@ -905,7 +930,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if multica_dag_enabled:
             # Wire the multica base workflow: one arun_episode = one Multica task
             # = N agents -> AssembledDag. multica_dag_client is the get_dag
-            # poller; the create_env_dispatch client (a distinct concern) is
+            # poller; the  client (a distinct concern) is
             # constructed directly here as a MulticaEnvDispatchClient, which
             # reads MULTICA_BASE_URL / MULTICA_API_KEY from the environment.
             # The workflow's group_size is the squad size N (defaults to 1);
@@ -1795,10 +1820,20 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         try:
             # Insert fresh nodes into tree
             if fresh_nodes:
+                # ARE-4: the fresh rollout IS the latest exploration. Record
+                # its policy version so new/old nodes resolve correctly, and
+                # back up its returns into the latest-only stats (record_latest)
+                # so V_latest can be computed new-only.
+                fresh_vids = [
+                    n.version_id for n in fresh_nodes if getattr(n, "version_id", -1) >= 0
+                ]
+                if fresh_vids:
+                    self.tree_store.set_latest_version(max(fresh_vids))
                 self.tree_store.insert_super_batch(
                     [_wrap_leaf_super(fresh_nodes)],
                     query_id=query_id,
                     backup=True,
+                    record_latest=True,
                 )
 
             if self.loss_mode != LossMode.GRPO:
@@ -1835,6 +1870,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 self.gae_advantage_computer.compute(all_nodes)
             elif self.advantage_mode == AdvantageMode.HYBRID_GAE:
                 self.hybrid_gae_advantage_computer.compute(all_nodes)
+            elif self.advantage_mode == AdvantageMode.VERSIONED_BACKUP:
+                self.versioned_backup_advantage_computer.compute(all_nodes)
 
             # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(

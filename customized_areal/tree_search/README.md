@@ -1215,6 +1215,49 @@ as leaf `SuperNode`s before insertion into `MCTSTreeStore`.
 | `agents/self_play_runner.py`                    | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue.                          |
 | `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration.                                    |
 
+### Per-Agent External Model Runtime
+
+A non-training scratch message dispatch can attach an external model runtime
+to an individual squad agent via `per_agent_env.<agent_id>.runtime`. That
+agent's sandbox starts with the caller-supplied provider instead of the
+agent's configured runtime. The API key is sent to the server in the request
+and is never returned in responses, errors, or structured logs.
+
+```python
+await client.create_env_dispatch(
+    mode="scratch",
+    dispatch_type="message",
+    squad_id="sq-1",
+    domain="self_play",
+    message="solve this",
+    per_agent_env={
+        "agent-1": {
+            "runtime": {
+                "base_url": "https://provider.example/v1",
+                "api_key": "YOUR_ROTATED_API_KEY",
+                "model": "provider-model",
+            }
+        }
+    },
+)
+```
+
+Semantics:
+
+- `runtime` is accepted only for `mode=scratch` + `dispatch_type=message` and
+  must not be attached to the `train_agent_id` entry. Branch dispatch, issue
+  dispatch, the training target, and a partial or invalid provider config are
+  all rejected before any rollout resource is created.
+- A runtime-only entry resolves to the `default` sandbox template; `template`
+  may also be set explicitly alongside `runtime` (template and `base_env_id`
+  remain mutually exclusive).
+- `base_url` must be an absolute HTTP(S) URL; `api_key` and `model` are
+  required and whitespace-trimmed before use.
+- Branch dispatch inherits the source binding's `sandbox_config` verbatim, so a
+  resumed agent keeps its runtime policy; a caller-supplied `runtime` override
+  on a branch dispatch is rejected.
+- Rotate the provider key out-of-band and never commit it to source control.
+
 ### DAG Rollout Data Flow
 
 ```mermaid
