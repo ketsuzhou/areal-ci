@@ -11,7 +11,7 @@
 
 ## 2. Runtime Policy Propagation Tests
 
-- [ ] 2.1 Add channel-binding tests proving each agent's canonical runtime policy
+- [x] 2.1 Add channel-binding tests proving each agent's canonical runtime policy
   is persisted with its template and remains isolated from other squad members.
 - [ ] 2.2 Add provisioning tests proving immediate leader create and lazy peer
   first-mention create pass the stored runtime object to the sandbox lifecycle.
@@ -24,12 +24,12 @@
 
 - [x] 3.1 Add typed external runtime request/service structures and atomic
   validation for complete values, absolute HTTP(S) URL, and non-training target.
-- [ ] 3.2 Carry the validated runtime policy through per-agent environment
+- [x] 3.2 Carry the validated runtime policy through per-agent environment
   resolution and serialize it into the existing env-agent sandbox binding
   configuration.
 - [ ] 3.3 Decode the stored policy in `provisionEnvDispatchAgent` and populate
   `CreateSandboxInstanceInput.Runtime` for create and clone payloads.
-- [ ] 3.4 Audit env-dispatch response/error/log paths and prevent runtime secret
+- [x] 3.4 Audit env-dispatch response/error/log paths and prevent runtime secret
   disclosure without changing response schemas.
 
 ## 4. Client Compatibility and Documentation
