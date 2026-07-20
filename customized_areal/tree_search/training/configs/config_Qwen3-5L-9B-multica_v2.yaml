@@ -12,11 +12,15 @@ tree_search:
   sample_source: SCRATCH
   branch_probability: 0.5
 total_train_epochs: 4
+# Online mode requires explicit total_train_steps (cannot derive from dataset
+# length). 100 steps = 25 steps/epoch. Adjust based on multica throughput.
+total_train_steps: 100
 tokenizer_path: ${actor.path}
 
-# TPFC Agent workflow
-workflow: customized_areal.tpfc.tpfc_agent.TPFCAgent
-eval_workflow: ${workflow}
+# Online mode: external agent pushes trajectories via the proxy gateway
+# callback. No workflow class needed (workflow=None -> online mode).
+workflow: null
+eval_workflow: null
 
 agent:
   trial_name: ${trial_name}
@@ -56,7 +60,7 @@ rollout:
   scheduling_spec: ${actor.scheduling_spec}
   dump_to_file: true
   agent:
-    mode: inline
+    mode: online
     # Qwen3.5-9B uses qwen25 tool call parser (same format as Qwen2.5)
     # and qwen3 reasoning parser for <think> tag detection
     tool_call_parser: qwen25
@@ -120,7 +124,7 @@ actor:
   adv_norm:
     mean_level: batch
     std_level: batch
-  weight_update_mode: xccl
+  weight_update_mode: disk
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker
@@ -182,13 +186,8 @@ train_dataset:
   type: rl
   max_length: 15000
 
-valid_dataset:
-  batch_size: 4
-  pin_memory: true
-  num_workers: 2
-  path: customized_areal/tpfc/data/generated_training_final_update.parquet
-  type: rl
-  max_length: 15000
+# valid_dataset omitted: online mode (agent.mode=online) does not support
+# validation datasets. trainer.py:156 raises if valid_dataset is set.
 
 # Utilities
 saver:
@@ -200,7 +199,7 @@ saver:
   freq_secs: 7200
 
 recover:
-  mode: "on"
+  mode: "off"
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
@@ -224,7 +223,7 @@ stats_logger:
     mode: disabled
   swanlab:
     project: tpfc-grpo
-    mode: cloud
+    mode: disabled
     api_key: ${oc.env:SWANLAB_API_KEY,""}
 
 perf_tracer:

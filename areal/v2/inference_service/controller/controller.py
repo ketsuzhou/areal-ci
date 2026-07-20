@@ -31,6 +31,7 @@ from areal.infra.utils.http import async_http_retry, create_httpx_client
 
 if TYPE_CHECKING:
     from areal.api.scheduler_api import Scheduler, Worker
+    from areal.api.workflow_api import RolloutWorkflow
 
 from areal.api.cli_args import InferenceEngineConfig
 from areal.api.io_struct import LocalInfServerInfo
@@ -1547,6 +1548,142 @@ class RolloutControllerV2:
             group_size=group_size,
         )
 
+    def _wrap_tree_search(
+        self,
+        inner: RolloutWorkflow,
+        group_size: int,
+        tree_search_cfg: Any,
+        max_tokens: int,
+    ) -> RolloutWorkflow:
+        """Wrap inner workflow in TreeSearchGroupedRolloutWorkflow.
+
+        Mirrors ``RemoteInfEngine._resolve_workflow``'s tree-search wrapping,
+        omitting the ``judge_*`` fields that v1 passes but ``Config`` does not
+        define (v1 path is broken on those fields). The inner workflow runs 1
+        trajectory per ``arun_episode`` call; the outer wrapper calls it
+        ``group_size`` times for tree backup, so the inner ``group_size`` is
+        reset to 1.
+        """
+        from customized_areal.tree_search.core.customized_grouped_workflow import (
+            TreeSearchGroupedRolloutWorkflow,
+        )
+
+        inner.group_size = 1
+        multica_kwargs = self._build_multica_kwargs()
+        return TreeSearchGroupedRolloutWorkflow(
+            inner,
+            group_size,
+            checkpoint_dir=tree_search_cfg.checkpoint_dir,
+            advantage_mode=tree_search_cfg.advantage_mode,
+            loss_mode=tree_search_cfg.loss_mode,
+            cache_mode=tree_search_cfg.mode,
+            tokenizer_path=self.config.tokenizer_path,
+            max_reasoning_tokens=tree_search_cfg.max_reasoning_tokens,
+            rl_loss_weight=tree_search_cfg.rl_loss_weight,
+            distill_loss_weight=tree_search_cfg.distill_loss_weight,
+            topk_distill=tree_search_cfg.topk_distill,
+            teacher_provider=tree_search_cfg.teacher_provider,
+            teacher_base_url=tree_search_cfg.teacher_base_url,
+            teacher_backend=tree_search_cfg.teacher_backend,
+            teacher_model_name=tree_search_cfg.teacher_model_name,
+            teacher_api_key=tree_search_cfg.teacher_api_key,
+            teacher_top_k=tree_search_cfg.teacher_top_k,
+            teacher_max_retries=tree_search_cfg.teacher_max_retries,
+            teacher_timeout=tree_search_cfg.teacher_timeout,
+            teacher_missing_logprob=tree_search_cfg.teacher_missing_logprob,
+            teacher_max_concurrency=tree_search_cfg.teacher_max_concurrency,
+            diagnose_model_name=tree_search_cfg.diagnose_model_name,
+            diagnose_max_tokens=tree_search_cfg.diagnose_max_tokens,
+            diagnose_temperature=tree_search_cfg.diagnose_temperature,
+            diagnose_base_url=tree_search_cfg.diagnose_base_url,
+            diagnose_api_key=tree_search_cfg.diagnose_api_key,
+            strict_distill_json=tree_search_cfg.strict_distill_json,
+            max_tokens=max_tokens,
+            sample_source=tree_search_cfg.sample_source,
+            branch_probability=tree_search_cfg.branch_probability,
+            dynamic_group_size=tree_search_cfg.dynamic_group_size,
+            initial_group_size=tree_search_cfg.initial_group_size,
+            max_group_size=tree_search_cfg.max_group_size,
+            uncertainty_threshold=tree_search_cfg.uncertainty_threshold,
+            reward_type=tree_search_cfg.reward_type,
+            distill_kl_mode=tree_search_cfg.distill_kl_mode,
+            max_distill_tokens=tree_search_cfg.max_distill_tokens or max_tokens,
+            use_fresh_query=tree_search_cfg.use_fresh_query,
+            fresh_query_table=tree_search_cfg.fresh_query_table,
+            enable_generative_critic=tree_search_cfg.enable_generative_critic,
+            critic_gamma=tree_search_cfg.critic_gamma,
+            critic_lambda=tree_search_cfg.critic_lambda,
+            critic_avg_success_rate=tree_search_cfg.critic_avg_success_rate,
+            critic_score_max=tree_search_cfg.critic_score_max,
+            critic_max_new_tokens=tree_search_cfg.critic_max_new_tokens,
+            critic_temperature=tree_search_cfg.critic_temperature,
+            critic_target_scale=tree_search_cfg.critic_target_scale,
+            critic_mc_weight=tree_search_cfg.critic_mc_weight,
+            critic_td_n_steps=tree_search_cfg.critic_td_n_steps,
+            critic_mc_adaptive=tree_search_cfg.critic_mc_adaptive,
+            critic_mc_c=tree_search_cfg.critic_mc_c,
+            hybrid_mc_min_visits=tree_search_cfg.hybrid_mc_min_visits,
+            hybrid_critic_var_floor=tree_search_cfg.hybrid_critic_var_floor,
+            hybrid_critic_error_var=tree_search_cfg.hybrid_critic_error_var,
+            branch_td_threshold=tree_search_cfg.branch_td_threshold,
+            **multica_kwargs,
+        )
+
+    def _build_multica_kwargs(self) -> dict[str, Any]:
+        """Auto-construct multica DAG components when MULTICA_BASE_URL is set.
+
+        When multica is configured, TreeSearchGroupedRolloutWorkflow.__init__
+        overrides the inner workflow with MultiAgentEnvDispatchWorkflow
+        (AReaL calls create_env_dispatch + polls DAG; Multica owns start_session
+        + per-agent credentials). The inner InferenceServiceWorkflow passed
+        by _wrap_tree_search is discarded on this path.
+
+        Returns empty dict when MULTICA_BASE_URL is unset, so
+        TreeSearchGroupedRolloutWorkflow uses its defaults
+        (multica_dag_enabled=False) and the inner workflow is used as-is.
+        """
+        import os
+
+        if not os.environ.get("MULTICA_BASE_URL"):
+            return {}
+
+        from customized_areal.tree_search.agents.multica_dag_client import (
+            MulticaDagClient,
+        )
+        from customized_areal.tree_search.agents.segment_dag_trainer import (
+            DataProxySessionRemover,
+            DataProxyTensorResolver,
+        )
+        from customized_areal.tree_search.agents.supernode_assembler import (
+            SuperNodeAssembler,
+        )
+
+        if not self._data_proxy_addrs:
+            raise ValueError(
+                "MULTICA_BASE_URL is set but v2 controller has no data-proxy. "
+                "Cannot construct DataProxyTensorResolver/SessionRemover."
+            )
+
+        data_proxy_addr = self._data_proxy_addrs[0]
+        api_key = self.config.admin_api_key
+
+        logger.info(
+            "Multica DAG path enabled: dag_client=%s, data_proxy=%s",
+            os.environ["MULTICA_BASE_URL"],
+            data_proxy_addr,
+        )
+        return {
+            "multica_dag_enabled": True,
+            "multica_dag_client": MulticaDagClient(),
+            "multica_assembler": SuperNodeAssembler(),
+            "multica_resolver": DataProxyTensorResolver(
+                data_proxy_addr, api_key=api_key
+            ),
+            "multica_session_remover": DataProxySessionRemover(
+                data_proxy_addr, api_key=api_key
+            ),
+        }
+
     def _resolve_workflow(
         self,
         workflow,
@@ -1572,6 +1709,24 @@ class RolloutControllerV2:
         from areal.api.workflow_api import RolloutWorkflow
         from areal.utils.dynamic_import import import_from_string
 
+        # Pop tree_search_config so it isn't forwarded to InferenceServiceWorkflow
+        # (mirrors RemoteInfEngine._resolve_workflow). The tree-search wrapper
+        # is applied after inner-workflow resolution below.
+        tree_search_cfg = None
+        max_tokens = 0
+        if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
+            workflow_kwargs = dict(workflow_kwargs)
+            tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+            max_tokens = workflow_kwargs.pop("max_tokens", 0)
+            # v1 passes these as agent-constructor kwargs (TPFCAgent accepts
+            # them). v2 online mode has no agent class: InferenceServiceWorkflow
+            # forwards sampling params per-request via gateway body, not at
+            # construction. Drop them here so they don't reach InferenceServiceWorkflow.
+            workflow_kwargs.pop("temperature", None)
+            workflow_kwargs.pop("top_p", None)
+            workflow_kwargs.pop("max_completion_tokens", None)
+        use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
+
         # External mode only supports online mode (workflow=None)
         if self.external_mode and workflow is not None:
             raise ValueError(
@@ -1587,10 +1742,11 @@ class RolloutControllerV2:
 
         # (a) None → online mode: create InferenceServiceWorkflow without agent
         if workflow is None:
-            if group_size > 1:
+            if group_size > 1 and not use_tree_search:
                 raise ValueError(
-                    "Online mode (workflow=None) does not support group_size > 1. "
-                    f"Got group_size={group_size}."
+                    "Online mode (workflow=None) does not support group_size > 1 "
+                    "without tree_search_config.enabled=True. Got group_size="
+                    f"{group_size}."
                 )
 
             from areal.v2.inference_service.controller.workflow import (
@@ -1599,13 +1755,18 @@ class RolloutControllerV2:
 
             online_kwargs = dict(workflow_kwargs or {})
             online_kwargs.pop("controller", None)
-            return InferenceServiceWorkflow(
+            resolved = InferenceServiceWorkflow(
                 controller=self,
                 agent=None,
                 gateway_addr=self._gateway_addr,
                 admin_api_key=self.config.admin_api_key,
                 **online_kwargs,
             )
+            if use_tree_search:
+                resolved = self._wrap_tree_search(
+                    resolved, group_size, tree_search_cfg, max_tokens
+                )
+            return resolved
 
         # (b) Resolve workflow input (string import path, class, or instance).
         #     Defer instantiation until after the RolloutWorkflow guard.
@@ -1638,6 +1799,15 @@ class RolloutControllerV2:
 
         # (d) Wrap the agent in InferenceServiceWorkflow (with group_size)
         resolved = self._wrap_agent(agent, group_size=group_size)
+
+        # (e) If tree-search is enabled, wrap InferenceServiceWorkflow in
+        #     TreeSearchGroupedRolloutWorkflow. The inner workflow runs 1
+        #     trajectory per arun_episode call; the outer wrapper calls it
+        #     group_size times for tree backup.
+        if use_tree_search:
+            resolved = self._wrap_tree_search(
+                resolved, group_size, tree_search_cfg, max_tokens
+            )
 
         return resolved
 

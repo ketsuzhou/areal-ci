@@ -177,16 +177,22 @@ def main(args: list[str] | None = None) -> None:
             max_length=config.train_dataset.max_length,
         )
 
-    valid_dataset = get_tpfc_rl_dataset(
-        path=config.valid_dataset.path,
-        split="test",
-        tokenizer=tokenizer,
-        max_length=config.valid_dataset.max_length,
-    )
+    if config.valid_dataset is not None:
+        valid_dataset = get_tpfc_rl_dataset(
+            path=config.valid_dataset.path,
+            split="test",
+            tokenizer=tokenizer,
+            max_length=config.valid_dataset.max_length,
+        )
+    else:
+        valid_dataset = None
 
     if train_dataset is not None:
         logger.info("Loaded %d training samples", len(train_dataset))
-    logger.info("Loaded %d validation samples", len(valid_dataset))
+    if valid_dataset is not None:
+        logger.info("Loaded %d validation samples", len(valid_dataset))
+    else:
+        logger.info("No validation dataset (online mode)")
 
     # Build cache / tree backup configs from overrides
     _validate_tree_search_startup(config)

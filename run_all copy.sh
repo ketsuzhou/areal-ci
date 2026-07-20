@@ -34,4 +34,4 @@ cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/
 
 cd /dfs/share-groups/letrain/zhoujie/AReaL-main && uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tpfc/configs/config_tpfc_Qwen3-5L-9B_self_play_test.yaml 2>&1 | tee training_self_play.log
 
-uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tree_search/training/configs/config_Qwen3-5L-9B-multica_v2.yaml 2>&1 | tee training_multica.log
+AREAL_LOG_LEVEL=DEBUG uv run customized_areal/tpfc/scripts/train_tpfc_tree_search.py --config  customized_areal/tree_search/training/configs/config_Qwen3-5L-9B-multica_v2.yaml 2>&1 | tee training_multica.log
