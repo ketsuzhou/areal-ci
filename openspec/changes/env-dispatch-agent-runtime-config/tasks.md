@@ -13,11 +13,11 @@
 
 - [x] 2.1 Add channel-binding tests proving each agent's canonical runtime policy
   is persisted with its template and remains isolated from other squad members.
-- [ ] 2.2 Add provisioning tests proving immediate leader create and lazy peer
+- [x] 2.2 Add provisioning tests proving immediate leader create and lazy peer
   first-mention create pass the stored runtime object to the sandbox lifecycle.
-- [ ] 2.3 Add clone/retry and concurrent first-mention tests proving one canonical
+- [x] 2.3 Add clone/retry and concurrent first-mention tests proving one canonical
   runtime policy is preserved by the existing single-flight path.
-- [ ] 2.4 Add failure-path assertions that responses, errors, and structured logs do
+- [x] 2.4 Add failure-path assertions that responses, errors, and structured logs do
   not contain the synthetic API key.
 
 ## 3. Server Implementation
@@ -27,7 +27,7 @@
 - [x] 3.2 Carry the validated runtime policy through per-agent environment
   resolution and serialize it into the existing env-agent sandbox binding
   configuration.
-- [ ] 3.3 Decode the stored policy in `provisionEnvDispatchAgent` and populate
+- [x] 3.3 Decode the stored policy in `provisionEnvDispatchAgent` and populate
   `CreateSandboxInstanceInput.Runtime` for create and clone payloads.
 - [x] 3.4 Audit env-dispatch response/error/log paths and prevent runtime secret
   disclosure without changing response schemas.
