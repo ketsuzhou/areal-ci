@@ -34,18 +34,18 @@
 
 ## 4. Client Compatibility and Documentation
 
-- [ ] 4.1 Verify the standalone MultiCA client's generic `per_agent_env`
+- [x] 4.1 Verify the standalone MultiCA client's generic `per_agent_env`
   serialization carries the nested runtime object unchanged; add a focused test
   or minimal client adjustment only if needed.
-- [ ] 4.2 Add a secret-free request example documenting per-agent external model
+- [x] 4.2 Add a secret-free request example documenting per-agent external model
   configuration and the current rejection of caller runtime for
   `train_agent_id`.
 
 ## 5. Verification
 
-- [ ] 5.1 Run targeted Go handler/service/provisioning tests and the relevant
+- [x] 5.1 Run targeted Go handler/service/provisioning tests and the relevant
   Python client tests; record any unavailable toolchain or integration suite.
-- [ ] 5.2 Run repository formatting/lint checks appropriate to the changed files
+- [x] 5.2 Run repository formatting/lint checks appropriate to the changed files
   and update the code graph with `graphify update .`.
 - [ ] 5.3 After deployment, dispatch to a fresh non-training agent with a rotated
   external provider credential, confirm the agent replies in the channel, and
