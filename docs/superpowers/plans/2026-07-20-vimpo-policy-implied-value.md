@@ -60,7 +60,7 @@ base-ref: c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8
 - Consumes: existing `Config`, `AdvantageMode`, and explicit actor data-parallel process groups.
 - Produces: `AdvantageMode.VIMPO`; the exact config fields in the design; `candidate_forward_kl`, `masked_episode_reverse_lambda`, `masked_distributed_whiten`, and `VIMPOAdvantageComputer.compute`.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_config.py
@@ -113,13 +113,13 @@ def test_non_vimpo_mode_does_not_require_reference_url() -> None:
     assert Config().advantage_mode is AdvantageMode.TREE
 ```
 
-- [ ] **Step 2: Run configuration tests and verify the new enum/fields are absent**
+- [x] **Step 2: Run configuration tests and verify the new enum/fields are absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_config.py -q`
 
 Expected: FAIL during collection or construction because `AdvantageMode.VIMPO` and the `vimpo_*` fields do not exist.
 
-- [ ] **Step 3: Add the enum, fields, and mode-gated validation**
+- [x] **Step 3: Add the enum, fields, and mode-gated validation**
 
 ```python
 # customized_areal/tree_search/config.py
@@ -180,7 +180,7 @@ if self.advantage_mode is AdvantageMode.VIMPO:
         raise ValueError("VIMPO is incompatible with use_clip_cov")
 ```
 
-- [ ] **Step 4: Write failing pure-math and gradient-isolation tests**
+- [x] **Step 4: Write failing pure-math and gradient-isolation tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_advantage.py
@@ -251,13 +251,13 @@ def test_vimpo_computer_detaches_kl_reference_and_advantage() -> None:
     assert out["advantages"].requires_grad is False
 ```
 
-- [ ] **Step 5: Run the math tests and verify imports fail**
+- [x] **Step 5: Run the math tests and verify imports fail**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_advantage.py -q`
 
 Expected: FAIL during collection because the VIMPO helpers do not exist.
 
-- [ ] **Step 6: Implement the pure tensor helpers and computer**
+- [x] **Step 6: Implement the pure tensor helpers and computer**
 
 ```python
 # customized_areal/tree_search/core/advantage.py
@@ -347,7 +347,7 @@ class VIMPOAdvantageComputer:
 
 Also reject duplicate valid candidate IDs in `VIMPOAdvantageComputer.compute`, export the class lazily from `customized_areal/tree_search/__init__.py`, and keep all reductions in float32 except whitening sufficient statistics.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_config.py customized_areal/tree_search/tests/test_vimpo_advantage.py -q`
 

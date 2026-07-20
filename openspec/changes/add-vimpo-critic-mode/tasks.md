@@ -1,13 +1,13 @@
 ## 1. Configuration and Core Mathematics
 
-- [ ] 1.1 Add `AdvantageMode.VIMPO` and paper-oriented VIMPO fields/defaults to
+- [x] 1.1 Add `AdvantageMode.VIMPO` and paper-oriented VIMPO fields/defaults to
   `customized_areal/tree_search/config.py`, including configurable top-k and explicit
   validation/incompatibility errors.
-- [ ] 1.2 Implement masked reverse lambda accumulation, detached distributed whitening,
+- [x] 1.2 Implement masked reverse lambda accumulation, detached distributed whitening,
   and `VIMPOAdvantageComputer` tensor helpers in `core/advantage.py`.
-- [ ] 1.3 Implement pure candidate-KL helpers using policy-selected top-k values without
+- [x] 1.3 Implement pure candidate-KL helpers using policy-selected top-k values without
   candidate renormalization, including retained-mass metrics and the full-vocabulary case.
-- [ ] 1.4 Add CPU numerical and gradient-isolation tests for configuration, top-k KL,
+- [x] 1.4 Add CPU numerical and gradient-isolation tests for configuration, top-k KL,
   lambda advantages, masks, whitening, and `k == vocab_size` exactness.
 
 ## 2. FSDP Actor Candidate Statistics
