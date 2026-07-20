@@ -29,6 +29,7 @@ __all__ = [
     "TreeAdvantageComputer",
     "GAEAdvantageComputer",
     "HybridGAEAdvantageComputer",
+    "VersionedBackupAdvantageComputer",
     "Config",
     "CacheMode",
     "TreeCheckpointManager",
@@ -50,6 +51,10 @@ def __getattr__(name):
         from .core.advantage import HybridGAEAdvantageComputer
 
         return HybridGAEAdvantageComputer
+    if name == "VersionedBackupAdvantageComputer":
+        from .core.advantage import VersionedBackupAdvantageComputer
+
+        return VersionedBackupAdvantageComputer
     if name == "TreeCheckpointManager":
         from .core.checkpoint import TreeCheckpointManager
 

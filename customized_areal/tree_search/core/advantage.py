@@ -422,3 +422,289 @@ class HybridGAEAdvantageComputer(GAEAdvantageComputer):
                 if getattr(n, "node_id", None):
                     self.tree_store.set_normalized_advantage(n.node_id, adv)
                     self.tree_store.set_normalized_return(n.node_id, ret)
+
+
+versioned_logger = logging.getLogger("VersionedBackupAdvantageComputer")
+
+
+def n_step_return(
+    rewards: list[float],
+    t: int,
+    n: int,
+    gamma: float,
+    bootstrap_value: float,
+) -> float:
+    """n-step return ``G^(n)(s_t)`` (ARE-4, pure helper).
+
+    ``G^(n)(s_t) = sum_{i=0}^{n-1} gamma^i * r_{t+i} + gamma^n * bootstrap_value``.
+
+    Rewards past the episode end are treated as 0, so a horizon that reaches or
+    passes the terminal reduces to a Monte-Carlo return when ``bootstrap_value``
+    is 0 (the pure-MC / terminal-bootstrap case). Exposed for unit tests with
+    known values.
+    """
+    g = 0.0
+    for i in range(int(n)):
+        idx = t + i
+        if 0 <= idx < len(rewards):
+            g += (gamma ** i) * rewards[idx]
+    g += (gamma ** int(n)) * float(bootstrap_value)
+    return g
+
+
+def compute_advantage(v_own: float, g_latest: float) -> float:
+    """``A(s_t) = G_latest^(n)(s_t) - V_own(s_t)`` (ARE-4, pure helper).
+
+    Exposed for unit tests that assert ``A`` from known ``V_own`` / ``G_latest``.
+    """
+    return float(g_latest) - float(v_own)
+
+
+def adaptive_horizon(
+    path_len: int,
+    t: int,
+    tree_store,
+    node_ids: list[str],
+    excluded_rewards: list[float],
+    *,
+    rho: float,
+    n_min: int,
+    n_max: int,
+    critic_error_var: float | None,
+) -> tuple[int, bool]:
+    """Pick the backup horizon for node ``t`` by walking descendants (ARE-4).
+
+    Bootstrap at the first descendant ``s_{t+d}`` where the critic is
+    trustworthy::
+
+        critic_error_var(s_{t+d}) <= rho * var_mc(s_{t+d})
+
+    where ``critic_error_var`` is the global critic-error EMA and ``var_mc`` is
+    the per-node MC mean's sampling variance from
+    ``tree_store.get_loo_value_and_variance``. Returns ``(horizon, trusted)``:
+
+    * ``trusted=True``  -> bootstrap with ``V_latest(s_{t+horizon})``.
+    * ``trusted=False`` -> pure MC: bootstrap 0 (terminal reached, or the
+      ``n_max`` cap hit without the criterion ever being satisfied).
+
+    ``var_mc`` unavailable (``visit < 2``) -> the critic is NOT trusted there ->
+    keep walking (long horizon), so brand-new nodes with no MC data fall through
+    to a pure-MC return. ``n_min`` floors the horizon; ``n_max`` caps it.
+    ``rho in (0, 1]`` controls how strict the trust criterion is.
+    """
+    distance_to_terminal = path_len - t  # t + distance == terminal index
+    d = max(int(n_min), 1)
+    crit_err = float(critic_error_var) if critic_error_var is not None else 0.0
+    while d <= int(n_max) and d < distance_to_terminal:
+        idx = t + d
+        if 0 <= idx < len(node_ids):
+            _, var_mc, n_loo = tree_store.get_loo_value_and_variance(
+                node_ids[idx], excluded_rewards[idx]
+            )
+            if n_loo >= 2 and var_mc >= 0.0 and crit_err <= rho * var_mc:
+                return d, True
+        d += 1
+    horizon = min(int(n_max), distance_to_terminal)
+    if horizon < 1:
+        horizon = 1
+    return horizon, False
+
+
+class VersionedBackupAdvantageComputer(HybridGAEAdvantageComputer):
+    """ΔV advantage ``A(s_t) = G_latest^(n)(s_t) - V_own(s_t)`` (ARE-4).
+
+    Each ``Node`` carries a ``version_id`` (the policy version that generated
+    it). The latest policy version is recorded on the tree store; nodes whose
+    ``version_id`` equals it are "new", all others are reused "old" nodes.
+
+    * ``V_own(s_t)`` [baseline]: the node's OWN blended value (critic +
+      all-version LOO MC, reusing :class:`HybridGAEAdvantageComputer`'s
+      inverse-variance blend). Using the node's own value -- not its parent's --
+      satisfies "new node baseline = own V_own".
+    * ``G_latest^(n)(s_t)`` [return]: n-step return along the episode,
+      bootstrapped at an adaptively-chosen descendant with ``V_latest``.
+      Horizon ``n`` is the first depth where the critic is trustworthy
+      (:func:`adaptive_horizon`); new / no-data nodes never satisfy it early ->
+      long horizon / pure MC. ``V_latest`` is NEW-ONLY: for new nodes it is the
+      own value (they ARE the latest exploration); for old nodes it is the
+      latest-policy LOO MC value (excluding old-policy samples). Old nodes with
+      NO latest data are "path-off" -> advantage 0 / skipped this round.
+
+    No importance sampling -- the off-policy value estimate is backup-based.
+    Intermediates ``v_own`` / ``g_latest`` are stashed on each node for
+    inspection/testing.
+    """
+
+    def __init__(
+        self,
+        tree_store,
+        gamma: float = 1.0,
+        lam: float = 0.95,
+        judge_beta: float = 0.0,
+        judge_score_max: int = 10,
+        mc_min_visits: int = 5,
+        critic_var_floor: float = 1e-3,
+        critic_error_var: float = 0.05,
+        critic_error_var_fn=None,
+        rho: float = 1.0,
+        n_min: int = 1,
+        n_max: int = 10,
+    ) -> None:
+        super().__init__(
+            tree_store,
+            gamma=gamma,
+            lam=lam,
+            judge_beta=judge_beta,
+            judge_score_max=judge_score_max,
+            mc_min_visits=mc_min_visits,
+            critic_var_floor=critic_var_floor,
+            critic_error_var=critic_error_var,
+            critic_error_var_fn=critic_error_var_fn,
+        )
+        self.rho = float(rho)
+        self.n_min = int(n_min)
+        self.n_max = int(n_max)
+
+    def _is_new(self, node: Node) -> bool:
+        """True iff this node was generated by the latest policy version."""
+        if self.tree_store.latest_version < 0:
+            return False
+        return int(getattr(node, "version_id", -1) or -1) == self.tree_store.latest_version
+
+    def _is_on_latest_path(self, node: Node) -> bool:
+        """On-path check (ARE-4) using the node's own ``version_id``.
+
+        New (latest-version) nodes are always on the path. Old nodes are on the
+        path iff at least one latest-only MC sample has been backed up through
+        them; old nodes with no latest data are "path-off" -> A=0 / skipped.
+        When version tracking is off (``latest_version < 0``) every node is
+        on-path so the computer degrades gracefully. Reads ``version_id`` from
+        the node object directly (not via ``get_node``) so it works whether or
+        not the node is indexed in the store.
+        """
+        if self.tree_store.latest_version < 0:
+            return True
+        if self._is_new(node):
+            return True
+        node_id = getattr(node, "node_id", None)
+        return bool(node_id) and self.tree_store.get_latest_visit_count(node_id) >= 1
+
+    def _v_latest(self, node: Node, excluded_reward: float) -> float:
+        """``V_latest`` at a node: the new-only value (ARE-4).
+
+        New (latest-version) node -> its own blended value (it IS the latest
+        exploration). Old node -> the latest-policy LOO MC mean, falling back to
+        the all-version blended value when no latest-only sample exists. When
+        version tracking is off (``latest_version < 0``) every node uses its own
+        blended value.
+        """
+        node_id = getattr(node, "node_id", None)
+        if (
+            self.tree_store.latest_version >= 0
+            and node_id
+            and not self._is_new(node)
+        ):
+            v_latest, _, n_loo = self.tree_store.get_latest_loo_value_and_variance(
+                node_id, excluded_reward
+            )
+            if n_loo >= 2:
+                return float(v_latest)
+        return self._blended_value(node, excluded_reward)
+
+    def compute(self, trajectories: list[Node]) -> None:
+        """Compute ΔV advantages/returns in-place on the given nodes (ARE-4)."""
+        episodes: dict[tuple[str, str], list[Node]] = {}
+        for traj in trajectories:
+            node_id = getattr(traj, "node_id", None)
+            if node_id is None:
+                continue
+            query_id = traj.query_id or ""
+            ep_id = traj.episode_id or node_id
+            episodes.setdefault((query_id, ep_id), []).append(traj)
+
+        # Record the latest policy version present in this batch so the
+        # is_latest_* / is_on_latest_path helpers resolve correctly even when
+        # the store was not pre-configured with set_latest_version.
+        max_vid = -1
+        for traj in trajectories:
+            vid = int(getattr(traj, "version_id", -1) or -1)
+            if vid > max_vid:
+                max_vid = vid
+        if max_vid >= 0 and (
+            self.tree_store.latest_version < 0
+            or max_vid > self.tree_store.latest_version
+        ):
+            self.tree_store.set_latest_version(max_vid)
+
+        for nodes in episodes.values():
+            ordered = sorted(nodes, key=lambda n: getattr(n, "turn_idx", 0))
+            n_turns = len(ordered)
+            node_ids = [getattr(n, "node_id", "") for n in ordered]
+
+            # Per-turn rewards (reuse the GAE/Hybrid reward logic).
+            if self.judge_beta > 0.0:
+                from customized_areal.tree_search.core.process_reward import (
+                    build_episode_process_rewards,
+                    episode_returns_to_go,
+                )
+
+                rewards = build_episode_process_rewards(
+                    ordered,
+                    self.tree_store,
+                    beta=self.judge_beta,
+                    score_max=self.judge_score_max,
+                )
+                excluded = episode_returns_to_go(rewards, gamma=self.gamma)
+            else:
+                rewards = [0.0] * n_turns
+                if n_turns > 0:
+                    rewards[-1] = float(ordered[-1].outcome_reward)
+                term = float(ordered[-1].outcome_reward) if n_turns > 0 else 0.0
+                excluded = [term] * n_turns
+
+            # V_own (own blended baseline) and V_latest (new-only) per turn.
+            v_own = [
+                self._blended_value(n, excluded[i]) for i, n in enumerate(ordered)
+            ]
+            v_latest_vals = [
+                self._v_latest(n, excluded[i]) for i, n in enumerate(ordered)
+            ]
+
+            crit_err = self._critic_error_var()
+            for t, node in enumerate(ordered):
+                node_id = node_ids[t]
+                # Path-off old nodes: no latest data -> A=0, skip (AC #6).
+                if not self._is_on_latest_path(node):
+                    node.v_own = v_own[t]
+                    node.g_latest = 0.0
+                    self._assign(node, 0.0, v_own[t])
+                    self.tree_store.set_normalized_advantage(node_id, 0.0)
+                    self.tree_store.set_normalized_return(node_id, v_own[t])
+                    continue
+
+                horizon, trusted = adaptive_horizon(
+                    n_turns,
+                    t,
+                    self.tree_store,
+                    node_ids,
+                    excluded,
+                    rho=self.rho,
+                    n_min=self.n_min,
+                    n_max=self.n_max,
+                    critic_error_var=crit_err,
+                )
+                if trusted and (t + horizon) < n_turns:
+                    bootstrap = v_latest_vals[t + horizon]
+                else:
+                    bootstrap = 0.0  # pure MC (terminal / n_max cap)
+                g_latest = n_step_return(
+                    rewards, t, horizon, self.gamma, bootstrap
+                )
+                adv = compute_advantage(v_own[t], g_latest)
+                ret = adv + v_own[t]
+                node.v_own = v_own[t]
+                node.g_latest = g_latest
+                self._assign(node, adv, ret)
+                if node_id:
+                    self.tree_store.set_normalized_advantage(node_id, adv)
+                    self.tree_store.set_normalized_return(node_id, ret)

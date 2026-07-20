@@ -13,6 +13,7 @@ class AdvantageMode(str, Enum):
     GAE = "gae"
     TREE = "tree"
     HYBRID_GAE = "hybrid_gae"
+    VERSIONED_BACKUP = "versioned_backup"
 
 
 class LossMode(str, Enum):
@@ -148,6 +149,19 @@ class Config:
     # the previous entropy-only behavior.
     branch_td_threshold: float = 0.0
 
+    # ARE-4 ΔV advantage (advantage_mode=VERSIONED_BACKUP). A(s_t) =
+    # G_latest^(n)(s_t) - V_own(s_t) with a variance-threshold adaptive
+    # horizon: bootstrap at the first descendant s_{t+d} where the critic is
+    # trustworthy (critic_error_var(s_{t+d}) <= versioned_rho * var_mc(s_{t+d})).
+    # ``versioned_rho`` in (0, 1] (default 1: critic trusted once its error
+    # variance is no larger than the MC mean's sampling variance).
+    # ``versioned_n_min`` / ``versioned_n_max`` floor/ceiling the horizon; if the
+    # trust criterion is never met within n_max (or the episode ends first) the
+    # return is pure MC with a 0 terminal bootstrap.
+    versioned_rho: float = 1.0
+    versioned_n_min: int = 1
+    versioned_n_max: int = 10
+
     def __post_init__(self) -> None:
         self.distill_kl_mode = DistillKLMode(self.distill_kl_mode)
         if self.critic_loss_weight < 0:
@@ -242,6 +256,20 @@ class Config:
             )
         if self.critic_mc_c <= 0:
             raise ValueError(f"critic_mc_c must be > 0, got {self.critic_mc_c}")
+        # ARE-4 versioned-backup hyperparameter validation.
+        if not 0.0 < self.versioned_rho <= 1.0:
+            raise ValueError(
+                f"versioned_rho must be in (0, 1], got {self.versioned_rho}"
+            )
+        if self.versioned_n_min < 1:
+            raise ValueError(
+                f"versioned_n_min must be >= 1, got {self.versioned_n_min}"
+            )
+        if self.versioned_n_max < self.versioned_n_min:
+            raise ValueError(
+                f"versioned_n_max ({self.versioned_n_max}) must be >= "
+                f"versioned_n_min ({self.versioned_n_min})"
+            )
         if self.enable_generative_critic:
             # The generative critic supplies bootstrapped state values, so the
             # actor advantage must be GAE or the variance-aware HYBRID_GAE
@@ -250,12 +278,13 @@ class Config:
             if self.advantage_mode not in (
                 AdvantageMode.GAE,
                 AdvantageMode.HYBRID_GAE,
+                AdvantageMode.VERSIONED_BACKUP,
             ):
                 import warnings
 
                 warnings.warn(
                     "enable_generative_critic=True requires "
-                    "advantage_mode=GAE or HYBRID_GAE; "
+                    "advantage_mode=GAE, HYBRID_GAE, or VERSIONED_BACKUP; "
                     f"overriding advantage_mode={self.advantage_mode.value!r} -> 'gae'.",
                     stacklevel=2,
                 )
