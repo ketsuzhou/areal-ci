@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -14,6 +15,7 @@ class AdvantageMode(str, Enum):
     TREE = "tree"
     HYBRID_GAE = "hybrid_gae"
     VERSIONED_BACKUP = "versioned_backup"
+    VIMPO = "vimpo"
 
 
 class LossMode(str, Enum):
@@ -40,6 +42,26 @@ class Config:
     checkpoint_dir: str = ""
     advantage_mode: AdvantageMode = AdvantageMode.TREE
     loss_mode: LossMode = LossMode.GRPO
+    # VIMPO (critic-free, policy-implied terminal value) settings.
+    #
+    # When ``advantage_mode == VIMPO`` the actor is trained with a candidate
+    # forward-KL regularizer toward a frozen reference policy plus a
+    # policy-implied terminal value. ``vimpo_beta`` scales the implied value
+    # (the per-sample policy/reference log-probability gap minus the candidate
+    # KL), ``vimpo_actor_coeff`` / ``vimpo_value_loss_weight`` weight the two
+    # loss heads, and ``vimpo_*_ref_*`` configure the reference-policy server.
+    vimpo_beta: float = 5e-4
+    vimpo_actor_coeff: float = 5e-3
+    vimpo_value_loss_weight: float = 1.0
+    vimpo_gamma: float = 1.0
+    vimpo_lambda: float = 1.0
+    vimpo_top_k: int = 128
+    vimpo_whiten_advantages: bool = True
+    vimpo_detach_kl: bool = True
+    vimpo_ref_base_url: str = ""
+    vimpo_ref_timeout: float = 300.0
+    vimpo_ref_max_concurrency: int = 8
+    vimpo_ref_max_retries: int = 3
     # Weight of the co-trained generative-critic value loss in the combined
     # actor+critic objective (``actor_PG + critic_loss_weight * critic_value_loss``)
     # when ``advantage_mode == GAE`` for DAG runs (Phase 3). Start small to limit
@@ -215,6 +237,42 @@ class Config:
 
         # Generative-critic validation and GAE gating.
         self.advantage_mode = AdvantageMode(self.advantage_mode)
+        if self.advantage_mode is AdvantageMode.VIMPO:
+            if not math.isfinite(self.vimpo_beta) or self.vimpo_beta <= 0:
+                raise ValueError("vimpo_beta must be finite and > 0")
+            if not math.isfinite(self.vimpo_actor_coeff) or self.vimpo_actor_coeff < 0:
+                raise ValueError("vimpo_actor_coeff must be finite and >= 0")
+            if (
+                not math.isfinite(self.vimpo_value_loss_weight)
+                or self.vimpo_value_loss_weight < 0
+            ):
+                raise ValueError("vimpo_value_loss_weight must be finite and >= 0")
+            if self.vimpo_actor_coeff == 0 and self.vimpo_value_loss_weight == 0:
+                raise ValueError("at least one VIMPO loss coefficient must be positive")
+            if self.vimpo_gamma != 1.0:
+                raise ValueError("vimpo_gamma must equal 1.0 in VIMPO version 1")
+            if not math.isfinite(self.vimpo_lambda) or not 0 <= self.vimpo_lambda <= 1:
+                raise ValueError("vimpo_lambda must be in [0, 1]")
+            if self.vimpo_top_k <= 0:
+                raise ValueError("vimpo_top_k must be > 0")
+            if not self.vimpo_detach_kl:
+                raise ValueError(
+                    "vimpo_detach_kl=False is not supported in VIMPO version 1"
+                )
+            if not self.vimpo_ref_base_url.startswith(("http://", "https://")):
+                raise ValueError("vimpo_ref_base_url is required and must be HTTP(S)")
+            if not math.isfinite(self.vimpo_ref_timeout) or self.vimpo_ref_timeout <= 0:
+                raise ValueError("vimpo_ref_timeout must be finite and > 0")
+            if self.vimpo_ref_max_concurrency <= 0:
+                raise ValueError("vimpo_ref_max_concurrency must be > 0")
+            if self.vimpo_ref_max_retries < 0:
+                raise ValueError("vimpo_ref_max_retries must be >= 0")
+            if self.loss_mode is not LossMode.GRPO:
+                raise ValueError("VIMPO requires loss_mode='grpo'")
+            if self.enable_generative_critic:
+                raise ValueError("VIMPO is incompatible with enable_generative_critic")
+            if self.use_clip_cov:
+                raise ValueError("VIMPO is incompatible with use_clip_cov")
         if not 0.0 <= self.critic_avg_success_rate <= 1.0:
             raise ValueError(
                 "critic_avg_success_rate must be in [0, 1], got "

@@ -708,3 +708,242 @@ class VersionedBackupAdvantageComputer(HybridGAEAdvantageComputer):
                 if node_id:
                     self.tree_store.set_normalized_advantage(node_id, adv)
                     self.tree_store.set_normalized_return(node_id, ret)
+
+
+vimpo_logger = logging.getLogger("VIMPOAdvantageComputer")
+
+
+def candidate_forward_kl(
+    policy_candidate_logp: torch.Tensor,
+    reference_candidate_logp: torch.Tensor,
+    mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Un-renormalized forward KL over a top-K candidate set (VIMPO, pure helper).
+
+    For each valid position ``[b, s]`` with candidate log-probabilities
+    ``policy_candidate_logp[b, s, :]`` (the actor) and
+    ``reference_candidate_logp[b, s, :]`` (the frozen reference policy)::
+
+        kl[b, s]  = sum_k exp(policy_logp_k) * (policy_logp_k - ref_logp_k)
+        mass[b, s] = sum_k exp(policy_logp_k)
+
+    The KL is **not** renormalized by the retained mass: the missing probability
+    (tokens outside the top-K candidate set) is intentionally left outside the
+    sum, so ``mass`` reports how much of the policy distribution the KL covers.
+    At full vocabulary coverage ``mass == 1`` and this reduces to the exact
+    forward KL ``KL(pi || ref)``. Reductions run in float32; the returned
+    tensors are detached (the KL must not backprop into the policy here).
+
+    Args:
+        policy_candidate_logp: ``[B, S, K]`` actor log-probabilities over the
+            top-K candidate set.
+        reference_candidate_logp: ``[B, S, K]`` reference log-probabilities,
+            same shape as ``policy_candidate_logp``.
+        mask: ``[B, S]`` boolean predict mask. Invalid positions return 0.
+
+    Returns:
+        ``(kl, mass)``: each ``[B, S]`` float32, detached.
+    """
+    if policy_candidate_logp.shape != reference_candidate_logp.shape:
+        raise ValueError("policy and reference candidate log-probability shapes differ")
+    if policy_candidate_logp.ndim != 3 or mask.shape != policy_candidate_logp.shape[:2]:
+        raise ValueError(
+            "candidate log-probabilities must be [B, S, K] with mask [B, S]"
+        )
+    valid = mask.bool()
+    if (
+        not torch.isfinite(policy_candidate_logp[valid]).all()
+        or not torch.isfinite(reference_candidate_logp[valid]).all()
+    ):
+        raise ValueError("valid candidate log-probabilities must be finite")
+    policy_logp = policy_candidate_logp.float()
+    reference_logp = reference_candidate_logp.float()
+    probability = policy_logp.exp()
+    kl = (probability * (policy_logp - reference_logp)).sum(-1)
+    mass = probability.sum(-1)
+    return torch.where(valid, kl, 0.0).detach(), torch.where(valid, mass, 0.0).detach()
+
+
+def masked_episode_reverse_lambda(
+    td: torch.Tensor,
+    mask: torch.Tensor,
+    episode_index: torch.Tensor,
+    turn_index: torch.Tensor,
+    *,
+    gamma: float,
+    lam: float,
+) -> torch.Tensor:
+    """Reverse-time TD(λ) generalised return, grouped by episode (VIMPO helper).
+
+    Walks each episode's valid positions in **reverse** turn order accumulating
+    ``A_t = td_t + gamma * lam * A_{t+1}`` with ``A_{T+1} = 0``. Episodes are
+    identified by ``episode_index`` and ordered within an episode by
+    ``turn_index`` (ascending); the carry resets to 0 at the start of each new
+    episode so returns never bleed across episode boundaries. Invalid
+    (masked-out) positions are skipped and left at 0.
+
+    Args:
+        td: ``[B, S]`` per-position TD signal (the policy-implied terminal value).
+        mask: ``[B, S]`` boolean predict mask.
+        episode_index: ``[B, S]`` integer episode id per position.
+        turn_index: ``[B, S]`` integer turn id per position (orders positions
+            within an episode; ties keep row-major order).
+        gamma: discount factor.
+        lam: GAE lambda.
+
+    Returns:
+        ``[B, S]`` float32 generalised returns (0 at invalid positions).
+    """
+    result = torch.zeros_like(td, dtype=torch.float32)
+    valid = mask.bool()
+    for episode in torch.unique(episode_index[valid], sorted=True):
+        rows = torch.unique(
+            torch.nonzero((episode_index == episode) & valid, as_tuple=False)[:, 0],
+            sorted=True,
+        )
+        ordered_rows = sorted(
+            rows.tolist(), key=lambda row: int(turn_index[row][valid[row]][0])
+        )
+        positions = [
+            (row, pos)
+            for row in ordered_rows
+            for pos in torch.nonzero(valid[row], as_tuple=False).flatten().tolist()
+        ]
+        carry = td.new_zeros((), dtype=torch.float32)
+        for row, pos in reversed(positions):
+            carry = td[row, pos].float() + gamma * lam * carry
+            result[row, pos] = carry
+    return result
+
+
+def masked_distributed_whiten(
+    values: torch.Tensor,
+    mask: torch.Tensor,
+    group: torch.distributed.ProcessGroup | None,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Mean/variance whitening over all valid tokens, summed across the DP group.
+
+    Sufficient statistics (count, sum, sum-of-squares) are accumulated in
+    float64 for numerical stability, then all-reduced across ``group`` when
+    distributed training is initialized so every rank produces the same
+    normalized advantages. A single valid token (or zero variance) whitens to
+    exactly 0. Invalid positions are masked to 0 and the result is detached so
+    the advantage signal never backprops through the normalization statistics.
+
+    Args:
+        values: ``[B, S]`` values to whiten.
+        mask: ``[B, S]`` boolean predict mask.
+        group: actor data-parallel process group (``None`` for single-process).
+        eps: numerical floor under the variance denominator.
+
+    Returns:
+        ``[B, S]`` float32 whitened values (0 at invalid positions), detached.
+
+    Raises:
+        ValueError: if there are zero valid tokens.
+    """
+    valid = mask.bool()
+    count = valid.sum(dtype=torch.float64)
+    total = values.double().masked_fill(~valid, 0).sum()
+    total_sq = values.double().square().masked_fill(~valid, 0).sum()
+    stats = torch.stack((count, total, total_sq))
+    if torch.distributed.is_initialized() and group is not None:
+        torch.distributed.all_reduce(stats, group=group)
+    if stats[0] == 0:
+        raise ValueError("cannot whiten zero valid VIMPO tokens")
+    mean = stats[1] / stats[0]
+    variance = (stats[2] / stats[0] - mean.square()).clamp_min(0)
+    normalized = (values.float() - mean.float()) / torch.sqrt(variance.float() + eps)
+    if stats[0] == 1 or variance == 0:
+        normalized = torch.zeros_like(normalized)
+    return normalized.masked_fill(~valid, 0).detach()
+
+
+class VIMPOAdvantageComputer:
+    """Critic-free VIMPO advantage computer (policy-implied terminal value).
+
+    The per-position TD signal is the policy-implied terminal value
+    ``beta * (log pi(y|x) - log pi_ref(y|x) - KL_topK(pi || pi_ref))``, where the
+    KL is the un-renormalized candidate forward KL over the top-K set. A reverse
+    TD(λ) pass over each episode generalizes this into advantages, optionally
+    whitened across the actor data-parallel group.
+
+    Gradient isolation: the candidate KL is detached inside
+    :func:`candidate_forward_kl`, the TD signal is detached before the
+    reverse-lambda pass, and the final advantages are detached. The reference
+    policy never receives gradient, and the advantage itself is a stop-gradient
+    target (the policy is trained through the separate actor/value losses that
+    consume it).
+    """
+
+    def __init__(
+        self,
+        *,
+        beta: float,
+        gamma: float,
+        lam: float,
+        whiten: bool,
+        dp_group=None,
+    ) -> None:
+        self.beta = beta
+        self.gamma = gamma
+        self.lam = lam
+        self.whiten = whiten
+        self.dp_group = dp_group
+
+    def compute(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Compute VIMPO KL, retained mass, and advantages; update ``batch`` in place.
+
+        Expected batch keys (all ``torch.Tensor``):
+
+        * ``vimpo_predict_mask``       : ``[B, S]`` bool predict mask.
+        * ``vimpo_sample_logp``        : ``[B, S]`` actor log-prob of the sampled token.
+        * ``vimpo_ref_sample_logp``    : ``[B, S]`` reference log-prob of the sampled token.
+        * ``vimpo_candidate_logp``     : ``[B, S, K]`` actor log-probs over top-K candidates.
+        * ``vimpo_ref_candidate_logp`` : ``[B, S, K]`` reference log-probs over top-K candidates.
+        * ``vimpo_episode_index``      : ``[B, S]`` int episode id.
+        * ``vimpo_turn_index``         : ``[B, S]`` int turn id (orders positions within an episode).
+        * ``vimpo_candidate_ids``      : optional ``[B, S, K]`` int candidate ids; when present,
+          duplicate ids within a valid position raise ``ValueError``.
+
+        Writes ``vimpo_candidate_kl``, ``vimpo_retained_mass``, and
+        ``advantages`` back into ``batch`` and returns it.
+        """
+        mask = batch["vimpo_predict_mask"].bool()
+        if "vimpo_candidate_ids" in batch:
+            candidate_ids = batch["vimpo_candidate_ids"]
+            for b in range(candidate_ids.shape[0]):
+                for s in range(candidate_ids.shape[1]):
+                    if mask[b, s]:
+                        ids = candidate_ids[b, s]
+                        if torch.unique(ids).numel() != ids.numel():
+                            raise ValueError(
+                                f"duplicate candidate IDs at valid position [{b}, {s}]"
+                            )
+        kl, mass = candidate_forward_kl(
+            batch["vimpo_candidate_logp"],
+            batch["vimpo_ref_candidate_logp"],
+            mask,
+        )
+        td = self.beta * (
+            batch["vimpo_sample_logp"].float()
+            - batch["vimpo_ref_sample_logp"].float()
+            - kl
+        )
+        advantages = masked_episode_reverse_lambda(
+            td.detach(),
+            mask,
+            batch["vimpo_episode_index"],
+            batch["vimpo_turn_index"],
+            gamma=self.gamma,
+            lam=self.lam,
+        )
+        if self.whiten:
+            advantages = masked_distributed_whiten(advantages, mask, self.dp_group)
+        batch.update(
+            vimpo_candidate_kl=kl,
+            vimpo_retained_mass=mass,
+            advantages=advantages.detach(),
+        )
+        return batch

@@ -30,6 +30,7 @@ __all__ = [
     "GAEAdvantageComputer",
     "HybridGAEAdvantageComputer",
     "VersionedBackupAdvantageComputer",
+    "VIMPOAdvantageComputer",
     "Config",
     "CacheMode",
     "TreeCheckpointManager",
@@ -55,6 +56,10 @@ def __getattr__(name):
         from .core.advantage import VersionedBackupAdvantageComputer
 
         return VersionedBackupAdvantageComputer
+    if name == "VIMPOAdvantageComputer":
+        from .core.advantage import VIMPOAdvantageComputer
+
+        return VIMPOAdvantageComputer
     if name == "TreeCheckpointManager":
         from .core.checkpoint import TreeCheckpointManager
 
