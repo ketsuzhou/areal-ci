@@ -369,7 +369,7 @@ git commit -m "feat(tree-search): add VIMPO config and advantage math"
 - Consumes: `Node.query_id`, `Node.episode_id`, `Node.turn_idx`, `Node.outcome_reward`, and `AdvantageMode.VIMPO`.
 - Produces: `annotate_vimpo_episode_metadata(nodes: list[Node]) -> None` and tensor keys `vimpo_query_index`, `vimpo_episode_index`, `vimpo_turn_index`, `vimpo_centered_reward`, `vimpo_predict_mask`.
 
-- [ ] **Step 1: Write failing metadata and dispatch tests**
+- [x] **Step 1: Write failing metadata and dispatch tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_workflow.py
@@ -414,13 +414,13 @@ def test_metadata_rejects_duplicate_turn_and_inconsistent_reward() -> None:
         annotate_vimpo_episode_metadata([_node("q", "a", 1, 1), _node("q", "a", 2, 0)])
 ```
 
-- [ ] **Step 2: Run tests and verify the metadata helper is missing**
+- [x] **Step 2: Run tests and verify the metadata helper is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_workflow.py -q`
 
 Expected: FAIL during collection because `annotate_vimpo_episode_metadata` does not exist.
 
-- [ ] **Step 3: Add stable Node fields and query-local annotation**
+- [x] **Step 3: Add stable Node fields and query-local annotation**
 
 ```python
 # Add to Node in customized_areal/tree_search/core/tree_store.py
@@ -476,13 +476,13 @@ for key, value, dtype in (
 
 In `_finalize_episode`, call `annotate_vimpo_episode_metadata(all_nodes)` only for VIMPO, skip every Node advantage computer, skip `_annotate_critic_values`, pass `advantage_mode` to tensorization, and never attach `critic_train_data`.
 
-- [ ] **Step 4: Run focused and regression workflow tests**
+- [x] **Step 4: Run focused and regression workflow tests**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_workflow.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_gae_advantage.py customized_areal/tree_search/tests/test_critic_smoke.py -q`
 
 Expected: PASS; existing modes retain their original tensor keys and critic dispatch.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/test_vimpo_workflow.py

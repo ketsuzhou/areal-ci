@@ -35,11 +35,11 @@
 
 ## 4. Workflow Metadata and Episode Batching
 
-- [ ] 4.1 Add the VIMPO workflow dispatch path without invoking generative-critic value
+- [x] 4.1 Add the VIMPO workflow dispatch path without invoking generative-critic value
   annotation or critic training-data construction.
-- [ ] 4.2 Preserve query ID, episode ID, turn order, final outcome reward, and response masks
+- [x] 4.2 Preserve query ID, episode ID, turn order, final outcome reward, and response masks
   through Node tensorization and reference-stat attachment.
-- [ ] 4.3 Compute centered rewards across distinct episodes within each query, including
+- [x] 4.3 Compute centered rewards across distinct episodes within each query, including
   variable group sizes and single-episode queries.
 - [ ] 4.4 Implement episode-atomic PPO minibatch construction balanced by valid token count so
   no multi-turn terminal objective is split.
