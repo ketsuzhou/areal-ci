@@ -1,152 +1,93 @@
 ## Context
 
-The frontend's sandbox creation flow already sends a `runtime` object with
-`base_url`, `api_key`, and `model`. Sandboxd merges those values into the
-runtime environment before starting the in-sandbox daemon. Env-dispatch uses
-the same sandbox lifecycle service, but its per-agent policy currently preserves
-only a template in `environment_agent_sandbox.sandbox_config`; provisioning
-therefore creates a daemon-enabled sandbox without model configuration.
+Frontend sandbox creation produces an online Pi runtime. The current env-dispatch
+implementation pre-creates an offline runtime row, creates a sandbox through a separate
+lifecycle adapter, and queues work before provider readiness. Live diagnostics showed
+the sandbox reaching `running`, the expected daemon adopting the runtime row, Pi
+remaining `offline`, the task staying queued, and the DAG staying `in_progress`.
 
-Message dispatch also has two provisioning times. The roster leader is
-provisioned during the initial dispatch, while peers remain pending and are
-provisioned on their first directed mention. Any runtime policy must therefore
-survive beyond the HTTP request and be consumed by the existing single-flight
-provisioner.
+The source agent must also remain reusable: concurrently addressing the same source
+agent in multiple dispatches cannot repeatedly overwrite its global runtime binding.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Accept a typed per-agent external model configuration under
-  `per_agent_env.<agent_id>.runtime`.
-- Apply exactly the same policy to immediate leader provisioning and lazy peer
-  provisioning, including the clone path.
-- Preserve existing env-dispatch behavior when no runtime object is supplied.
-- Prevent API-key disclosure through responses, errors, and structured logs.
-- Prove that a non-training agent can answer through the configured external
-  model in a deployed end-to-end test.
+- Make frontend and env-dispatch use one sandbox creation implementation.
+- Discover an online daemon-registered runtime without pre-creating its DB row.
+- Create one derived global agent per source-agent sandbox and record lineage.
+- Keep model credentials and training sessions one-to-one with the source binding.
+- Preserve `session_id -> agent_run_id` by linking the real task after enqueue.
+- Fail and compensate terminal provisioning errors instead of leaving an endless DAG.
+- Clean up every resource owned by the derived dispatch.
 
 **Non-Goals:**
 
-- Calling AReaL `start_session` or provisioning the `areal-default` proxy for a
-  training target.
-- Changing ordinary, non-env-dispatch channel runtime selection.
-- Introducing a new credential vault, encryption scheme, dependency, or database
-  migration.
-- Changing sandboxd's existing runtime key names or process startup behavior.
-- Extending this first delivery beyond `dispatch_type=message` interactions.
-- Overriding a copied source binding's model configuration during branch.
+- Rebinding the source agent's global runtime.
+- Matching runtimes by mutable display name.
+- Exposing provider, bootstrap, or session credentials in public APIs.
+- Adding a general-purpose agent cloning API for unrelated product flows.
 
 ## Decisions
 
-### Use a nested per-agent runtime object
+### Share the frontend sandbox service
 
-The request shape is:
+The HTTP handler and env-dispatch call one service for node selection, instance insert,
+metadata persistence, daemon PAT minting, runtime environment construction, job payload,
+and notification. This removes the behavioral drift observed in production.
 
-```json
-{
-  "per_agent_env": {
-    "<agent_id>": {
-      "template": "default",
-      "runtime": {
-        "base_url": "https://provider.example/v1",
-        "api_key": "<secret>",
-        "model": "provider-model"
-      }
-    }
-  }
-}
-```
+### Discover runtime after registration
 
-This matches the sandbox API's runtime vocabulary and allows squad members to
-use different providers. A top-level runtime object was rejected because its
-ownership is ambiguous for squads and would require inheritance/override rules.
+Sandbox creation mints a unique daemon ID but does not insert `agent_runtime`.
+Provisioning waits for a Pi runtime with matching workspace, daemon ID, and trusted
+`sandbox_instance_id` metadata to report `online`. Runtime names are display-only.
 
-### Validate and canonicalize before creating rollout state
+### Clone a derived global agent
 
-The handler/service boundary will use a typed runtime policy rather than passing
-unvalidated arbitrary JSON. For scratch message dispatch, when `runtime` is
-present, all three trimmed values must be non-empty and `base_url` must be an
-absolute HTTP(S) URL. A runtime-only per-agent entry resolves to template
-`default`; explicit template and base-env selection remain supported. A
-malformed or partial object fails with a validation error before an env, project,
-channel, binding, runtime, or sandbox is created.
+When runtime readiness succeeds, a transaction copies approved executable fields and
+skills from the source agent, binds the new agent to the runtime, records
+`source_agent_id`, replaces the source member for this dispatch channel, and records the
+derived ID on the binding. The source agent remains unchanged.
 
-Branch source selection remains the top-level `env_id`. Branch copies the source
-channel and binding policy, so it inherits runtime configuration and rejects a
-caller-supplied runtime override rather than accepting an unused credential.
+### Resolve credentials before sandbox creation
 
-Runtime configuration for `train_agent_id` is rejected in this change. Silently
-ignoring it could run a training target against the wrong model; accepting it
-would pre-empt the later `start_session` design.
+Static agents consume the validated runtime object stored for their source binding.
+Training agents call `start_session(session_ref, env_id)` with the persistent source
+binding ID and build a server-owned runtime policy with model `areal-default`, the
+configured bridge URL, and the returned session key. The bridge retains legacy `task_id`
+compatibility. Once the real derived-agent task is inserted, env-dispatch links that
+task to the session for DAG assembly. Retries reuse the recorded session.
 
-### Persist the canonical runtime policy in the env-agent binding
+Sandbox bootstrap PAT and model API key are distinct typed credentials. A binding's
+`model_config_owner_agent_id` must equal its `source_agent_id`.
 
-The canonical policy is stored alongside `template` in the existing
-`environment_agent_sandbox.sandbox_config` JSONB value. The provisioning claim
-then reads the stored policy and sets `CreateSandboxInstanceInput.Runtime` for
-both create and clone payloads. This reuses the binding as the established
-single source of truth and preserves retry/idempotency behavior.
+### Make readiness and cleanup transactional at the workflow level
 
-Keeping the policy only in request memory was rejected because pending peers may
-be mentioned minutes later or after a server restart. Creating every peer
-sandbox eagerly was rejected because it breaks the leader-only wake contract.
-
-### Reuse existing sandboxd runtime behavior
-
-No new environment-variable mapping is introduced. The lifecycle job carries
-the runtime object, and sandboxd's existing merge logic supplies `api_key`,
-`base_url`, and `model` when it starts the daemon. This keeps env-dispatch
-equivalent to the already-working frontend sandbox creation flow.
-
-### Treat the API key as write-only at the public API boundary
-
-The runtime policy is needed at rest until lazy provisioning, so this change uses
-the existing database protection model for sandbox runtime metadata and binding
-JSON. The key must not be included in env-dispatch responses, binding status
-responses, errors, or structured logs. Tests use synthetic credentials and
-assert non-disclosure.
-
-Adding a new encrypted secret store was rejected for this focused delivery; it
-would be a separate security capability and migration. Operational access to the
-database and sandbox job payloads remains trusted as it is for frontend-created
-sandbox runtime metadata today.
+The binding state machine single-flights credential resolution, sandbox creation,
+runtime discovery, derived-agent creation, and task enqueue. Every failure step has
+explicit compensation. Dispatch cleanup archives derived agents and deletes their
+sandbox, runtime, credentials, and training session.
 
 ## Risks / Trade-offs
 
-- [The binding must retain a provider credential until a pending peer is
-  provisioned] -> Reuse current database access controls, never expose the value
-  through API/logging, and delete it with the env-agent binding during normal
-  cleanup. A dedicated encrypted credential reference can replace the inline
-  value in a later change.
-- [A retry could lose or alter runtime policy] -> Persist one canonical policy
-  before provisioning and always load it from the claimed binding.
-- [Leader and peer behavior could diverge] -> Route both through the existing
-  `provisionEnvDispatchAgent` function and test both timing paths.
-- [Runtime configuration could accidentally bypass training proxy setup] ->
-  Reject a runtime object for `train_agent_id` until the training change owns
-  that branch.
-- [A valid-looking provider configuration may still be unreachable] -> Keep
-  request validation structural; surface sandbox/task failure without echoing
-  credentials, and require a deployed end-to-end reply test.
+- Creating global derived agents increases agent-row volume. Cleanup ownership and
+  archive indexing keep the lifecycle bounded.
+- Waiting for runtime readiness increases dispatch latency. A bounded timeout gives
+  truthful failure instead of indefinite DAG polling.
+- Training credentials exist before task insertion. Binding persistence and a stable
+  session reference provide idempotency; compensation closes orphaned sessions.
+- Schema changes require coordinated deployment. New provisioning is feature-gated and
+  old pending bindings are drained or rejected.
 
 ## Migration Plan
 
-1. Deploy the additive request parsing, validation, binding persistence, and
-   provisioning changes together.
-2. Existing callers that omit `runtime` continue unchanged; no data backfill or
-   database migration is required.
-3. Update the standalone caller/example to send the nested per-agent object if a
-   client-side gap is found.
-4. Verify against a fresh non-training agent and synthetic/rotated provider
-   credential in the deployed service.
-5. Roll back the server code if needed. Existing binding JSON remains readable
-   because unknown JSON fields are ignored by the old provisioner.
+1. Add lineage and binding-state schema with backward-compatible nullable columns.
+1. Deploy the shared sandbox service and runtime discovery seam behind a feature flag.
+1. Deploy derived-agent cloning, credential resolution, orchestration, and cleanup.
+1. Enable for test workspaces; verify static and training dispatches end-to-end.
+1. Drain legacy pending bindings, then remove the pre-created-runtime path.
 
 ## Open Questions
 
-- The later training-agent change must decide how `start_session` credentials
-  are represented without accepting caller-supplied runtime values for the
-  training target.
-- Moving provider credentials from binding JSON to an encrypted secret reference
-  is a separate hardening decision.
+None. Deployment supplies the AReaL bridge URL through existing training configuration;
+production code does not hardcode a deployment endpoint.

@@ -10,7 +10,7 @@ review_mode: standard
 isolation: branch
 verify_mode: null
 auto_transition: true
-base_ref: bd6c2462edfb664c696cc05a9ec791effe97d101
+base_ref: ef19c0e66c655a66f3feb4b0eb6cf0513de965af
 design_doc: docs/superpowers/specs/2026-07-20-env-dispatch-agent-runtime-config-design.md
 plan: docs/superpowers/plans/2026-07-20-env-dispatch-agent-runtime-config.md
 verify_result: pending

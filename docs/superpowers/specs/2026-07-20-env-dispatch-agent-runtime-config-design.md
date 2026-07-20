@@ -132,6 +132,7 @@ sandbox_instance_id
 daemon_id
 runtime_id
 training_session_id
+training_session_ref
 credential_kind
 model_config_owner_agent_id
 ```
@@ -161,8 +162,13 @@ sandbox creation service. Squad members never inherit another member's policy.
 ### Training agent
 
 The training target ignores caller-supplied external runtime credentials. On its first
-address, env-dispatch calls `start_session` for that exact source agent and receives a
-unique `session_id` and model API key. It builds a server-owned runtime policy:
+address, env-dispatch calls `start_session(session_ref, env_id)` with the persistent
+env-agent binding ID as `session_ref` and receives a unique `session_id` and model API
+key. The AReaL bridge accepts `session_ref` as the session namespace while retaining
+legacy `task_id` request compatibility; a session no longer requires a synthetic or
+not-yet-inserted Multica task. After the derived agent and runtime are ready,
+env-dispatch creates a normal task and records the real task ID against the existing
+session for DAG assembly. It builds a server-owned runtime policy:
 
 ```text
 base_url = configured AReaL bridge URL
@@ -171,9 +177,10 @@ model    = areal-default
 ```
 
 The deployment config supplies the requested bridge URL; production code does not
-hardcode a deployment endpoint. The returned `session_id` is persisted on the same
-binding as the source agent, then injected through the training runtime contract
-required by the bridge.
+hardcode a deployment endpoint. The returned `session_id`, session key, and
+`training_session_ref` are persisted on the same binding as the source agent, then
+injected through the training runtime contract required by the bridge. Retry reuses the
+recorded session and never calls `start_session` twice.
 
 The AReaL model key is distinct from the sandbox bootstrap PAT. The bootstrap PAT
 authenticates the daemon to MultiCA; the session key authenticates model inference to
@@ -223,8 +230,10 @@ The database transaction must:
 1. replace/add the derived member in the env-dispatch channel;
 1. persist `derived_agent_id` on the binding.
 
-After commit, the task is created with the derived agent ID and the binding's explicit
-runtime ID.
+After commit, the task is created normally with a newly generated real task ID, the
+derived agent ID, and explicit runtime ID. The server then records
+`session_id -> task_id` for training DAG assembly. Task enqueue and
+collaboration-trigger idempotency use that real task identity only.
 
 ## Failure and Compensation
 
@@ -294,8 +303,9 @@ API contract explicitly requires it.
   and task.
 - Verify two source agents receive different credentials, sessions, sandboxes, runtimes,
   and derived agents.
-- Verify training calls `start_session` once for the claimed source agent and uses its
-  returned key only with that agent's sandbox.
+- Verify training calls `start_session` once with the claimed binding ID as
+  `session_ref`, later links the resulting session to the normally inserted
+  derived-agent task, and uses the returned key only with that agent's sandbox.
 - Verify all compensation paths and idempotent cleanup.
 
 ### Security tests
@@ -318,9 +328,10 @@ environment or secret injector, address the source agent, and assert:
 - the DAG returns `200` and passes structural validation;
 - cleanup archives the derived agent and removes the sandbox/runtime.
 
-For a training source agent, additionally assert `start_session` is called once, the
-returned session/key pair stays on that source binding, the derived agent uses
-`areal-default`, and cleanup closes the session.
+For a training source agent, additionally assert `start_session` is called once with the
+binding's `session_ref`, the returned session/key pair stays on that source binding, the
+real task ID is linked after enqueue, the derived agent uses `areal-default`, and
+cleanup closes the session.
 
 ## Rollout and Migration
 
