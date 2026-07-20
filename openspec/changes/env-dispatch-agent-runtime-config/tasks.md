@@ -1,12 +1,12 @@
 ## 1. Request Contract and Validation Tests
 
-- [ ] 1.1 Add handler tests that parse
+- [x] 1.1 Add handler tests that parse
   `per_agent_env.<agent_id>.runtime` and map `base_url`, `api_key`, and `model`
   to the service input without exposing them in the response.
-- [ ] 1.2 Add service tests for complete runtime configuration, missing/blank
+- [x] 1.2 Add service tests for complete runtime configuration, missing/blank
   fields, invalid URL schemes, runtime on `train_agent_id`, and no-resource
   side effects on validation failure.
-- [ ] 1.3 Add backward-compatibility tests for per-agent environment entries that
+- [x] 1.3 Add backward-compatibility tests for per-agent environment entries that
   omit `runtime`.
 
 ## 2. Runtime Policy Propagation Tests
@@ -22,7 +22,7 @@
 
 ## 3. Server Implementation
 
-- [ ] 3.1 Add typed external runtime request/service structures and atomic
+- [x] 3.1 Add typed external runtime request/service structures and atomic
   validation for complete values, absolute HTTP(S) URL, and non-training target.
 - [ ] 3.2 Carry the validated runtime policy through per-agent environment
   resolution and serialize it into the existing env-agent sandbox binding
