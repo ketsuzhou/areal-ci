@@ -499,7 +499,7 @@ git commit -m "feat(tree-search): preserve VIMPO episode targets"
 - Consumes: padded tensor dictionaries, `MicroBatchSpec`, and repeated `vimpo_episode_index`.
 - Produces: `split_episode_atomic_batches(data, mb_spec, episode_key="vimpo_episode_index") -> MicroBatchList` with complete episodes in every `mb`.
 
-- [ ] **Step 1: Write failing allocator tests**
+- [x] **Step 1: Write failing allocator tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_batching.py
@@ -531,13 +531,13 @@ def test_allocator_rejects_episode_larger_than_token_limit() -> None:
         split_episode_atomic_batches(_batch(), MicroBatchSpec(n_mbs=2, max_tokens_per_mb=6))
 ```
 
-- [ ] **Step 2: Run tests and verify the module is missing**
+- [x] **Step 2: Run tests and verify the module is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 
 Expected: FAIL during collection because `vimpo_batching.py` does not exist.
 
-- [ ] **Step 3: Implement deterministic episode grouping and balancing**
+- [x] **Step 3: Implement deterministic episode grouping and balancing**
 
 Implement the allocator with this exact public contract and ordering:
 
@@ -581,7 +581,7 @@ def split_episode_atomic_batches(
 
 Before returning, reject empty input and enforce contiguous one-based turn rows per episode. Preserve non-row tensor/list metadata exactly as the generic splitter does.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 

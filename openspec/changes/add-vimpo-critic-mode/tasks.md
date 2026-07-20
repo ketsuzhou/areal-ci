@@ -41,9 +41,9 @@
   through Node tensorization and reference-stat attachment.
 - [x] 4.3 Compute centered rewards across distinct episodes within each query, including
   variable group sizes and single-episode queries.
-- [ ] 4.4 Implement episode-atomic PPO minibatch construction balanced by valid token count so
+- [x] 4.4 Implement episode-atomic PPO minibatch construction balanced by valid token count so
   no multi-turn terminal objective is split.
-- [ ] 4.5 Add tests proving one terminal target per multi-turn episode, query-local baselines,
+- [x] 4.5 Add tests proving one terminal target per multi-turn episode, query-local baselines,
   correct padding behavior, and atomic minibatch membership.
 
 ## 5. Combined VIMPO Training Objective
