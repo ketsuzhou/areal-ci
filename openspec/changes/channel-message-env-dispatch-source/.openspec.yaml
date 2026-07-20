@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-17
+goal: Allow channel_message.source='env_dispatch' so env-dispatch message dispatch
+  stops violating channel_message_source_check (SQLSTATE 23514) and returning 500.

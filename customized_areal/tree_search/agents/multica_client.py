@@ -19,6 +19,21 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    # Load customized_areal/.env once at import so MULTICA_BASE_URL /
+    # MULTICA_WORKSPACE_ID / MULTICA_AGENT_ID serve as defaults for the client,
+    # create_env_dispatch, and the debug CLI. override=False keeps real env
+    # vars and test monkeypatches authoritative; the file only fills in values
+    # that are otherwise unset. Mirrors the pattern in
+    # customized_grouped_workflow.py so external callers inherit the same
+    # defaults without each loading .env themselves.
+    load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+except ImportError:
+    pass
 
 import httpx
 
@@ -98,11 +113,17 @@ class MulticaEnvDispatchClient:
         # token carries its workspace in X-Workspace-ID (set server-side by the
         # auth middleware), so these stay None in production. A user PAT must
         # identify the workspace explicitly via ?workspace_slug / ?workspace_id
-        # (resolveWorkspaceUUID priority 2/3 in middleware/workspace.go).
+        # (resolveWorkspaceUUID priority 2/3 in middleware/workspace.go). For
+        # local dev/debug the workspace may also come from MULTICA_WORKSPACE_SLUG
+        # / MULTICA_WORKSPACE_ID in customized_areal/.env; explicit args win.
+        workspace_slug = (
+            workspace_slug or os.environ.get("MULTICA_WORKSPACE_SLUG") or None
+        )
+        workspace_id = workspace_id or os.environ.get("MULTICA_WORKSPACE_ID") or None
         if workspace_slug and workspace_id:
             raise ValueError("pass at most one of workspace_slug or workspace_id")
-        self._workspace_slug = workspace_slug or None
-        self._workspace_id = workspace_id or None
+        self._workspace_slug = workspace_slug
+        self._workspace_id = workspace_id
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=timeout, transport=transport
         )
@@ -175,7 +196,17 @@ class MulticaEnvDispatchClient:
         means no training session. For a single-agent dispatch it must equal
         ``agent_id``; for a squad dispatch (``squad_id`` set) it must be a squad
         member. The server enforces these rules in ``validate()``.
+
+        ``agent_id`` defaults to ``MULTICA_AGENT_ID`` from customized_areal/.env
+        when omitted on a single-agent dispatch. Squad dispatches (``squad_id``
+        set) intentionally omit ``agent_id`` - the squad supplies its members -
+        so the env default does not apply there (spec §4.1).
         """
+        # Resolve the single-agent target from MULTICA_AGENT_ID (.env) when the
+        # caller omits it. Squad dispatches leave agent_id unset: the env default
+        # must not turn a squad dispatch into a single-agent one.
+        if not agent_id and not squad_id:
+            agent_id = os.environ.get("MULTICA_AGENT_ID") or None
         payload: dict = {
             "mode": mode,
             "dispatch_type": dispatch_type,
