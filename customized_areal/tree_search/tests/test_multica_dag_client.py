@@ -3,6 +3,7 @@ import pytest
 
 from customized_areal.tree_search.agents import multica_auth
 from customized_areal.tree_search.agents.multica_auth import save_credentials
+from customized_areal.tree_search.agents.multica_client import EnvDispatchHandle
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     DagError,
@@ -272,3 +273,52 @@ def test_assembled_dag_from_dict_defaults_step_rewards_absent():
     dag = AssembledDag.from_dict(_dag_payload())
     assert dag.step_rewards == []
     assert dag.score_max == 0
+
+
+def test_get_dag_message_handle_routes_channel_first():
+    """A message-dispatch handle polls the channel-scoped DAG route."""
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient("http://multica", _transport=httpx.MockTransport(handler))
+    handle = EnvDispatchHandle(
+        channel_id="c1",
+        project_id="p1",
+        env_id="e1",
+        dispatch_type="message",
+    )
+    dag = client.get_dag(handle, timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)
+    assert seen["path"] == "/api/v1/env-dispatch/channels/c1/dag"
+
+
+def test_get_dag_message_handle_missing_channel_id_raises():
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=_dag_payload())
+        ),
+    )
+    bad = EnvDispatchHandle(
+        channel_id=None, project_id="p1", env_id="", dispatch_type="message"
+    )
+    with pytest.raises(DagError, match="missing channel_id"):
+        client.get_dag(bad, timeout=1.0, interval=0.0)
+
+
+def test_get_dag_issue_handle_routes_project_first():
+    """An issue-dispatch handle keeps the legacy project-scoped DAG route."""
+
+    def handler(request):
+        assert request.url.path == "/api/v1/env-dispatch/p1/dag"
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient("http://multica", _transport=httpx.MockTransport(handler))
+    handle = EnvDispatchHandle(
+        channel_id=None, project_id="p1", env_id="", dispatch_type="issue"
+    )
+    dag = client.get_dag(handle, timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)

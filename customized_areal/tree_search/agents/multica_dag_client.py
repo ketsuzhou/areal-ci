@@ -1,8 +1,10 @@
 """HTTP client for fetching MultiCA's assembled DAG directly.
 
-Polls ``GET /api/v1/env-dispatch/{project_id}/dag`` on ``MULTICA_BASE_URL``
-with the caller's MultiCA PAT until it returns an assembled DAG, or raises a
-typed DAG error. Transient responses are re-polled up to the configured deadline.
+Polls the dispatch-scoped assembled-DAG endpoint on ``MULTICA_BASE_URL`` with
+the caller's MultiCA PAT until it returns an assembled DAG, or raises a typed DAG
+error. Message dispatches poll ``GET /api/v1/env-dispatch/channels/{channel_id}/dag``;
+issue dispatches poll ``GET /api/v1/env-dispatch/{project_id}/dag``. Transient
+responses are re-polled up to the configured deadline.
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -19,6 +21,11 @@ from customized_areal.tree_search.agents.multica_auth import (
     normalize_base_url,
     resolve_api_key,
 )
+
+if TYPE_CHECKING:
+    # EnvDispatchHandle is a lightweight dataclass; imported only for typing so
+    # this module stays decoupled from multica_client at runtime.
+    from customized_areal.tree_search.agents.multica_client import EnvDispatchHandle
 
 
 class DagError(Exception):
@@ -149,12 +156,45 @@ class MulticaDagClient:
 
     def get_dag(
         self,
-        project_id: str,
+        handle: EnvDispatchHandle | str | None = None,
         *,
+        project_id: str | None = None,
+        channel_id: str | None = None,
+        dispatch_type: str = "issue",
         timeout: float | None = None,
         interval: float | None = None,
     ) -> AssembledDag:
-        url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
+        """Poll the dispatch-scoped DAG endpoint until assembled.
+
+        Accepts either an :class:`~.multica_client.EnvDispatchHandle` (preferred)
+        or explicit ``channel_id`` / ``project_id`` + ``dispatch_type`` so
+        existing issue callers stay source-compatible: a positional project id
+        string is treated as an issue dispatch. Message dispatches route to
+        ``/api/v1/env-dispatch/channels/{channel_id}/dag``; issue dispatches
+        route to ``/api/v1/env-dispatch/{project_id}/dag``.
+
+        ``get_dag`` accepts per-call ``timeout`` / ``interval`` overrides that
+        fall back to the configured defaults.
+        """
+        if handle is not None:
+            if isinstance(handle, str):
+                # Legacy positional project_id (issue dispatch).
+                project_id = handle
+                dispatch_type = "issue"
+            else:
+                project_id = handle.project_id
+                channel_id = handle.channel_id
+                dispatch_type = handle.dispatch_type
+        if dispatch_type == "message":
+            if not channel_id:
+                raise DagError("message dispatch handle missing channel_id")
+            url = f"{self._base}/api/v1/env-dispatch/channels/{channel_id}/dag"
+            label = channel_id
+        else:
+            if not project_id:
+                raise DagError("issue dispatch handle missing project_id")
+            url = f"{self._base}/api/v1/env-dispatch/{project_id}/dag"
+            label = project_id
         headers = {"Authorization": f"Bearer {self._api_key}"}
         # Per-call overrides fall back to the client's configured defaults.
         poll_timeout = timeout if timeout is not None else self._poll_timeout
@@ -182,7 +222,7 @@ class MulticaDagClient:
                 if resp.status_code in (202, 502, 503, 504):
                     if time.monotonic() >= deadline:
                         raise DagTimeout(
-                            f"dag for {project_id} not ready in {poll_timeout}s"
+                            f"dag for {label} not ready in {poll_timeout}s"
                         )
                     time.sleep(current_interval)
                     # Backoff: grow the poll interval up to the configured cap so
@@ -195,9 +235,9 @@ class MulticaDagClient:
                         )
                     continue
                 if resp.status_code == 404:
-                    raise DagNotFound(project_id)
+                    raise DagNotFound(label)
                 if resp.status_code == 403:
-                    raise DagForbidden(project_id)
+                    raise DagForbidden(label)
                 if resp.status_code == 401:
                     raise DagError(
                         "MultiCA authentication failed: status=401. "

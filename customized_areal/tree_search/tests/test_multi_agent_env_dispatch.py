@@ -14,6 +14,7 @@ from customized_areal.tree_search.agents.execution_dag import DAGError
 from customized_areal.tree_search.agents.multi_agent_workflow import (
     MultiAgentEnvDispatchWorkflow,
 )
+from customized_areal.tree_search.agents.multica_client import EnvDispatchHandle
 from customized_areal.tree_search.agents.multica_dag_client import (
     AssembledDag,
     DagError,
@@ -38,15 +39,20 @@ def _seg(segment_id="seg1", agent_run_id="r1", shard_id=None):
 
 
 class _FakeDispatch:
-    """Returns a preconfigured project_id from create_env_dispatch."""
+    """Returns a preconfigured EnvDispatchHandle from create_env_dispatch."""
 
-    def __init__(self, project_id="p1"):
-        self._project_id = project_id
+    def __init__(self, project_id="p1", channel_id="c1"):
+        self._handle = EnvDispatchHandle(
+            channel_id=channel_id,
+            project_id=project_id,
+            env_id="e1",
+            dispatch_type="message",
+        )
         self.dispatch_env_ids: list[str | None] = []
 
     async def create_env_dispatch(self, **kw):
         self.dispatch_env_ids.append(kw.get("env_id"))
-        return self._project_id
+        return self._handle
 
 
 class _FakeDagClient:
@@ -56,7 +62,7 @@ class _FakeDagClient:
         self._dag = dag
         self._raises = raises
 
-    def get_dag(self, project_id, *, timeout, interval):  # sync
+    def get_dag(self, handle, *, timeout, interval):  # sync
         if self._raises is not None:
             raise self._raises
         return self._dag
@@ -214,9 +220,7 @@ async def test_arun_episode_clears_consumed_shards_and_removes_sessions():
     wf = _make_workflow(
         dispatch=_FakeDispatch("p1"),
         dag_client=_FakeDagClient(
-            AssembledDag(
-                segments=[seg], edges=[], session_to_agent_run={"sess1": "r1"}
-            )
+            AssembledDag(segments=[seg], edges=[], session_to_agent_run={"sess1": "r1"})
         ),
         resolver=resolver,
         session_remover=sr,

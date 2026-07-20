@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-07-17
+goal: Rollout-isolated project-backed group channels for dispatch_type=message,
+  waking only the selected agent in a cloned sandbox, lazily provisioning peers
+  on first mention, and resuming branches from a persisted collaboration
+  trigger.
