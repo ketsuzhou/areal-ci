@@ -76,6 +76,8 @@ class CustomizedPPOTrainer(PPOTrainer):
         self._clip_cov_patch_applied = False
         self._muon_patch_applied = False
         self._combined_critic_patch_applied = False
+        self._weight_update_timeout_patched = False
+        self._v2_disk_fallback_patched = False
         self._use_fresh_query_dataloader = self.tree_search_config.use_fresh_query
         if self._use_fresh_query_dataloader:
             if config.total_train_steps is None:
@@ -101,6 +103,8 @@ class CustomizedPPOTrainer(PPOTrainer):
             self._patch_clip_cov_loss()
         if self.tree_search_config.use_muon_optimizer:
             self._patch_muon_optimizer(config)
+        self._patch_weight_update_setup_timeout()
+        self._patch_v2_disk_fallback(config)
         try:
             super().__init__(config, train_dataset, valid_dataset)
         except Exception:
@@ -167,6 +171,81 @@ class CustomizedPPOTrainer(PPOTrainer):
 
         unpatch_fsdp_engine_for_muon()
         self._muon_patch_applied = False
+
+    def _patch_weight_update_setup_timeout(self, timeout_s: float = 120.0) -> None:
+        """Bump WeightUpdateController setup_timeout to survive slow areal imports.
+
+        The weight-update gateway is a fresh `python -m areal.v2.weight_update.gateway`
+        subprocess. `areal/__init__.py` eagerly imports infra/controller/launcher,
+        pulling in torch/ray/megatron; cold-start takes ~35s. The default
+        `setup_timeout=30.0` trips a spurious TimeoutError before uvicorn even
+        binds. Wrap `WeightUpdateController.initialize` to raise the deadline to
+        `timeout_s` (120s) so the gateway has time to finish importing.
+
+        Dataclass field defaults are baked into the generated `__init__`
+        signature, so setting `WeightUpdateControllerConfig.setup_timeout` as a
+        class attribute does NOT propagate to new instances; we must mutate
+        `self.config.setup_timeout` on the live instance instead.
+        """
+        from areal.v2.weight_update.controller.controller import (
+            WeightUpdateController,
+        )
+
+        if getattr(WeightUpdateController.initialize, "_timeout_patched", False):
+            self._weight_update_timeout_patched = True
+            return
+
+        original_initialize = WeightUpdateController.initialize
+
+        def _initialize_with_extended_timeout(controller_self):
+            if controller_self.config.setup_timeout < timeout_s:
+                controller_self.config.setup_timeout = timeout_s
+            return original_initialize(controller_self)
+
+        _initialize_with_extended_timeout._timeout_patched = True
+        WeightUpdateController.initialize = _initialize_with_extended_timeout
+        self._weight_update_timeout_patched = True
+
+    def _patch_v2_disk_fallback(self, config: Any) -> None:
+        """Force v2 weight-update dispatch onto the disk path when configured.
+
+        ``rl_trainer.py`` v2 branch (non-LoRA) hard-codes
+        ``WeightUpdateMeta.from_awex()`` and ignores
+        ``actor.weight_update_mode`` entirely. For models AWEX can't yet
+        map (Qwen3.5 hybrid Mamba: train has 4 separate ``in_proj_{a,b,qkv,z}``
+        but SGLang has 2 fused ``in_proj_{ba,qkvz}``), swap ``from_awex``
+        for a ``from_disk`` factory so the gateway routes through
+        ``_disk_transfer_weights`` and SGLang's native ``load_weights``
+        handles the structural fusion.
+
+        No-op when ``weight_update_mode != "disk"``, so switching back to
+        ``xccl`` in config restores AWEX behavior without code changes.
+        """
+        if getattr(config, "actor", None) is None:
+            return
+        if config.actor.weight_update_mode != "disk":
+            return
+
+        from areal.api.io_struct import WeightUpdateMeta
+
+        if getattr(WeightUpdateMeta.from_awex, "_disk_fallback_patched", False):
+            self._v2_disk_fallback_patched = True
+            return
+
+        disk_kwargs = {
+            "experiment_name": config.experiment_name,
+            "trial_name": config.trial_name,
+            "file_root": config.cluster.fileroot,
+            "name": "default",
+            "clear_checkpoint_after_load": True,
+        }
+
+        def _from_awex_disk_fallback(**kwargs):
+            return WeightUpdateMeta.from_disk(**disk_kwargs)
+
+        _from_awex_disk_fallback._disk_fallback_patched = True
+        WeightUpdateMeta.from_awex = staticmethod(_from_awex_disk_fallback)
+        self._v2_disk_fallback_patched = True
 
     def _create_train_engine(self, actor_config, alloc):
         """Override to use MultiCandidateFSDPPPOActor when distill loss is enabled."""

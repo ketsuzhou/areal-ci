@@ -58,11 +58,11 @@ class TPFCConfig(PPOConfig):
     workflow using the OpenAI-compatible proxy approach.
     """
 
-    workflow: str = field(
+    workflow: str | None = field(
         default="customized_areal.tpfc_agent.TPFCAgent",
         metadata={"help": "Path to the TPFC workflow class for training."},
     )
-    eval_workflow: str = field(
+    eval_workflow: str | None = field(
         default="${workflow}",
         metadata={"help": "Path to the TPFC workflow class for evaluation."},
     )
