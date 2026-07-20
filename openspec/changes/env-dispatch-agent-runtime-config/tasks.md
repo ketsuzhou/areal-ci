@@ -1,10 +1,10 @@
 ## 1. Persistence and Identity
 
-- [ ] 1.1 Add reversible migrations for source-agent lineage and expanded
+- [x] 1.1 Add reversible migrations for source-agent lineage and expanded
   `environment_agent_sandbox` provisioning identities/state.
 - [ ] 1.2 Add generated/query-layer methods for binding claims, runtime discovery,
   derived-agent ownership, session-to-real-task linkage, and cleanup.
-- [ ] 1.3 Add DB tests for workspace isolation, uniqueness, retry state, and
+- [x] 1.3 Add DB tests for workspace isolation, uniqueness, retry state, and
   source-agent preservation.
 
 ## 2. Shared Sandbox Creation
