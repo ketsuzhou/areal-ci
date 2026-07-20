@@ -10,6 +10,7 @@ from customized_areal.tree_search.agents.multica_client import (
     EnvDispatchHandle,
     MulticaCheckpointError,
     MulticaEnvDispatchClient,
+    _poll_dag,
     build_debug_parser,
     main,
 )
@@ -171,6 +172,42 @@ def test_create_env_dispatch_message_missing_channel_id_raises():
                 message="hi",
             )
         )
+
+
+def test_create_env_dispatch_rejects_per_rollout_error():
+    def handler(req):
+        return httpx.Response(
+            201,
+            json={
+                "project_id": "p1",
+                "channel_id": "c1",
+                "rollouts": [{"env_id": "e1", "error": "runtime readiness timeout"}],
+            },
+        )
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://x", transport=_transport(handler)
+    )
+
+    with pytest.raises(RuntimeError, match="runtime readiness timeout"):
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch",
+                dispatch_type="message",
+                agent_id="ag",
+                message="hi",
+            )
+        )
+
+
+def test_poll_dag_timeout_is_failure():
+    class FakeClient:
+        async def get_dag(self, *, handle):
+            return httpx.Response(202, json={"status": "in_progress"})
+
+    handle = EnvDispatchHandle("c1", "p1", "e1", "message")
+    with pytest.raises(TimeoutError, match="DAG readiness timeout"):
+        asyncio.run(_poll_dag(FakeClient(), handle, timeout=0.0, interval=0.0))
 
 
 def test_create_env_dispatch_401_points_to_login_without_leaking_pat():

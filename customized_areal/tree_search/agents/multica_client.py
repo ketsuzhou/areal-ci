@@ -216,6 +216,16 @@ class MulticaEnvDispatchClient:
         if resp.status_code != 201:
             raise RuntimeError(self._failure_message("create_env_dispatch", resp))
         data = resp.json()
+        rollouts = data.get("rollouts") or []
+        rollout_errors = [
+            str(rollout.get("error"))
+            for rollout in rollouts
+            if isinstance(rollout, dict) and rollout.get("error")
+        ]
+        if rollout_errors:
+            raise RuntimeError(
+                f"env-dispatch rollout failed: {rollout_errors[0][:1024]}"
+            )
         project_id = data.get("project_id") or ""
         if not project_id:
             raise RuntimeError(
@@ -228,7 +238,6 @@ class MulticaEnvDispatchClient:
                 "message dispatch response missing channel_id"
             )
         env_id = ""
-        rollouts = data.get("rollouts") or []
         if rollouts:
             env_id = rollouts[0].get("env_id") or ""
         return EnvDispatchHandle(
@@ -429,14 +438,24 @@ async def _poll_dag(
         resp = await client.get_dag(handle=handle)
         print(f"dag -> status={resp.status_code} body={resp.text[:2048]}")
         if resp.status_code == 200:
+            from customized_areal.tree_search.agents.multica_dag_client import (
+                AssembledDag,
+                DagError,
+            )
+
+            try:
+                AssembledDag.from_dict(resp.json())
+            except (DagError, TypeError, ValueError) as exc:
+                raise RuntimeError(f"invalid assembled DAG: {exc}") from exc
             print("dag assembled")
             return
         if resp.status_code not in (202, 502, 503, 504):
-            print(f"dag poll stopped: terminal status {resp.status_code}")
-            return
+            raise RuntimeError(
+                f"DAG polling failed: status={resp.status_code} "
+                f"body={client._safe_response_body(resp)}"
+            )
         if time.monotonic() >= deadline:
-            print(f"dag poll timed out after {timeout}s")
-            return
+            raise TimeoutError(f"DAG readiness timeout after {timeout}s")
         await asyncio.sleep(interval)
 
 
