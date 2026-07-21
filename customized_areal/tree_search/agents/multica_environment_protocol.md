@@ -10,7 +10,7 @@ small protocols only; it does not import a sandbox-vendor SDK.
 | Actor                                 | Responsibility                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | AReaL trainer / tree-search agents    | Starts rollout groups, consumes RL `session_id`s produced by Multica, records trajectories, selects branch points, asks Multica to materialize branches via env-dispatch, verifies rewards, and cleans up.                                                                                                                                                                                      |
-| Multica API                           | Owns the unified env-dispatch primitive: base env boot, scratch/branch dispatch, issue/chat/task orchestration, agent-run startup, and the mapping from rollout lanes to projects/issues/sandboxes. Calls `db_bridge.start_session` per rollout to register the RL session and obtain a scoped `api_key`. Server-side owns sandbox snapshot/fork/issue-subtree-copy as part of `mode="branch"`. |
+| Multica API                           | Owns the unified env-dispatch primitive: base env boot, scratch/branch dispatch, issue/chat/task orchestration, agent-run startup, and the mapping from rollout lanes to projects/issues/sandboxes. On a source agent's first address it provisions a sandbox (shared `EnvSandboxLifecycleService`), discovers the daemon-registered runtime, clones a **derived global agent** bound to it, and calls `db_bridge.start_session(session_ref=<binding-ID>)` to register the RL session and obtain a scoped `api_key`. Server-side owns sandbox snapshot/fork/issue-subtree-copy as part of `mode="branch"`. |
 | db_bridge                             | AReaL-hosted control-plane + model-serving bridge. Exposes `start_session` (returns `session_id` + scoped `api_key`), `set_reward`, `end_session`, `export_trajectories`, and the AReaL-served model endpoint. Multica and the agent runtime call it over HTTP; AReaL never imports its internals.                                                                                              |
 | Remote sandbox server / cloud runtime | Owns live sandbox lifecycle behind Multica's env-dispatch endpoints. Multica calls this service; AReaL talks to it only through `ForkableEnvironment` providers when an explicit injection path is wired.                                                                                                                                                                                       |
 | Agent runtime                         | Runs inside the allocated sandbox, calls the AReaL-served model via db_bridge using the `api_key` Multica handed it (provider `areal`), emits messages/interactions, and carries RL session metadata used by AReaL.                                                                                                                                                                             |
@@ -458,63 +458,63 @@ call; AReaL normalizes them into per-segment `SuperNode.process_reward`.
 
 ## RL Session Start and End
 
-RL sessions are the control-plane link between Multica agent runs and AReaL training
-trajectories. During env-dispatch, Multica calls
-`db_bridge.start_session(agent_run_id, issue_id)` for each rollout; db_bridge forwards
-to the AReaL runner, which creates the session and returns `session_id` + `api_key`
-(provider `areal`) back through db_bridge. Multica then hands the `api_key` to the agent
-runtime with provider `areal`, and the agent uses it to call the AReaL-served model via
-db_bridge (again forwarded to the AReaL runner). AReaL reads the resulting `session_id`
-from the rollout to bind trajectory capture, rewards, and export to the correct agent
-run.
+RL sessions are the control-plane link between Multica agent runs and AReaL
+training trajectories. On the dispatch path **Multica owns** `start_session`: on
+a source agent's first address it calls
+`db_bridge.start_session(session_ref=<env-agent-binding-ID>, env_id)`, which the
+AReaL bridge forwards to the AReaL rollout server. The server derives
+`session_id = f"{session_ref}-{idx}"` from `canonical_session_ref` and returns
+`session_id` + a scoped `api_key` (provider `areal`); a retry reuses the recorded
+session (no second `start_session`). `session_ref` is the persistent
+`environment_agent_sandbox` binding ID, not a task id - a session no longer
+requires a synthetic or not-yet-inserted Multica task. Multica hands the `api_key`
+to the derived agent's runtime, which uses it to call the AReaL-served model via
+db_bridge. AReaL itself **never calls `start_session`** on this path; it reads
+each `session_id` from the assembled DAG's `session_to_agent_run` map.
 
-The runner protocols in `swe_lego_issue_runner.py` and `self_play_runner.py` model the
-session handle as:
+The verifier-side session seam (in `agents/reward/swe_lego_verifier.py`) is
+write-only:
 
 ```python
 class _RlSession(Protocol):
-    async def start(self, *, agent_run_id: str, issue_id: str) -> str: ...
+    async def set_reward(self, *, session_id: str, reward: float) -> None: ...
 ```
 
 System-level flow:
 
-1. Multica creates `agent_run_id` and `issue_id` during env-dispatch.
-1. Multica calls `db_bridge.start_session(agent_run_id, issue_id)` for each rollout;
-   db_bridge forwards to the AReaL runner.
-1. AReaL runner creates the session and returns `session_id` + `api_key` (provider
-   `areal`) through db_bridge.
-1. Multica passes the `api_key` to the agent runtime with provider `areal`.
-1. The agent runtime uses the `api_key` to call the AReaL-served model via db_bridge
-   (db_bridge forwards to the AReaL runner).
-1. AReaL reads the `session_id` for the rollout and passes it into
-   `branch_driver.drive_lane(...)` so trajectory capture, rewards, and later export are
-   bound to the correct agent run.
-1. `SuperNodeAssembler` stamps the `session_id` onto every `SuperNode` for that agent
-   run. `ExecutionDAG.session_map()` exposes `{super_node_id: session_id}` to the
-   verifier.
-1. After lane completion, Multica's verifier agent calls `db_bridge.set_reward` and
-   `db_bridge.end_session` / `db_bridge.export_trajectories`; db_bridge forwards each to
-   the AReaL runner, which persists the reward and revokes the session on export.
+1. Multica creates the env-agent binding (status=pending) and, on first address,
+   calls `db_bridge.start_session(session_ref=binding.ID, env_id)`.
+1. The AReaL rollout server creates the session and returns `session_id` +
+   `api_key` (provider `areal`); retry reuses the recorded session.
+1. Multica passes the `api_key` to the derived agent's runtime; the agent calls
+   the AReaL-served model via db_bridge.
+1. `SuperNodeAssembler` stamps the `session_id` (from
+   `dag.session_to_agent_run`) onto every `SuperNode` for that agent run;
+   `ExecutionDAG.session_map()` exposes `{super_node_id: session_id}`.
+1. After assembly, AReaL's `MultiAgentEnvDispatchWorkflow` cleans up each session
+   via `DataProxySessionRemover.remove` (`POST /export_trajectories` with
+   `remove_session=true`).
 
 ```mermaid
 sequenceDiagram
-    participant A as AReaL runner
+    participant A as AReaL (MultiAgentEnvDispatchWorkflow)
     participant G as db_bridge
     participant M as Multica API
-    participant R as Agent runtime
+    participant R as Agent runtime (derived)
     participant D as ExecutionDAG/SuperNodes
 
-    A->>M: POST /api/v1/env-dispatch (mode=scratch, MultiCA PAT)
-    M->>G: start_session(agent_run_id, issue_id)
-    G->>A: forward
+    A->>M: POST /api/v1/env-dispatch (mode=scratch, dispatch_type=message, PAT)
+    M->>G: start_session(session_ref=binding.ID, env_id)
+    G->>A: forward (rollout server derives session_id)
     A-->>G: session_id + api_key (provider=areal)
     G-->>M: session_id + api_key (provider=areal)
-    M->>R: start agent run with api_key (provider=areal)
+    M->>R: start derived agent run with api_key (provider=areal)
     R->>G: model inference (api_key)
     G->>A: forward
-    M-->>A: rollout(agent_run_id, issue_id, env_id, session_id)
-    A->>D: stamp session_id on SuperNode(s)
+    M-->>A: 200 rollouts[]; AReaL polls /dag -> AssembledDag
+    A->>D: stamp session_id (session_to_agent_run) on SuperNode(s)
     D-->>A: session_map for verifier rewards
+    A->>G: export_trajectories(session_id, remove_session=true) per session
 ```
 
 Ending a session is driven by Multica's verifier agent, which calls db_bridge to write
@@ -581,9 +581,13 @@ providers use a semaphore to cap concurrent forks; by default the cap comes from
 
 ## Branch / Resume Lifecycle
 
-Branching resumes work from a saved frontier. `agents/branch_driver.py` implements this
-in `EnvDispatchBranchDriver`, which satisfies the `_BranchDriver` Protocol used by both
-runners (structural typing).
+Branching resumes work from a saved frontier. It is a single env-dispatch call
+(`mode="branch"`); AReaL does not snapshot, fork, or replay messages itself. The
+`BRANCH` edge type is defined in `ExecutionDag` and `mode="branch"` is accepted by
+the client, but no coordinator is wired into the live `MultiAgentEnvDispatchWorkflow`
+to issue branch dispatches yet - this section describes the intended protocol.
+(The earlier `agents/branch_driver.py` / `EnvDispatchBranchDriver` /
+`_BranchDriver` / `drive_lane` seam has been removed.)
 
 ```mermaid
 sequenceDiagram
@@ -606,14 +610,14 @@ Branch materialization is a single env-dispatch call:
 1. **Select branch point**: AReaL picks a `Node` with `need_branch=True` (entropy / TD
    gate) — its `env_id` is the branch frontier. The same handle is mirrored on the
    `SuperNode.env_id` field by `SuperNodeAssembler`.
-1. **Dispatch branch**: `EnvDispatchBranchDriver.drive_lane(...)` calls
+1. **Dispatch branch**: the coordinator calls
    `create_env_dispatch(mode="branch", env_id=<source_env_id>, group_size=1, ...)` with
    the same `domain` / `dispatch_type` / `agent_id` as the parent rollout.
 1. **Server-side fork**: Multica forks the source sandbox, copies the issue/chat
    subtree, and starts a child agent run. AReaL does **not** snapshot, fork, replay
    messages, or drop `PriorSessionID` itself — those steps are server-side.
-1. **Return child env_id**: the driver returns `setup.rollouts[0].env_id`, which the
-   runner treats as the terminal `env_id` for the lane and passes to the verifier.
+1. **Return child env_id**: AReaL reads `setup.rollouts[0].env_id` as the terminal
+   `env_id` for the lane (the child env the branch produced).
 
 `mode="resume"` is accepted at the boundary as an alias for `branch`; Multica normalizes
 it to `branch` server-side and records the original verb only for logging/metrics.
@@ -651,22 +655,27 @@ Cleanup is intentionally idempotent:
 | `snapshot_id`  | Remote sandbox server                   | `ForkableEnvironment.fork(snapshot_id=...)`                                  | Durable save point for `ForkableEnvironment`-driven forks. Not produced by the env-dispatch branch path.                                                              |
 | `project_id`   | Multica env-dispatch                    | Cleanup calls                                                                | Groups rollout resources for cascade deletion. One per rollout lane.                                                                                                  |
 | `issue_id`     | Multica env-dispatch                    | RL session start, verifier                                                   | Identifies the issue subtree for the lane. Branch copies the subtree server-side; AReaL never forks issues itself.                                                    |
-| `agent_run_id` | Multica agent runtime                   | RL session start, lane driver, verifier                                      | Identifies one agent execution lane.                                                                                                                                  |
-| `session_id`   | db_bridge (`start_session`)             | Lane driver, `SuperNodeAssembler`, verifier/reward writer/trajectory harvest | Binds rewards and exported trajectories to one agent run. Multica creates it via db_bridge and returns it to AReaL in the rollout.                                    |
+| `agent_run_id` | Multica agent runtime                   | DAG `session_to_agent_run`, verifier                                      | Identifies one agent execution lane.                                                                                                                                  |
+| `source_agent_id` | Multica env-dispatch (roster) | Derived-agent clone, credential invariant | The roster agent selected by the caller; template for the derived agent. Never rebound to an ephemeral runtime. |
+| `derived_agent_id` | `CloneEnvDispatchAgentTx` | Dispatch channel member, task enqueue, AC-6 cleanup | Global agent cloned from the source agent, permanently bound to the discovered runtime for the dispatch lifetime. Records `source_agent_id` lineage. |
+| `training_session_ref` | `environment_agent_sandbox` binding ID | `ResolveEnvDispatchTrainingSession` → `db_bridge.start_session` | Stable namespace for a training session (`session_ref`); the same session is reused on retry. |
+| `session_id`   | db_bridge (`start_session`)             | `MultiAgentEnvDispatchWorkflow` cleanup, `SuperNodeAssembler`, verifier/reward writer/trajectory harvest | Binds rewards and exported trajectories to one agent run. Multica creates it via db_bridge keyed by `session_ref=binding.ID`; AReaL reads it from the assembled DAG's `session_to_agent_run`.                                    |
 | `api_key`      | db_bridge (`start_session`)             | Multica → agent runtime                                                      | Scoped credential for one agent run to call the AReaL-served model via db_bridge (provider `areal`). Issued by db_bridge alongside `session_id`; not stored by AReaL. |
 
 ## Current Integration Status
 
 The torch-free `agents/` modules define and test the Multica communication contracts,
-the env-dispatch branch driver, and the verifier/harvest finalizers. The live
-`TreeSearchGroupedRolloutWorkflow` still uses the legacy single-agent TPFC branch path
-(`build_branch_task`) unless a future coordinator wires `multica_dag_enabled` /
-`multica_dag_client` into the episode loop (see
-`docs/superpowers/specs/2026-06-30-supernode-multica-dag-rollout-design.md`). The shared
-`SuperNode` store path is already active because single-agent episodes are wrapped as
-leaf `SuperNode`s before insertion into `MCTSTreeStore`, and per-turn `Node.env_id` is
-stamped from backend metadata so the branch-frontier handle is available wherever a
-future coordinator needs it.
+the `MultiAgentEnvDispatchWorkflow` orchestrator (scratch message dispatch -> DAG
+poll -> assemble -> cleanup), the env-dispatch branch protocol, and the
+verifier/harvest finalizers. ARE-5 derived-agent provisioning
+(`envDispatchDerivedAgentEnabled`, default `true`) is active on the scratch+message
+path: no pre-created runtime, shared sandbox service, runtime discovery, derived-agent
+clone, and `session_ref`-keyed training sessions. Branch execution via `mode="branch"`
+env-dispatch is defined (`BRANCH` edge type, client `mode=branch`) but not yet wired
+into the live workflow. The shared `SuperNode` store path is active: single-agent
+episodes are wrapped as leaf `SuperNode`s before insertion into `MCTSTreeStore`, and
+per-turn `Node.env_id` is stamped from backend metadata so the branch-frontier handle
+is available wherever a future coordinator needs it.
 
 ## Env Checkpoint Semantics
 
@@ -765,11 +774,20 @@ that may never participate.
 ### Lazy agent provisioning
 
 Agents are not all provisioned at dispatch time. The dispatch records the
-`environment_agent_sandbox` binding for each agent in a pending state; a sandbox is
-materialized only when the collaboration routes to that agent (a mention or an
-explicit turn handoff). Provisioning uses a single-flight claim
-(`claimProvisioning`) so a concurrently-mentioned agent is booted exactly once. The
-binding's `SourceSandboxInstanceID` is the clone source for the trigger/mention path.
+`environment_agent_sandbox` binding for each roster agent in a `pending` state; a
+binding is provisioned only when the collaboration first addresses that agent (the
+scratch leader's initial dispatch, a later mention, or an explicit turn handoff).
+Provisioning uses a single-flight claim (`claimProvisioning`) so a
+concurrently-addressed agent is provisioned exactly once; concurrent mentions
+observe the winner and wait for the same terminal result.
+
+On a **scratch** dispatch, first-address provisioning is the ARE-5 derived-agent
+flow: `claimProvisioning` -> `validateEnvDispatchCredentialOwner` -> (training:
+`ResolveEnvDispatchTrainingSession`) -> `EnvSandboxLifecycleService.Create` ->
+`WaitForOnlineSandboxRuntime` -> `CloneEnvDispatchAgentTx` -> `markReady` (see
+the Phase 1-7 pipeline). On a **branch** dispatch the trigger is instead provisioned
+from the cloned source sandbox instance (`CloneSandboxInstance` on the source
+binding's `sandbox_instance_id`); see "Leader-only wake on branch".
 
 ### Branch errors
 
