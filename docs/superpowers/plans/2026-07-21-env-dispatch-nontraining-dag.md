@@ -86,19 +86,19 @@ Run the Step 2 command; expected PASS.
 - Produces: `CreateEnvDispatchRun(projectID, workspaceID, trainingMode)`, `BindEnvDispatchRootTask(projectID, rootTaskID)`, and `GetEnvDispatchRootTaskStatus(projectID, workspaceID)` dependency/query seams.
 - Consumes: `EnvRollout.LeaderRunID` after the leader task is enqueued.
 
-- [ ] **Task 2 / Step 1: Write failing persistence and readiness tests**
+- [x] **Task 2 / Step 1: Write failing persistence and readiness tests**
 
 Assert every successful rollout persists mode and leader task, `/dag` returns
 202 for queued/running roots, and returns assembled data for a completed
 non-training root without any `training_dispatch` row.
 
-- [ ] **Task 2 / Step 2: Run tests and verify RED**
+- [x] **Task 2 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/handler ./server/internal/service -run 'EnvDispatch.*(Root|Readiness|Dag)' -count=1`
 
 Expected: FAIL because readiness still joins `training_dispatch`.
 
-- [ ] **Task 2 / Step 3: Add schema and queries**
+- [x] **Task 2 / Step 3: Add schema and queries**
 
 Create one row per project:
 
@@ -115,13 +115,13 @@ CREATE TABLE env_dispatch_run (
 Add create, root-bind, and workspace-scoped status queries; update sqlc output
 using the repository's existing generation workflow, without adding tools.
 
-- [ ] **Task 2 / Step 4: Wire dispatch persistence and replace readiness lookup**
+- [x] **Task 2 / Step 4: Wire dispatch persistence and replace readiness lookup**
 
 Create the dispatch row once the project exists, bind `LeaderRunID` after
 enqueue, and make `/dag` exclusively query the new root status. Preserve 202,
 failed-density, and successful-DAG response shapes.
 
-- [ ] **Task 2 / Step 5: Run tests and verify GREEN**
+- [x] **Task 2 / Step 5: Run tests and verify GREEN**
 
 Run the Step 2 command; expected PASS.
 

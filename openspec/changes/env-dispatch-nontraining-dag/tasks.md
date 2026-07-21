@@ -16,22 +16,22 @@
 
 ## 2. Durable dispatch root and readiness
 
-- [ ] 2.1 Write failing persistence and readiness tests: every successful rollout
+- [x] 2.1 Write failing persistence and readiness tests: every successful rollout
   persists mode and leader task, `/dag` returns 202 for queued/running roots, and
   returns assembled data for a completed non-training root without any
   `training_dispatch` row.
-- [ ] 2.2 Verify RED: `go test ./server/internal/handler ./server/internal/service
+- [x] 2.2 Verify RED: `go test ./server/internal/handler ./server/internal/service
   -run 'EnvDispatch.*(Root|Readiness|Dag)' -count=1` fails because readiness still
   joins `training_dispatch`.
-- [ ] 2.3 Create migration `204_env_dispatch_run` (`env_dispatch_run` keyed by
+- [x] 2.3 Create migration `204_env_dispatch_run` (`env_dispatch_run` keyed by
   project with workspace, training mode, nullable root task) and add create,
   root-bind, and workspace-scoped status queries; update sqlc output via the
   existing generation workflow without adding tools.
-- [ ] 2.4 Wire dispatch persistence: create the dispatch row once the project
+- [x] 2.4 Wire dispatch persistence: create the dispatch row once the project
   exists, bind `LeaderRunID` after enqueue, and make `/dag` exclusively query the
   new root status. Preserve 202, failed-density, and successful-DAG response
   shapes.
-- [ ] 2.5 Verify GREEN: the Step 2.2 command passes.
+- [x] 2.5 Verify GREEN: the Step 2.2 command passes.
 
 ## 3. Dual-source segment persistence
 

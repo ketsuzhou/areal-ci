@@ -1,91 +1,131 @@
-# Task 2 Report: Per-Segment Turn-Range Capture + Migration (Go)
+# Task 2 Report - Durable dispatch root and readiness
 
-## ✅ Implemented
+## Status: DONE
 
-1. **Migration (161)**
-   - Added `start_seq` and `end_seq` columns to `interaction_dag_segment` (integer, NOT NULL, default 0)
-   - Created `interaction_dag_step_reward` table with:
-     - `segment_id` (text, FK to `interaction_dag_segment`, cascade delete)
-     - `seq` (integer, NOT NULL)
-     - `score` (integer, NOT NULL, check >= 0)
-     - `rationale` (text, NOT NULL, default '')
-     - `created_at` (timestamptz, NOT NULL, default now())
-     - Primary key: (segment_id, seq)
+## RED evidence (Step 2)
 
-2. **SQL Queries**
-   - Updated `InsertInteractionDAGSegmentWithSnapshot` to include `start_seq` and `end_seq` (params 10 and 11, shifting env snapshot params to 12-14)
-   - Updated `GetInteractionDAGSegmentByAgentRun` and `ListInteractionDAGSegmentsForProject` to return the new columns
-   - Added `GetLastEndSeqForAgentRun`: returns MAX(end_seq) for an agent_run, or 0 if no segments
-   - Added `GetMaxTaskMessageSeq`: returns MAX(seq) from `task_message` for a task (UUID passed as text)
+Command: `cd multica/server && go test ./internal/handler/... ./internal/service/... -run 'EnvDispatch.*(Root|Readiness|Dag)' -count=1 -v`
 
-3. **Go Code**
-   - Updated `InteractionDAGSegment` struct with `StartSeq` and `EndSeq` (int32)
-   - Updated `InsertInteractionDAGSegmentWithSnapshotParams` with new fields
-   - Hand-wrote all new and modified sqlc-generated methods (since sqlc generate is broken in this repo)
-   - Added `GetLastEndSeqForAgentRun` and `GetMaxTaskMessageSeq` to `InteractionDAGStore` interface
-   - Updated `CloseSegmentForEvent` to:
-     - Calculate `start_seq = GetLastEndSeqForAgentRun(agentRunID) + 1`
-     - Calculate `end_seq = GetMaxTaskMessageSeq(agentRunID)`
-     - Store both in the segment
-   - Updated fake test store with new methods and tracking
-   - Added comprehensive tests:
-     - Tested leaf segment with turn range
-     - Tested multiple segments with sequential ranges (start_seq = previous end_seq + 1)
+Handler tests SKIP locally (TestMain calls `os.Exit(0)` when Postgres is unreachable). Service tests FAIL because the service does not yet call `CreateEnvDispatchRun` / `BindEnvDispatchRootTask` (no `env_dispatch_run` persistence).
 
-## TDD Evidence
-
-### RED (Before implementation)
-N/A - We implemented TDD by writing the tests *after* the code to verify, but verified the code fails if columns are missing.
-
-### GREEN (After implementation)
+Failing test names + output:
 ```
-cd /workspaces/leagent/backend/areal/multica/server && go test ./internal/service/ -run "TestInteractionDAG_CloseSegment" -v
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_RecordsSegment
---- PASS: TestInteractionDAG_CloseSegmentForEvent_RecordsSegment (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_LeafSegmentClosingEventEmpty
---- PASS: TestInteractionDAG_CloseSegmentForEvent_LeafSegmentClosingEventEmpty (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_TurnRanges
---- PASS: TestInteractionDAG_CloseSegmentForEvent_TurnRanges (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_MissingSessionLookupErrors
---- PASS: TestInteractionDAG_CloseSegmentForEvent_MissingSessionLookupErrors (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_CloseSegmentErrorPropagates
---- PASS: TestInteractionDAG_CloseSegmentForEvent_CloseSegmentErrorPropagates (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_ExportErrorPropagates
---- PASS: TestInteractionDAG_CloseSegmentForEvent_ExportErrorPropagates (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_BadTensorRefErrors
---- PASS: TestInteractionDAG_CloseSegmentForEvent_BadTensorRefErrors (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_StoreInsertErrorPropagates
---- PASS: TestInteractionDAG_CloseSegmentForEvent_StoreInsertErrorPropagates (0.00s)
-=== RUN   TestInteractionDAG_CloseSegmentForEvent_FanOutDeterministic
---- PASS: TestInteractionDAG_CloseSegmentForEvent_FanOutDeterministic (0.00s)
+ok  	github.com/multica-ai/multica/server/internal/handler	0.040s
+--- FAIL: TestEnvDispatch_DispatchPersistsRunAndBindsRootTask (0.00s)
+    env_dispatch_test.go:2459: CreateEnvDispatchRun calls: want 2 (one per rollout), got 0
+--- FAIL: TestEnvDispatch_NonTrainingDispatch_PersistsRootWithoutTrainingDispatch (0.00s)
+    env_dispatch_test.go: CreateEnvDispatchRun calls: want 1, got 0
+--- FAIL: TestEnvDispatch_GetDagReadiness_InProgress (0.00s)
+    env_dispatch_test.go: want run+bind persisted, got create=0 bind=0
+--- FAIL: TestEnvDispatch_GetDagReadiness_Terminal_NonTrainingRoot (0.00s)
+    env_dispatch_test.go: want run+bind persisted, got create=0 bind=0
+--- PASS: TestEnvDispatch_GetDagReadiness_NoRun (0.00s)
+FAIL
+FAIL	github.com/multica-ai/multica/server/internal/service	0.021s
+FAIL
+```
+
+4 service tests FAIL (persistence not wired); 1 passes (NoRun contract test: no run -> InProgress is correct even before wiring). Handler tests compile and skip locally (Postgres unreachable).
+
+## GREEN evidence (Step 5)
+
+Same command after wiring persistence + replacing the readiness lookup:
+
+```
+ok  	github.com/multica-ai/multica/server/internal/handler	0.031s
+=== RUN   TestEnvDispatch_DispatchPersistsRunAndBindsRootTask
+--- PASS: TestEnvDispatch_DispatchPersistsRunAndBindsRootTask (0.00s)
+=== RUN   TestEnvDispatch_NonTrainingDispatch_PersistsRootWithoutTrainingDispatch
+--- PASS: TestEnvDispatch_NonTrainingDispatch_PersistsRootWithoutTrainingDispatch (0.00s)
+=== RUN   TestEnvDispatch_GetDagReadiness_InProgress
+--- PASS: TestEnvDispatch_GetDagReadiness_InProgress (0.00s)
+=== RUN   TestEnvDispatch_GetDagReadiness_Terminal_NonTrainingRoot
+--- PASS: TestEnvDispatch_GetDagReadiness_Terminal_NonTrainingRoot (0.00s)
+=== RUN   TestEnvDispatch_GetDagReadiness_NoRun
+--- PASS: TestEnvDispatch_GetDagReadiness_NoRun (0.00s)
 PASS
-ok  	github.com/multica-ai/multica/server/internal/service	0.020s
+ok  	github.com/multica-ai/multica/server/internal/service	0.022s
 ```
 
-## Files Changed
-- `server/migrations/161_interaction_dag_segment_turn_ranges.up.sql` (NEW)
-- `server/migrations/161_interaction_dag_segment_turn_ranges.down.sql` (NEW)
-- `server/pkg/db/queries/interaction_dag.sql` (MODIFIED)
-- `server/pkg/db/queries/task_message.sql` (MODIFIED)
-- `server/pkg/db/generated/interaction_dag.sql.go` (MODIFIED)
-- `server/pkg/db/generated/task_message.sql.go` (MODIFIED)
-- `server/internal/service/interaction_dag.go` (MODIFIED)
-- `server/internal/service/interaction_dag_test.go` (MODIFIED)
+All 5 service tests PASS. Handler tests skip locally (no Postgres). Full `go test ./internal/service/... ./internal/handler/...` and `go vet` pass with no regressions.
 
-## Migration Summary
-- **161**: Adds turn range columns and step reward table
-  - Up: Alter segment table + create reward table
-  - Down: Drop reward table + remove columns from segment
+## Files changed + git diff --stat f124119f3..HEAD
 
-## Self-Review
-- ✅ All requirements from the brief implemented
-- ✅ All existing tests still pass
-- ✅ New tests verify the core functionality
-- ✅ No `sqlc generate` used (per repo constraint)
-- ✅ No fabricated defaults, absence stays distinguishable
-- ✅ Turn range calculation follows the specified logic
-- ✅ All patterns from the existing codebase followed
-- ✅ Migration follows repo's numbering and file organization
+```
+ server/internal/handler/env_dispatch.go         |  91 ++++++---
+ server/internal/handler/env_dispatch_test.go    | 116 +++++++++++
+ server/internal/service/env_dispatch.go         | 104 ++++++++++
+ server/internal/service/env_dispatch_test.go    | 248 ++++++++++++++++++++++++
+ server/migrations/204_env_dispatch_run.down.sql |   1 +
+ server/migrations/204_env_dispatch_run.up.sql   |  15 ++
+ server/pkg/db/generated/environment.sql.go      |  54 ++++++
+ server/pkg/db/generated/models.go               |   8 +
+ server/pkg/db/queries/environment.sql           |  35 ++++
+ 9 files changed, 643 insertions(+), 29 deletions(-)
+```
 
-## Concerns
-None! Everything looks good.
+## Commit hash
+
+`df6c1353c` in the multica repo (branch `feature/20260721/env-dispatch-nontraining-dag`).
+
+## Migration number used + DDL
+
+Migration number: **204** (verified as the next free number in `multica/server/migrations/`; 203 was the last existing migration).
+
+Referenced table names verified via migrations + models.go:
+- `project` (migration 034, `models.Project.ID`)
+- `workspace` (migration 001, `models.Workspace`)
+- `agent_task_queue` (migration 001, `models.AgentTaskQueue.ID`)
+
+Up (`204_env_dispatch_run.up.sql`):
+```sql
+CREATE TABLE env_dispatch_run (
+  project_id   uuid PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  training_mode boolean NOT NULL,
+  root_task_id  uuid REFERENCES agent_task_queue(id) ON DELETE SET NULL,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Down (`204_env_dispatch_run.down.sql`):
+```sql
+DROP TABLE IF EXISTS env_dispatch_run;
+```
+
+## sqlc queries added + how generation was done
+
+Three queries added to `pkg/db/queries/environment.sql`:
+- `CreateEnvDispatchRun :exec` - INSERT ... ON CONFLICT (project_id) DO UPDATE (upsert workspace_id + training_mode).
+- `BindEnvDispatchRootTask :exec` - UPDATE env_dispatch_run SET root_task_id = $2 WHERE project_id = $1.
+- `GetEnvDispatchRootTaskStatus :one` - SELECT atq.status FROM env_dispatch_run r JOIN agent_task_queue atq ON atq.id = r.root_task_id WHERE r.project_id = $1 AND r.workspace_id = $2. INNER JOIN yields ErrNoRows when no run exists or root_task_id is NULL (both -> in_progress).
+
+**Generation method:** sqlc is NOT installed in this environment (`which sqlc` returned empty). The generated output (`pkg/db/generated/environment.sql.go` + `models.go`) was **hand-edited** to match sqlc v1.31.1 output exactly:
+- `environment.sql.go`: 3 const/type/func blocks added in alphabetical order (bindEnvDispatchRootTask, createEnvDispatchRun, getEnvDispatchRootTaskStatus), following the existing pattern (pgtype.UUID params, QueryRow/Exec style).
+- `models.go`: `EnvDispatchRun` struct added after `EnvDispatchRequest` (alphabetical), with fields project_id, workspace_id, training_mode, root_task_id, created_at (pgtype.UUID/bool/pgtype.Timestamptz).
+- The `EnvDispatchRun` struct is not directly referenced by the queries (they return primitives), but is included for completeness/consistency with sqlc's model generation.
+
+## Interfaces produced
+
+- `CreateEnvDispatchRun(projectID, workspaceID, trainingMode)` - on `EnvDispatchDeps`, called by `Dispatch` after the project exists.
+- `BindEnvDispatchRootTask(projectID, rootTaskID)` - on `EnvDispatchDeps`, called by `Dispatch` after `dispatchOne` (consumes `EnvRollout.AgentRunID`).
+- `GetEnvDispatchRootTaskStatus(projectID, workspaceID)` - on `EnvDispatchDeps`, called by `EnvDispatchService.GetDagReadiness`.
+- `EnvDispatchService.GetDagReadiness(ctx, projectID, workspaceID) (DagReadiness, error)` - service method returning `DagReadinessInProgress` (202) or `DagReadinessTerminal` (proceed to 200 assembly). The handler's `/dag` endpoint calls this instead of the old `GetRootTrainingTaskStatusForProject`.
+
+## Concerns, deviations, or follow-ups
+
+1. **`AgentRunID` vs `LeaderRunID`:** The task says "Consumes: `EnvRollout.LeaderRunID`". However, `LeaderRunID` is only set for channel dispatches (scratch-channel and branch-channel). For issue and self_play-message dispatches, only `AgentRunID` is set (it IS the leader/root task - the single enqueued run). To correctly bind the root task for ALL dispatch types, `BindEnvDispatchRootTask` consumes `EnvRollout.AgentRunID` (set in every `dispatchOne` path). For channel dispatches, `AgentRunID == LeaderRunID`, so this is equivalent. This is noted as a deviation from the literal task text but matches the design intent ("bind root_task_id immediately after enqueuing the leader task").
+
+2. **`GetRootTrainingTaskStatusForProject` not removed:** The old sqlc query and its generated code (`training_dispatch.sql.go`) are left in place - a comment in `service/training.go:563` still references it, and removing generated code outside the allowed file list is out of scope. The handler no longer calls it. A follow-up task could remove the dead query.
+
+3. **`ListOwnedEnvDispatchResources` stale generated code:** The generated `environment.sql.go` did not contain `ListOwnedEnvDispatchResources` before my changes (pre-existing stale state - the query exists in `environment.sql` but was never generated). I did not fix this; it is unrelated to Task 2.
+
+4. **Handler `/dag` tests skip locally:** Per the task caveat, handler `TestMain` exits 0 when Postgres is unreachable. The two handler test stubs (`TestGetDag_NoEnvDispatchRun_Returns202`, `TestGetDag_NonTrainingCompletedRoot_ReturnsNot202`) compile and will run in CI with a DB; they exercise the full handler path (workspace gate + readiness + assembly) that the service tests cover via the `GetDagReadiness` seam. `go vet ./internal/handler/...` passes.
+
+5. **`rootTrainingTaskTerminalStatuses` map removed:** The handler's now-unused terminal-status map was removed (Boy Scout Rule). The equivalent logic lives in the service's `rootTaskTerminalStatuses` map, used by `GetDagReadiness`.
+
+## Security constraints confirmation
+
+- **Provider API keys** never appear in DAG data, responses, errors, or logs. My changes add DB persistence (env_dispatch_run), a readiness query, and test mocks - none touch API keys, credentials, or DAG segment serialization. Verified by grep: no `api_key`/`secret` references in the diff.
+- **`training_mode=false` makes ZERO AReaL session/trajectory lifecycle calls.** Task 2 adds no AReaL call paths - `CreateEnvDispatchRun`, `BindEnvDispatchRootTask`, and `GetDagReadiness` are pure DB/logic operations. The non-training test (`TestEnvDispatch_NonTrainingDispatch_PersistsRootWithoutTrainingDispatch`) asserts `len(f.trainingSaves) == 0`.
+- **Local trajectory serialization** is sourced ONLY from persisted `task_message` columns. Task 2 does not touch trajectory serialization (that is Task 3's scope).
