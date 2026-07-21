@@ -23,9 +23,17 @@ from areal.engine.core import reorder_and_pad_outputs
 from areal.engine.fsdp_engine import FSDPEngine, FSDPTrainContext
 from areal.models.tree_attn.functional import gather_packed_tree_vocab_stats
 from areal.utils import logging
-from areal.utils.data import pack_tensor_dict
+from areal.utils.data import (
+    MicroBatchList,
+    amend_position_ids,
+    pack_tensor_dict,
+    pad_mb_list,
+    unsqueeze_mb_list,
+)
 
 from ..training.logprobs import gather_logprobs_entropy_multi_candidates
+from ..training.losses.vimpo import vimpo_loss_fn, vimpo_loss_terms
+from ..training.vimpo_batching import split_episode_atomic_batches
 
 logger = logging.getLogger("MultiCandidateFSDPEngine")
 
@@ -857,6 +865,311 @@ class MultiCandidateFSDPEngine(FSDPEngine):
 
         loss_scale = local_weight / total_loss_weight * loss_multiplier
         return loss * loss_scale
+
+    # ------------------------------------------------------------------
+    # VIMPO combined actor loss (one backward, two denominators)
+    # ------------------------------------------------------------------
+
+    # Keys consumed by ``vimpo_loss_terms``.  The process callback forwards
+    # whichever of these are present in the micro-batch's ``orig_mb``.
+    _VIMPO_LOSS_DATA_KEYS = (
+        "vimpo_predict_mask",
+        "vimpo_episode_index",
+        "vimpo_centered_reward",
+        "vimpo_ref_sample_logp",
+        "vimpo_candidate_kl",
+        "vimpo_turn_index",
+        "vimpo_expected_turn_count",
+        "logprobs",
+        "prox_logp",
+        "advantages",
+    )
+
+    _VIMPO_REQUIRED_FIELDS = (
+        "input_ids",
+        "attention_mask",
+        "vimpo_predict_mask",
+        "vimpo_episode_index",
+        "vimpo_centered_reward",
+        "vimpo_ref_sample_logp",
+        "vimpo_candidate_kl",
+        "advantages",
+    )
+
+    def _validate_vimpo_batch(self, data: dict[str, Any]) -> None:
+        """Validate all VIMPO batch fields and reference tensors.
+
+        Runs on the raw (pre-split) 2D batch BEFORE ``optimizer_zero_grad``.
+        Raises ``ValueError`` on any missing field, shape mismatch,
+        non-finite reference value, or empty predict mask so the optimizer
+        state is never mutated on invalid input.
+        """
+        for key in self._VIMPO_REQUIRED_FIELDS:
+            if key not in data:
+                raise ValueError(f"VIMPO batch missing required field: {key!r}")
+        if "prox_logp" not in data and "logprobs" not in data:
+            raise ValueError(
+                "VIMPO batch requires at least one of 'prox_logp' or 'logprobs'"
+            )
+
+        bs, seq_len = data["attention_mask"].shape[:2]
+        for key in (
+            "vimpo_predict_mask",
+            "vimpo_episode_index",
+            "vimpo_centered_reward",
+            "vimpo_ref_sample_logp",
+            "vimpo_candidate_kl",
+            "advantages",
+        ):
+            tensor = data[key]
+            if tensor.shape[:2] != (bs, seq_len):
+                raise ValueError(
+                    f"VIMPO batch field {key!r} has shape {tuple(tensor.shape)}, "
+                    f"expected first two dims ({bs}, {seq_len})"
+                )
+        for key in ("prox_logp", "logprobs"):
+            if key in data:
+                tensor = data[key]
+                if tensor.shape[:2] != (bs, seq_len):
+                    raise ValueError(
+                        f"VIMPO batch field {key!r} has shape {tuple(tensor.shape)}, "
+                        f"expected first two dims ({bs}, {seq_len})"
+                    )
+
+        for key in (
+            "vimpo_ref_sample_logp",
+            "vimpo_candidate_kl",
+            "vimpo_centered_reward",
+            "advantages",
+        ):
+            tensor = data[key]
+            if tensor.is_floating_point() and not torch.isfinite(tensor).all():
+                raise ValueError(
+                    f"VIMPO batch field {key!r} contains non-finite values (inf/nan)"
+                )
+        for key in ("prox_logp", "logprobs"):
+            if key in data:
+                tensor = data[key]
+                if tensor.is_floating_point() and not torch.isfinite(tensor).all():
+                    raise ValueError(
+                        f"VIMPO batch field {key!r} contains non-finite values (inf/nan)"
+                    )
+
+        if data["vimpo_predict_mask"].sum().item() == 0:
+            raise ValueError(
+                "VIMPO batch has no valid predict positions "
+                "(vimpo_predict_mask is all False)"
+            )
+
+    def _prepare_vimpo_mb_list(self, input_: dict[str, Any]) -> MicroBatchList:
+        """Episode-atomic split + pack/pad for VIMPO training.
+
+        Uses :func:`split_episode_atomic_batches` (T3) to keep multi-turn
+        episodes indivisible at the micro-batch boundary, then applies the
+        same pack/pad/unsqueeze helpers as ``_prepare_mb_list``.
+        """
+        assert "attention_mask" in input_ and "input_ids" in input_
+        input_ = input_.copy()
+
+        if self.enable_tree_training:
+            raise NotImplementedError(
+                "VIMPO training with tree training is not yet supported; "
+                "use the non-tree (padded) path."
+            )
+
+        # Add position_ids (same as _prepare_mb_list for non-VL models).
+        input_ = amend_position_ids(input_)
+
+        # Episode-atomic split: episodes are indivisible at the mb boundary.
+        mb_list = split_episode_atomic_batches(input_, self.config.mb_spec)
+
+        # Pack each mb: [B_mb, S, ...] -> [total_content_length, ...]
+        mb_list.mbs = [pack_tensor_dict(mb) for mb in mb_list.mbs]
+
+        # Pad for memory fragmentation / SP alignment.
+        mb_list = pad_mb_list(
+            mb_list,
+            pad_value=0.0,
+            pad_to_maximum=self.config.pad_to_maximum,
+        )
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        self.logger.info(
+            f"VIMPO microbatch #tokens (rank {rank}): "
+            f"{mb_list.group_lens}, padded to: {mb_list.padded_to_lengths}, "
+            f"padding lengths: {mb_list.padding_lengths}"
+        )
+
+        # Unsqueeze packed tensors to [1, padded_length] for model forward.
+        mb_list = unsqueeze_mb_list(mb_list)
+
+        # Setup attention_mask / cu_seq_lens (same as _prepare_mb_list).
+        assert mb_list.padded_mbs is not None
+        for i, mb in enumerate(mb_list.mbs):
+            mb_list.mbs[i] = dict(**mb)
+        for i, mb in enumerate(mb_list.padded_mbs):
+            mb_list.padded_mbs[i] = dict(**mb)
+        for mb, padded_mb in zip(mb_list.mbs, mb_list.padded_mbs):
+            mb["max_length_q"] = mb["max_length_k"] = mb["max_seqlen"] = int(
+                mb["max_seqlen"]
+            )
+            padded_mb["max_length_q"] = padded_mb["max_length_k"] = padded_mb[
+                "max_seqlen"
+            ] = int(padded_mb["max_seqlen"])
+            mb["cu_seq_lens_q"] = mb["cu_seq_lens_k"] = mb["cu_seqlens"]
+            padded_mb["cu_seq_lens_q"] = padded_mb["cu_seq_lens_k"] = padded_mb[
+                "cu_seqlens"
+            ]
+            mb["use_cache"] = False
+            padded_mb["use_cache"] = False
+            mb["attention_mask"] = dict(full_attention=None, sliding_attention=None)
+            padded_mb["attention_mask"] = dict(
+                full_attention=None, sliding_attention=None
+            )
+
+        return mb_list
+
+    def train_vimpo_batch(
+        self,
+        input_: list[dict[str, Any]] | dict[str, Any],
+        *,
+        actor_coeff: float,
+        value_loss_weight: float,
+        beta: float,
+        eps_clip: float,
+        eps_clip_higher: float | None = None,
+    ) -> dict[str, float]:
+        """One zero-grad / backward / optimizer-step with two distributed denominators.
+
+        VIMPO combines a PPO token-mean and a terminal episode-mean in a
+        single backward pass.  The two means use *different* denominators
+        (``valid_token_count`` and ``episode_count``), so the generic
+        ``train_batch`` (single ``loss_weight_fn``) cannot express this.
+
+        Pipeline:
+
+        1. Normalize input and validate ALL batches/reference tensors BEFORE
+           ``optimizer_zero_grad`` (fail loud on missing/invalid data).
+        2. Episode-atomic split + pack/pad (episodes indivisible at mb boundary).
+        3. Compute and all-reduce ``[valid_token_count, episode_count]``
+           (float64) over ``dp_group`` once.
+        4. ``optimizer_zero_grad()``.
+        5. ``forward_backward_batch`` with a process callback that gathers
+           sampled-action logprobs, calls ``vimpo_loss_terms``, and scales
+           per ``vimpo_loss_fn``.
+        6. ``optimizer_step()`` once.
+
+        Parameters
+        ----------
+        input_
+            VIMPO batch dict (or list of dicts to concatenate).
+        actor_coeff
+            PPO actor loss coefficient (multiplies the token-mean term).
+        value_loss_weight
+            Terminal value loss coefficient (multiplies the episode-mean term).
+        beta
+            Terminal-value temperature scaling the policy-reference KL.
+        eps_clip
+            PPO clip ratio bound.
+        eps_clip_higher
+            Decoupled upper clip bound; ``None`` falls back to ``eps_clip``.
+        """
+        self._ensure_ready()
+
+        # Step 1: Normalize input.
+        input_batched, _ = self._normalize_batch_input(input_)
+
+        # Step 2: Validate ALL batches/reference tensors BEFORE optimizer_zero_grad.
+        self._validate_vimpo_batch(input_batched)
+
+        # Step 3: Episode-atomic split + pack/pad.
+        mb_list = self._prepare_vimpo_mb_list(input_batched).to(self.device)
+
+        # Step 4: Compute local denominators (float64 for all-reduce stability).
+        # ``mb_list.mbs[i]`` are pre-pad content-only 1D tensors (total_content_length).
+        local_valid_tokens = torch.tensor(0.0, dtype=torch.float64, device=self.device)
+        local_episodes = torch.tensor(0.0, dtype=torch.float64, device=self.device)
+        for mb in mb_list.mbs:
+            pm = mb["vimpo_predict_mask"].bool()
+            local_valid_tokens += pm.sum().to(torch.float64)
+            ep_idx = mb["vimpo_episode_index"]
+            local_episodes += torch.unique(ep_idx[pm]).numel()
+
+        global_valid_tokens = local_valid_tokens.clone()
+        global_episodes = local_episodes.clone()
+        # All-reduce over dp_group (identity when dp_size=1, but keeps the
+        # contract so the math is correct under data parallelism).
+        dist.all_reduce(global_valid_tokens, group=self.dp_group)
+        dist.all_reduce(global_episodes, group=self.dp_group)
+
+        # Step 5: zero_grad (AFTER validation and denominator computation).
+        self.optimizer_zero_grad()
+
+        # Step 6: Forward-backward with VIMPO loss scaling.
+        metric_numerators: list[tuple[torch.Tensor, ...]] = []
+
+        def process_output(
+            logits: torch.Tensor, ctx_dict: dict[str, Any]
+        ) -> torch.Tensor:
+            ctx = FSDPTrainContext(**ctx_dict)
+
+            # Gather sampled-action logprobs (single-candidate path).
+            logprobs, _ = self._compute_logprobs_entropy(
+                logits, ctx.model_inputs, ctx.ulysses_pad_size
+            )
+            # Trim batch-level padding to match ctx.mb_input (content-only, 1D).
+            if ctx.pad_length > 0:
+                logprobs = logprobs[: -ctx.pad_length]
+
+            # Build vimpo_data from ctx.mb_input (already 1D content-only).
+            vimpo_data: dict[str, Any] = {}
+            for key in self._VIMPO_LOSS_DATA_KEYS:
+                if key in ctx.mb_input:
+                    vimpo_data[key] = ctx.mb_input[key]
+
+            terms = vimpo_loss_terms(
+                logprobs,
+                vimpo_data,
+                beta=beta,
+                eps_clip=eps_clip,
+                eps_clip_higher=eps_clip_higher,
+            )
+
+            # Accumulate detached metric numerators for logging.
+            metric_numerators.append(
+                (
+                    terms.ppo_sum.detach(),
+                    terms.value_sum.detach(),
+                    terms.valid_token_count.detach(),
+                    terms.episode_count.detach(),
+                )
+            )
+
+            # Scale per the two-denominator formula.
+            return vimpo_loss_fn(
+                terms,
+                actor_coeff=actor_coeff,
+                value_loss_weight=value_loss_weight,
+                global_valid_tokens=global_valid_tokens,
+                global_episodes=global_episodes,
+                dp_size=self.parallel_helper.dp_size,
+            )
+
+        self.forward_backward_batch(mb_list, process_output, forward_only=False)
+
+        # Step 7: optimizer_step (once).
+        stats = self.optimizer_step()
+        stats["num_micro_batches"] = len(mb_list.mbs)
+
+        # Aggregate detached metric numerators for logging.
+        if metric_numerators:
+            total_ppo = torch.stack([m[0] for m in metric_numerators]).sum().item()
+            total_value = torch.stack([m[1] for m in metric_numerators]).sum().item()
+            stats["vimpo_ppo_sum"] = total_ppo
+            stats["vimpo_value_sum"] = total_value
+            stats["vimpo_valid_tokens"] = global_valid_tokens.item()
+            stats["vimpo_episode_count"] = global_episodes.item()
+
+        return stats
 
     # ------------------------------------------------------------------
     # VIMPO actor candidate statistics
