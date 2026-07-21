@@ -1,18 +1,18 @@
 ## 1. Required training-mode request contract
 
-- [ ] 1.1 Write failing handler and service tests: omitted `training_mode` returns
+- [x] 1.1 Write failing handler and service tests: omitted `training_mode` returns
   HTTP 400, `false` plus training IDs fails validation, `true` without
   `train_agent_id` fails, and the two valid forms reach the service with the exact
   boolean.
-- [ ] 1.2 Verify RED: `go test ./server/internal/handler ./server/internal/service
+- [x] 1.2 Verify RED: `go test ./server/internal/handler ./server/internal/service
   -run 'EnvDispatch.*TrainingMode' -count=1` fails because no explicit
   training-mode contract exists.
-- [ ] 1.3 Add `EnvDispatchRequest.TrainingMode *bool` at the HTTP boundary; reject
+- [x] 1.3 Add `EnvDispatchRequest.TrainingMode *bool` at the HTTP boundary; reject
   nil before constructing `EnvDispatchInput`; pass the dereferenced value as
   `EnvDispatchInput.TrainingMode bool`. In service validation enforce
   `!TrainingMode && (TrainAgentID != "" || CriticAgentID != "")` failure and
   `TrainingMode && TrainAgentID == ""` failure.
-- [ ] 1.4 Verify GREEN: the Step 1.2 command passes.
+- [x] 1.4 Verify GREEN: the Step 1.2 command passes.
 
 ## 2. Durable dispatch root and readiness
 

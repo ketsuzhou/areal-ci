@@ -37,19 +37,19 @@ base-ref: 1dfc83c64835df6fa5fa5585f662ecb9114ad263
 - Produces: `EnvDispatchRequest.TrainingMode *bool` at the HTTP boundary and `EnvDispatchInput.TrainingMode bool` after validation.
 - Produces: validation that false forbids training IDs and true requires `TrainAgentID`.
 
-- [ ] **Step 1: Write failing handler and service tests**
+- [x] **Task 1 / Step 1: Write failing handler and service tests**
 
 Add table cases asserting omitted `training_mode` returns HTTP 400, false plus
 training IDs fails validation, true without `train_agent_id` fails, and the two
 valid forms reach the service with the exact boolean.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Task 1 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/handler ./server/internal/service -run 'EnvDispatch.*TrainingMode' -count=1`
 
 Expected: FAIL because the request/input has no explicit training-mode contract.
 
-- [ ] **Step 3: Implement the minimal request and validation changes**
+- [x] **Task 1 / Step 3: Implement the minimal request and validation changes**
 
 Use a pointer only in the handler to distinguish an omitted JSON field:
 
@@ -65,7 +65,7 @@ if !in.TrainingMode && (in.TrainAgentID != "" || in.CriticAgentID != "") { ... }
 if in.TrainingMode && in.TrainAgentID == "" { ... }
 ```
 
-- [ ] **Step 4: Run tests and verify GREEN**
+- [x] **Task 1 / Step 4: Run tests and verify GREEN**
 
 Run the Step 2 command; expected PASS.
 
@@ -86,19 +86,19 @@ Run the Step 2 command; expected PASS.
 - Produces: `CreateEnvDispatchRun(projectID, workspaceID, trainingMode)`, `BindEnvDispatchRootTask(projectID, rootTaskID)`, and `GetEnvDispatchRootTaskStatus(projectID, workspaceID)` dependency/query seams.
 - Consumes: `EnvRollout.LeaderRunID` after the leader task is enqueued.
 
-- [ ] **Step 1: Write failing persistence and readiness tests**
+- [ ] **Task 2 / Step 1: Write failing persistence and readiness tests**
 
 Assert every successful rollout persists mode and leader task, `/dag` returns
 202 for queued/running roots, and returns assembled data for a completed
 non-training root without any `training_dispatch` row.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [ ] **Task 2 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/handler ./server/internal/service -run 'EnvDispatch.*(Root|Readiness|Dag)' -count=1`
 
 Expected: FAIL because readiness still joins `training_dispatch`.
 
-- [ ] **Step 3: Add schema and queries**
+- [ ] **Task 2 / Step 3: Add schema and queries**
 
 Create one row per project:
 
@@ -115,13 +115,13 @@ CREATE TABLE env_dispatch_run (
 Add create, root-bind, and workspace-scoped status queries; update sqlc output
 using the repository's existing generation workflow, without adding tools.
 
-- [ ] **Step 4: Wire dispatch persistence and replace readiness lookup**
+- [ ] **Task 2 / Step 4: Wire dispatch persistence and replace readiness lookup**
 
 Create the dispatch row once the project exists, bind `LeaderRunID` after
 enqueue, and make `/dag` exclusively query the new root status. Preserve 202,
 failed-density, and successful-DAG response shapes.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [ ] **Task 2 / Step 5: Run tests and verify GREEN**
 
 Run the Step 2 command; expected PASS.
 
@@ -142,7 +142,7 @@ Run the Step 2 command; expected PASS.
 - Produces: `RecordLocalSegmentForEvent(ctx, projectID, agentRunID, issueID, closingEvent, envSnapshot) (string, error)`.
 - Produces: `AssembledSegment` fields `TrajectorySource`, `Trainable`, and `Trajectory`; AReaL-only fields are nullable.
 
-- [ ] **Step 1: Write failing local-segment tests**
+- [ ] **Task 3 / Step 1: Write failing local-segment tests**
 
 Insert task messages at known sequence numbers and assert the local recorder
 upserts session `multica:<task-id>`, snapshots only the requested sequence
@@ -150,13 +150,13 @@ range in order, sets `trajectory_source=task_messages`, sets
 `trainable=false`, and leaves AReaL fields null. Assert repeated close is
 idempotent and runtime provider secrets never enter serialized trajectory.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [ ] **Task 3 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/service -run 'InteractionDAG.*Local' -count=1`
 
 Expected: FAIL because local segment recording does not exist.
 
-- [ ] **Step 3: Add the dual-source schema**
+- [ ] **Task 3 / Step 3: Add the dual-source schema**
 
 Backfill existing rows, constrain the source, and enforce source-specific
 validity:
@@ -173,14 +173,14 @@ ALTER TABLE interaction_dag_segment
 Add checks requiring non-null AReaL fields only for trainable tensor segments
 and null AReaL fields for task-message segments.
 
-- [ ] **Step 4: Implement local snapshot recording and assembly**
+- [ ] **Task 3 / Step 4: Implement local snapshot recording and assembly**
 
 Serialize an allowlisted message event shape containing sequence, type, tool,
 content, input, and output from persisted rows. Compute start/end using the
 existing sequence queries, atomically insert the segment and environment
 snapshot, and emit the three new contract fields from both source types.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [ ] **Task 3 / Step 5: Run tests and verify GREEN**
 
 Run the Step 2 command plus `go test ./server/internal/service -run InteractionDAG -count=1`; expected PASS.
 
@@ -198,27 +198,27 @@ Run the Step 2 command plus `go test ./server/internal/service -run InteractionD
 - Consumes: env-dispatch project membership and `RecordLocalSegmentForEvent`.
 - Produces: a unified close seam choosing AReaL only when `areal_proxy` exists; otherwise local recording for env-dispatch tasks.
 
-- [ ] **Step 1: Replace the old non-trained no-op test with failing behavior tests**
+- [ ] **Task 4 / Step 1: Replace the old non-trained no-op test with failing behavior tests**
 
 Prove a non-trained issue task and channel task record local segments, a mixed
 trained/non-trained pair records both sources with an edge, ordinary
 non-env-dispatch tasks remain no-ops, and the non-training path makes zero fake
 AReaL client calls.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [ ] **Task 4 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/service -run 'InteractionDAG.*(NonTrain|Mixed|Channel)' -count=1`
 
 Expected: FAIL at the current `extractArealProxyConfig` early return.
 
-- [ ] **Step 3: Implement unified project and trajectory-source routing**
+- [ ] **Task 4 / Step 3: Implement unified project and trajectory-source routing**
 
 Resolve project from issue or chat session. Gate local recording on an
 `env_dispatch_run` lookup. Keep the current bridge close/export order for proxy
 tasks; use deterministic local session/run mapping and local segment recording
 otherwise. Reuse existing edge and one-segment guards.
 
-- [ ] **Step 4: Run tests and verify GREEN**
+- [ ] **Task 4 / Step 4: Run tests and verify GREEN**
 
 Run the Step 2 command and `go test ./server/internal/service -count=1`; expected PASS.
 
@@ -236,27 +236,27 @@ Run the Step 2 command and `go test ./server/internal/service -count=1`; expecte
 - Consumes: server `SegmentSpec` dual-source JSON.
 - Produces: nullable tensor fields and explicit local trajectory fields; only `trainable=true` segments reach tensor resolution and shard cleanup.
 
-- [ ] **Step 1: Write failing Python contract and resolver tests**
+- [ ] **Task 5 / Step 1: Write failing Python contract and resolver tests**
 
 Build a mixed DAG containing one `areal_tensor` and one `task_messages`
 segment. Assert strict parsing succeeds, topology retains both segments, only
 the trainable tensor ref is resolved, and cleanup never receives the local
 segment.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [ ] **Task 5 / Step 2: Run tests and verify RED**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_assembler_ref_resolve.py customized_areal/tree_search/tests/test_segment_dag_training_path.py -q`
 
 Expected: FAIL because current dataclasses require tensor fields and the assembler resolves every segment.
 
-- [ ] **Step 3: Implement the Python dual-source contract**
+- [ ] **Task 5 / Step 3: Implement the Python dual-source contract**
 
 Add typed defaults for `trajectory_source`, `trainable`, and `trajectory`; make
 `trajectory_id`/`tensor_ref` optional. Validate trainable segments strictly and
 skip resolution/cleanup for non-trainable segments while retaining their DAG
 identity and metadata.
 
-- [ ] **Step 4: Run tests and verify GREEN**
+- [ ] **Task 5 / Step 4: Run tests and verify GREEN**
 
 Run the Step 2 command; expected PASS.
 
@@ -269,29 +269,29 @@ Run the Step 2 command; expected PASS.
 - Consumes: all prior tasks.
 - Produces: reproducible verification evidence.
 
-- [ ] **Step 1: Run focused Go tests**
+- [ ] **Task 6 / Step 1: Run focused Go tests**
 
 Run: `go test ./server/internal/service ./server/internal/handler -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Go static checks**
+- [ ] **Task 6 / Step 2: Run Go static checks**
 
 Run: `go vet ./server/internal/service ./server/internal/handler`
 
 Expected: exit 0.
 
-- [ ] **Step 3: Run focused Python tests**
+- [ ] **Task 6 / Step 3: Run focused Python tests**
 
 Run the Task 5 Step 2 command; expected PASS.
 
-- [ ] **Step 4: Update the repository graph**
+- [ ] **Task 6 / Step 4: Update the repository graph**
 
 Run: `graphify update .`
 
 Expected: graph update completes successfully; dirty graph outputs are retained.
 
-- [ ] **Step 5: Review secret and AReaL-call boundaries**
+- [ ] **Task 6 / Step 5: Review secret and AReaL-call boundaries**
 
 Search changed code and test output for provider API-key fixtures and verify
 they occur only in request/setup fixtures, never serialized DAG assertions,

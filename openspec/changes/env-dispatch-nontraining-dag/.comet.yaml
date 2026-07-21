@@ -2,12 +2,12 @@ workflow: full
 language: en
 phase: build
 context_compression: off
-build_mode: null
+build_mode: subagent-driven-development
 build_pause: null
-subagent_dispatch: null
-tdd_mode: null
+subagent_dispatch: confirmed
+tdd_mode: tdd
 review_mode: standard
-isolation: null
+isolation: branch
 verify_mode: null
 auto_transition: true
 base_ref: 1dfc83c64835df6fa5fa5585f662ecb9114ad263
