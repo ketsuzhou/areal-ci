@@ -1,16 +1,16 @@
-# Graph Report - areal  (2026-07-17)
+# Graph Report - areal  (2026-07-20)
 
 ## Corpus Check
-- 5134 files · ~5,297,974 words
+- 5260 files · ~5,431,220 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 59650 nodes · 143552 edges · 2201 communities (2020 shown, 181 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 19227 edges (avg confidence: 0.71)
+- 60865 nodes · 146825 edges · 2193 communities (2009 shown, 184 thin omitted)
+- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 19767 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `226afe98`
+- Built from commit: `a05a019e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1113,6 +1113,7 @@
 - Page Multica Squads
 - Env Dispatch Schema
 - Multica Packages Markdown
+- Ui Radio Group
 - Build Prod Multica
 - Ensure Postgres Multica
 - Start Web Multica
@@ -1963,23 +1964,23 @@
 - Testing All Skill Types
 - RED-GREEN-REFACTOR for Skills
 - VERIFY GREEN: Pressure Testing
-- .arun_episode
+- TestProxyServerEndpoints
 - Automatic Handoff to Next Phase Protocol
 - Debug Gate Protocol
-- IsBrewInstall
-- 大型 MoE 模型微调
-- .execute
+- TestGatewaySessionLifecycle
+- TestGatewayAuth
+- TestGatewayPauseContinue
 - Automatic Handoff to Next Phase Protocol
 - Debug Gate Protocol
-- captureSpy
+- to_precision_dtype
 - layout.tsx
 - UnescapeBackslashEscapes
 - Automatic Handoff to Next Phase Protocol
 - Debug Gate Protocol
 - Automatic Handoff to Next Phase Protocol
 - Debug Gate Protocol
-- ResumeTrigger
-- admin_headers
+- _get_json
+- 大型 MoE 模型微调
 - codex-tools.md
 - Pi Tool Mapping
 - Evaluation and iteration
@@ -1989,30 +1990,23 @@
 - Skill Types
 - Example: TDD Skill Bulletproofing
 - SwanlabConfig
-- TestWorkflow
-- ._compute_stats
+- env_dispatch_clone_adapter_test.go
+- TestGatewayVLLM
 - .copyEnvDispatchChannel
+- .create_from_chat_task
 - workspace_reserved_slugs.go
-- rewriteGitHubTransport
-- subscriberToResponse
+- Anti-patterns to avoid
 - install_claude.sh
 - daemon-reauth.test.ts
-- 3.3 Project 项目
-- TestTaskWakeupURL
-- TestResolveProjectWorkdirRuntime_OfflineSharedDaemon
-- TestTaskToResponseMapsArealProxyFromContext
-- radarReplayRecorder
-- shouldCreateEvolutionDeliveryMatch
-- evolution_skill_catalog_test.go
+- .GetSandboxInstanceForWorkspace
+- memoryCurationDaemonResultRequest
+- DBStageName
+- .create_scaffolding_output
 - start-server.sh
 - Antigravity CLI (`agy`) Tool Mapping
-- .broadcast
 - test_api_logprobs.py
 - hermes_loop.py
-- memoryCurationDaemonResultRequest
 - TestEnvDispatchChannelFirstAndProjectFirstRoutesRegistered
-- DBStageName
-- TestIsTrivialDoneOutput
 - comet-commands.ts
 - spec-document-reviewer-prompt.md
 - file-structure.md
@@ -2032,19 +2026,18 @@
 - README.md
 - file-structure.md
 - comet-env.mjs
-- radarWakeRecorder
 
 ## God Nodes (most connected - your core abstractions)
-1. `Context` - 2719 edges
-2. `Request` - 616 edges
-3. `uuidToString()` - 593 edges
-4. `parseUUID()` - 522 edges
-5. `writeError()` - 462 edges
-6. `newRequest()` - 406 edges
-7. `writeJSON()` - 359 edges
-8. `ApiClient` - 325 edges
-9. `withURLParam()` - 318 edges
-10. `MCTSTreeStore` - 312 edges
+1. `Context` - 2826 edges
+2. `Request` - 636 edges
+3. `uuidToString()` - 623 edges
+4. `parseUUID()` - 563 edges
+5. `writeError()` - 480 edges
+6. `newRequest()` - 420 edges
+7. `writeJSON()` - 372 edges
+8. `MCTSTreeStore` - 356 edges
+9. `ApiClient` - 337 edges
+10. `withURLParam()` - 331 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `"node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/merge.js"()` --indirect_call--> `key()`  [INFERRED]
@@ -2063,6 +2056,7 @@
 - 1-file cycle: `areal/utils/logging.py -> areal/utils/logging.py`
 - 2-file cycle: `multica/packages/views/issues/components/index.ts -> multica/packages/views/issues/components/issue-detail.tsx -> multica/packages/views/issues/components/index.ts`
 - 3-file cycle: `multica/packages/views/issues/components/index.ts -> multica/packages/views/issues/components/issues-page.tsx -> multica/packages/views/issues/components/issues-header.tsx -> multica/packages/views/issues/components/index.ts`
+- 3-file cycle: `multica/packages/views/agents/components/tabs/activity-timeline.tsx -> multica/packages/views/common/markdown.tsx -> multica/packages/views/common/actor-profile-popover.tsx -> multica/packages/views/agents/components/tabs/activity-timeline.tsx`
 - 3-file cycle: `multica/packages/views/editor/attachment-preview-modal.tsx -> multica/packages/views/editor/readonly-content.tsx -> multica/packages/views/editor/attachment.tsx -> multica/packages/views/editor/attachment-preview-modal.tsx`
 - 3-file cycle: `multica/packages/views/agents/components/agent-profile-card.tsx -> multica/packages/views/agents/components/inspector/runtime-picker.tsx -> multica/packages/views/common/actor-avatar.tsx -> multica/packages/views/agents/components/agent-profile-card.tsx`
 - 3-file cycle: `multica/packages/core/api/client.ts -> multica/packages/core/runtimes/cloud-runtime.ts -> multica/packages/core/api/index.ts -> multica/packages/core/api/client.ts`
@@ -2084,195 +2078,201 @@
 - **Multica Helm Release (chart + values + 6 templates)** — multica_deploy_helm_multica_chart_helm_chart, multica_deploy_helm_multica_values_helm_values, multica_deploy_helm_multica_templates_backend_backend_deployment, multica_deploy_helm_multica_templates_configmap_configmap, multica_deploy_helm_multica_templates_frontend_frontend_deployment, multica_deploy_helm_multica_templates_ingress_ingress, multica_deploy_helm_multica_templates_postgres_postgres_deployment, multica_deploy_helm_multica_templates_prometheusrule_prometheusrule [EXTRACTED 0.95]
 - **AReaL Test Config Suite (GRPO + SFT Backends)** — tests_grpo_config_grpo_test_config, tests_sft_config_archon_sft_archon_config, tests_sft_config_fsdp_sft_fsdp_config, tests_sft_config_megatron_sft_megatron_config [INFERRED 0.75]
 
-## Communities (2201 total, 181 thin omitted)
+## Communities (2193 total, 184 thin omitted)
 
 ### Community 0 - "Multica Packages Views"
-Cohesion: 0.09
-Nodes (20): cookieValueFromSetCookies(), GET(), publicOrigin(), relativeRedirect(), req(), SET_COOKIES, RFC-6749, resolveRemoteApiUrl() (+12 more)
+Cohesion: 0.01
+Nodes (524): RFC-1918, DesktopAgentsPage(), DesktopInboxBridge(), CheckState, UpdatesSettingsTab(), AgentDetailPage(), MemberDetailPage(), RuntimeDetailPage() (+516 more)
 
 ### Community 1 - "Areal Trainer Rationale"
-Cohesion: 0.02
-Nodes (129): _DatasetConfig, DPOConfig, EvaluatorConfig, Configuration for model evaluation scheduling and timing., Configuration for Weights & Biases experiment tracking., Validate WandB configuration., Configuration for Trackio experiment tracking (Hugging Face).      Trackio is a, Validate Trackio configuration. (+121 more)
+Cohesion: 0.01
+Nodes (374): Affected Files, Primary (engine layer — most likely to break), Secondary (model / infra layer — HIGH RISK: monkey-patching), Tertiary (tests and examples), Version-Guarded Code, DPOConfig, GRPOConfig, load_expr_config() (+366 more)
 
 ### Community 2 - "Multica Packages Apiclient"
 Cohesion: 0.01
-Nodes (457): Props, ApiClient, LoginResponse, AuthState, getCurrentSlug(), AuthedContext, mockAgents, mockAuthValue (+449 more)
+Nodes (482): Props, Props, Props, Props, ApiClient, LoginResponse, AuthState, getCurrentSlug() (+474 more)
 
 ### Community 3 - "Engine Areal Archon"
-Cohesion: 0.02
-Nodes (159): DPOEngineConfig, PPOCriticConfig, Core configuration for model training, including optimization and backend settin, Configuration for PPO critic model, a subclass of a TrainEngine., Engine configuration for DPO training, extending TrainEngineConfig with DPO-spec, TrainEngineConfig, DeviceRuntimeInfo, patch_dist_group_timeout() (+151 more)
+Cohesion: 0.01
+Nodes (256): DPOEngineConfig, FSDPWrapPolicy, PerfTracerConfig, PPOCriticConfig, Configuration for PPO critic model, a subclass of a TrainEngine., Configuration for perf tracer emission., Engine configuration for DPO training, extending TrainEngineConfig with DPO-spec, Policy configuration for FSDP model layer wrapping. None defaults to wrapping tr (+248 more)
 
 ### Community 4 - "Multica Packages Views"
 Cohesion: 0.01
-Nodes (413): RFC-3339, IssueDetailPage(), ProjectDetailPage(), DocsSettings(), switchLocalePath(), THEME_OPTIONS, NewProjectDraftState, agentTaskSnapshotOptions() (+405 more)
+Nodes (446): RFC-3339, IssueDetailPage(), ProjectDetailPage(), DocsSettings(), switchLocalePath(), THEME_OPTIONS, IssuesViewState, NewProjectDraftState (+438 more)
 
 ### Community 5 - "Handler Multica Server"
 Cohesion: 0.02
-Nodes (229): ChannelMemberBrief, ChannelMessageQuote, ChannelThreadParticipant, ClientIdentity, Request, channelAgentPromptTxResult, channelFacilitatorState, channelMessageCreateResult (+221 more)
+Nodes (206): Request, AttachLabelRequest, ChatSessionResponse, CreateLabelRequest, DashboardAgentRunTimeResponse, DashboardRunTimeDailyResponse, DashboardUsageByAgentResponse, DashboardUsageDailyResponse (+198 more)
 
 ### Community 6 - "Generated Handler Queries"
 Cohesion: 0.01
-Nodes (247): SessionCreds, AddReactionParams, ArchiveAgentParams, ArchiveAgentsByIDsParams, ArchiveAgentsByRuntimeParams, CancelAgentRadarRunByTaskIDParams, CancelAgentTasksByIssueAndAgentParams, CancelAgentTasksByRuntimeOrAgentParams (+239 more)
+Nodes (270): SessionCreds, AddAgentSkillParams, AddIssueReactionParams, AddIssueSubscriberParams, AddReactionParams, AddSquadMemberParams, AgentSharedSkill, ArchiveSquadParams (+262 more)
 
 ### Community 7 - "Controller V2 Inference"
-Cohesion: 0.03
-Nodes (51): Any, StatefulDataLoader, Worker, WorkflowLike, Asynchronously generate a response for the given request.          This method p, Offload rollout model memory on all inference workers., Onload rollout model memory on all inference workers., For backward compatibility. The runner is now owned by the dispatcher. (+43 more)
+Cohesion: 0.02
+Nodes (105): Any, Popen, StatefulDataLoader, Tensor, WorkflowLike, Launch SGLang server subprocess., SGLang remote inference engine.      This class delegates all functionality to R, Create a RemoteInfEngine without kwargs instead of InferenceEngineConfig. (+97 more)
 
 ### Community 8 - "Multica Packages Channels"
 Cohesion: 0.01
-Nodes (381): TAB_ICONS, href(), memberProfileOptions(), AgentPanelState, useAgentPanelStore, ApiError, ChannelCreateErrorBodySchema, activeChannelTasksKeys (+373 more)
+Nodes (299): TAB_ICONS, TabBar(), MockTab, state, ChannelCreateErrorBodySchema, activeChannelTasksKeys, activeChannelTasksOptions(), channelMessage() (+291 more)
 
 ### Community 9 - "Multica Packages Views"
 Cohesion: 0.01
-Nodes (285): App(), HTML_LANG, UpdateNotification(), UpdateState, DaemonStatusLike, mergeDaemonStatus(), useDaemonIPCBridge(), createDesktopLocaleAdapter() (+277 more)
+Nodes (261): App(), createDesktopLocaleAdapter(), {
+  mockSendCode,
+  mockVerifyCode,
+  mockIssueCliToken,
+  searchParamsState,
+  authStateRef,
+}, TEST_RESOURCES, geistMono, HTML_LANG, inter, metadata (+253 more)
 
 ### Community 10 - "Scheduler Local Areal"
 Cohesion: 0.01
-Nodes (251): BaseExperimentConfig, str, Base configuration class for all experiment types with common settings., Validate training configuration., SchedulingStrategyType, EngineCallError, EngineCreationError, EngineImportError (+243 more)
+Nodes (237): InferenceParallelism, Backward Compatible: Inference parallelism configuration with backend and valida, Enum, str, SchedulingStrategy, SchedulingStrategyType, Job, Create and start worker processes for a specific role.          Parameters (+229 more)
 
 ### Community 11 - "Controller Rollout Areal"
-Cohesion: 0.14
-Nodes (23): device, dtype, Data type of the tensor., Device of the tensor., _compute_internal_node_logprobs(), _compute_internal_node_logprobs_entropy(), _compute_transition_logprob(), _compute_transition_logprob_entropy() (+15 more)
+Cohesion: 0.15
+Nodes (14): _critic_train_data(), _FakeActor, _FakeEngine, TestBuildCriticMinibatch, TestCriticMultiCandidateLoss, TestRunCriticRegressionStep, build_critic_minibatch(), critic_multicandidate_loss_fn() (+6 more)
 
 ### Community 12 - "Multica Packages Views"
-Cohesion: 0.01
-Nodes (125): detect_image_mime(), get_versioned_lora_name(), HttpGenerationResult, HttpRequest, Get versioned LoRA adapter name (e.g., 'lora-v1')., Detect image MIME type from the first bytes of base64-encoded data.      Examine, Represents an HTTP request to be sent to a remote inference server., Parsed result from a generation response. (+117 more)
+Cohesion: 0.03
+Nodes (109): NameResolveConfig, Configuration for distributed name resolution and service discovery., _apply_patches_on_import(), _patch_qwen3vl_pr3143_word_embeddings(), megatron-bridge PR #3143: expose word_embeddings on MTP shadow embedding.      B, cleanup_forked_children(), main(), main() (+101 more)
 
 ### Community 13 - "Multica Packages Issues"
-Cohesion: 0.02
-Nodes (192): queryClient, agentActivityEventsKeys, agentActivityEventsOptions(), agentActivityKeys, agentHealthKeys, agentHealthOptions(), agentMemoryKeys, agentMemoryOptions() (+184 more)
+Cohesion: 0.01
+Nodes (225): queryClient, agentActivityEventsKeys, agentActivityEventsOptions(), agentActivityKeys, agentHealthKeys, agentMemoryKeys, agentRunCountsKeys, agentSkillSuggestionKeys (+217 more)
 
 ### Community 14 - "Handler Multica Server"
-Cohesion: 0.23
-Nodes (10): channelAmbientGateConfig, channelAmbientGateStats, deterministicChannelAmbientRelevanceSkip(), Agent, ChatSession, DBTX, Duration, Handler (+2 more)
+Cohesion: 0.02
+Nodes (194): ChannelMemberBrief, ChannelMessageQuote, ChannelThreadParticipant, AddChannelMemberRequest, AddChannelMembersRequest, AgentMemoryResponse, AssigneeFrequencyEntry, AutopilotResponse (+186 more)
 
 ### Community 15 - "Inference Service Bridge"
-Cohesion: 0.02
-Nodes (105): GenerationHyperparameters, Any, Controls text generation behavior for rollout., Create a new generation hyperparameters with stop and pad token ids added., Convert the generation hyperparameters to a dictionary of arguments for OpenAI c, ModelRequest, Return a copy of this meta with versioned path.          Changes path from 'weig, PreTrainedTokenizerFast (+97 more)
+Cohesion: 0.01
+Nodes (167): GenerationHyperparameters, Controls text generation behavior for rollout., Create a new generation hyperparameters with stop and pad token ids added., Asynchronously generate a response for the given request.          Parameters, detect_image_mime(), get_versioned_lora_name(), HttpGenerationResult, HttpRequest (+159 more)
 
 ### Community 16 - "Proxy Service Inference"
 Cohesion: 0.02
-Nodes (198): DataProxyConfig, ConfigureBackendResponse, create_app(), _create_areal_client(), _create_inf_bridge(), DataProxyHealthResponse, DataProxyStatusResponse, _flush_ready_trajectories() (+190 more)
+Nodes (200): DataProxyConfig, ConfigureBackendResponse, create_app(), _create_areal_client(), _create_inf_bridge(), DataProxyHealthResponse, DataProxyStatusResponse, GetVersionResponse (+192 more)
 
 ### Community 17 - "Archon Distributed Experimental"
-Cohesion: 0.01
-Nodes (230): Update weights to the inference engine in a blocking manner.          Parameters, ParamSpec, WeightUpdateMeta, init_custom_process_group(), Create one NCCL weight-update group per inference PP stage.          The group n, Future, Build SGLang init weights group request.          Supports two scenarios:, Initialize the weight update process group. (+222 more)
+Cohesion: 0.14
+Nodes (23): Smoke test on a single GPU: engine init + forward pass.      Validates the megat, Same regression guard as ``test_qwen3_grad_norm_mb_invariance`` but on     Qwen3, HF save/load round-trip under TP=2.      Uses _save_model_to_hf / _load_model_fr, Qwen3.5-MoE megatron forward under PP=2 / TP=2 / EP=2.      The MoE analog of ``, HF save/load round-trip for Qwen3.5-MoE under PP=2 / TP=2 / EP=2.      Validates, Regression guard: grad_norm must be invariant to num_microbatches.      Guards t, _run_test_with_torchrun(), test_qwen3_5_grad_norm_mb_invariance() (+15 more)
 
 ### Community 18 - "Scaffolding Examples Controllers"
-Cohesion: 0.02
-Nodes (166): ABCMeta, InferenceEngine, Configure performance tracer.          Parameters         ----------         con, Connect to an inference engine for online training.          Parameters, Initialize environments and launch the background thread for asynchronous distri, Destroy the engine and release GPU memory for the local inference engine., Check if the engine has been initialized.          Returns         -------, Get the workflow executor of the inference engine. (+158 more)
+Cohesion: 0.10
+Nodes (20): GSM8K RLVR Scaffolding Config (2-node Ray), GSM8KScaffoldingWorkflow, RLVR (Reinforcement Learning with Verifiable Rewards) Example using Scaffolding, ScaffoldingWorkflow customized for GSM8K RLVR training.      Demonstrates overri, Create an SGLangWorker connected to the real SGLang server., sglang_worker(), CreateWorkerFromEngine(), AsyncOpenAI (+12 more)
 
 ### Community 19 - "Multica Packages Views"
-Cohesion: 0.02
-Nodes (201): agentTaskStatsOptions(), dashboardAgentRunTimeOptions(), dashboardKeys, dashboardRunTimeDailyOptions(), dashboardUsageByAgentOptions(), dashboardUsageDailyOptions(), evolutionKeys, evolutionMetricsOptions() (+193 more)
+Cohesion: 0.01
+Nodes (263): agentTaskStatsOptions(), debounceStorageWrites(), dashboardAgentRunTimeOptions(), dashboardKeys, dashboardRunTimeDailyOptions(), dashboardUsageByAgentOptions(), dashboardUsageDailyOptions(), issueReviewStatsOptions() (+255 more)
 
 ### Community 20 - "Controller Scheduler Service"
 Cohesion: 0.03
-Nodes (66): Protocol, Return (concurrency_capacity, staleness_capacity) for diagnostics.          Unli, Adjust accepted count after checkpoint recovery.          When a checkpoint is r, Callback when a rollout is enqueued as a pending input task.          Thread-saf, Callback when a rollout is submitted for execution.          Thread-safe method, Callback when a rollout completes successfully and is accepted.          Thread-, Callback when a rollout completes but is rejected.          Thread-safe method t, Manages rollout capacity based on staleness and concurrency constraints.      Th (+58 more)
+Nodes (64): Get the workflow executor of the inference engine., Get the workflow executor of the inference engine., Raised when an AsyncTaskRunner queue is full., Wrapper for task results with creation timestamp.      Attributes     ----------, TaskQueueFullError, TimedResult, get(), Execution context available to workflows via contextvars.      Attributes     -- (+56 more)
 
 ### Community 21 - "Multica Packages Views"
 Cohesion: 0.02
-Nodes (83): RFC-4122, AttachmentPreviewRoute(), PreviewTooLargeError, PreviewUnsupportedError, ConfigState, configStore, useWorkspaceSlug(), Attachment (+75 more)
+Nodes (143): RFC-2142, AppContent(), HTML_LANG, DesktopShell(), MainTopBar(), useInternalLinkHandler(), useNativeNavigationGestures(), TabContent() (+135 more)
 
 ### Community 22 - "Areal Staleness Infra"
-Cohesion: 0.01
-Nodes (136): SchedulingStrategy, Job, Any, Stop and clean up worker processes.          Parameters         ----------, Represents a worker process in the distributed system.      Attributes     -----, Fork new worker processes from existing workers.          Creates new worker pro, Create an engine instance on a remote worker.          The engine parameter is a, Set environment variables on a worker before engine creation.          Parameter (+128 more)
+Cohesion: 0.05
+Nodes (36): Attention, FeedForward, device, ProcessGroup, Tensor, Qwen2Model, Configure Ulysses sequence parallelism.          Args:             cp_group: Pro, Check if Ulysses SP is enabled. (+28 more)
 
 ### Community 23 - "Multica Packages Views"
 Cohesion: 0.04
-Nodes (40): ParallelStrategy, Data parallelism size for expert modules in MoE models., Tensor parallelism size (abbreviated)., Data parallelism size (abbreviated)., Context parallelism size (abbreviated)., Expert parallelism size (abbreviated)., Expert tensor parallelism size (abbreviated)., Expert data parallelism size (abbreviated). (+32 more)
+Nodes (14): ParallelDimension, _ParallelStrategyTransformer, Single parallelism dimension with type and size.      Used internally by the gra, Lark transformer to convert parse tree to lists of ModelAllocation objects., Validate and track component names for uniqueness., Build ModelAllocation with validation., Handle multi-component disaggregation: comp1 + comp2 + comp3..., Handle colocation: comp1 | comp2 | comp3... (+6 more)
 
 ### Community 24 - "Multica Packages Onboarding"
-Cohesion: 0.13
-Nodes (19): stickerCatalogKeys, stickerCatalogOptions(), StickerAsset, copyTextMock, presenceDetailMock, renderWithStickerCatalog(), absolutizeStickerURL(), buildStickerAssetIndex() (+11 more)
+Cohesion: 0.09
+Nodes (17): compute_advantage(), n_step_return(), Node, GRPO-normalize per-node credit across all nodes in each query group.          Ea, Compute GAE advantages/returns in-place on the given nodes., Extract query_id from Node., Current critic error-variance estimate (live if available)., Critic value for ``node``, blended with LOO MC when eligible. (+9 more)
 
 ### Community 25 - "Functional Sampling Rejection"
 Cohesion: 0.03
-Nodes (53): Unified configuration for sample filtering based on policy divergence.      Filt, Validate configuration., RejectionSamplingConfig, Additional edge case tests for ppo_actor_loss_fn., Test that invalid importance_sampling_level raises ValueError., Test batch_size=1 with complete sequence (no padding)., Test batch_size=1 with partial masking (some padding)., TestPPOActorLossFnEdgeCases (+45 more)
+Nodes (58): Unified configuration for sample filtering based on policy divergence.      Filt, Validate configuration., RejectionSamplingConfig, Additional edge case tests for ppo_actor_loss_fn., Test that invalid importance_sampling_level raises ValueError., Test batch_size=1 with complete sequence (no padding)., Test batch_size=1 with partial masking (some padding)., TestPPOActorLossFnEdgeCases (+50 more)
 
 ### Community 26 - "Tracer Perf Areal"
-Cohesion: 0.02
-Nodes (129): AbstractAsyncContextManager, AbstractContextManager, PerfTracerConfig, Configuration for per-session lifecycle tracing., Configuration for perf tracer emission., SessionTracerConfig, _AsyncScope, _AsyncSessionPhaseScope (+121 more)
+Cohesion: 0.03
+Nodes (110): AbstractAsyncContextManager, AbstractContextManager, Configuration for per-session lifecycle tracing., SessionTracerConfig, _AsyncScope, _AsyncSessionPhaseScope, configure(), _default_trace_path() (+102 more)
 
 ### Community 27 - "Archon Experimental Torchrun"
 Cohesion: 0.02
-Nodes (173): ArchonFP8Config, Archon FP8 training configuration., DCPState, Stateful, DCP wrapper for archon models.      Key design decisions:     - Uses flatten_opt, ArchonParallelDims, Parallel dimensions for Archon engine.      Archon Engine uses PyTorch-native di, Whether HSDP replication is enabled (dp_replicate > 1). (+165 more)
+Nodes (208): ArchonParallelDims, Parallel dimensions for Archon engine.      Archon Engine uses PyTorch-native di, Whether HSDP replication is enabled (dp_replicate > 1)., Whether FSDP sharding is enabled (dp_shard > 1)., Whether any data parallelism is enabled (dp_replicate > 1 or dp_shard > 1)., Whether data or context parallelism is enabled (for loss all-reduce)., Whether FSDP is enabled (dp_shard > 1 or cp > 1)., Whether context parallelism is enabled. (+200 more)
 
 ### Community 28 - "Handler Multica Server"
 Cohesion: 0.03
-Nodes (155): CreateAgentRadarActionParams, channelPromptNoopDB, ghCheckSuitePayload, ghInstallationPayload, ghPRChanges, ghPullRequestPayload, GitHubConnectResponse, GitHubInstallationResponse (+147 more)
+Nodes (98): CreateAgentRadarActionParams, PendingHandoff, channelPromptNoopDB, cloudRuntimeProxy, Config, identifierParts, ModelListStore, radarActivityTarget (+90 more)
 
 ### Community 29 - "Handler Multica Server"
 Cohesion: 0.02
-Nodes (231): revocationFixture, T, insertHandlerTestTask(), rawJSONResponse(), TestAgentEnv_AgentActorRejected(), TestAgentEnv_TaskTokenActorSource(), TestAgentResponseIncludesRuntimeName(), TestAgentResponseShape_HasNoLegacyEnvFields() (+223 more)
+Nodes (257): revocationFixture, TestAgentEnv_AgentCredentialActorSource(), TestCreateAgentCredential_RejectsAgentActor(), T, insertHandlerTestTask(), rawJSONResponse(), TestAgentEnv_AgentActorRejected(), TestAgentEnv_TaskTokenActorSource() (+249 more)
 
 ### Community 30 - "Experimental Openai Remote"
 Cohesion: 0.02
-Nodes (111): Apply chat template -> token IDs. Runs in executor., default_prefix_matcher(), InteractionCache, PrefixMatcher, Protocol, Add a new interaction to the cache, automatically building parent-child relation, Dump mismatched parent/child messages to a JSON file for debugging., Protocol for custom message prefix matching functions. (+103 more)
+Nodes (98): Apply chat template -> token IDs. Runs in executor., InteractionCache, PrefixMatcher, Protocol, Add a new interaction to the cache, automatically building parent-child relation, Dump mismatched parent/child messages to a JSON file for debugging., Protocol for custom message prefix matching functions., Allow deep-copy of the empty cache.          ``threading.Lock`` cannot be deep-c (+90 more)
 
 ### Community 31 - "Multica Packages Store"
-Cohesion: 0.01
-Nodes (166): DesktopShell(), MainTopBar(), useInternalLinkHandler(), useNativeNavigationGestures(), TabBar(), MockTab, state, TabContent() (+158 more)
+Cohesion: 0.02
+Nodes (157): WebNotificationBridge(), TranscriptSortDirection, TranscriptViewState, useTranscriptViewStore, AgentsScope, AgentsViewState, useAgentsViewStore, identify() (+149 more)
 
 ### Community 32 - "Scaffolding Examples Task"
-Cohesion: 0.03
-Nodes (87): RolloutWorkflow, Logger, Completion, Run a single tau2 task. Returns the reward., run_task(), Scaffolding framework primitives vendored from TensorRT-LLM.  This module re-exp, BestOfNController, Controller (+79 more)
+Cohesion: 0.04
+Nodes (78): RolloutWorkflow, Logger, Completion, Run a single tau2 task. Returns the reward., run_task(), Scaffolding framework primitives vendored from TensorRT-LLM.  This module re-exp, BestOfNController, Controller (+70 more)
 
 ### Community 33 - "Areal Customized Teacher"
 Cohesion: 0.02
-Nodes (139): EpisodeRunResult, accuracy_reward(), on_policy_distill_reward_fn(), OnPolicyDistillAgent, Any, On-Policy Distillation Agent for AReaL integration.  This module provides a clas, Execute a single agent run and return the reward.          This method is compat, Simple accuracy reward function.      Args:         completion: The model's comp (+131 more)
+Nodes (140): build_judge_instruction(), parse_turn_scores(), Build the judge instruction appended after the full episode.      The judge is a, Extract ``{turn_idx: score}`` from a judge XML response.      Robust to surround, accuracy_reward(), on_policy_distill_reward_fn(), OnPolicyDistillAgent, Any (+132 more)
 
 ### Community 34 - "Inference V2 Service"
-Cohesion: 0.01
-Nodes (155): Export a ready trajectory.          Parameters         ----------         discou, Get completion/response with its reward from cache., Export cached completions/responses in different formats.          When ``style=, concat_string_interactions(), InteractionWithTokenLogpReward, ResponseInputParam, Tensor, Concat interactions that lack tensor data (e.g. external API mode).      Returns (+147 more)
+Cohesion: 0.05
+Nodes (22): One ready-but-not-yet-exported online trajectory., Unified session data for both offline and online modes.      Maintains ``active_, Return the latest ready trajectory.          Caller must already hold ``self._lo, Record reward for the active trajectory., Close the active segment into a ready trajectory WITHOUT setting a reward., Thread-safe store for session lifecycle management., Start a new session, returning (session_id, session_api_key).          If *api_k, Return the persistent HITL session, creating it if needed. (+14 more)
 
 ### Community 35 - "Multica Packages Views"
-Cohesion: 0.01
-Nodes (206): buildPresenceMap(), deriveAgentAvailability(), deriveAgentPresenceDetail(), DerivePresenceInput, deriveWorkload(), deriveWorkloadDetail(), NOW, WorkloadDetail (+198 more)
+Cohesion: 0.03
+Nodes (66): GroupedRolloutWorkflow, Any, Future, Popen, Protocol, StatefulDataLoader, Tensor, WorkflowLike (+58 more)
 
 ### Community 36 - "Areal Infra Launcher"
-Cohesion: 0.01
-Nodes (203): _AllocationMode, AllocationType, InferenceParallelism, Backward Compatible: Type of resource allocation strategy., DEPRECATED — Legacy resource allocation configuration for SPMD launchers only., Get all inference allocations (sglang, vllm backends)., Get all training allocations (fsdp, megatron, archon backends)., DEPRECATED: Infer allocation type from allocations. Use ModelAllocation directly (+195 more)
+Cohesion: 0.03
+Nodes (100): AllocationType, Backward Compatible: Type of resource allocation strategy., ClusterSpecConfig, _migrate_legacy_rejection_sampling(), parse_cli_args(), DictConfig, Configuration for experiment recovery and fault tolerance., Configuration for cluster specification and distributed computing setup. (+92 more)
 
 ### Community 37 - "Pp Sglang Unit"
 Cohesion: 0.01
-Nodes (189): AllocationValidationError, InvalidAllocationModeError, _LLMParallelParser, MegatronParallelStrategy, ModelAllocation, ParallelDimension, _ParallelStrategyTransformer, Exception (+181 more)
+Nodes (150): AllocationValidationError, InvalidAllocationModeError, ModelAllocation, Exception, Raised when allocation mode validation fails., Single model allocation with backend, name, parallel strategy, and scheduling., Legacy exception for backward compatibility with existing code., Get allocation by name. (+142 more)
 
 ### Community 38 - "Moe Archon Experimental"
-Cohesion: 0.03
-Nodes (79): ArchonEngineConfig, Configuration for Archon Engine training backend., ParallelizeFn, PipeliningFn, device, dtype, Module, PipelineStage (+71 more)
+Cohesion: 0.02
+Nodes (114): ArchonEngineConfig, Configuration for Archon Engine training backend., MoEArgs, Arguments for Mixture of Experts (MoE) configuration.      Attributes:         n, _check_grouped_mm_available(), GroupedExperts, Tensor, # NOTE: Upgrading PyTorch may resolve this in the future. (+106 more)
 
 ### Community 39 - "Gateway Inference Service"
 Cohesion: 0.02
-Nodes (132): BroadcastResponse, BroadcastResultItem, create_app(), GatewayHealthResponse, GatewayModelsResponse, BaseModel, Exception, FastAPI (+124 more)
+Nodes (133): BroadcastResponse, BroadcastResultItem, create_app(), GatewayHealthResponse, GatewayModelsResponse, BaseModel, Exception, FastAPI (+125 more)
 
 ### Community 40 - "Engine Areal Fsdp"
-Cohesion: 0.02
-Nodes (73): FSDPWrapPolicy, Policy configuration for FSDP model layer wrapping. None defaults to wrapping tr, is_gemma3_model(), is_moe_model(), is_qwen2_vl_model(), is_qwen3_5_model(), is_qwen3_moe_model(), is_qwen3_vl_model() (+65 more)
+Cohesion: 0.04
+Nodes (45): ArchiveAgentParams, ArchiveAgentsByIDsParams, ArchiveAgentsByRuntimeParams, CancelAgentTasksByIssueAndAgentParams, CancelInFlightChatTasksBySessionAndAgentParams, CancelInFlightTasksByIssueAndAgentParams, ClaimAgentChatTaskParams, CompleteAgentTaskParams (+37 more)
 
 ### Community 41 - "Rtensor Rationale Rpc"
 Cohesion: 0.01
-Nodes (247): _dispatch_tensors(), _item_weight(), Extract shard IDs and clear tensors on each worker.          HTTP DELETEs to eac, Partition trajectories across DP groups by balanced token count.      Args:, Clear distributed batch shards from workers to free memory.          Two fan-out, fetch(), flatten_shard_ids(), get_backend() (+239 more)
+Nodes (233): Drain this worker's client-side RTensor fetch buffer.          Called via RPC by, GatewayTrainController, Any, Future, Worker, Ensure _workers_ready is signaled even if _bg_initialize fails., Destroy engines on all training workers before killing processes.          ``dis, create_app() (+225 more)
 
 ### Community 42 - "Archon Experimental State"
-Cohesion: 0.02
-Nodes (122): BaseStateDictAdapter, Any, Tensor, Return HuggingFaceStorageReader to read HF checkpoint.          Args:, Return the checkpoint key to use for HF save/load operations.          Most Arch, Base class for HF <-> Archon state dict conversion.      Args:         model_con, Load model.safetensors.index.json to support multi-file checkpoint., get_supported_model_types() (+114 more)
+Cohesion: 0.03
+Nodes (75): BaseModelArgs, BaseStateDictAdapter, ABC, Any, PretrainedConfig, Tensor, Return HuggingFaceStorageReader to read HF checkpoint.          Args:, Return the checkpoint key to use for HF save/load operations.          Most Arch (+67 more)
 
 ### Community 43 - "Tree Search Store"
-Cohesion: 0.02
-Nodes (94): GAEAdvantageComputer, HybridGAEAdvantageComputer, Generalized Advantage Estimation over episode turns.      Each ``Node`` is one t, Variance-aware GAE that blends the critic with a leave-one-out MC value.      Id, episode_returns_to_go(), Discounted return-to-go ``g_t = sum_{k>=t} gamma^{k-t} * r_k`` per turn.      Th, _lazy_torch(), MCTSTreeStore (+86 more)
+Cohesion: 0.01
+Nodes (181): adaptive_horizon(), GAEAdvantageComputer, HybridGAEAdvantageComputer, Generalized Advantage Estimation over episode turns.      Each ``Node`` is one t, Replace GAE advantages with per-query GRPO-normalized outcome_rewards.      Read, Variance-aware GAE that blends the critic with a leave-one-out MC value.      Id, Pick the backup horizon for node ``t`` by walking descendants (ARE-4).      Boot, ΔV advantage ``A(s_t) = G_latest^(n)(s_t) - V_own(s_t)`` (ARE-4).      Each ``No (+173 more)
 
 ### Community 44 - "Seqpack Rationale Dispatch"
-Cohesion: 0.03
-Nodes (33): MegatronEngine, _normalize_glu_param_name(), Any, Parameter, ProcessGroup, StatefulDataLoader, Tensor, WorkflowLike (+25 more)
+Cohesion: 0.02
+Nodes (143): Affected Files, Primary (engine layer — most likely to break), Secondary (model / infra layer), Tertiary (tests, infra), Version-Guarded Code, MegatronParallelStrategy, Megatron parallel strategy with additional sequence parallelism and virtual pipe, FP8EngineConfig (+135 more)
 
 ### Community 45 - "Handler Server Multica"
 Cohesion: 0.03
-Nodes (99): AgentCredentialResponse, CreateAgentCredentialRequest, CreateAgentCredentialResponse, CreatePATRequest, CreatePATResponse, CreateSandboxNodeRequest, CreateSandboxRequest, PersonalAccessTokenResponse (+91 more)
+Nodes (67): Protocol, Return (concurrency_capacity, staleness_capacity) for diagnostics.          Unli, Adjust accepted count after checkpoint recovery.          When a checkpoint is r, Callback when a rollout is enqueued as a pending input task.          Thread-saf, Callback when a rollout is submitted for execution.          Thread-safe method, Callback when a rollout completes successfully and is accepted.          Thread-, Callback when a rollout completes but is rejected.          Thread-safe method t, Manages rollout capacity based on staleness and concurrency constraints.      Th (+59 more)
 
 ### Community 46 - "Areal Mode Alloc"
-Cohesion: 0.16
-Nodes (13): FSDPParallelStrategy, FSDP parallel strategy., ProcessGroup, Force eager initialization of the collective communicator for each group.      N, warmup_process_groups(), Unit tests for ``warmup_process_groups``.  The collective warmup itself needs a, When LOCAL_RANK is unset, the caller's current device is used., test_dedupes_repeated_groups() (+5 more)
+Cohesion: 0.03
+Nodes (63): Any, DTensor, Tensor, Qwen3_5StateDictAdapter, Convert Archon state dict to HuggingFace format.          Main transformations:, Convert HuggingFace state dict to Archon format.          Main transformations:, State dict adapter for Qwen3.5 Dense and MoE models.      Handles:     - Key nam, Convert a single Archon (name, tensor) pair to HuggingFace format.          Used (+55 more)
 
 ### Community 47 - "Areal Resolve Rationale"
 Cohesion: 0.04
@@ -2280,127 +2280,127 @@ Nodes (50): apply_rejection_sampling(), _check_bounds(), compute_binary_kl_diver
 
 ### Community 48 - "Customized Areal Tree"
 Cohesion: 0.02
-Nodes (124): copy_messages_to_task(), Copy raw messages to a task after stripping source DB identity columns., Any, Structured result from TPFCAgent.run() that survives subprocess pickling.      U, Execute a single agent run and return the reward.          This method is compat, TPFCAgentResult, _affected_row_count(), annotate_nodes_from_run() (+116 more)
+Nodes (117): copy_messages_to_task(), Copy raw messages to a task after stripping source DB identity columns., Structured result from TPFCAgent.run() that survives subprocess pickling.      U, TPFCAgentResult, _affected_row_count(), annotate_nodes_from_run(), _apply_fresh_query_row(), _apply_train_id_not_contains_filter() (+109 more)
 
 ### Community 49 - "Service Taskservice Multica"
-Cohesion: 0.04
-Nodes (78): FileAttachResult, PickedAsset, UploadContext, ApiClientOptions, ApiError, FileAsset, ActiveTasksResponse, ActiveTasksResponseSchema (+70 more)
+Cohesion: 0.07
+Nodes (35): ClaimEvolutionCandidateParams, CreateSharedEvolutionUnitParams, CreateSharedEvolutionUnitVersionParams, DeleteEvolutionSubmissionFilesParams, FindSharedEvolutionUnitByHashParams, GetEvolutionSubmissionForReviewParams, GetEvolutionUnitSubmissionInWorkspaceParams, GetSharedEvolutionUnitCurrentVersionIDParams (+27 more)
 
 ### Community 50 - "Handler Agent Multica"
-Cohesion: 0.03
-Nodes (142): AgentActivityEntry, CreateTaskMessageParams, ListTaskMessagesSinceParams, MessagesForTaskInRangeParams, TaskMessage, activityEventExec, AgentActivityCursor, AgentActivityDetailResponse (+134 more)
+Cohesion: 0.04
+Nodes (132): AgentActivityEntry, activityEventExec, AgentActivityCursor, AgentActivityDetailResponse, AgentActivityDiagnosticResponse, AgentActivityEntry, AgentActivityEventCursor, AgentActivityEventRealtimePayload (+124 more)
 
 ### Community 51 - "Handler Multica Server"
 Cohesion: 0.03
-Nodes (118): AgentSkillSummary, AgentActivityBucket, AgentCreationDraftResponse, AgentEnvResponse, AgentInboxLeaseResponse, AgentResponse, AgentRunCount, AgentTaskFeedCursor (+110 more)
+Nodes (123): AgentSkillSummary, AgentActivityBucket, AgentCreationDraftResponse, AgentInboxLeaseResponse, AgentResponse, AgentRunCount, AgentTaskFeedCursor, AgentTaskFeedItem (+115 more)
 
 ### Community 52 - "Prox Approx Rationale"
-Cohesion: 0.01
-Nodes (237): DistributedDataParallelConfig, MemoryProfilerConfig, MicroBatchSpec, PPOActorConfig, Specification for splitting micro-batches during training., Configuration for PPO actor model, a subclass of a TrainEngine., Validate packing algorithm configuration., Create new spec with updated fields while maintaining Omegaconf compatibility. (+229 more)
+Cohesion: 0.10
+Nodes (18): Resolve the proximal policy log-probabilities based on the method.      This fun, _resolve_proximal_logp(), clip_cov_grpo_loss_fn(), clip_cov_ppo_actor_loss_fn(), _masked_mean(), Tensor, Clip-cov PPO loss functions.  Implements covariance-aware PPO clipping from http, Compute mean over valid (masked) elements. (+10 more)
 
 ### Community 53 - "Multica Packages Views"
-Cohesion: 0.02
-Nodes (140): runUpload(), UploadResult, PAGINATED_STATUSES, canAssignAgentToIssue(), canChangeMemberRole(), canDeleteComment(), canDeleteRuntime(), canDeleteSkill() (+132 more)
+Cohesion: 0.03
+Nodes (91): canAssignAgentToIssue(), canChangeMemberRole(), canDeleteComment(), canDeleteRuntime(), canDeleteSkill(), canDeleteWorkspace(), canEditAgent(), canEditComment() (+83 more)
 
 ### Community 54 - "Handler Multica Server"
 Cohesion: 0.05
-Nodes (170): newRequestAs(), createAgentFilesTestMember(), T, TestAgentFileContentDevProfileAccessAllowsReadNotWrite(), TestAgentFileContentOwnerOnly(), TestListAgentFilesDevProfileAccessAllowsWorkspaceMembers(), TestListAgentFilesOwnerOnly(), T (+162 more)
+Nodes (192): agentCredentialTransportFixture, newRequestAs(), T, seedAgentCredentialTransportFixture(), seedHandlerTestRuntimeCapabilities(), seedHandlerTestRuntimeDaemonID(), seedHandlerTestRuntimeDaemonIDNull(), seedHandlerTestRuntimeOwner() (+184 more)
 
 ### Community 55 - "Qwen3 Archon Experimental"
 Cohesion: 0.02
-Nodes (112): BaseArchonModel, BaseModelArgs, ABC, device, PretrainedConfig, Base class for Archon models., Initialize model parameters., Initialize model buffers (e.g., rope_cache). (+104 more)
+Nodes (107): BaseArchonModel, device, Base class for Archon models., Initialize model parameters., Initialize model buffers (e.g., rope_cache)., Qwen3_5ModelArgs, Model arguments for Qwen3.5 (dense + MoE, hybrid architecture).      Qwen3.5 is, compute_decay_beta() (+99 more)
 
 ### Community 56 - "Areal Serialization Rpc"
 Cohesion: 0.02
-Nodes (72): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), askUser(), changeDirectory2(), changeSearchText() (+64 more)
+Nodes (59): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), changeDirectory2(), changeSearchText(), classicStateToDocument() (+51 more)
 
 ### Community 57 - "Controller Service Inference"
 Cohesion: 0.01
-Nodes (297): AgentConfig, conf_as_dict(), get_py_cmd(), InferenceEngineConfig, Validate scheduling spec configuration., Configuration for vLLM runtime. Refer to:     https://docs.vllm.ai/en/stable/api, Configuration for SGLang runtime. Refer to:     https://github.com/sgl-project/s, Configuration for agent workflows and the experimental agent service controller. (+289 more)
+Nodes (266): AgentConfig, conf_as_dict(), InferenceEngineConfig, Validate scheduling spec configuration., Configuration for vLLM runtime. Refer to:     https://docs.vllm.ai/en/stable/api, Configuration for SGLang runtime. Refer to:     https://github.com/sgl-project/s, Configuration for agent workflows and the experimental agent service controller., Configuration for inference servers, including offpolicyness control. (+258 more)
 
 ### Community 58 - "Chat Multica Packages"
-Cohesion: 0.03
-Nodes (74): Props, Props, TranscriptSortDirection, TranscriptViewState, useTranscriptViewStore, AgentAvailability, TaskFailureReason, ChatMessage (+66 more)
+Cohesion: 0.01
+Nodes (217): buildPresenceMap(), deriveAgentAvailability(), deriveAgentPresenceDetail(), DerivePresenceInput, deriveWorkload(), deriveWorkloadDetail(), NOW, WorkloadDetail (+209 more)
 
 ### Community 59 - "Tree Customized Areal"
-Cohesion: 0.04
-Nodes (58): Edge, ExecutionDAG, A directed dependency from ``src`` run to ``dst`` run., Directed acyclic graph of agent runs.      Edges point from a *cause* run to an, Runs this run causally depends on (incoming edges)., Runs that causally depend on this run (outgoing edges)., Bind an RL ``session_id`` to a run (called at ``rl_start_session``)., Return ``{node_id: session_id}`` for every run in the DAG.          Session-less (+50 more)
+Cohesion: 0.02
+Nodes (232): assemble_node_advantages(), AssembledAdvantages, explained_variance(), DAG advantage assembler -- the GAE-replaces-GRPO core (Phase 3, Task 9).  Torch-, Per-node GAE outputs keyed by ``node_id``., Run global GAE over ``ordered_nodes`` (global completion order).      ``ordered_, ``1 - Var(target - pred) / Var(target)`` -- critic-quality metric.      Returns, CreditAssignment (+224 more)
 
 ### Community 60 - "Controller Train Areal"
-Cohesion: 0.02
-Nodes (58): create_mock_distributed_batch(), ft_spec(), mock_scheduler(), MockScheduler, Unit tests for TrainController.  Tests cover initialization, worker management,, Mock worker deletion., Provide a MockScheduler instance., Provide a TrainEngineConfig for testing. (+50 more)
+Cohesion: 0.12
+Nodes (10): mock_scheduler(), MockScheduler, Mock worker deletion., Provide a MockScheduler instance., Mock Scheduler for testing TrainController., Create mock workers based on job configuration., Return list of workers for the given role., Mock environment configuration. (+2 more)
 
 ### Community 61 - "Daemon Multica Server"
-Cohesion: 0.03
-Nodes (74): repoCacheBackend, runtimeSetWatcher, SkillData, TaskResult, taskRunner, workspaceState, isInvalidDaemonTokenError(), isTaskNotFoundError() (+66 more)
+Cohesion: 0.06
+Nodes (9): daemonRegistrationCapabilities(), Client, Daemon, HeartbeatResponse, RWMutex, Time, repoAllowlist(), PendingLocalSkillImport (+1 more)
 
 ### Community 62 - "Handler Multica Server"
-Cohesion: 0.03
-Nodes (103): decodeMs, AgentUsagePayload, channelAgentTriggerContext, conversationSurface, DaemonHeartbeatRequest, DaemonRegisterRequest, daemonWorkspaceReposResponse, inboxEventTaskMessageRow (+95 more)
+Cohesion: 0.02
+Nodes (132): ClientIdentity, decodeMs, AckAgentInboxEventRequest, AgentInboxEventResponse, AgentInboxExecutionRequest, AgentUsagePayload, CompleteAgentInboxEventRequest, conversationSurface (+124 more)
 
 ### Community 63 - "Multica Components Apps"
 Cohesion: 0.03
-Nodes (106): VISIBILITY_DESCRIPTION, VISIBILITY_LABEL, VISIBILITY_TOOLTIP, useChatStore, logger, useCreateChatSession(), useDeleteChatSession(), useMarkChatSessionRead() (+98 more)
+Nodes (57): PretrainedConfig, Create MoEArgs from a HuggingFace config.          Expected HuggingFace config f, PretrainedConfig, PretrainedConfig, PretrainedConfig, Test creating MoEArgs when HF config uses num_local_experts., Test MoEArgs.from_hf_config uses defaults for missing fields., Test creating MoEArgs from a basic HF config. (+49 more)
 
 ### Community 64 - "Cmd Multica Server"
-Cohesion: 0.03
-Nodes (197): actorDisplayLookup, actorDisplayLookupState, assigneeKinds, assigneeMatch, idCandidate, resolvedID, cleanSkillIDsFlag(), APIClient (+189 more)
+Cohesion: 0.04
+Nodes (198): actorDisplayLookup, actorDisplayLookupState, assigneeKinds, assigneeMatch, idCandidate, resolvedID, cleanSkillIDsFlag(), APIClient (+190 more)
 
 ### Community 65 - "Checkpoint Archon Experimental"
 Cohesion: 0.05
 Nodes (37): Configuration for model checkpoint saving scheduling and timing., SaverConfig, AsyncCheckpointManager, AsyncMode, ProcessGroup, str, Submit a bg job: wait for upload -> run *fn*., Wait for staging (GPU->CPU) + check for bg errors.          Called by the traini (+29 more)
 
 ### Community 66 - "Distill Tree Search"
-Cohesion: 0.03
-Nodes (94): PositionRewardInfo, Reward information for a single generation position.      Stores candidate token, _distribute_position_rewards(), Distribute position_rewards to minibatches based on sample_index.      Each Posi, _compute_position_level_grpo_loss(), Compatibility exports for tree-search GRPO/distillation losses.  The implementat, Compatibility wrapper that preserves patching of ``loss.logger``., grpo_distill_loss_fn() (+86 more)
+Cohesion: 0.02
+Nodes (126): PositionRewardInfo, Reward information for a single generation position.      Stores candidate token, _FakeClient, _logits_one_hot(), _node(), TestBatchBuilder, TestCriticLoss, TestExpectedValueFromLogits (+118 more)
 
 ### Community 67 - "Norm Adv Group"
-Cohesion: 0.04
-Nodes (96): NormConfig, Configuration for reward/advantage normalization., Validate normalization configuration., Normalization, Adaptive normalization with different levels.      Supports independent specific, Build slices for group-level normalization.          When ``group_sizes`` (e.g., Test the eps parameter behavior with new options., Test equality comparison between NormConfig instances. (+88 more)
+Cohesion: 0.03
+Nodes (128): NormConfig, Configuration for reward/advantage normalization., Validate normalization configuration., Normalization, Adaptive normalization with different levels.      Supports independent specific, Build slices for group-level normalization.          When ``group_sizes`` (e.g., Compute mean only, using masked_normalization internals., Compute std only, given precomputed mean. (+120 more)
 
 ### Community 68 - "Handler Multica Server"
 Cohesion: 0.05
-Nodes (137): claimCommentTaskResp, claimRuntimeGuardTask, assertChannelMessageContentCount(), assertNoChannelMessageContent(), assertSingleMentionReferenceForTest(), assertTaskOutputSuppressedReason(), capabilitiesContainExactly(), claimCommentTask() (+129 more)
+Nodes (128): claimCommentTaskResp, claimRuntimeGuardTask, assertNoChannelMessageContent(), assertNoAgentChannelMessages(), assertSingleMentionReferenceForTest(), assertTaskOutputSuppressedReason(), capabilitiesContainExactly(), claimCommentTask() (+120 more)
 
 ### Community 69 - "Scaffolding Areal Engine"
-Cohesion: 0.07
-Nodes (19): Run multi-turn chat generation.          Creates a ChatTask from the stored mess, Any, ToolDescription, _fetch_page(), _html_to_text(), Real search and visit tools for the search scaffolding example.  Uses the Serper, Very basic HTML tag stripping., Fetch webpages and return truncated text content.      Parameters     ---------- (+11 more)
+Cohesion: 0.11
+Nodes (18): _fetch_page(), _html_to_text(), Real search and visit tools for the search scaffolding example.  Uses the Serper, Very basic HTML tag stripping., Fetch webpages and return truncated text content.      Parameters     ----------, Fetch a URL and return plain-text content (truncated)., Perform Google searches via the Serper API.      Parameters     ----------     q, Search a single query via Serper and return formatted results. (+10 more)
 
 ### Community 70 - "Handler Multica Server"
-Cohesion: 0.02
-Nodes (114): AddAgentSkillParams, AgentSharedSkill, CreateAgentMemoryParams, CreateAgentSharedSkillParams, CreateSkillParams, DeleteAgentMemoryParams, DeleteAgentSharedSkillParams, DeleteSkillParams (+106 more)
+Cohesion: 0.04
+Nodes (86): AgentMemorySyncRequest, AgentMemorySyncSet, AgentSharedSkillSyncRequest, agentSharedSkillSyncResult, AgentSharedSkillSyncSet, CreateSkillFileRequest, EvolutionSubmissionFile, EvolutionSubmissionRequest (+78 more)
 
 ### Community 71 - "Engine Areal Rationale"
-Cohesion: 0.03
-Nodes (40): Any, ProcessGroup, StatefulDataLoader, Tensor, WorkflowLike, Check if the current rank is the data parallel head of the current engine., Get the context and model parallel communication group of this engine., Get the CPU communication group of this engine.          Returns         ------- (+32 more)
+Cohesion: 0.02
+Nodes (84): ABCMeta, InferenceEngine, Any, ProcessGroup, StatefulDataLoader, Tensor, WorkflowLike, Configure performance tracer.          Parameters         ----------         con (+76 more)
 
 ### Community 72 - "Inference Service V2"
-Cohesion: 0.03
-Nodes (105): _query_router(), create_httpx_client(), AsyncClient, Create an httpx.AsyncClient with shared pool limits and transport-level retries., _post_online_ready_callback(), AsyncClient, ReadyNotification, pause_backend() (+97 more)
+Cohesion: 0.02
+Nodes (154): _query_router(), create_httpx_client(), get_default_uvicorn_kwargs(), Any, AsyncClient, Create an httpx.AsyncClient with shared pool limits and transport-level retries., Return shared uvicorn capacity kwargs to spread into uvicorn.run()., Force all HTTP-related loggers to WARNING.      Call this from service __main__. (+146 more)
 
 ### Community 73 - "Archon Experimental Hf"
-Cohesion: 0.02
-Nodes (120): get_model_spec(), is_supported_model(), Get ModelSpec by HF model_type., Check if a model_type is supported., get_state_dict_from_repo_id_or_path(), Obtain a state dictionary from either a Hugging Face repo ID or a local path., load_archon_model(), dtype (+112 more)
+Cohesion: 0.04
+Nodes (80): get_model_spec(), is_supported_model(), Get ModelSpec by HF model_type., Check if a model_type is supported., load_archon_model(), dtype, Load Archon model with same weights as HuggingFace model.      Args:         mod, Data Parallelism (DP/FSDP) tests for Archon Engine.  Run tests:     pytest tests (+72 more)
 
 ### Community 74 - "Handler Multica Server"
 Cohesion: 0.08
-Nodes (26): CreateWorkspaceParams, ListWorkspacesRow, SetDefaultSelfPlayEnvParams, UpdateWorkspaceParams, CreateMemberRequest, CreateWorkspaceRequest, MemberResponse, MemberWithUserResponse (+18 more)
+Nodes (28): CreateWorkspaceParams, ListWorkspacesRow, SetDefaultSelfPlayEnvParams, UpdateWorkspaceParams, CreateMemberRequest, CreateWorkspaceRequest, MemberResponse, MemberWithUserResponse (+20 more)
 
 ### Community 75 - "Multica Packages Ui"
 Cohesion: 0.10
 Nodes (27): bind_sandbox_to_task(), cleanup_sandbox_for_task(), clone_sandbox(), delete_sandbox(), _get_daytona(), _lookup_sandbox_id_for_task(), Sandbox lifecycle and cleanup operations.  Ported from le-agent-dev/backend/core, Clone a Daytona sandbox if the installed SDK exposes a clone path. (+19 more)
 
 ### Community 76 - "Guard Areal Infra"
-Cohesion: 0.05
-Nodes (80): cleanup_forked_children(), main(), main(), cleanup_forked_children(), main(), cleanup_forked_children(), configure_state_from_args(), create_app() (+72 more)
+Cohesion: 0.04
+Nodes (67): lang_config(), Return the language-model side of a (possibly nested) HF config.      Qwen3-VL a, FP8BlockwiseTensorHelper, Split operation: split both data and scale_inv along the same dimension., A helper wrapper tensor that maps operations on data to operations on both data, Reshape operation: same as view but allows non-contiguous tensors., Indexing operation: slice data and scale_inv accordingly.          Only the last, Concatenate FP8BlockwiseTensorHelper instances along specified dimension. (+59 more)
 
 ### Community 77 - "Multica Apps Mobile"
 Cohesion: 0.03
-Nodes (82): IssueProjectPickerRoute(), AgentPickerSheet(), Props, ChatTitleButton(), MarkdownToolbarProps, InboxDetailLabel(), PRIORITY_LABEL, shortDate() (+74 more)
+Nodes (93): Mode, EMPTY_RESULTS, HighlightTextProps, issueIconColor(), navigateOnTap(), RecentRow(), RecentRowProps, RowItem (+85 more)
 
 ### Community 78 - "Proxy Areal Experimental"
 Cohesion: 0.02
-Nodes (65): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), askUser(), changeDirectory2(), classicStateToDocument() (+57 more)
+Nodes (59): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), changeDirectory2(), changeSearchText(), classicStateToDocument() (+51 more)
 
 ### Community 79 - "Agent Service Experimental"
 Cohesion: 0.05
@@ -2408,91 +2408,91 @@ Nodes (58): OpenResponsesBridge, QueueMode, Queue mode for inbound messages when
 
 ### Community 80 - "Execenv Multica Server"
 Cohesion: 0.06
-Nodes (109): Environment, prepareCodexHome(), codexSandboxPolicyFor(), writeContextFiles(), Logger, Prepare(), ReadGCMeta(), Reuse() (+101 more)
+Nodes (108): Environment, prepareCodexHome(), codexSandboxPolicyFor(), writeContextFiles(), Logger, Prepare(), ReadGCMeta(), Reuse() (+100 more)
 
 ### Community 81 - "Generated Queries Agent"
-Cohesion: 0.04
-Nodes (26): Any, Future, Popen, StatefulDataLoader, Tensor, WorkflowLike, Launch vLLM server subprocess., vLLM remote inference engine.      This class delegates all functionality to Rem (+18 more)
+Cohesion: 0.05
+Nodes (49): BaseExperimentConfig, Base configuration class for all experiment types with common settings., Validate training configuration., Ray engine container. Represents either:     - one training world rank, or     -, RayRPCServer, Scheduler, Worker, Helper to build environment variables for a worker. (+41 more)
 
 ### Community 82 - "Handler Multica Server"
 Cohesion: 0.06
-Nodes (59): AgentRuntimeResponse, archiveAgentsAndDeleteRuntimeRequest, DashboardAgentRunTimeResponse, DashboardRunTimeDailyResponse, DashboardUsageByAgentResponse, DashboardUsageDailyResponse, RuntimeRelease, RuntimeUsageByAgentResponse (+51 more)
+Nodes (63): AgentRuntimeResponse, archiveAgentsAndDeleteRuntimeRequest, InMemoryUpdateStore, redisUpdateEnvelope, RedisUpdateStore, RuntimeUsageByAgentResponse, RuntimeUsageByHourResponse, UpdateAgentRuntimeRequest (+55 more)
 
 ### Community 83 - "Lark Multica Server"
-Cohesion: 0.04
-Nodes (49): addReactionCall, AddReactionParams, BindingPromptParams, BotInfo, cachedToken, deleteReactionCall, DeleteReactionParams, Enricher (+41 more)
+Cohesion: 0.03
+Nodes (61): addReactionCall, AddReactionParams, APIClient, BindingPromptParams, BotInfo, cachedToken, deleteReactionCall, DeleteReactionParams (+53 more)
 
 ### Community 84 - "Engine Distributed Torchrun"
-Cohesion: 0.03
-Nodes (93): Affected Files, Primary (engine layer — most likely to break), Secondary (model / infra layer), Tertiary (tests, infra), Version-Guarded Code, FP8EngineConfig, Configuration for FP8 (8-bit floating point) training.      This configuration e, broadcast_tensor() (+85 more)
+Cohesion: 0.09
+Nodes (29): compare_rmsnorm_bf16_fp8(), dequantize_fp8_param(), engine_bf16(), engine_fp8(), forward_backward_rmsnorm_module(), get_custom_rmsnorm(), load_layernorm_inputs_from_file(), Any (+21 more)
 
 ### Community 85 - "Archon Areal Experimental"
 Cohesion: 0.04
-Nodes (43): Qwen2ModelArgs, Model arguments for Qwen2. Default values are for Qwen2-0.5B., Attention, FeedForward, device, ProcessGroup, Tensor, Qwen2Model (+35 more)
+Nodes (68): _AsyncGenerateEngine, concat_prompt_token_ids_with_parent(), _ensure_message_dict_list(), _find_kth(), is_omitted(), _parse_tool_call_arguments(), Any, ChatCompletion (+60 more)
 
 ### Community 86 - "Handler Server Multica"
 Cohesion: 0.02
-Nodes (65): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), askUser(), changeDirectory2(), classicStateToDocument() (+57 more)
+Nodes (80): annotatedMarkdown(), annotateFrontmatter(), appendClassicStateEvent(), applyClassicTransition(), applyProjection(), applyRunStateToDocument(), applyStateUpdate(), artifactsHash() (+72 more)
 
 ### Community 87 - "Controller Areal Service"
 Cohesion: 0.01
-Nodes (207): _fetch_kv_metadata(), Any, Fetch infer and training parameter metadata from the gateway KV store.      Uses, Sync wrapper around :func:`_fetch_kv_metadata`.      Bridges async ``aiohttp`` i, WeightUpdateControllerConfig, Any, Client, WeightUpdateControllerConfig (+199 more)
+Nodes (307): Create one NCCL weight-update group per inference PP stage.          The group n, WeightUpdateControllerConfig, Any, Client, WeightUpdateControllerConfig, WeightUpdateResult, WeightUpdateController, Start the proxy gateway for external access.          Creates a FastAPI server t (+299 more)
 
 ### Community 88 - "Multica Autopilots Packages"
 Cohesion: 0.03
-Nodes (83): AutopilotDetailPage(), useCreateAutopilot(), useCreateAutopilotTrigger(), useDeleteAutopilot(), useDeleteAutopilotTrigger(), useReplayAutopilotDelivery(), useRotateAutopilotTriggerWebhookToken(), useTriggerAutopilot() (+75 more)
+Nodes (92): AutopilotDetailPage(), useCreateAutopilot(), useCreateAutopilotTrigger(), useDeleteAutopilot(), useDeleteAutopilotTrigger(), useReplayAutopilotDelivery(), useRotateAutopilotTriggerWebhookToken(), useTriggerAutopilot() (+84 more)
 
 ### Community 89 - "Daemon Multica Server"
-Cohesion: 0.04
-Nodes (166): blockingBackend, idleWatchdogBackend, longToolCallBackend, noopWriter, reportTaskResultRecorder, stuckInFlightToolBackend, tailIdleAfterToolBackend, taskRunnerFunc (+158 more)
+Cohesion: 0.03
+Nodes (163): blockingBackend, idleWatchdogBackend, longToolCallBackend, noopWriter, repoCacheBackend, reportTaskResultRecorder, runtimeSetWatcher, stuckInFlightToolBackend (+155 more)
 
 ### Community 90 - "Service Multica Server"
-Cohesion: 0.06
-Nodes (80): CreateCriticTaskParams, CreateTrainingDispatchParams, TrainingDispatch, UUID, criticTaskForCloseTest(), fmtFloat(), T, TestMaybeCloseTrainingSessionFromCritic_MalformedCriticOf_NoOp() (+72 more)
+Cohesion: 0.05
+Nodes (84): CreateCriticTaskParams, CreateTrainingDispatchParams, TrainingDispatch, main(), main(), TaskService, UUID, criticTaskForCloseTest() (+76 more)
 
 ### Community 91 - "Agent Multica Server"
-Cohesion: 0.03
-Nodes (96): AuthPreflight, blockedArgMode, claudeBackend, claudeContentBlock, claudeControlRequestPayload, claudeLogEntry, claudeMessageContent, claudeResultModelUsage (+88 more)
+Cohesion: 0.04
+Nodes (74): blockedArgMode, claudeBackend, claudeContentBlock, claudeControlRequestPayload, claudeLogEntry, claudeMessageContent, claudeResultModelUsage, claudeSDKMessage (+66 more)
 
 ### Community 92 - "Torchrun Forward Areal"
-Cohesion: 0.04
-Nodes (61): ChatSessionsRoute(), ChatTab(), ChatEmptyState(), Props, STARTER_PROMPTS, AssistantRow(), ChatMessageList(), MessageRow() (+53 more)
+Cohesion: 0.05
+Nodes (49): ChatSessionsRoute(), ChatTab(), AssistantRow(), ChatMessageList(), MessageRow(), ChatSessionActions(), Props, ChatTimeline() (+41 more)
 
 ### Community 93 - "Agent Multica Server"
-Cohesion: 0.04
-Nodes (120): acpDiscoveryProvider, codebuddyHelpEntry, codexDebugModelsResponse, Model, modelCacheEntry, ModelThinking, openclawAgentEntry, opencodeModelMetadata (+112 more)
+Cohesion: 0.05
+Nodes (100): acpDiscoveryProvider, Model, modelCacheEntry, ModelThinking, openclawAgentEntry, opencodeModelMetadata, opencodeModelVariant, ThinkingLevel (+92 more)
 
 ### Community 94 - "Archon Experimental Activation"
 Cohesion: 0.02
-Nodes (120): build_ac_config(), force_pad_to_maximum(), prepare_training_config(), Logger, PretrainedConfig, Build ActivationCheckpointConfig from engine config.      Returns None if gradie, Fix zero-bubble schedule incompatibilities.      Zero-bubble schedules (split ba, Set env vars and PyTorch flags for deterministic training. (+112 more)
+Nodes (143): get_cosine_schedule_with_warmup(), Optimizer, Create a schedule with a learning rate that decreases following the values of th, Apply pipeline parallelism using pipelining_fn., Apply parallelism using parallelize_fn., build_ac_config(), create_lr_scheduler(), create_optimizer() (+135 more)
 
 ### Community 95 - "Tree Search Customized"
-Cohesion: 0.03
-Nodes (57): AdvantageMode, CacheMode, Config, DistillKLMode, LossMode, Enum, str, SampleSource (+49 more)
+Cohesion: 0.02
+Nodes (80): AdvantageMode, CacheMode, Config, DistillKLMode, LossMode, Enum, str, RolloutCacheConfig (+72 more)
 
 ### Community 96 - "Areal Experimental Archon"
-Cohesion: 0.05
-Nodes (52): apply_expert_parallel(), BaseExpertParallel, ExpertParallel, ExpertTensorParallel, ABC, DeviceMesh, Module, ParallelStyle (+44 more)
+Cohesion: 0.04
+Nodes (77): apply_expert_parallel(), BaseExpertParallel, ExpertParallel, ExpertTensorParallel, ABC, DeviceMesh, Module, ParallelStyle (+69 more)
 
 ### Community 97 - "Openai Experimental Tool"
-Cohesion: 0.04
-Nodes (78): AsyncCompletionsWithReward, _AsyncGenerateEngine, AsyncResponsesWithReward, concat_prompt_token_ids_with_parent(), _ensure_message_dict_list(), _find_kth(), is_omitted(), _parse_tool_call_arguments() (+70 more)
+Cohesion: 0.25
+Nodes (10): _assert_tool_calls(), FakeReasoningParser, _patch_vllm_parsers(), MonkeyPatch, _raise_module_not_found(), _run_process_tool_calls(), test_process_tool_calls_qwen25_chat_completions_sglang(), test_process_tool_calls_qwen25_chat_completions_vllm() (+2 more)
 
 ### Community 98 - "Image Input Inference"
 Cohesion: 0.04
-Nodes (27): _build_messages_list(), _convert_tool_output_format(), _extract_images_from_messages(), Extract image data from OpenAI-format messages.      Scans message ``content`` l, Convert custom tool output format to standard chat template format.      Convert, Convert a Responses API input item into Chat Completions message dicts.      Han, ChatCompletionToolMessageParam, blue_pixel_b64() (+19 more)
+Nodes (26): _build_messages_list(), _convert_tool_output_format(), _extract_images_from_messages(), Extract image data from OpenAI-format messages.      Scans message ``content`` l, Convert custom tool output format to standard chat template format.      Convert, Convert a Responses API input item into Chat Completions message dicts.      Han, ChatCompletionToolMessageParam, _make_data_uri() (+18 more)
 
 ### Community 99 - "Training Proxy Service"
-Cohesion: 0.11
-Nodes (13): Dispatcher, WorkerTopology, Partitioned HTTP dispatcher for one 5D-parallel worker group., Close the underlying HTTP session., discover_topology(), WorkerInfo, WorkerTopology, _AsyncCM (+5 more)
+Cohesion: 0.06
+Nodes (11): GatewayTrainController, Any, Future, Worker, Ensure _workers_ready is signaled even if _bg_initialize fails., Destroy engines on all training workers before killing processes.          ``dis, _FakeAsyncClient, _make_controller() (+3 more)
 
 ### Community 100 - "Tree Attn Areal"
 Cohesion: 0.02
-Nodes (139): create_block_causal_mask_2d(), device, dtype, Tensor, # TODO: Mask should be precomputed and passed in, not computed here., Create a 2D block-diagonal causal attention mask for SDPA.      For packed seque, SDPA wrapper for packed sequences with block-diagonal causal mask.      This wra, Compute attention with block-diagonal causal mask.          Args:             q: (+131 more)
+Nodes (140): create_runner(), _NullOutputChunks, PipelinedRunner, ABC, Any, list, Module, PipelineStage (+132 more)
 
 ### Community 101 - "Multica Cmd Server"
 Cohesion: 0.04
-Nodes (104): BackendOverrides, CLIConfig, OpenClawOverride, normalizeAPIBaseURL(), resolveServerURL(), browserOpenCommand(), configuredAppURL(), detectOutboundIP() (+96 more)
+Nodes (105): BackendOverrides, CLIConfig, OpenClawOverride, normalizeAPIBaseURL(), resolveServerURL(), TestResolveWorkspaceID_AgentContextSkipsConfig(), browserOpenCommand(), configuredAppURL() (+97 more)
 
 ### Community 102 - "Tree Treesearch Bugfixes"
 Cohesion: 0.08
@@ -2500,31 +2500,31 @@ Nodes (28): ClearChatSessionResumeIfMatchParams, CreateChatMessageParams, Create
 
 ### Community 103 - "Agent Multica Server"
 Cohesion: 0.03
-Nodes (120): acpMcpTransportCapabilities, acpProviderErrorSniffer, acpRPCError, bufferWriter, hermesBackend, hermesClient, hermesPromptResult, kimiBackend (+112 more)
+Nodes (118): acpMcpTransportCapabilities, acpProviderErrorSniffer, acpRPCError, bufferWriter, hermesBackend, hermesClient, hermesPromptResult, kiroBackend (+110 more)
 
 ### Community 104 - "Service Interaction Dag"
-Cohesion: 0.06
-Nodes (84): assembleEnvSnapshot(), decodeTensorRef(), encodeEnvSnapshot(), extractShardRef(), T, TestInteractionDAG_NonTrainedRolloutRecordsNothing(), TestInteractionDAG_RecordingErrorIsBestEffort(), RawMessage (+76 more)
+Cohesion: 0.07
+Nodes (74): T, TestInteractionDAG_NonTrainedRolloutRecordsNothing(), TestInteractionDAG_RecordingErrorIsBestEffort(), NewInteractionDAGService(), arealProxyContext(), T, TaskService, leanSnap() (+66 more)
 
 ### Community 105 - "Critic Customized Areal"
-Cohesion: 0.05
-Nodes (45): build_critic_instruction(), build_critic_messages(), digit_token_ids(), expected_value_from_logprobs(), _find_turn_boundaries(), Any, Protocol, Append the critic instruction as a final message.      Returns ``[*messages_thro (+37 more)
+Cohesion: 0.06
+Nodes (30): build_critic_instruction(), build_critic_messages(), digit_token_ids(), expected_value_from_logprobs(), _find_turn_boundaries(), Any, Protocol, Append the critic instruction as a final message.      Returns ``[*messages_thro (+22 more)
 
 ### Community 106 - "Agent Multica Server"
-Cohesion: 0.05
-Nodes (77): Config, Logger, LaunchHeader(), New(), T, TestDetectVersionFailsForMissingBinary(), TestLaunchHeaderCoversAllSupportedBackends(), TestLaunchHeaderReturnsEmptyForUnknownType() (+69 more)
+Cohesion: 0.04
+Nodes (83): AuthPreflight, Config, kimiBackend, Message, MessageType, Result, RuntimeTokenStats, Logger (+75 more)
 
 ### Community 107 - "Fp8 Rmsnorm Comparison"
 Cohesion: 0.02
 Nodes (65): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), askUser(), changeDirectory2(), classicStateToDocument() (+57 more)
 
 ### Community 108 - "Service Evolution Multica"
-Cohesion: 0.02
-Nodes (156): EvolutionReviewFile, EvolutionReviewRiskLevel, ClaimEvolutionCandidateParams, CreateSharedEvolutionUnitParams, CreateSharedEvolutionUnitVersionParams, DeleteEvolutionSubmissionFilesParams, EvolutionUnitSubmission, EvolutionUnitSubmissionFile (+148 more)
+Cohesion: 0.06
+Nodes (81): EvolutionUnitSubmission, EvolutionUnitSubmissionFile, SharedEvolutionUnit, acquireEvolutionPromotionLock(), appendEvolutionTerms(), applyEvolutionReviewSuggestions(), bestSemanticDuplicate(), candidateClaimToken() (+73 more)
 
 ### Community 109 - "Controller Service Inference"
 Cohesion: 0.03
-Nodes (37): Any, AsyncClient, ChatCompletion, ChatCompletionChunk, Future, Set version locally and broadcast to all data proxy workers., Return the local version (compatible with VersionProvider protocol)., Submit a batch of data items and wait for all results.          Parameters (+29 more)
+Nodes (38): Any, AsyncClient, ChatCompletion, ChatCompletionChunk, Future, Scheduler, Set version locally and broadcast to all data proxy workers., Return the local version (compatible with VersionProvider protocol). (+30 more)
 
 ### Community 110 - "Engine Areal Infra"
 Cohesion: 0.04
@@ -2535,24 +2535,24 @@ Cohesion: 0.04
 Nodes (47): Agent Configuration, ArchonEngine Configuration, ArchonFP8 Configuration, BaseExperiment Configuration, Cluster Specification Configuration, DistributedDataParallel Configuration, DPO Configuration, DPOEngine Configuration (+39 more)
 
 ### Community 112 - "Agent Codex Multica"
-Cohesion: 0.06
-Nodes (92): fakeStdin, rpcResponse, buildCodexArgs(), ensureCodexMcpConfig(), extractNestedString(), filterCodexCustomConfigOverrides(), Logger, hasManagedCodexMcpConfig() (+84 more)
+Cohesion: 0.04
+Nodes (140): codexBackend, codexSessionTokenCount, codexSessionUsage, codexTimeoutDiagnostic, codexTimeoutKind, codexTokenUsage, fakeStdin, pendingRPC (+132 more)
 
 ### Community 113 - "Handler Multica Server"
-Cohesion: 0.14
-Nodes (27): evolutionCandidateRerunAudit, EvolutionCandidateRerunResponse, EvolutionMaterializedSkillResponse, EvolutionReviewAppliesResponse, evolutionReviewDecisionRequest, EvolutionReviewEvidenceResponse, EvolutionReviewFileResponse, EvolutionReviewSubmissionResponse (+19 more)
+Cohesion: 0.04
+Nodes (52): Single URL for external users., Return callback server address as 'host:port'., _init_weights_update_group_remote(), Helper to update weights from disk in a separate process., Helper to initialize weight update group in a separate process.      If xccl_gro, Helper to update weights from distributed memory in a separate process., _update_weights_from_disk(), _update_weights_from_distributed() (+44 more)
 
 ### Community 114 - "Ray Areal Infra"
-Cohesion: 0.03
-Nodes (73): alloc_ports(), anthropic_messages(), _call_client_create(), call_engine_method(), chat_completions(), cleanup_engine(), _cleanup_stale_sessions(), create_engine() (+65 more)
+Cohesion: 0.07
+Nodes (18): Update the last access time for this session., Check if this session has been inactive for too long., Whether this session has been completed via ``finish()``., Data associated with a single RL session., SessionData, SessionData env_id defaults to None when not provided., SessionData stores env_id when provided in constructor., SessionData (+10 more)
 
 ### Community 115 - "Db Bridge Multica"
 Cohesion: 0.04
 Nodes (69): Channel, channels_for_group(), executor_channels(), Group, Side, Channel registry for the DB bridge.  A *channel* is one bridged HTTP endpoint. E, Channels whose stub server runs on *side*., Channels whose executor worker runs on *side*. (+61 more)
 
 ### Community 116 - "Areal Customized Tree"
-Cohesion: 0.04
-Nodes (108): MultiAgentEnvDispatchWorkflow, Any, MultiAgentEnvDispatchWorkflow: thin RolloutWorkflow orchestrator over the existi, One arun_episode = one Multica task = N agents = N sessions -> AssembledDag., login_guidance(), EnvDispatchHandle, _poll_dag(), HTTP client for the multica unified env-dispatch API.  Wraps ``POST /api/v1/env- (+100 more)
+Cohesion: 0.03
+Nodes (118): r"""Returns whether the model is in stream mode, which sends partial         res, _auth_request(), _credentials_path(), load_saved_api_key(), login(), login_guidance(), main(), MulticaAuthError (+110 more)
 
 ### Community 117 - "Multica Apps Mobile"
 Cohesion: 0.05
@@ -2560,7 +2560,7 @@ Nodes (43): Agent Daemon, Assign Issue, Associating Issues with Projects, Authen
 
 ### Community 118 - "Reward Areal Workflow"
 Cohesion: 0.02
-Nodes (63): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), changeDirectory2(), changeSearchText(), classicStateToDocument() (+55 more)
+Nodes (65): annotatedMarkdown(), annotateFrontmatter(), applyProjection(), applyRunStateToDocument(), artifactsHash(), askUser(), changeDirectory2(), classicStateToDocument() (+57 more)
 
 ### Community 119 - "Protocol Agent Service"
 Cohesion: 0.06
@@ -2571,12 +2571,12 @@ Cohesion: 0.05
 Nodes (60): EnvironmentError, FleetSandboxProvider, ForkableEnvironment, ForkError, ForkResult, MulticaSweLegoProvider, BaseTransport, Protocol (+52 more)
 
 ### Community 121 - "Multica Cmd Server"
-Cohesion: 0.08
-Nodes (57): runIssueCommentList(), captureStderr(), Builder, Command, File, T, newFlagTestCmd(), newIssueCommentListTestCmd() (+49 more)
+Cohesion: 0.06
+Nodes (100): Command, T, newAutopilotCreateTestCmd(), newAutopilotUpdateTestCmd(), TestResolveAgent(), TestRunAutopilotCreateSendsProjectID(), TestRunAutopilotUpdateSendsProjectIDChanges(), TestUUIDRegexp() (+92 more)
 
 ### Community 122 - "Selected Turn Distill"
-Cohesion: 0.07
-Nodes (62): Node, A single turn in a multi-turn conversation tree.      Each Node represents one a, DiagnosisTurn, EpisodeDiagnosis, InteractionWithTokenLevelReward, Distillation types: PositionRewardInfo and InteractionWithTokenLevelReward., Extended interaction class that supports token-level rewards.      The ``rewards, Validate token-level reward dimensions. (+54 more)
+Cohesion: 0.06
+Nodes (60): _filter_distill_episode_failure(), LossMode, DiagnosisTurn, EpisodeDiagnosis, _as_list(), build_teacher_prompt_ids(), _child_text(), _diagnosis_xml_candidates() (+52 more)
 
 ### Community 123 - "Agent Openclaw Multica"
 Cohesion: 0.05
@@ -2587,16 +2587,16 @@ Cohesion: 0.05
 Nodes (65): AuthTokenExpiredError, _base64url_decode(), _base64url_json(), _configured_jwt_secret_valid(), _decode_jwt_header(), _decode_jwt_payload(), _FileLock, _is_auth_token_usable() (+57 more)
 
 ### Community 125 - "Daemon Client Multica"
-Cohesion: 0.04
-Nodes (46): AgentData, AgentCredentialResponse, AgentData, AgentInboxEvent, AgentInboxLease, ArealProxy, AutopilotRunGCStatus, ChatAttachmentMeta (+38 more)
+Cohesion: 0.05
+Nodes (29): AgentCredentialResponse, AgentInboxEvent, AgentInboxLease, AutopilotRunGCStatus, ChatSessionGCStatus, Client, daemonAuthToken, IssueGCStatus (+21 more)
 
 ### Community 126 - "Lark Ws Multica"
 Cohesion: 0.06
-Nodes (63): Dialer, CredentialsProvider, CredentialsProviderFunc, EndpointFetcher, EndpointFetcherFunc, fakeWSConn, fakeWSDialer, Frame (+55 more)
+Nodes (65): Dialer, CredentialsProvider, CredentialsProviderFunc, EndpointFetcher, EndpointFetcherFunc, fakeWSConn, fakeWSDialer, Frame (+57 more)
 
 ### Community 127 - "Task Async Runner"
 Cohesion: 0.03
-Nodes (51): AsyncTaskRunner, RuntimeError, T, Initialize the AsyncTaskRunner.          Parameters         ----------         m, Initialize and start the background thread.          This method starts the back, Shutdown the task runner and wait for thread cleanup.          This method signa, Check if the background thread has encountered a fatal error.          Raises, Entry point for the background thread.          Runs the async event loop and ha (+43 more)
+Nodes (52): AsyncTaskRunner, RuntimeError, T, Initialize the AsyncTaskRunner.          Parameters         ----------         m, Initialize and start the background thread.          This method starts the back, Shutdown the task runner and wait for thread cleanup.          This method signa, Check if the background thread has encountered a fatal error.          Raises, Entry point for the background thread.          Runs the async event loop and ha (+44 more)
 
 ### Community 128 - "Db Shell Multica"
 Cohesion: 0.05
@@ -2615,28 +2615,28 @@ Cohesion: 0.05
 Nodes (51): finalize_with_verifier(), Any, Verifier finalization helper for tree-search RL sessions.  Runs the verifier ove, Run the verifier and write the reward to the RL session.      Replaces the const, BlendWeights, _Critic, _Objective, ObjectiveOutcome (+43 more)
 
 ### Community 132 - "Generated Queries Sandbox"
-Cohesion: 0.06
-Nodes (40): ClaimSandboxJobsForNodeParams, CompleteSandboxInstanceCreateParams, CompleteSandboxJobParams, CountSandboxInstancesGroupedByNodeRow, CreateSandboxDeleteJobParams, CreateSandboxInstanceParams, CreateSandboxJobParams, CreateSandboxNodeParams (+32 more)
+Cohesion: 0.10
+Nodes (25): CompleteSandboxInstanceCreateParams, CountSandboxInstancesGroupedByNodeRow, CreateSandboxNodeParams, CreateSandboxNodeTokenParams, DeleteSandboxNodeForOwnerParams, DeleteSandboxSnapshotParams, DisableSandboxWorkspaceBindingParams, FailSandboxJobParams (+17 more)
 
 ### Community 133 - "Handler Runtime Local"
-Cohesion: 0.03
-Nodes (58): cloudRuntimeProxy, Config, CreateRuntimeLocalSkillImportRequest, InMemoryLocalSkillImportStore, InMemoryLocalSkillListStore, LocalSkillImportAction, LocalSkillImportConflict, LocalSkillImportRequestInput (+50 more)
+Cohesion: 0.05
+Nodes (42): CreateRuntimeLocalSkillImportRequest, InMemoryLocalSkillImportStore, InMemoryLocalSkillListStore, LocalSkillImportAction, LocalSkillImportConflict, LocalSkillImportRequestInput, LocalSkillImportStore, LocalSkillListStore (+34 more)
 
 ### Community 134 - "Server Multica Cmd"
-Cohesion: 0.05
-Nodes (92): autopilotEventPayload(), defaultFailureMonitorConfig(), emitAutopilotPausedNotifications(), envDurationNonNegative(), envDurationOrZero(), envDurationPositive(), envFailureMonitorConfig(), envFloatInUnitInterval() (+84 more)
+Cohesion: 0.07
+Nodes (62): Bus, Event, Handler, Event, Queries, handleTaskActivity(), publishActivityEvent(), autopilotRunReport() (+54 more)
 
 ### Community 135 - "Multica Apps Mobile"
 Cohesion: 0.05
 Nodes (40): 10. Route registration (`server/cmd/server/router.go`), 11. Testing strategy, 12. Open dependencies, 1. Motivation, 2. Goals, 3. Non-goals, 4.1 env_id model, 4.2 Combination matrix (+32 more)
 
 ### Community 136 - "Service Experimental Gateway"
-Cohesion: 0.05
-Nodes (61): AgentTaskQueue, TaskService, isSquadContextHandoff(), Queries, HasSquadLeaderNoActionEvaluationForTask(), agentToMap(), computeChatElapsedMs(), durationSeconds() (+53 more)
+Cohesion: 0.04
+Nodes (69): AgentTaskQueue, ephemeralSandboxManager, Handler, AgentRadarRun, Mutex, isSquadContextHandoff(), Queries, HasSquadLeaderNoActionEvaluationForTask() (+61 more)
 
 ### Community 137 - "Generated Queries Multica"
-Cohesion: 0.09
-Nodes (32): ChildIssueProgressRow, CountCreatedIssueAssigneesParams, CountCreatedIssueAssigneesRow, CountIssuesParams, CreateIssueParams, CreateIssueWithMetadataParams, CreateIssueWithOriginParams, DeleteIssueMetadataKeyParams (+24 more)
+Cohesion: 0.05
+Nodes (54): ChildIssueProgressRow, CountCreatedIssueAssigneesParams, CountCreatedIssueAssigneesRow, CountIssuesParams, CreateIssueParams, CreateIssueWithMetadataParams, CreateIssueWithOriginParams, DeleteIssueMetadataKeyParams (+46 more)
 
 ### Community 138 - "Handler Multica Server"
 Cohesion: 0.12
@@ -2652,7 +2652,7 @@ Nodes (39): 1.1 当前现状, 1.2 三阶段方案, 1.3 不在范围内, 1. 背�
 
 ### Community 141 - "Generated Multica Server"
 Cohesion: 0.08
-Nodes (74): Agent, AgentCredential, AgentExecution, AgentInboxEvent, AgentInboxToken, AgentMemory, AgentRadarAction, AgentRadarRun (+66 more)
+Nodes (82): ActivityLog, Agent, AgentEventDelivery, AgentExecution, AgentInboxEvent, AgentInboxToken, AgentMemory, AgentRadarAction (+74 more)
 
 ### Community 142 - "Tree Search Workflow"
 Cohesion: 0.05
@@ -2668,27 +2668,27 @@ Nodes (47): CapacityResponse, create_app(), _extract_bearer_token(), HealthRespo
 
 ### Community 145 - "Megatron Engine Vlm"
 Cohesion: 0.04
-Nodes (62): _accepts_hf_config(), _all_gather_and_concat(), _all_gather_fp8_tensor_and_concat(), all_gather_param(), convert_bailingmoe_to_hf(), convert_deepseekv3_to_hf(), convert_qwen2_5_vl_to_hf(), convert_qwen2_to_hf() (+54 more)
+Nodes (46): _accepts_hf_config(), _all_gather_and_concat(), _all_gather_fp8_tensor_and_concat(), all_gather_param(), convert_bailingmoe_to_hf(), convert_deepseekv3_to_hf(), convert_qwen2_5_vl_to_hf(), convert_qwen2_to_hf() (+38 more)
 
 ### Community 146 - "Customized Areal Tree"
 Cohesion: 0.06
 Nodes (35): 10. Plan Review (Critical self-review), 11. Acceptance Criteria, 12. Out of Scope for v1 (defer), 13. Recommended Next Action, 1. Goals and Non-Goals, 2. Current State Summary (Problem Statement), 3.1 L1 Domains and L2 Signals, 3. Target Information Architecture (+27 more)
 
 ### Community 147 - "Lark Multica Server"
-Cohesion: 0.06
-Nodes (44): authQueriesAdapter, BeginInstallParams, BeginInstallResult, BeginResult, capturingRoundTripper, InstallerBinder, Region, RegistrationClient (+36 more)
+Cohesion: 0.08
+Nodes (39): authQueriesAdapter, BeginInstallParams, BeginInstallResult, fakeClockSvc, fakeTxStarter, InstallerBinder, RegistrationService, RegistrationServiceConfig (+31 more)
 
 ### Community 148 - "Multica Apiclient Apps"
 Cohesion: 0.06
 Nodes (34): AReaL v2 Multi-Agent Integration + Tree-Search Branching Implementation Plan, Dependency Note (read before executing), Execution Handoff, File Structure, Global Constraints, Phase 1 - `MultiAgentEnvDispatchWorkflow` orchestrator (reuse existing), Phase 2 - `TreeSearchGroupedRolloutWorkflow` wiring (Approach B: SuperNode-preserving), Phase 3 - Tree-search branching (F-independent, via `EnvDispatchBranchDriver`) (+26 more)
 
 ### Community 149 - "Weight Update Areal"
-Cohesion: 0.03
-Nodes (32): GatewayTrainController, Any, Future, Worker, Ensure _workers_ready is signaled even if _bg_initialize fails., Destroy engines on all training workers before killing processes.          ``dis, Any, Future (+24 more)
+Cohesion: 0.07
+Nodes (28): _dequant_dtensor(), dequant_fp8_state_dict(), _detect_fp8_checkpoint(), _get_scale_inv_keys(), _prepare_fp8_state_dict(), dtype, Tensor, Blockwise FP8 dequantization in pure PyTorch (CPU-compatible).      Equivalent t (+20 more)
 
 ### Community 150 - "Service Autopilot Multica"
 Cohesion: 0.07
-Nodes (45): AgentReadiness(), Agent, Queries, autopilotActorID(), autopilotErrorType(), autopilotRunDurationMS(), autopilotRunTriggeredAt(), autopilotSquadAttribution() (+37 more)
+Nodes (48): AgentReadiness(), Agent, Queries, autopilotActorID(), autopilotErrorType(), autopilotRunDurationMS(), autopilotRunTriggeredAt(), autopilotSquadAttribution() (+40 more)
 
 ### Community 151 - "Multica Apps Mobile"
 Cohesion: 0.06
@@ -2696,15 +2696,15 @@ Nodes (34): a) Install the CLI and an AI agent, Architecture Overview, b) One-co
 
 ### Community 152 - "Cli V2 Areal"
 Cohesion: 0.06
-Nodes (36): _cleanup_runtime(), do_run(), _latest_model_state_for_cleanup(), ServiceState, run_cmd(), do_stop(), stop_cmd(), Tear down the whole inference service in data-flow order: kill the     data-prox (+28 more)
+Nodes (34): _cleanup_runtime(), _latest_model_state_for_cleanup(), ServiceState, do_stop(), stop_cmd(), Tear down the whole inference service in data-flow order: kill the     data-prox, terminate_runtime_state(), Backend-agnostic identity of a running task.      ``ref`` carries backend-specif (+26 more)
 
 ### Community 153 - "Service Customized Areal"
 Cohesion: 0.06
 Nodes (52): AgentFilters, AgentService, get_agent_service(), AgentConfig, AgentResponse, Any, Agent service with CRUD operations for TPFC backend.  This is a simplified versi, Get a single agent with full configuration. (+44 more)
 
 ### Community 154 - "Customized Areal Tree"
-Cohesion: 0.05
-Nodes (44): DataProxySessionRemover, DataProxyTensorResolver, Any, BaseTransport, Client, Protocol, Minimal segment-DAG training plumbing + tensor lifecycle (change 1).  Wires the, Removes a v2 session via ``POST /export_trajectories`` (remove_session=True). (+36 more)
+Cohesion: 0.03
+Nodes (141): MultiAgentEnvDispatchWorkflow, Any, MultiAgentEnvDispatchWorkflow: thin RolloutWorkflow orchestrator over the existi, One arun_episode = one Multica task = N agents = N sessions -> AssembledDag., AssembledDag, DagError, DagForbidden, DagNotFound (+133 more)
 
 ### Community 155 - "Chat Multica Apps"
 Cohesion: 0.06
@@ -2724,7 +2724,7 @@ Nodes (33): `activation_checkpointing` Add-On \[targeted\], `archon_model_family
 
 ### Community 159 - "Agent Copilot Multica"
 Cohesion: 0.07
-Nodes (63): copilotAssistantMessage, copilotBackend, copilotCodeChanges, copilotEvent, copilotEventState, copilotMessageDelta, copilotReasoning, copilotResultUsage (+55 more)
+Nodes (64): copilotAssistantMessage, copilotBackend, copilotCodeChanges, copilotEvent, copilotEventState, copilotMessageDelta, copilotReasoning, copilotResultUsage (+56 more)
 
 ### Community 160 - "Customized Areal Tree"
 Cohesion: 0.06
@@ -2739,76 +2739,76 @@ Cohesion: 0.08
 Nodes (63): extractToolOutput(), FileInfo, opencodeWindowsPackageCandidates(), resolveOpenCodeNativeFromShim(), containsString(), equalStringSlice(), fakeOpencodeScript(), fakeStat() (+55 more)
 
 ### Community 163 - "Handler Multica Server"
-Cohesion: 0.06
-Nodes (70): assemble_node_advantages(), AssembledAdvantages, explained_variance(), DAG advantage assembler -- the GAE-replaces-GRPO core (Phase 3, Task 9).  Torch-, Per-node GAE outputs keyed by ``node_id``., Run global GAE over ``ordered_nodes`` (global completion order).      ``ordered_, ``1 - Var(target - pred) / Var(target)`` -- critic-quality metric.      Returns, _adjacency() (+62 more)
+Cohesion: 0.12
+Nodes (23): assign_token_advantages(), broadcast_node_advantages(), combined_actor_critic_loss(), critic_huber_loss(), huber_loss_py(), Tensor, Node-advantage broadcast + critic value loss target (Phase 3, Task 8).  Bridges, Combined co-trained objective: ``actor_PG + w * critic_value_loss``.      Both t (+15 more)
 
 ### Community 164 - "Areal Rw Stats"
-Cohesion: 0.05
-Nodes (39): _pad_eval_batch(), Pad the first tensor-like arg to a multiple of ``dp_size * group_size``.      Ca, compute_rw_loss(), _log_empty_rw_stats(), Any, device, Tensor, Train on a batch (reward model). (+31 more)
+Cohesion: 0.07
+Nodes (28): compute_rw_loss(), _log_empty_rw_stats(), Any, device, Tensor, Train on a batch (reward model)., _rw_loss_weight(), _rw_valid_pairs() (+20 more)
 
 ### Community 165 - "Daemon Multica Server"
 Cohesion: 0.06
-Nodes (76): AgentEntry, Config, Overrides, ProfileDir(), Daemon, applyOpenclawOverride(), ArtifactPatternsFromEnv(), buildLoginShellResolveScript() (+68 more)
+Nodes (77): AgentEntry, Config, Overrides, ProfileDir(), Daemon, applyOpenclawOverride(), ArtifactPatternsFromEnv(), buildLoginShellResolveScript() (+69 more)
 
 ### Community 166 - "Handler Multica Server"
-Cohesion: 0.03
-Nodes (104): AddChannelMemberRequest, AddChannelMembersRequest, agentTransportDraft, agentTransportFreshnessDecision, AgentTransportReactRequest, AgentTransportReactResponse, AgentTransportReadRequest, AgentTransportReadResponse (+96 more)
+Cohesion: 0.05
+Nodes (67): agentTransportDraft, agentTransportFreshnessDecision, agentTransportFreshnessHoldError, agentTransportMessageResult, AgentTransportReactRequest, AgentTransportReactResponse, AgentTransportReadRequest, AgentTransportReadResponse (+59 more)
 
 ### Community 167 - "Multica Server Handler"
-Cohesion: 0.10
-Nodes (61): DMItem, cancelTaskByUserRequest(), createAutopilotRunOnlyTask(), createForeignWorkspaceAgent(), T, taskStatus(), TestCancelTaskByUser_ChannelBoundChatTask_ChannelMemberSucceeds(), TestCancelTaskByUser_ChannelBoundChatTask_NonMemberReturns403() (+53 more)
+Cohesion: 0.12
+Nodes (55): DMItem, cancelTaskByUserRequest(), createAutopilotRunOnlyTask(), createForeignWorkspaceAgent(), T, taskStatus(), TestCancelTaskByUser_ChannelBoundChatTask_ChannelMemberSucceeds(), TestCancelTaskByUser_ChannelBoundChatTask_NonMemberReturns403() (+47 more)
 
 ### Community 168 - "Generated Queries Evolution"
-Cohesion: 0.06
-Nodes (66): Edge ref type + message-timeline helper for the linear SuperNode log.  After the, DAGError, EdgeType, StrEnum, ValueError, Agent-execution DAG model for multi-agent RL training in Multica.  Multica runs, Exact inverse of :meth:`to_dict`. Raises ``DAGError`` on bad input., Raised when the DAG is malformed (unknown event, cycle, etc.). (+58 more)
+Cohesion: 0.04
+Nodes (28): Any, ChatCompletion, ChatCompletionChunk, Future, Set version locally and broadcast to all data proxy workers., Submit a batch of data items and wait for all results.          Parameters, Prepare a full training batch by consuming data from a dataloader.          Para, Send a chat completion request through the gateway HTTP stack.          Paramete (+20 more)
 
 ### Community 169 - "Server Listeners Multica"
-Cohesion: 0.14
-Nodes (65): Event, Queries, handleTaskActivity(), publishActivityEvent(), registerActivityListeners(), cleanupActivities(), Queries, T (+57 more)
+Cohesion: 0.16
+Nodes (61): registerActivityListeners(), cleanupActivities(), Queries, T, listActivitiesForIssue(), TestActivityIssueCreated(), TestActivityIssueUpdated_AssigneeChanged(), TestActivityIssueUpdated_NoChangeFlags() (+53 more)
 
 ### Community 170 - "Qwen3 Experimental Archon"
-Cohesion: 0.04
-Nodes (35): PretrainedConfig, Create MoEArgs from a HuggingFace config.          Expected HuggingFace config f, PretrainedConfig, PretrainedConfig, PretrainedConfig, Test creating MoEArgs when HF config uses num_local_experts., Test MoEArgs.from_hf_config uses defaults for missing fields., Test creating MoEArgs from a basic HF config. (+27 more)
+Cohesion: 0.12
+Nodes (20): CancelledChatMessageResponse, CancelTaskByUserResponse, ChatMessageResponse, ChatMessagesCursorResponse, ChatMessagesPageResponse, CreateChatSessionRequest, PendingChatTaskItem, PendingChatTaskResponse (+12 more)
 
 ### Community 171 - "Dispatcher Areal V2"
-Cohesion: 0.14
-Nodes (20): create_app(), FastAPI, RawResponse, TrainDataProxyConfig, _raw_json_response(), TrainDataProxyConfig, Dispatcher, Partitioned HTTP dispatcher for one 5D-parallel worker group. (+12 more)
+Cohesion: 0.06
+Nodes (31): CancelAgentTasksByRuntimeOrAgentParams, DeleteAgentRuntimeForWorkspaceParams, DeleteStaleOfflineRuntimesRow, FindLegacyRuntimesByDaemonIDParams, ForceOfflineRuntimesByIDsRow, GetAgentBoundRuntimeForWorkspaceParams, GetAgentRuntimeForWorkspaceParams, ListAgentRuntimesByOwnerParams (+23 more)
 
 ### Community 172 - "Handler Multica Server"
-Cohesion: 0.07
-Nodes (65): AddAgentSkillsRequest, AgentSkillSummary, clawhubFileEntry, clawhubGetSkillResponse, clawhubLatestVersion, clawhubSearchResponse, clawhubSearchResult, clawhubSkill (+57 more)
+Cohesion: 0.06
+Nodes (100): AddAgentSkillsRequest, AgentSkillSummary, clawhubFileEntry, clawhubGetSkillResponse, clawhubLatestVersion, clawhubSearchResponse, clawhubSearchResult, clawhubSkill (+92 more)
 
 ### Community 173 - "Daemon Multica Apps"
 Cohesion: 0.08
 Nodes (64): AuthProbeOutcome, AuthProbeResult, classifyAuthProbe(), isAuthStatusError(), ActiveProfile, bootstrapCli(), bundledCliPath(), clearToken() (+56 more)
 
 ### Community 174 - "Fp8 Experimental Archon"
-Cohesion: 0.02
-Nodes (117): _check_fp8_shard_compatibility(), _consolidate_shards_distributed(), _get_merged_state_dict(), load_from_dcp(), load_model_from_hf(), load_optimizer_state(), Any, AutoProcessor (+109 more)
+Cohesion: 0.18
+Nodes (18): create_mock_input(), main(), mock_loss_fn(), mock_loss_weight_fn(), device, Tensor, End-to-end test for ArchonEngine with Pipeline Parallelism.  This test directly, Test forward_batch with PP enabled. (+10 more)
 
 ### Community 175 - "Multica Server Update"
-Cohesion: 0.19
-Nodes (21): GitHubRelease, GitHubReleaseAsset, extractBinaryFromTarGz(), extractBinaryFromZip(), FetchLatestRelease(), fetchReleaseByTag(), fetchURLBytes(), findChecksumManifestAsset() (+13 more)
+Cohesion: 0.12
+Nodes (29): Command, runUpdate(), BrewPackage(), extractBinaryFromTarGz(), extractBinaryFromZip(), FetchLatestRelease(), fetchReleaseByTag(), fetchURLBytes() (+21 more)
 
 ### Community 176 - "Handler Autopilot Webhook"
 Cohesion: 0.07
 Nodes (60): WebhookEnvelope, WebhookEventFilter, WebhookRequest, addrInPrefixes(), encodeWebhookEventFilters(), encodeWebhookEventFiltersAlways(), extractDedupeKey(), generateWebhookToken() (+52 more)
 
 ### Community 177 - "Testhttpclient Lark Http"
-Cohesion: 0.12
-Nodes (56): ChatID, fakeClock, T, TestHTTPClient_BatchGetUsers(), TestHTTPClient_BatchGetUsersEmpty(), T, TestHTTPClient_GetMessageEmptyID(), TestHTTPClient_GetMessageErrorCode() (+48 more)
+Cohesion: 0.10
+Nodes (62): ChatID, fakeClock, larkFakeServer, T, TestHTTPClient_BatchGetUsers(), TestHTTPClient_BatchGetUsersEmpty(), T, TestHTTPClient_GetMessageEmptyID() (+54 more)
 
 ### Community 178 - "Engine Vllm Remote"
-Cohesion: 0.03
-Nodes (56): InferenceServiceWorkflow, Any, ClientSession, RolloutControllerV2, GatewayInferenceController, check_server_health(), _get_model_path(), get_test_model_path() (+48 more)
+Cohesion: 0.04
+Nodes (43): _AllocationMode, _LLMParallelParser, Internal LLM parallel strategy parser using Lark grammar.      This parser handl, Convert parsed result to _AllocationMode object.          Args:             resu, DEPRECATED — Legacy resource allocation configuration for SPMD launchers only., Parse allocation mode string into _AllocationMode object.          Parameters, Get all inference allocations (sglang, vllm backends)., Get all training allocations (fsdp, megatron, archon backends). (+35 more)
 
 ### Community 179 - "Fp8 Experimental Archon"
 Cohesion: 0.06
-Nodes (36): enable_fp8_experts(), enable_fp8_linear(), _is_eligible(), _patch_fp8_experts_forward(), _patch_fp8_forward(), Module, Replace mod.forward with FP8 blockwise matmul (padding + fp8_blockwise_mm)., Enable FP8 blockwise matmul for eligible nn.Linear modules.      Patches the for (+28 more)
+Nodes (40): _make_bridge(), _make_request(), _make_sglang_response(), _make_vllm_response(), Any, InfBridge, PauseState, SGLangBridgeBackend (+32 more)
 
 ### Community 180 - "Areal Customized Tree"
-Cohesion: 0.06
-Nodes (56): build_debug_parser(), _debug_run(), main(), MulticaCheckpointError, MulticaEnvDispatchClient, ArgumentParser, BaseTransport, Namespace (+48 more)
+Cohesion: 0.10
+Nodes (32): AppLayout(), confirmDelete(), IssueDetail(), MissingPinRow(), PinsPage(), ProjectDetail(), Index(), AuthInitializer() (+24 more)
 
 ### Community 181 - "Db Multica Bridge"
 Cohesion: 0.05
@@ -2820,71 +2820,71 @@ Nodes (41): _chunked_apply(), _chunked_gather_logprobs(), _chunked_gather_logpro
 
 ### Community 183 - "Cli Multica Server"
 Cohesion: 0.07
-Nodes (43): AttachmentResponse, ErrorKind, Language, NetworkError, timeoutErr, UserMessageError, main(), APITimeout() (+35 more)
+Nodes (44): AttachmentResponse, ErrorKind, Language, NetworkError, timeoutErr, UserMessageError, init(), main() (+36 more)
 
 ### Community 184 - "Activity Multica Packages"
-Cohesion: 0.16
-Nodes (17): AgentActivityTimelineEvent, ActivitySubtextKey, fullCommand(), isActiveStatus(), isMappedTool(), isNarrativeActivityEvent(), isRadarActionEvent(), narrativeText() (+9 more)
+Cohesion: 0.05
+Nodes (44): members, navigationStub, TEST_RESOURCES, ChannelSystemMessageRow(), interpolateIssueSlot(), interpolateProjectSlots(), interpolateSlots(), ISSUE_STATUS_KEYS (+36 more)
 
 ### Community 185 - "Multica Server Service"
-Cohesion: 0.11
-Nodes (23): CommandTag, agentMemoryValues(), bytesArg(), evolutionAgentValues(), evolutionFileValues(), evolutionSubmissionValues(), float8Arg(), Agent (+15 more)
+Cohesion: 0.07
+Nodes (77): T, TestCurateAndMatchWorkspaceRequiresTransactions(), TestCurateMemorySubmissionAssigns(), TestCurateMemorySubmissionUpdatesExistingSyncKey(), TestEvolutionMemoryDeliveryScopeRequiresStableMember(), NewEvolutionService(), NewEvolutionServiceWithReviewer(), rejectEvolutionSubmissionReason() (+69 more)
 
 ### Community 186 - "Gateway Integration Service"
-Cohesion: 0.06
-Nodes (32): AcquireLarkWSLeaseParams, CreateLarkBindingTokenParams, CreateLarkChatSessionBindingParams, CreateLarkInstallationParams, CreateLarkOutboundCardMessageParams, CreateLarkUserBindingParams, GetLarkChatSessionBindingParams, GetLarkInstallationByAgentParams (+24 more)
+Cohesion: 0.07
+Nodes (25): AcquireLarkWSLeaseParams, ClaimLarkInboundDedupParams, CreateLarkBindingTokenParams, CreateLarkChatSessionBindingParams, CreateLarkInstallationParams, CreateLarkOutboundCardMessageParams, CreateLarkUserBindingParams, GetLarkChatSessionBindingParams (+17 more)
 
 ### Community 187 - "Controller Service Training"
-Cohesion: 0.02
-Nodes (100): FinetuneSpec, GatewayTrainController, Any, Future, Worker, Ensure _workers_ready is signaled even if _bg_initialize fails., Destroy engines on all training workers before killing processes.          ``dis, WeightUpdateControllerConfig (+92 more)
+Cohesion: 0.12
+Nodes (11): BaseModel, Result of a weight update operation., WeightUpdateResult, ctrl(), _mock_response(), TestConnect, TestDisconnect, TestHealthCheck (+3 more)
 
 ### Community 188 - "Service Db Customized"
 Cohesion: 0.04
 Nodes (50): get_default_httpx_limits(), Return shared httpx.Limits for high-concurrency services., AgentConfig, AgentData, AgentLoader, get_agent_loader(), Any, AgentLoader - Unified agent data loading service.  Provides AgentConfig/AgentDat (+42 more)
 
 ### Community 189 - "Lark Multica Server"
-Cohesion: 0.13
-Nodes (51): fakeConnector, fakeCredentials, fakeHubQueries, slowReplier, NewHub(), Duration, EventEmitter, LarkInstallation (+43 more)
+Cohesion: 0.11
+Nodes (61): fakeConnector, fakeHubQueries, slowReplier, NewHub(), Duration, EventEmitter, LarkInstallation, Logger (+53 more)
 
 ### Community 190 - "Handler Comment Multica"
-Cohesion: 0.19
-Nodes (43): commentListFixture, CommentResponse, AttachmentResponse, assertRootStat(), cursorQuery(), decodeComments(), eqIDs(), ResponseRecorder (+35 more)
+Cohesion: 0.13
+Nodes (56): commentEventCapture, commentListFixture, CommentResponse, resolveTestFixture, AttachmentResponse, assertRootStat(), cursorQuery(), decodeComments() (+48 more)
 
 ### Community 191 - "Multica Server Agent"
 Cohesion: 0.07
 Nodes (51): grokBackend, grokSessionUpdate, grokStreamEvent, grokUpdateEnvelope, daemonSysProcAttr(), CancelFunc, SysProcAttr, isAccessDeniedSpawnErr() (+43 more)
 
 ### Community 192 - "Checkpoint Tree Search"
-Cohesion: 0.06
-Nodes (23): Node, Checkpoint save/load for the SuperNode store.  MCTS stats are keyed by node_id (, Save one query file under a per-query inter-process lock., Serialize a SuperNode losslessly (DAG topology + env + reward + turns)., Save trained episode IDs to the recover checkpoint directory., Load trained episode IDs from the recover checkpoint directory.          Returns, TreeCheckpointManager, _node() (+15 more)
+Cohesion: 0.05
+Nodes (28): Node, Checkpoint save/load for the SuperNode store.  MCTS stats are keyed by node_id (, Save one query file under a per-query inter-process lock., Serialize a SuperNode losslessly (DAG topology + env + reward + turns)., Save trained episode IDs to the recover checkpoint directory., Load trained episode IDs from the recover checkpoint directory.          Returns, TreeCheckpointManager, _find_turn_boundaries() (+20 more)
 
 ### Community 193 - "Gateway Proxy Experimental"
-Cohesion: 0.07
-Nodes (35): CompletedSessionInfo, Credentials of a completed external session.      Returned by ``/internal/wait_f, _admin_headers(), _make_client(), _make_mocked_client(), _MockAiohttpResponse, _MockAiohttpSession, Unit tests for the proxy gateway (FastAPI gateway). (+27 more)
+Cohesion: 0.06
+Nodes (40): get_retry_strategy(), log_retry(), OpenAIProxyClient, post_json(), post_json_with_retry(), BaseModel, ClientSession, Exception (+32 more)
 
 ### Community 194 - "Agent Multica Server"
-Cohesion: 0.13
-Nodes (33): codexReasoningCase, applyCodexReasoningEffort(), TestOpencodeBackendInjectsThinkingVariant(), parseClaudeEffortHelp(), resetThinkingCacheForTests(), argIndexOf(), assertCodexThreadConfigEffort(), assertCodexTurnEffort() (+25 more)
+Cohesion: 0.08
+Nodes (57): codebuddyHelpEntry, codexDebugModelsResponse, codexReasoningCase, thinkingCacheEntry, thinkingCacheKey, DetectVersion(), applyCodexReasoningEffort(), TestOpencodeBackendInjectsThinkingVariant() (+49 more)
 
 ### Community 195 - "Agent Codex Multica"
 Cohesion: 0.06
 Nodes (32): 1. Configuration Overview, 2. Engine Initialization, 3. Training Loop Integration, 4. Integration with Workflows, Common Configuration Patterns, Common Issues, Common Usage Patterns, Configuration (+24 more)
 
 ### Community 196 - "Metrics Multica Server"
-Cohesion: 0.08
-Nodes (26): GaugeVec, activeTaskLabels, ModelPrice, Collector, CounterVec, HistogramVec, BusinessMetrics, Mutex (+18 more)
+Cohesion: 0.07
+Nodes (28): GaugeVec, activeTaskLabels, ModelPrice, Collector, CounterVec, HistogramVec, BusinessMetrics, Mutex (+20 more)
 
 ### Community 197 - "Handler Agent Radar"
-Cohesion: 0.12
-Nodes (56): radarExecutorErrorRow, radarExecutorFailingTx, radarExecutorWakeNotification, radarExecutorWakeRecorder, scheduledRadarExecutorFixture, containsJSONText(), T, jsonContainsString() (+48 more)
+Cohesion: 0.09
+Nodes (78): radarExecutorErrorRow, radarExecutorFailingTx, radarExecutorWakeNotification, radarExecutorWakeRecorder, scheduledRadarExecutorFixture, containsJSONText(), T, jsonContainsString() (+70 more)
 
 ### Community 198 - "Jobs Agent Radar"
 Cohesion: 0.16
 Nodes (50): T, TestCompleteDaemonTaskAfterCancellationHasNoRadarExecutionAuthority(), TestCompleteDaemonTaskAtomicallyClaimsRadarAndIgnoresRetryOutput(), TestReconcileLeavesFreshCompletedUnclaimedRadarForCompatibilityWindow(), T, TestRecoverStaleCompletedRadarRunReplaysPersistedResultWithoutNewTask(), TestRecoverStaleCompletedRadarRunSkipsReboundSupervisor(), T (+42 more)
 
 ### Community 199 - "Agent Multica Server"
-Cohesion: 0.13
-Nodes (26): cursorAssistantMessage, cursorContentBlock, cursorStepFinishPart, cursorStreamEvent, cursorTextPart, cursorUsage, buildCursorArgs(), cursorErrorText() (+18 more)
+Cohesion: 0.07
+Nodes (56): cursorAssistantMessage, cursorContentBlock, cursorStepFinishPart, cursorStreamEvent, cursorTextPart, cursorUsage, buildClaudeArgs(), filterCustomArgs() (+48 more)
 
 ### Community 200 - "Skill Areal Agents"
 Cohesion: 0.08
@@ -2895,8 +2895,8 @@ Cohesion: 0.06
 Nodes (37): AttemptStats, BenchmarkEvaluator, BenchmarkResult, BenchmarkTask, entrypoint(), JSONLDatasetEvaluator, _last_assistant_content(), main() (+29 more)
 
 ### Community 202 - "Tree Search Customized"
-Cohesion: 0.18
-Nodes (8): clip_cov_ppo_actor_loss_fn(), _masked_mean(), Tensor, Compute mean over valid (masked) elements., Covariance-aware PPO actor loss.      Extends standard PPO clipping with gradien, Tests for clip_cov_ppo_actor_loss_fn., When no tokens fall within the cov range, clip_cov loss equals standard PPO loss, TestClipCovPpoActorLossFn
+Cohesion: 0.12
+Nodes (29): SharedEvolutionUnitFile, SharedEvolutionUnitVersion, BuildEvolutionVersionEvalSummary(), evolutionMatcherSnapshotFromMetadata(), evolutionUnitMatchesVersion(), evolutionVersionVerdict(), DBTX, Queries (+21 more)
 
 ### Community 203 - "Multica Apps Mobile"
 Cohesion: 0.06
@@ -2915,12 +2915,12 @@ Cohesion: 0.06
 Nodes (31): 1.0 PR Status Check \[Haiku\], 1.1 Get PR Summary \[Haiku\], 1.2 Domain & Signal Detection \[Sonnet\], 1.3 Domain-Specific Risk Identification, 1.4 Output Change Analysis Report, 2.1 Planning Principles, 2.2 Task Template Selection, 2.3 Output Review Task List (+23 more)
 
 ### Community 207 - "Cmd Multica Server"
-Cohesion: 0.15
-Nodes (39): runIssueMetadataList(), Command, HandlerFunc, Server, T, metadataTestServer(), newIssueMetadataDeleteTestCmd(), newIssueMetadataGetTestCmd() (+31 more)
+Cohesion: 0.05
+Nodes (35): Qwen3ModelArgs, Model arguments for Qwen3. Default values are for Qwen3-0.6B.      Attributes:, Attention, FeedForward, _is_moe_layer(), maybe_to_local(), device, ProcessGroup (+27 more)
 
 ### Community 208 - "Server Multica Client"
-Cohesion: 0.17
-Nodes (11): redisImportEnvelope, RedisLocalSkillImportStore, RedisLocalSkillListStore, RuntimeLocalSkillImportRequest, RuntimeLocalSkillListRequest, Time, localSkillImportKey(), localSkillImportPendingKey() (+3 more)
+Cohesion: 0.03
+Nodes (115): executionMemoryCandidate, MemoryData, scopedMemoryPaths, TaskResult, TaskUsageEntry, MemoryContextForEnv, isTaskNotFoundError(), capacityBackoff() (+107 more)
 
 ### Community 209 - "Codex Multica Server"
 Cohesion: 0.11
@@ -2928,19 +2928,19 @@ Nodes (50): codexMemoryEnabled(), ensureCodexMemoryConfig(), Logger, Regexp, has
 
 ### Community 210 - "V2 Inference Service"
 Cohesion: 0.07
-Nodes (50): IssueLabelPickerRoute(), ProjectsPage(), EditProject(), ProjectLeadPickerRoute(), ProjectPriorityPickerRoute(), ProjectStatusPickerRoute(), ProjectDetail(), Inbox() (+42 more)
+Nodes (45): ProjectPinRow(), INBOX_GROUPS, NotificationsSettingsScreen(), EditProject(), ProjectLeadPickerRoute(), ProjectPriorityPickerRoute(), ProjectStatusPickerRoute(), NewProject() (+37 more)
 
 ### Community 211 - "Daemon Shared Skills"
-Cohesion: 0.03
-Nodes (71): _check_grouped_mm_available(), GroupedExperts, Tensor, # NOTE: Upgrading PyTorch may resolve this in the future., Check if torch._grouped_mm is available and functional.      Note: grouped_mm re, Grouped experts module with 3D weight tensors.      This module stores expert we, Execute expert computation using for-loop (reference implementation).      This, Return (w1, w2, w3), converting from DTensor to local if needed. (+63 more)
+Cohesion: 0.09
+Nodes (36): EvolutionReviewFile, EvolutionReviewRiskLevel, clampReviewConfidence(), copyReviewMetadata(), envBool(), envSeconds(), evolutionReviewFallback(), evolutionReviewPayload() (+28 more)
 
 ### Community 212 - "Generated Queries Chat"
-Cohesion: 0.08
-Nodes (23): NewIssueModal(), NewProjectPriorityPickerRoute(), NewProjectStatusPickerRoute(), NewProject(), NewProjectPickerField, DescriptionField(), Props, SubmitIssueButton() (+15 more)
+Cohesion: 0.10
+Nodes (15): NewProjectPriorityPickerRoute(), NewProjectStatusPickerRoute(), ProjectPriorityPickerBody(), Props, ProjectStatusPickerBody(), Props, ProjectRow(), Props (+7 more)
 
 ### Community 213 - "Handler Dm Multica"
 Cohesion: 0.11
-Nodes (14): CreateOrFindDirectMessageRequest, DMItem, dmMember, DMPeer, dmPeerRef, dmCanonicalName(), dmItemForChannel(), Agent (+6 more)
+Nodes (16): CreateOrFindDirectMessageRequest, DMItem, dmMember, DMPeer, dmPeerRef, dmCanonicalName(), dmItemForChannel(), Agent (+8 more)
 
 ### Community 214 - "Multica Apps Mobile"
 Cohesion: 0.06
@@ -2948,31 +2948,31 @@ Nodes (17): Test gate selection with mixed positive and negative advantages., Te
 
 ### Community 215 - "Handler Multica Server"
 Cohesion: 0.08
-Nodes (54): mockDB, mockRow, CommandTag, Config, DBTX, Handler, Row, T (+46 more)
+Nodes (55): mockDB, mockRow, CommandTag, Config, DBTX, Handler, Row, T (+47 more)
 
 ### Community 216 - "Memorycuration Multica Server"
-Cohesion: 0.13
-Nodes (43): agentRoot, AgentRunResult, Engine, l2AgentEnvelope, L3ReviewTrace, appendBoundedReviewTraces(), appendL3TraceAudit(), bracketValue() (+35 more)
+Cohesion: 0.10
+Nodes (53): agentRoot, AgentRunResult, Engine, l2AgentEnvelope, L3ReviewTrace, reviewEntry, appendBoundedReviewTraces(), appendL3TraceAudit() (+45 more)
 
 ### Community 217 - "Multica Bridge Db"
 Cohesion: 0.08
 Nodes (45): _env_bool(), _env_float(), _env_int(), _env_uuid(), _get(), Environment-driven configuration for the DB bridge.  All knobs are read from env, Parse a comma-separated key list into a set of trimmed, non-empty keys., _require_non_negative() (+37 more)
 
 ### Community 218 - "Mcore Areal Bailing"
-Cohesion: 0.04
-Nodes (59): _compute_stage_layer_lengths(), configure_pipeline_layer_splits(), estimate_stage_parameter_buckets(), PretrainedConfig, TransformerConfig, BailingMoeBridge, Tensor, Override to return heterogeneous layer specs (Lightning + MLA).          PP slic (+51 more)
+Cohesion: 0.03
+Nodes (84): _compute_stage_layer_lengths(), configure_pipeline_layer_splits(), estimate_stage_parameter_buckets(), PretrainedConfig, TransformerConfig, _build_lightning_attn_spec(), hf_to_mcore_config_bailing_moe(), is_lightning_layer() (+76 more)
 
 ### Community 219 - "Agent V2 Service"
 Cohesion: 0.11
 Nodes (18): create_data_proxy_app(), DataProxyConfig, FastAPI, _SessionData, DataProxyClient, Any, DataProxyConfig, main() (+10 more)
 
 ### Community 220 - "Execenv Multica Server"
-Cohesion: 0.10
-Nodes (50): recordingTaskWakeup, TestBuildMetaSkillContentNormalizesDescriptionLineEndings(), TestBuildMetaSkillContentSanitizesRequestingUserName(), buildMetaSkillContent(), CleanupRuntimeConfig(), locateMarkerBlock(), T, TestAssignmentTriggeredProtocolHonorsAgentIdentity() (+42 more)
+Cohesion: 0.07
+Nodes (66): recordingTaskWakeup, TestBuildMetaSkillContentNormalizesDescriptionLineEndings(), TestBuildMetaSkillContentSanitizesRequestingUserName(), buildMetaSkillContent(), chatRuntimeSkills(), CleanupRuntimeConfig(), formatProjectResource(), Builder (+58 more)
 
 ### Community 221 - "Cmd Multica Agent"
 Cohesion: 0.14
-Nodes (31): runAgentAvatar(), freshAgentEnvSetCmd(), freshMcpConfigCmd(), Command, T, TestAgentAvatarCaseInsensitiveExtension(), TestAgentAvatarHappyPath(), TestAgentAvatarMissingAgent() (+23 more)
+Nodes (31): parseCustomEnv(), runAgentAvatar(), freshAgentEnvSetCmd(), freshMcpConfigCmd(), Command, T, TestAgentAvatarCaseInsensitiveExtension(), TestAgentAvatarHappyPath() (+23 more)
 
 ### Community 222 - "Workgraph Multica Server"
 Cohesion: 0.12
@@ -2983,20 +2983,20 @@ Cohesion: 0.05
 Nodes (35): admin_headers(), make_admin_dependency(), AgentBridge, ChatCompletionsBridge, mount_bridge(), mount_chat_bridge(), OpenResponsesBridge, ABC (+27 more)
 
 ### Community 224 - "Cli V2 Inference"
-Cohesion: 0.11
-Nodes (17): initialsOf(), INBOX_GROUPS, NotificationsSettingsScreen(), initialsOf(), ProfileSettingsScreen(), SettingsPage(), THEME_OPTIONS, Avatar() (+9 more)
+Cohesion: 0.04
+Nodes (78): FileAttachResult, PickedAsset, UploadContext, ApiClientOptions, ApiError, FileAsset, ActiveTasksResponse, ActiveTasksResponseSchema (+70 more)
 
 ### Community 225 - "Testdispatcher Lark Dispatcher"
-Cohesion: 0.23
-Nodes (35): activeInstallation(), boundUser(), dedupKey(), T, seedDedupKey(), TestDispatcher_AgentArchivedRepliesAtFlush(), TestDispatcher_AgentOfflineRepliesAtFlush(), TestDispatcher_AppendUserMessageFailureReleasesClaim() (+27 more)
+Cohesion: 0.15
+Nodes (42): fakeDedupRow, fakeEnqueuer, fakeQueries, activeInstallation(), boundUser(), dedupKey(), ChatSession, LarkInstallation (+34 more)
 
 ### Community 226 - "Cmd Multica Daemon"
 Cohesion: 0.11
 Nodes (47): diskUsageProfileSuggestion, resolveProfile(), buildDaemonStartArgs(), checkDaemonHealthOnPort(), countDiskUsageTaskDirs(), daemonAlive(), daemonDirForProfile(), daemonLogPathForProfile() (+39 more)
 
 ### Community 227 - "Handler Agent Activity"
-Cohesion: 0.12
-Nodes (52): AgentActivityTimelineEvent, agentActivityEventsResult, agentActivityListResult, agentActivityRequest(), assertActivityEventsOmitTopLevelLegacyFields(), assertActivityTimelineDetail(), createActivityChannelSession(), createActivityChatMessage() (+44 more)
+Cohesion: 0.08
+Nodes (76): AgentActivityTimelineEvent, agentActivityEventsResult, agentActivityListResult, agentActivityRequest(), assertActivityEventsOmitTopLevelLegacyFields(), assertActivityTimelineDetail(), createActivityChannelSession(), createActivityChatMessage() (+68 more)
 
 ### Community 228 - "Hf Mcore Load"
 Cohesion: 0.06
@@ -3004,51 +3004,51 @@ Nodes (30): API & Config Compatibility Risks, Checkpoint & Recovery Risks, CI/CD
 
 ### Community 229 - "Chat Proxy Experimental"
 Cohesion: 0.08
-Nodes (33): admin_headers(), config(), mock_areal_client(), Unit tests for data proxy chat/session endpoints (Plan 3b)., Test the complete flow: start → chat → set_reward → export., Mock ArealOpenAI client that returns a valid ChatCompletion.     Also stores the, session_headers(), test_admin_key_still_only_maps_to_hitl_session_while_batch_uses_session_key() (+25 more)
+Nodes (35): _flush_ready_trajectories(), FastAPI, _ready_trajectory_loop(), admin_headers(), mock_areal_client(), Unit tests for data proxy chat/session endpoints (Plan 3b)., Test the complete flow: start → chat → set_reward → export., Mock ArealOpenAI client that returns a valid ChatCompletion.     Also stores the (+27 more)
 
 ### Community 230 - "Batch Rtensor Proxy"
-Cohesion: 0.09
-Nodes (17): _deserialize_batch_response_bytes(), _deserialize_response_bytes(), Tensor, PUT a tensor then GET it back → deserialized tensor matches original., GET /data/{random-uuid} for a non-existent shard → 404., PUT 3 tensors with different shapes, POST /data/batch → all 3 match originals., POST /data/batch with a missing shard_id → 400 with error details., POST /data/batch with shard_ids as a non-list → 400/422 validation error. (+9 more)
+Cohesion: 0.08
+Nodes (20): client(), config(), _deserialize_batch_response_bytes(), _deserialize_response_bytes(), Tensor, Unit tests for RTensor storage endpoints in the data proxy FastAPI app.  Covers, PUT a tensor then GET it back → deserialized tensor matches original., GET /data/{random-uuid} for a non-existent shard → 404. (+12 more)
 
 ### Community 231 - "Daemonws Hub Multica"
 Cohesion: 0.12
 Nodes (13): client, ClientIdentity, HeartbeatHandler, Hub, MessageKindRecorder, Conn, Hub, Mutex (+5 more)
 
 ### Community 232 - "Realtime Multica Server"
-Cohesion: 0.10
-Nodes (23): deliverEnvelope(), envelopeFromXMessage(), envelopeRedisValues(), CancelFunc, Client, Hub, Mutex, WaitGroup (+15 more)
+Cohesion: 0.09
+Nodes (26): deliverEnvelope(), envelopeFromXMessage(), envelopeRedisValues(), CancelFunc, Client, Hub, Mutex, WaitGroup (+18 more)
 
 ### Community 233 - "Generated Queries Comment"
 Cohesion: 0.10
 Nodes (28): ClearOtherThreadResolutionsParams, CountCommentsParams, CountNewCommentsSinceParams, CreateCommentParams, DeleteCommentParams, GetCommentInWorkspaceParams, GetThreadRootParams, HasAgentCommentedSinceParams (+20 more)
 
 ### Community 234 - "Server Multica Cmd"
-Cohesion: 0.09
-Nodes (34): Config, envInt32(), Pool, logPoolConfig(), newDBPool(), newSamplerDBPool(), poolParamsFromURL(), runDBStatsLogger() (+26 more)
+Cohesion: 0.12
+Nodes (20): Config, closeRedisClient(), envBoolDefault(), envDuration(), envPositiveInt(), envPositiveInt64(), Client, Duration (+12 more)
 
 ### Community 235 - "Opencode Expert Agents"
 Cohesion: 0.06
 Nodes (30): API & Config Compatibility Risks, Checkpoint & Recovery Risks, CI/CD & Release Automation Risks, Cross-Domain Linkage Rules, Distributed Runtime Risks, Domain 10: Low-Risk Hygiene (LOW), Domain 11: Harness & Agent Infrastructure (MEDIUM/HIGH), Domain 12: CI/CD & Release Automation (HIGH/CRITICAL) (+22 more)
 
 ### Community 236 - "Agent Pi Multica"
-Cohesion: 0.05
-Nodes (78): piAssistantMessageEvent, piBackend, piMessage, PiRPCBackend, piRPCCompletion, piRPCEvent, piRPCProcess, piRPCResponse (+70 more)
+Cohesion: 0.07
+Nodes (61): piAssistantMessageEvent, piBackend, piMessage, piStreamEvent, piUsage, buildPiArgs(), buildPiArgsForExecution(), buildPiEnv() (+53 more)
 
 ### Community 237 - "Experimental Archon Hf"
-Cohesion: 0.04
-Nodes (36): _find_in_structure(), _is_tensor_like(), _merge_tensors(), Any, StatefulDataLoader, WorkflowLike, Flatten per-DP-group results and reorder to original trajectory order., Controller for managing distributed training across multiple workers.      This (+28 more)
+Cohesion: 0.14
+Nodes (15): buildQuickCreateReturnContent(), DBTX, Issue, Row, Rows, TaskService, Text, Timestamptz (+7 more)
 
 ### Community 238 - "Chat Proxy V2"
 Cohesion: 0.08
-Nodes (33): admin_headers(), config(), mock_areal_client(), Unit tests for data proxy chat/session endpoints (Plan 3b)., Test the complete flow: start → chat → set_reward → export., Mock ArealOpenAI client that returns a valid ChatCompletion.     Also stores the, session_headers(), test_admin_key_still_only_maps_to_hitl_session_while_batch_uses_session_key() (+25 more)
+Nodes (35): _flush_ready_trajectories(), FastAPI, _ready_trajectory_loop(), admin_headers(), mock_areal_client(), Unit tests for data proxy chat/session endpoints (Plan 3b)., Test the complete flow: start → chat → set_reward → export., Mock ArealOpenAI client that returns a valid ChatCompletion.     Also stores the (+27 more)
 
 ### Community 239 - "Customized Areal Tree"
 Cohesion: 0.06
 Nodes (30): archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env, archived-with: 2026-07-07-sub-project-e-critic-reward-entropy-env (+22 more)
 
 ### Community 240 - "Server Metrics Multica"
-Cohesion: 0.09
-Nodes (36): RegistryOptions, NewBusinessSamplerCollector(), newSamplerSnapshot(), T, TestBusinessSamplerStatementTimeoutCutsHungQuery(), bucketsFor(), filledSnapshot(), BusinessSamplerCollector (+28 more)
+Cohesion: 0.08
+Nodes (40): Registry, RegistryOptions, NewBusinessSamplerCollector(), newSamplerSnapshot(), T, TestBusinessSamplerStatementTimeoutCutsHungQuery(), bucketsFor(), filledSnapshot() (+32 more)
 
 ### Community 241 - "Multica Packages Views"
 Cohesion: 0.06
@@ -3059,16 +3059,16 @@ Cohesion: 0.20
 Nodes (43): bareHeadBranch(), getRemoteDefaultBranch(), New(), addEmptyCommit(), cachedRepoHasFile(), createTestRepo(), createTestRepoAt(), currentBranchName() (+35 more)
 
 ### Community 243 - "Service Multica Server"
-Cohesion: 0.07
-Nodes (46): SharedEvolutionUnitFile, SharedEvolutionUnitVersion, EvolutionSkillVersionDetailResponse, EvolutionSkillVersionFileResponse, EvolutionSkillVersionResponse, evolutionSkillVersionRollbackRequest, evolutionSkillVersionRollbackResponse, evolutionSkillVersionFileResponses() (+38 more)
+Cohesion: 0.04
+Nodes (30): Export a ready trajectory.          Parameters         ----------         discou, Export cached completions/responses in different formats.          When ``style=, Apply backward discounted rewards across cached completions/responses., Get completion/response with its reward from cache., Export cached completions/responses in different formats.          When ``style=, Export interactions for this session via HTTP.          This method should be ca, deserialize_interactions(), Any (+22 more)
 
 ### Community 244 - "Multica Apps Mobile"
 Cohesion: 0.06
 Nodes (30): Architecture, Block spacing between paragraphs, Critical correction from initial research, Decision log, File card rendering — preprocess into a normal link, Image rendering — auto aspect ratio, In-repo references, Libraries (+22 more)
 
 ### Community 245 - "Areal V2 Cli"
-Cohesion: 0.11
-Nodes (23): BaseHTTPClient, Any, Exception, Non-2xx response from the service. Body is captured so callers     can inspect a, Network-level error reaching the service: connection refused,     DNS failure, t, Issue an HTTP request returning parsed JSON.      A ``payload`` dict triggers JS, Minimal HTTP client base. Subclasses add business RPC methods.      Holds ``base, request_json() (+15 more)
+Cohesion: 0.09
+Nodes (39): BaseHTTPClient, Any, Exception, Non-2xx response from the service. Body is captured so callers     can inspect a, Network-level error reaching the service: connection refused,     DNS failure, t, Issue an HTTP request returning parsed JSON.      A ``payload`` dict triggers JS, Minimal HTTP client base. Subclasses add business RPC methods.      Holds ``base, request_json() (+31 more)
 
 ### Community 246 - "Areal V2 Cli"
 Cohesion: 0.08
@@ -3076,7 +3076,7 @@ Nodes (18): LogsCommand, Command, Path, Resolve the log file path. Subclasses ma
 
 ### Community 247 - "Tau2 Examples Agent"
 Cohesion: 0.08
-Nodes (27): BaseUser, _get_task(), Any, AsyncOpenAI, ChatCompletion, Environment, Task, Tau2 Agent Workflow for AReaL proxy mode.  This module implements a Tau2 agent t (+19 more)
+Nodes (26): BaseUser, _get_task(), Any, AsyncOpenAI, ChatCompletion, Environment, Task, Create a completion function for the given client. (+18 more)
 
 ### Community 248 - "Muon Customized Areal"
 Cohesion: 0.10
@@ -3099,28 +3099,28 @@ Cohesion: 0.10
 Nodes (37): Duration, UUID, NewDiagnosisAgentRunner(), parseStepRewards(), T, UUID, hasNoTools(), newDiagnosisStores() (+29 more)
 
 ### Community 253 - "Service Review Evolution"
-Cohesion: 0.32
-Nodes (6): NewOpenAICompatibleEvolutionReviewer(), TestAgentEvolutionReviewerFailureNeedsReview(), TestAgentEvolutionReviewerReturnsParsedReview(), TestOpenAICompatibleEvolutionReviewerProviderErrorNeedsReview(), TestOpenAICompatibleEvolutionReviewerReturnsParsedReview(), fakeEvolutionReviewer
+Cohesion: 0.15
+Nodes (33): autopilotEventPayload(), defaultFailureMonitorConfig(), emitAutopilotPausedNotifications(), envDurationNonNegative(), envDurationOrZero(), envDurationPositive(), envFailureMonitorConfig(), envFloatInUnitInterval() (+25 more)
 
 ### Community 254 - "Megatron Engine Vlm"
 Cohesion: 0.07
 Nodes (13): convert_qwen3_vl_to_hf(), Convert dense Qwen3-VL Megatron parameters to HuggingFace format.      Qwen3-VL-, Test mcore→HF weight name conversion for Qwen3-VL (dense)., Mock TransformerConfig matching Qwen/Qwen3-VL-2B-Instruct text_config:         h, Mock HF config matching Qwen/Qwen3-VL-2B-Instruct vision_config:         hidden=, convert_to_hf with model_name='qwen3_vl' must use the VLM converter,         not, Qwen3-specific q_layernorm → self_attn.q_norm., Qwen3-VL adds patch_embed bias (Qwen2.5-VL was bias=False). (+5 more)
 
 ### Community 255 - "Dispatcher Areal Experimental"
-Cohesion: 0.09
-Nodes (22): BroadcastRequest, _contains_partitionable_tensor_batch(), DispatchRequest, _empty_payload(), Any, BroadcastRequest, DispatchRequest, _raise_for_worker() (+14 more)
+Cohesion: 0.14
+Nodes (28): evolutionModelEvalRunRequest, evolutionModelEvalRunResponse, evolutionModelRuntimeConfigRequest, evolutionModelRuntimeConfigResponse, evolutionTrainingExamplePatchRequest, evolutionTrainingExampleResponse, evolutionTrainingExampleUpsertRequest, trainingExampleScanner (+20 more)
 
 ### Community 256 - "Execenv Multica Server"
-Cohesion: 0.13
-Nodes (42): sidecarManifest, workdirSnapshot, resolveSkillsDir(), skillsDirPath(), writeProjectResources(), writeSkillFiles(), TestReuseSkillRefreshIsCanonicalAcrossProviders(), T (+34 more)
+Cohesion: 0.15
+Nodes (38): sidecarManifest, workdirSnapshot, resolveSkillsDir(), skillsDirPath(), writeProjectResources(), TestReuseSkillRefreshIsCanonicalAcrossProviders(), CleanupSidecars(), dirHasEntries() (+30 more)
 
 ### Community 257 - "Handler Multica Server"
-Cohesion: 0.05
-Nodes (33): concat_padded_tensors(), Concatenate and pad tensors from multiple dictionaries.      For each key presen, mock_padded_llm_data(), Generate mock padded input data., concat_padded_tensors raises ValueError when later dict has extra key., concat_padded_tensors raises ValueError when later dict misses key., Test concat_padded_tensors utility., concat_padded_tensors works when all dicts have same keys. (+25 more)
+Cohesion: 0.10
+Nodes (26): useCreateCloudBillingCheckoutSession(), useCreateCloudBillingPortalSession(), useInvalidateBillingDataAfterCredit(), billingBalanceOptions(), billingBatchesOptions(), billingCheckoutSessionOptions(), billingKeys, billingPriceTiersOptions() (+18 more)
 
 ### Community 258 - "Proxy Experimental Openai"
-Cohesion: 0.08
-Nodes (23): Configuration for the routing service.      The router owns worker registry, ses, RouterConfig, main(), A registered data proxy worker., WorkerInfo, get_strategy(), Protocol, WorkerInfo (+15 more)
+Cohesion: 0.11
+Nodes (19): Configuration for the routing service.      The router owns worker registry, ses, RouterConfig, main(), A registered data proxy worker., WorkerInfo, get_strategy(), Protocol, WorkerInfo (+11 more)
 
 ### Community 259 - "Examples Grpo Tir"
 Cohesion: 0.27
@@ -3131,24 +3131,24 @@ Cohesion: 0.15
 Nodes (41): openclawCall, openclawCLIStub, OpenclawConfigPrep, OpenclawConfigResult, openclawResponse, buildPerTaskOpenclawConfig(), execOpenclawCLI(), Duration (+33 more)
 
 ### Community 261 - "Handler Multica Server"
-Cohesion: 0.10
-Nodes (50): wendyUnlockDispatchFixture, addRadarAgentMembersForExecutorTest(), T, TestListChannelSourceIssuesProjectsOnlyCurrentGroupAnchors(), T, TestListGroupedIssuesAssigneePaginatesPerGroup(), TestListGroupedIssuesProjectPaginatesPerGroup(), assertWendyUnlockHandoffChannel() (+42 more)
+Cohesion: 0.16
+Nodes (26): wendyUnlockDispatchFixture, T, TestListChannelSourceIssuesProjectsOnlyCurrentGroupAnchors(), T, TestListGroupedIssuesAssigneePaginatesPerGroup(), TestListGroupedIssuesProjectPaginatesPerGroup(), assertWendyUnlockHandoffChannel(), assertWendyUnlockMessageCount() (+18 more)
 
 ### Community 262 - "Service Multica Server"
 Cohesion: 0.10
 Nodes (29): ActiveDuplicateError, queryRower, fakeIssueCreator, DuplicateMessage(), Issue, Queries, UUID, LockAndFindActiveDuplicate() (+21 more)
 
 ### Community 263 - "Cache Multica Server"
-Cohesion: 0.04
-Nodes (39): _nodes_to_batched_tensor_dict(), Convert list[Node] to a batched tensor dict with metadata.      Each Node is con, _make_interaction_dict(), _make_model_response(), _make_node(), _make_workflow(), Any, LossMode (+31 more)
+Cohesion: 0.05
+Nodes (36): Agent Continuation Contract, Agent Message Freshness Spec, API / Transport Contract, Core Concept: Action Boundary CAS, Current Implementation, Data Model Impact, Gap 1: `send_draft` Bypasses Freshness, Gap 2: Check and Insert Are Not a Single CAS Boundary (+28 more)
 
 ### Community 264 - "Agent Hermesclient Hermes"
 Cohesion: 0.06
 Nodes (30): AGENTS.md -- AReaL Agent Operations Guide, API & config rules, Code style & patterns, Collaboration & review, Comet Ambient Resume, Core concepts, Distributed code rules, Domain experts & skills (+22 more)
 
 ### Community 265 - "Attention Lightning Areal"
-Cohesion: 0.07
-Nodes (35): _all_to_all_cp2hp(), _all_to_all_hp2cp(), _build_alibi_slopes(), _build_zigzag_redo_indices(), _build_zigzag_undo_indices(), _get_cp_group(), _get_cp_rank(), _get_cp_world_size() (+27 more)
+Cohesion: 0.15
+Nodes (39): runIssueMetadataList(), Command, HandlerFunc, Server, T, metadataTestServer(), newIssueMetadataDeleteTestCmd(), newIssueMetadataGetTestCmd() (+31 more)
 
 ### Community 266 - "Agent Service V2"
 Cohesion: 0.12
@@ -3159,8 +3159,8 @@ Cohesion: 0.06
 Nodes (30): 0.1 原架构与为什么改（考古，v2.4.2 补，代码核实）, 0. 背景 / 目标 / Scope 决策, 10. 权限 / 审计, 11. 边界状态, 12. 分期 → 任务, 13. 验收标准, 14. 变更记录, 15. 关联独立方向：Agent Memory / Workspace (+22 more)
 
 ### Community 268 - "Lark Multica Server"
-Cohesion: 0.15
-Nodes (25): larkEventEnvelope, larkEventHeader, LarkJSONFrameDecoder, larkMention, larkMessageReceiveEvent, containsMention(), extractTextBody(), LarkInstallation (+17 more)
+Cohesion: 0.10
+Nodes (37): larkEventEnvelope, larkEventHeader, LarkJSONFrameDecoder, larkMention, larkMessageReceiveEvent, larkPostContent, larkPostSpan, flattenContent() (+29 more)
 
 ### Community 269 - "Multica Bridge Db"
 Cohesion: 0.11
@@ -3191,8 +3191,8 @@ Cohesion: 0.10
 Nodes (23): BaseTool, ABC, Enum, Release any tool resources.          Most tools are stateless and do not need cl, Tool type enumeration, Tool call data structure, Tool description data structure, Tool markers data structure (+15 more)
 
 ### Community 276 - "Server Runtime Multica"
-Cohesion: 0.11
-Nodes (36): Bus, Event, Handler, LivenessStore, RuntimeHealthEventExecutor, candidateRow(), T, UUID (+28 more)
+Cohesion: 0.22
+Nodes (21): RuntimeHealthEventExecutor, candidateRow(), T, UUID, makeUUIDForFilter(), sortedIDStrings(), TestFilterStaleRuntimesByLiveness_AliveCandidatesSkipped(), TestFilterStaleRuntimesByLiveness_NoopStorePassesThrough() (+13 more)
 
 ### Community 277 - "Lark Multica Server"
 Cohesion: 0.08
@@ -3203,8 +3203,8 @@ Cohesion: 0.07
 Nodes (29): Add Archon Model, Architecture Decision Map, Common Mistakes, File Checklist, How to Update, Important Design Decisions, Prerequisites, Purpose (+21 more)
 
 ### Community 279 - "Multica Cmd Sandboxd"
-Cohesion: 0.12
-Nodes (26): cubeSandbox, sandboxClaimResponse, sandboxdClient, sandboxdConfig, sandboxJob, sandboxJobPayload, firstNonEmpty(), Client (+18 more)
+Cohesion: 0.08
+Nodes (40): cubeSandbox, cubeTemplateSummary, sandboxClaimResponse, sandboxdClient, sandboxdConfig, sandboxJob, sandboxJobPayload, buildStartRuntimeInCubeCode() (+32 more)
 
 ### Community 280 - "Multica Attachment Docs"
 Cohesion: 0.06
@@ -3215,12 +3215,12 @@ Cohesion: 0.13
 Nodes (39): Client, NewRedisLocalSkillImportStore(), NewRedisLocalSkillListStore(), Client, T, newRedisTestClient(), TestRedisLocalSkillImportStore_PopPendingAcrossInstances(), TestRedisLocalSkillImportStore_PopPendingBatch() (+31 more)
 
 ### Community 282 - "Experimental Inference Service"
-Cohesion: 0.07
-Nodes (14): admin_headers(), Admin key but no workers registered → 503., Route without auth → 401., Register session without auth → 401., Register a session, then verify pinned routing works., Delete a worker by worker_id instead of worker_addr., Delete by unknown worker_id → 404., Delete without worker_id or worker_addr → 422. (+6 more)
+Cohesion: 0.06
+Nodes (18): admin_headers(), Admin key but no workers registered → 503., Route without auth → 401., Register session without auth → 401., Register a session, then verify pinned routing works., Delete a worker by worker_id instead of worker_addr., Delete by unknown worker_id → 404., Delete without worker_id or worker_addr → 422. (+10 more)
 
 ### Community 283 - "Dataset Areal Image"
-Cohesion: 0.08
-Nodes (32): convert_image(), get_clevr_count_70k_rl_dataset(), get_clevr_count_70k_sft_dataset(), Any, ImageObject, # FIXME: processor process data extremely slowly in transformers > 4.53.1, # FIXME: processor process data extremely slowly in transformers > 4.53.1, "clevr_count_70k": {         "image_key": "images",         "question_key": "pro (+24 more)
+Cohesion: 0.07
+Nodes (34): convert_image(), get_clevr_count_70k_rl_dataset(), get_clevr_count_70k_sft_dataset(), Any, ImageObject, # FIXME: processor process data extremely slowly in transformers > 4.53.1, # FIXME: processor process data extremely slowly in transformers > 4.53.1, "clevr_count_70k": {         "image_key": "images",         "question_key": "pro (+26 more)
 
 ### Community 284 - "Runner Sandbox Infra"
 Cohesion: 0.09
@@ -3231,28 +3231,28 @@ Cohesion: 0.06
 Nodes (14): ChainedScheduler, ConstantScheduler, CosineDecayScheduler, EpochStepTimeFreqCtl, ExponentialScheduler, FrequencyControl, LinearScheduler, ABC (+6 more)
 
 ### Community 286 - "Task Examples Scaffolding"
-Cohesion: 0.10
-Nodes (5): Any, Task, Serialize a RoleMessage to a dictionary., Get statistics for a specific controller or all controllers., Get all records across all controllers as a flat list.
+Cohesion: 0.08
+Nodes (11): Any, Task, Task profiler that captures tasks at yield points., Serialize a RoleMessage to a dictionary., Compute avg, median, min, max, sum for a list of values., Print summary statistics for all controllers., Get statistics for a specific controller or all controllers., Get all records across all controllers as a flat list. (+3 more)
 
 ### Community 287 - "Tool Tir Examples"
 Cohesion: 0.08
 Nodes (17): test_tool_manager_async_dispatch_daytona(), Get all markers (start and end) for enabled tools only.          Returns:, Determine tool type to call based on markers., General tool manager responsible for coordinating tool calls., Get tool description prompt text for external calls., Get marker information for all tools.          Returns:             Dict[ToolTyp, Get all start markers for setting stop tokens.          Returns:             Lis, Get all end markers for setting stop tokens.          Returns:             List[ (+9 more)
 
 ### Community 288 - "Lark Dispatcher Multica"
-Cohesion: 0.16
-Nodes (17): captureReply, ChatTaskEnqueuer, dedupFinalize, Dispatcher, DispatcherQueries, DispatchResult, DropReason, FlushReplyFunc (+9 more)
+Cohesion: 0.11
+Nodes (26): captureReply, ChatTaskEnqueuer, dedupFinalize, Dispatcher, DispatcherQueries, DispatchResult, DropReason, FlushReplyFunc (+18 more)
 
 ### Community 289 - "Testdispatch Service Env"
-Cohesion: 0.15
-Nodes (54): NewEnvDispatchService(), fakeAdapterErr(), T, newFakeEnvDispatchDeps(), TestBranchAppendsNewMessageWithoutChangingTriggerAgent(), TestBranchLeavesNonTriggeredAgentsPendingWithCloneSources(), TestBranchRejectsInvalidMessageSourceBeforeWrites(), TestBranchWakesOnlyTriggerAgentWithClonedSandbox() (+46 more)
+Cohesion: 0.14
+Nodes (56): NewEnvDispatchService(), fakeAdapterErr(), T, newFakeEnvDispatchDeps(), TestBranchAppendsNewMessageWithoutChangingTriggerAgent(), TestBranchLeavesNonTriggeredAgentsPendingWithCloneSources(), TestBranchRejectsInvalidMessageSourceBeforeWrites(), TestBranchWakesOnlyTriggerAgentWithClonedSandbox() (+48 more)
 
 ### Community 290 - "Prepare Batch Rationale"
 Cohesion: 0.10
 Nodes (52): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+44 more)
 
 ### Community 291 - "Gateway Infra Service"
-Cohesion: 0.15
-Nodes (9): create_gateway_app(), FastAPI, GatewayConfig, GatewayConfig, main(), client(), config(), TestGatewayAuth (+1 more)
+Cohesion: 0.08
+Nodes (15): create_gateway_app(), FastAPI, GatewayConfig, GatewayConfig, main(), admin_headers(), client(), config() (+7 more)
 
 ### Community 292 - "Tree Areal Logprobs"
 Cohesion: 0.26
@@ -3276,19 +3276,19 @@ Nodes (29): Add Archon Model, Architecture Decision Map, Common Mistakes, File C
 
 ### Community 297 - "Handler Evolution Multica"
 Cohesion: 0.09
-Nodes (17): apply_fsdp2(), maybe_patch_fsdp_module(), # NOTE: FSDP2 is not compatible with AutoModelForSequenceClassification, so we n, model: AutoModelForCausalLM, AdamKernel, OptimKernel, Any, Tensor (+9 more)
+Nodes (35): PiRPCBackend, piRPCCompletion, piRPCContextUsage, piRPCEvent, piRPCProcess, piRPCResponse, piRPCTurn, choosePiInvocation() (+27 more)
 
 ### Community 298 - "Markdown Multica Packages"
 Cohesion: 0.11
-Nodes (27): CodeBlock(), CodeBlockProps, highlightCache, InlineCode(), LANGUAGE_ALIASES, escapeAttr(), isAllowedFileCardHref(), isCdnUrl() (+19 more)
+Nodes (26): CodeBlock(), CodeBlockProps, highlightCache, InlineCode(), LANGUAGE_ALIASES, escapeAttr(), isAllowedFileCardHref(), isCdnUrl() (+18 more)
 
 ### Community 299 - "Scheduler Multica Server"
-Cohesion: 0.13
-Nodes (23): T, TestConcurrentClaimsSingleWinner(), dumpJobRows(), Pool, T, Time, TestManagerEveryPlanRetriesFailedSamePlanTime(), NewManager() (+15 more)
+Cohesion: 0.06
+Nodes (19): Test with zero first_stage_less_layers., Test generate_llm_fqn_per_model_part function., Test validation error for num_stages < 1., Test validation error for negative num_stages., Test validation error when num_stages exceeds effective layers., Test validation error when first_stage_less_layers exceeds layers_per_stage., Single stage should contain all modules., Test validation error when last_stage_less_layers exceeds layers_per_stage. (+11 more)
 
 ### Community 300 - "Handler Multica Server"
-Cohesion: 0.18
-Nodes (18): AgentHealthEvent, AgentHealthSummary, AgentHealthEvent, AgentHealthResponse, AgentHealthSummary, agentHealthCurrentEvent(), agentHealthEventState(), agentHealthMissingRuntimeSummary() (+10 more)
+Cohesion: 0.06
+Nodes (33): ADDED Requirements, Requirement: Actor and value objectives share one optimizer update, Requirement: Candidate KL uses policy top-k and full-vocabulary normalization, Requirement: Reference policy is the frozen initial model served by SGLang, Requirement: SGLang scores actor-selected candidates, Requirement: Terminal value consistency is optimized per complete episode, Requirement: VIMPO advantages are token-level, detached, and normalized, Requirement: VIMPO mode is critic-free and explicitly configured (+25 more)
 
 ### Community 301 - "Guard Experimental Inference"
 Cohesion: 0.07
@@ -3304,35 +3304,35 @@ Nodes (9): cleanup_forked_children(), _make_mock_process(), Unit tests for RPCGu
 
 ### Community 304 - "Router Training Service"
 Cohesion: 0.08
-Nodes (20): create_app(), _extract_bearer_token(), _probe_model_health(), Any, BaseModel, FastAPI, ModelRegistry, RouterConfig (+12 more)
+Nodes (22): create_app(), _extract_bearer_token(), _probe_model_health(), Any, BaseModel, FastAPI, ModelRegistry, RouterConfig (+14 more)
 
 ### Community 305 - "Final Reward Gaia"
-Cohesion: 0.08
-Nodes (16): build_evaluate_final_answer_prompt(), call_openai_compatible_model(), compute_reward(), evaluate_final_answer(), extract_answer(), _flatten_content(), parse_judge_score(), Minimal final reward logic extracted from `verl_new/trainer/main_ppo.py`.  Only (+8 more)
+Cohesion: 0.09
+Nodes (14): build_evaluate_final_answer_prompt(), call_openai_compatible_model(), compute_reward(), evaluate_final_answer(), extract_answer(), _flatten_content(), parse_judge_score(), Minimal final reward logic extracted from `verl_new/trainer/main_ppo.py`.  Only (+6 more)
 
 ### Community 306 - "Critic Customized Areal"
-Cohesion: 0.10
-Nodes (52): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+44 more)
+Cohesion: 0.13
+Nodes (42): autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2(), fieldStatus(), gitOutput() (+34 more)
 
 ### Community 307 - "Daemon Multica Server"
 Cohesion: 0.12
-Nodes (35): SlashSkillRef, buildAutopilotPrompt(), buildChatPrompt(), BuildPrompt(), buildQuickCreatePrompt(), formatQuickCreateSourceContext(), Builder, Task (+27 more)
+Nodes (36): SlashSkillRef, buildAutopilotPrompt(), buildChatPrompt(), BuildPrompt(), buildProtocolTurnPrompt(), buildQuickCreatePrompt(), formatQuickCreateSourceContext(), Builder (+28 more)
 
 ### Community 308 - "Generated Queries Attachment"
 Cohesion: 0.10
 Nodes (52): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+44 more)
 
 ### Community 309 - "Lark Hub Multica"
-Cohesion: 0.10
-Nodes (22): EventConnector, EventEmitter, Hub, HubConfig, HubQueries, supervisorEntry, CancelFunc, Dispatcher (+14 more)
+Cohesion: 0.07
+Nodes (34): ConnectorFactory, EventConnector, EventEmitter, Hub, HubConfig, HubQueries, NoopConnector, supervisorEntry (+26 more)
 
 ### Community 310 - "Math Verify Reward"
 Cohesion: 0.05
 Nodes (20): Advanced LaTeX formula tests for robust mathematical notation., Test summation formula., Test quadratic formula., Test complex exponential., Test power notation instead of e notation., Test scientific notation in LaTeX form., Test matrix determinant calculation., Test continued fraction. (+12 more)
 
 ### Community 311 - "Reassemble Cp Logprobs"
-Cohesion: 0.04
-Nodes (57): _build_cp_reassemble_indices(), _drop_multi_modal_payload(), extract_vision_from_multi_modal(), _is_multi_modal_payload_key(), packed_context_parallel_forward(), postprocess_packed_seqs_context_parallel(), preprocess_packed_seqs_context_parallel(), Any (+49 more)
+Cohesion: 0.03
+Nodes (75): _build_cp_reassemble_indices(), _drop_multi_modal_payload(), extract_vision_from_multi_modal(), _is_multi_modal_payload_key(), packed_context_parallel_forward(), postprocess_packed_seqs_context_parallel(), preprocess_packed_seqs_context_parallel(), Any (+67 more)
 
 ### Community 312 - "Train Engine Fake"
 Cohesion: 0.07
@@ -3343,20 +3343,20 @@ Cohesion: 0.14
 Nodes (35): AutopilotAssignee, CoreProperties, AutopilotCreated(), AutopilotRunCompleted(), autopilotRunEvent(), AutopilotRunFailed(), AutopilotRunStarted(), ChatMessageSent() (+27 more)
 
 ### Community 314 - "Optimizer Areal Engine"
-Cohesion: 0.12
-Nodes (31): _get_local_tensor(), PerLayerOptimWrapper, Extract the underlying tensor from a DTensor, or return as-is., Accelerate offloaded optimizer step by streaming states per-layer to device., Pin optimizer state tensors in memory for async H2D/D2H transfers.          With, Re-apply state invariants after checkpoint load.          ``load_state_dict`` /, _assert_params_close(), _clip_grad_norm() (+23 more)
+Cohesion: 0.09
+Nodes (17): apply_fsdp2(), maybe_patch_fsdp_module(), # NOTE: FSDP2 is not compatible with AutoModelForSequenceClassification, so we n, model: AutoModelForCausalLM, AdamKernel, OptimKernel, Any, Tensor (+9 more)
 
 ### Community 315 - "Fp8 Areal Engine"
-Cohesion: 0.09
-Nodes (40): get_block_size_from_config(), Extract block size from quantization configuration.      Args:         quantizat, _blockwise_cast_to_fp8_triton(), constexpr, dtype, Tensor, Dequantize FP8 weights to the given dtype.      Args:         x: FP8 weight tens, Blockwise FP8 quantization using Triton.      Args:         x: Input tensor (2D) (+32 more)
+Cohesion: 0.06
+Nodes (59): get_block_size_from_config(), Extract block size from quantization configuration.      Args:         quantizat, get_device_sm(), is_blackwell(), is_hopper(), is_sm90_or_above(), Check if device is Hopper (SM90-99)., Check if device is Blackwell (SM100+). (+51 more)
 
 ### Community 316 - "Router Service Experimental"
-Cohesion: 0.06
-Nodes (49): codexBackend, codexClient, codexSessionTokenCount, codexSessionUsage, codexTimeoutDiagnostic, codexTimeoutKind, codexTokenUsage, pendingRPC (+41 more)
+Cohesion: 0.04
+Nodes (26): Any, Future, Popen, StatefulDataLoader, Tensor, WorkflowLike, Launch vLLM server subprocess., vLLM remote inference engine.      This class delegates all functionality to Rem (+18 more)
 
 ### Community 317 - "Generated Queries Work"
-Cohesion: 0.06
-Nodes (35): ClaimDuePendingHandoffsParams, ClaimDueWendyHandoffsParams, CountOpenUnresolvedWaitsOnParams, GetWorkNodeByIssueParams, HasAnyWaitsOnEdgeParams, InsertPendingHandoffParams, IsWorkspaceWendyAgentParams, ListOpenWaitsOnFromNodeParams (+27 more)
+Cohesion: 0.05
+Nodes (45): ClaimDuePendingHandoffsParams, ClaimDueWendyHandoffsParams, CountOpenUnresolvedWaitsOnParams, GetWorkNodeByIssueParams, HasAnyWaitsOnEdgeParams, InsertPendingHandoffParams, IssueDependency, IsWorkspaceWendyAgentParams (+37 more)
 
 ### Community 318 - "Metrics Multica Server"
 Cohesion: 0.10
@@ -3371,40 +3371,40 @@ Cohesion: 0.09
 Nodes (18): FastAPI, RpcProxy, Register ``/awex/*`` weight-update endpoints on the SGLang FastAPI app.      Eac, register_awex_endpoints(), areal_launch_server(), Any, PortArgs, ZMQ proxy bridging the HTTP process to scheduler subprocesses.      Two independ (+10 more)
 
 ### Community 321 - "Router Infra Service"
-Cohesion: 0.12
-Nodes (6): admin_headers(), TestConcurrentRouting, TestHealth, TestRouting, TestWorkerRegistration, TestWorkersList
+Cohesion: 0.08
+Nodes (18): create_router_app(), _extract_bearer_token(), BaseModel, FastAPI, RouterConfig, RegisterWorkerRequest, _require_admin_key(), UnregisterWorkerRequest (+10 more)
 
 ### Community 322 - "Agent V2 Service"
-Cohesion: 0.04
-Nodes (66): DesktopInboxBridge(), InboxIconRect, MentionPopupState, useMentionPopupStore, useArchiveAllInbox(), useArchiveAllReadInbox(), useArchiveCompletedInbox(), useArchiveInbox() (+58 more)
+Cohesion: 0.08
+Nodes (30): projectResourceKeys, projectResourcesOptions(), useCreateProjectResource(), useDeleteProjectResource(), useUpdateProjectResource(), DesktopLocalDirectoryAPI, isDesktopShell(), pickDirectory() (+22 more)
 
 ### Community 323 - "Areal V2 Cli"
-Cohesion: 0.14
-Nodes (23): parse_backend_spec(), Scheduler, Parse a backend spec into ``(engine, tp, dp, pp)``.      Delegates to ``ModelAll, register_internal(), build_data_proxy_task_spec(), build_sglang_task_spec(), build_vllm_task_spec(), Path (+15 more)
+Cohesion: 0.25
+Nodes (10): build_scheduler(), ABC, Exception, Scheduler, SchedulerError, TaskAllocation, _detect_gpus(), LocalScheduler (+2 more)
 
 ### Community 324 - "Proxy V2 Inference"
-Cohesion: 0.11
-Nodes (38): r"""Returns whether the model is in stream mode, which sends partial         res, _auth_request(), _credentials_path(), load_saved_api_key(), login(), main(), MulticaAuthError, normalize_base_url() (+30 more)
+Cohesion: 0.07
+Nodes (19): AgentController, AgentConfig, Scheduler, Launch the full micro-service stack.          Order: Guards (via scheduler) → Ro, Tear down all services in reverse order., Add *count* Worker+DataProxy pairs.          Pairs are distributed across guards, Remove *count* pairs (LIFO order).          For each pair: unregister from Route, Raises on failure so that ``scale_up`` callers know the pair is         non-func (+11 more)
 
 ### Community 325 - "Handler Multica Server"
 Cohesion: 0.19
 Nodes (35): childDoneFixture, squadCommentTriggerFixture, countInboxItems(), countPendingTasksForAgent(), countSystemCommentsOn(), T, newChildDoneFixture(), parentSystemCommentContent() (+27 more)
 
 ### Community 326 - "Multica Stickers Server"
-Cohesion: 0.11
-Nodes (28): StickerAssetResponse, StickerPackResponse, Command, printStickerTable(), runStickerList(), runStickerSearch(), stickerName(), stickersToJSON() (+20 more)
+Cohesion: 0.06
+Nodes (40): AEAD, ioErrReader, capturingRoundTripper, CredentialsDecrypter, InstallationParams, InstallationService, InstallationStatus, Region (+32 more)
 
 ### Community 327 - "Multica Apps Mobile"
 Cohesion: 0.07
 Nodes (29): Asynchronous Rollout Collection, Checkpointing, Configuration Files, Controller Architecture, Data Flow with RTensor, Evaluation, How Single-Controller Mode Works, Launching the Experiment (+21 more)
 
 ### Community 328 - "Billing Multica Packages"
-Cohesion: 0.10
-Nodes (26): useCreateCloudBillingCheckoutSession(), useCreateCloudBillingPortalSession(), useInvalidateBillingDataAfterCredit(), billingBalanceOptions(), billingBatchesOptions(), billingCheckoutSessionOptions(), billingKeys, billingPriceTiersOptions() (+18 more)
+Cohesion: 0.07
+Nodes (29): ContextBadge(), DaemonPanel(), DaemonPanelProps, DisplayItem, GroupRows(), highlight(), LEVEL_BADGE_CLASS, LEVELS (+21 more)
 
 ### Community 329 - "Env Id Proxy"
-Cohesion: 0.08
-Nodes (21): Whether this session has been completed via ``finish()``., Request to start a new RL session., Data associated with a single RL session., Update the last access time for this session., Check if this session has been inactive for too long., SessionData, StartSessionRequest, _admin_headers() (+13 more)
+Cohesion: 0.11
+Nodes (19): CreateAttachmentParams, DeleteAttachmentParams, GetAttachmentParams, LinkAttachmentsToChannelMessageParams, LinkAttachmentsToChatMessageParams, LinkAttachmentsToCommentParams, LinkAttachmentsToIssueParams, LinkOwnedAttachmentsToChannelMessageParams (+11 more)
 
 ### Community 330 - "Codex Execenv Multica"
 Cohesion: 0.16
@@ -3412,75 +3412,75 @@ Nodes (23): CodexHomeOptions, copyFile(), ensureDirSymlink(), ensureSymlink(), e
 
 ### Community 331 - "Lark Multica Server"
 Cohesion: 0.16
-Nodes (20): fakeClockSvc, fakeInstallerBinder, fakeTxStarter, Mutex, Queries, T, Time, Tx (+12 more)
+Nodes (37): cleanOptionalString(), NewInMemoryLocalSkillListStore(), bindAgentToSkill(), countAgentSkillBindings(), createImportTargetSkill(), getSkillRow(), RuntimeLocalSkillImportRequest, T (+29 more)
 
 ### Community 332 - "Lark Server Multica"
-Cohesion: 0.17
-Nodes (17): bootstrapRequest, endpointResponse, HTTPConnectionTokenConfig, HTTPConnectionTokenFetcher, Client, Logger, Time, NewHTTPConnectionTokenFetcher() (+9 more)
+Cohesion: 0.09
+Nodes (34): bootstrapRequest, endpointResponse, HTTPConnectionTokenConfig, HTTPConnectionTokenFetcher, stubCredentialsResolver, stubReplierQueries, NewLarkOutcomeReplier(), Agent (+26 more)
 
 ### Community 333 - "Lark Multica Server"
-Cohesion: 0.10
-Nodes (25): CardKind, CardRender, CardStatus, CredentialsResolver, defaultRenderer, InstallationStatus, Patcher, PatcherConfig (+17 more)
+Cohesion: 0.07
+Nodes (33): CardKind, CardRender, CardStatus, CredentialsResolver, defaultRenderer, Patcher, PatcherConfig, PatcherQueries (+25 more)
 
 ### Community 334 - "Multica Apps Web"
 Cohesion: 0.07
 Nodes (28): File Structure, Global Constraints, Multica v2 Segment-DAG Training (Change 1 - Data Path) Implementation Plan, Self-Review, Subsystem Sequencing & Cross-Repo Execution, Task 10.1: feature flag + config, Task 10.2: E2E + regression + grep sweep, Task 1.1: `SessionData.close_segment()` no-reward close (+20 more)
 
 ### Community 335 - "Multica Apps Web"
-Cohesion: 0.07
-Nodes (39): DownloadClient(), VersionInfoFooter(), AllPlatforms(), Arch, Format, isFallbackNeeded(), Platform, Props (+31 more)
+Cohesion: 0.05
+Nodes (19): Wraps HuggingFace tokenizer with async-safe methods for the data proxy., Tokenize string -> token IDs. Runs in executor (non-blocking)., Apply chat template -> token IDs. Runs in executor., Decode single token ID -> string piece. Sync (fast dict lookup)., Decode a list of token IDs -> full string. Used by ChatCompletionHandler., TokenizerProxy, _create_data_proxy_app_with_sessions(), Create a fully-wired data proxy app with session support. (+11 more)
 
 ### Community 336 - "Multica Cmd Server"
-Cohesion: 0.11
-Nodes (39): flagString(), agentMessageSendTextFallback(), buildAgentSendParts(), clientMessageIDFlag(), APIClient, Command, MessagePart, messageTargetFlagUsage() (+31 more)
+Cohesion: 0.12
+Nodes (38): flagString(), agentMessageSendTextFallback(), buildAgentSendParts(), clientMessageIDFlag(), APIClient, Command, MessagePart, messageTargetFlagUsage() (+30 more)
 
 ### Community 337 - "Experimental Archon Pipeline"
-Cohesion: 0.04
-Nodes (79): build_pipeline_schedule(), generate_llm_fqn_per_model_part(), _get_logger(), pipeline_llm(), pipeline_module_split(), device, DeviceMesh, Logger (+71 more)
+Cohesion: 0.09
+Nodes (39): T, TestConcurrentClaimsSingleWinner(), dbNow(), encodeResult(), finishFailure(), finishSuccess(), Duration, Pool (+31 more)
 
 ### Community 338 - "Engine Packed Megatron"
 Cohesion: 0.07
 Nodes (29): PPOTrainer：基于控制器的训练, RLVRWorkflow：单轮奖励学习, Rollout：生成训练数据, TrainController：分发机制, 三个并发级别, 三进程架构, 下一步, 传输方式 (+21 more)
 
 ### Community 339 - "Router Areal Inference"
-Cohesion: 0.13
-Nodes (24): dbNow(), encodeResult(), finishFailure(), finishSuccess(), Duration, Pool, Scope, Time (+16 more)
+Cohesion: 0.08
+Nodes (26): AgentReminderFireJob(), Handler, Pool, T, TestAgentReminderFireJobSpec(), Handler, Pool, WendyHandoffDispatchJob() (+18 more)
 
 ### Community 340 - "Daemon Server Runtime"
 Cohesion: 0.15
 Nodes (32): handleRuntimeGoneFixture, multiProviderRegisterFixture, testNopWriter, freshDaemon(), Daemon, Int64, Mutex, Server (+24 more)
 
 ### Community 341 - "Scaffolding Examples Search"
-Cohesion: 0.05
-Nodes (43): ALL_STATUSES, IssuesFilterRoute(), PRIORITY_LABEL, PRIORITY_ORDER, Scope, useScopedFilters(), emptyMessageForScope(), IssueSection (+35 more)
+Cohesion: 0.06
+Nodes (29): ALL_STATUSES, IssuesFilterRoute(), PRIORITY_LABEL, PRIORITY_ORDER, Scope, useScopedFilters(), emptyMessageForScope(), IssueSection (+21 more)
 
 ### Community 342 - "Handler Cloud Multica"
-Cohesion: 0.13
-Nodes (10): cloudRuntimeProxyOptions, Handler, ResponseWriter, isValidStripeSessionID(), cloudRuntimeRequestID(), Handler, ResponseWriter, readCloudRuntimeJSONBody() (+2 more)
+Cohesion: 0.05
+Nodes (35): Client, closeSegmentResponse, exportRequest, startSessionResponse, Client, Config, RequestRecorder, Response (+27 more)
 
 ### Community 343 - "Handler Heartbeat Multica"
-Cohesion: 0.07
-Nodes (74): BatchedHeartbeatScheduler, fakeLivenessStore, PassthroughHeartbeatScheduler, AgentRuntime, Duration, Mutex, Once, Queries (+66 more)
+Cohesion: 0.11
+Nodes (36): BatchedHeartbeatScheduler, fakeLivenessStore, PassthroughHeartbeatScheduler, AgentRuntime, Duration, Mutex, Once, Queries (+28 more)
 
 ### Community 344 - "Testregistrationclient Lark Server"
-Cohesion: 0.18
-Nodes (31): registrationFake, NewRegistrationClient(), errorsAs(), HandlerFunc, Int32, ServeMux, Server, T (+23 more)
+Cohesion: 0.11
+Nodes (41): BeginResult, PollResult, RegistrationClient, RegistrationConfig, RegistrationError, registrationFake, decorateQRCodeURL(), Client (+33 more)
 
 ### Community 345 - "Multica Packages Views"
 Cohesion: 0.08
-Nodes (31): BodyOpts, CREATE_AGENT_GUIDE_ISSUE_TITLE, enBody(), getCreateAgentGuideBody(), jaBody(), koBody(), zhBody(), HELPER_DESCRIPTION (+23 more)
+Nodes (39): BodyOpts, CREATE_AGENT_GUIDE_ISSUE_TITLE, enBody(), getCreateAgentGuideBody(), jaBody(), koBody(), zhBody(), HELPER_DESCRIPTION (+31 more)
 
 ### Community 346 - "Server Autopilot Failure"
 Cohesion: 0.14
 Nodes (31): ModelRegistry, Thread-safe registry for model routing., create_app(), _extract_bearer_token(), HealthResponse, ModelsResponse, BaseModel, FastAPI (+23 more)
 
 ### Community 347 - "Realtime Mirroredrelay Recordingmanagedrelay"
-Cohesion: 0.10
-Nodes (13): RelayNotifier, Hub, NewRelayNotifier(), NewMirroredRelay(), T, TestMirroredRelayDoesNotMirrorDaemonRuntimeEvents(), TestMirroredRelayPublishesSameEventIDToBothBackends(), TestMirroredRelayRecordsDivergenceWhenOneBackendFails() (+5 more)
+Cohesion: 0.11
+Nodes (9): NewMirroredRelay(), T, TestMirroredRelayDoesNotMirrorDaemonRuntimeEvents(), TestMirroredRelayPublishesSameEventIDToBothBackends(), TestMirroredRelayRecordsDivergenceWhenOneBackendFails(), ManagedRelay, MirroredRelay, recordingManagedRelay (+1 more)
 
 ### Community 348 - "Service E2E Infra"
-Cohesion: 0.26
-Nodes (11): _admin_headers(), _dataset_headers(), gateway_client(), Any, Client, _register_dataset(), TestBatchFetching, TestDatasetRegistration (+3 more)
+Cohesion: 0.17
+Nodes (21): _admin_headers(), data_service_stack(), _dataset_headers(), _free_port(), gateway_client(), Any, Client, Server (+13 more)
 
 ### Community 349 - "V2 Inference Service"
 Cohesion: 0.09
@@ -3491,12 +3491,12 @@ Cohesion: 0.11
 Nodes (50): archivedIsTrue(), betaSpecJsonStructurallyValid(), branchStatusHandled(), buildModeAllowedForWorkflow(), buildModeSelected(), check(), commandCheckPasses(), computeHandoffHash() (+42 more)
 
 ### Community 351 - "Search Agent Examples"
-Cohesion: 0.11
-Nodes (50): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+42 more)
+Cohesion: 0.10
+Nodes (52): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+44 more)
 
 ### Community 352 - "Areal V2 Cli"
-Cohesion: 0.10
-Nodes (24): do_ps(), _print_table(), ps_cmd(), do_models(), models_cmd(), _print_models_table(), do_ps(), _print_table() (+16 more)
+Cohesion: 0.12
+Nodes (20): do_ps(), _print_table(), ps_cmd(), do_models(), models_cmd(), _print_models_table(), do_ps(), _print_table() (+12 more)
 
 ### Community 353 - "Areal Cli V2"
 Cohesion: 0.20
@@ -3508,19 +3508,19 @@ Nodes (47): archivedIsTrue(), betaSpecJsonStructurallyValid(), branchStatusHandl
 
 ### Community 355 - "Generated Queries Agent"
 Cohesion: 0.13
-Nodes (18): AckAgentInboxDeliveryParams, AckAgentInboxDeliveryRow, AgentEventDelivery, AgentSession, CreateAgentInboxEventParams, FailAgentInboxDeliveryParams, FailAgentInboxDeliveryRow, RenewAgentInboxDeliveryParams (+10 more)
+Nodes (17): AckAgentInboxDeliveryParams, AckAgentInboxDeliveryRow, CreateAgentInboxEventParams, FailAgentInboxDeliveryParams, FailAgentInboxDeliveryRow, RenewAgentInboxDeliveryParams, RetryAgentInboxEventParams, RetryAgentInboxEventRow (+9 more)
 
 ### Community 356 - "Workspace Generated Handler"
 Cohesion: 0.07
 Nodes (28): 1. コードのネーミング, 2. i18n 翻訳用語集, 3. 中国語のボイスとスタイル, Go, TypeScript, Web 専用 / Desktop 専用のコピー, このページを更新するとき, イシューキー (+20 more)
 
 ### Community 357 - "Handler Multica Server"
-Cohesion: 0.16
-Nodes (10): attachmentDownloadMode, AttachmentResponse, attachmentDownloadPath(), Duration, Handler, UUID, isDurablePublicURL(), isTextPreviewable() (+2 more)
+Cohesion: 0.14
+Nodes (12): attachmentDownloadMode, AttachmentResponse, attachmentDownloadPath(), Attachment, Duration, Handler, ResponseWriter, UUID (+4 more)
 
 ### Community 358 - "Lark Httpapiclient Client"
-Cohesion: 0.10
-Nodes (31): channelMentionCandidate, channelMentionOccurrence, BareIssueIdentifier, IssueResolver, mockResolver, PrefixResolver, Resolver, skipRegion (+23 more)
+Cohesion: 0.22
+Nodes (13): channelMentionCandidate, channelMentionOccurrence, appendReferenceOccurrences(), channelPartsContainLegacyActorMention(), containsLegacyChannelActorMention(), findBareMentionCandidates(), Handler, MessagePart (+5 more)
 
 ### Community 359 - "Lark Typing Indicator"
 Cohesion: 0.07
@@ -3535,20 +3535,20 @@ Cohesion: 0.07
 Nodes (27): Algorithm Subclasses, Common Issues, Common Scenarios, Common Usage Patterns, Compatible Workflows, Configuration, Configuration Overview, Core Concepts (+19 more)
 
 ### Community 362 - "Agent Transport Multica"
-Cohesion: 0.17
-Nodes (43): agentIDForTask(), agentTransportReactForTest(), agentTransportReadForTest(), agentTransportRequest(), agentTransportSearchForTest(), agentTransportSendForTest(), agentTransportUnfollowThreadForTest(), assertAgentMessageSentActivityCount() (+35 more)
+Cohesion: 0.13
+Nodes (56): agentIDForTask(), agentTransportReactForTest(), agentTransportReadForTest(), agentTransportRequest(), agentTransportSearchForTest(), agentTransportSendForTest(), agentTransportUnfollowThreadForTest(), assertAgentMessageSentActivityCount() (+48 more)
 
 ### Community 363 - "Multica Server Skill"
 Cohesion: 0.09
-Nodes (12): Runtime, HeartbeatResponse, Daemon, Daemon, Result, Stage, Time, shouldRetryLocalL3() (+4 more)
+Nodes (21): BroadcastRequest, _contains_partitionable_tensor_batch(), DispatchRequest, _empty_payload(), Any, BroadcastRequest, WorkerTopology, _raise_for_worker() (+13 more)
 
 ### Community 364 - "Agent Opencode Mcp"
 Cohesion: 0.15
 Nodes (31): opencodeMCPEnabledOnly, opencodeMCPLocal, opencodeMCPOAuth, opencodeMCPRemote, buildOpenCodeMCPConfigContent(), copyIfPresent(), RawMessage, openCodeCommand() (+23 more)
 
 ### Community 365 - "Areal Fp8 Hf"
-Cohesion: 0.04
-Nodes (59): convert_fp8_helper_to_pytorch_fp8(), FP8BlockwiseTensorHelper, dtype, Tensor, Split operation: split both data and scale_inv along the same dimension., A helper wrapper tensor that maps operations on data to operations on both data, View operation: reshape both data and scale_inv.          When data is reshaped,, Reshape operation: same as view but allows non-contiguous tensors. (+51 more)
+Cohesion: 0.10
+Nodes (25): convert_fp8_helper_to_pytorch_fp8(), dtype, Tensor, View operation: reshape both data and scale_inv.          When data is reshaped,, Convert FP8BlockwiseTensorHelper to PyTorch float8 tensor.          This functio, Convert Transformer Engine Float8BlockwiseQTensor to FP8BlockwiseTensorHelper., Convert FP8BlockwiseTensorHelper to Transformer Engine Float8BlockwiseQTensor fo, Convert FP8BlockwiseTensorHelper instances in named tensors to PyTorch FP8 forma (+17 more)
 
 ### Community 366 - "Cli V2 Areal"
 Cohesion: 0.11
@@ -3560,7 +3560,7 @@ Nodes (27): localDirectoryAssignment, localDirectoryRef, LocalPathLocker, pathLo
 
 ### Community 368 - "Protocol Messages Multica"
 Cohesion: 0.07
-Nodes (36): ChatOutputTypeForAction(), ErrInvalidChatOutputType(), RawMessage, NormalizeChatOutputAction(), T, TestNormalizeChatOutputActionRequiresMessageSend(), ChannelTypingPayload, ChatDonePayload (+28 more)
+Nodes (37): ChatOutputTypeForAction(), ErrInvalidChatOutputType(), RawMessage, NormalizeChatOutputAction(), NormalizeChatOutputType(), T, TestNormalizeChatOutputActionRequiresMessageSend(), ChannelTypingPayload (+29 more)
 
 ### Community 369 - "Hermes Examples Hermesagent"
 Cohesion: 0.10
@@ -3571,8 +3571,8 @@ Cohesion: 0.15
 Nodes (19): AddAgentSkillWithSourceParams, AgentSkillSuggestion, CreateEvolutionSkillParams, GetAgentSkillSuggestionInWorkspaceParams, GetSkillBySourceEvolutionUnitParams, ListAgentSkillIDsWithSourceRow, ListEvolutionSkillsByWorkspaceRow, ListPendingAgentSkillSuggestionsByAgentParams (+11 more)
 
 ### Community 371 - "Memorycuration Multica Server"
-Cohesion: 0.15
-Nodes (40): recordingStageAgent, routeAllToMemoryReviewer, NewEngine(), assertContains(), assertNotContains(), Stage, T, Time (+32 more)
+Cohesion: 0.14
+Nodes (44): recordingStageAgent, routeAllToMemoryReviewer, NewEngine(), assertContains(), assertNotContains(), Stage, T, Time (+36 more)
 
 ### Community 372 - "Multica Apps Desktop"
 Cohesion: 0.12
@@ -3583,19 +3583,19 @@ Cohesion: 0.09
 Nodes (29): createTabRouter(), createId(), defaultPathFor(), defaultTabFor(), extractWorkspaceSlug(), getActiveTab(), makeTab(), migrateV1ToV2() (+21 more)
 
 ### Community 374 - "Shell Executor Multica"
-Cohesion: 0.12
-Nodes (23): assign_token_advantages(), broadcast_node_advantages(), combined_actor_critic_loss(), critic_huber_loss(), huber_loss_py(), Tensor, Node-advantage broadcast + critic value loss target (Phase 3, Task 8).  Bridges, Combined co-trained objective: ``actor_PG + w * critic_value_loss``.      Both t (+15 more)
+Cohesion: 0.48
+Nodes (6): AgentUsageHourlyJob(), Handler, Pool, Time, makeAgentUsageHourlyHandler(), readAgentUsageWatermark()
 
 ### Community 375 - "Pull Request Multica"
-Cohesion: 0.08
-Nodes (26): derivePullRequestProgressSegments(), derivePullRequestStatusKind(), PullRequestProgressSegment, PullRequestStatsInput, PullRequestStatusInput, PullRequestStatusKind, shouldShowPullRequestStats(), base (+18 more)
+Cohesion: 0.10
+Nodes (23): derivePullRequestProgressSegments(), derivePullRequestStatusKind(), PullRequestProgressSegment, PullRequestStatsInput, PullRequestStatusInput, PullRequestStatusKind, shouldShowPullRequestStats(), base (+15 more)
 
 ### Community 376 - "Multica Server Handler"
 Cohesion: 0.15
-Nodes (28): T, listContainsAgent(), privateAgentTestFixture(), TestCreateChatSession_PrivateAgentForbidsPlainMember(), TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(), TestGetAgent_PrivateAgentForbidsPlainMember(), TestGetAgent_RejectsForgedAgentIDHeader(), TestListAgents_FiltersPrivateForPlainMember() (+20 more)
+Nodes (30): T, listContainsAgent(), privateAgentTestFixture(), TestCreateChatSession_PrivateAgentForbidsPlainMember(), TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(), TestGetAgent_PrivateAgentForbidsPlainMember(), TestGetAgent_RejectsForgedAgentIDHeader(), TestListAgents_FiltersPrivateForPlainMember() (+22 more)
 
 ### Community 377 - "Realtime Hub Client"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (9): Hub, Mutex, RWMutex, sk(), Client, Hub, ScopeAuthorizer, scopeKey (+1 more)
 
 ### Community 378 - "Fp8 Linear Experimental"
@@ -3607,20 +3607,20 @@ Cohesion: 0.10
 Nodes (23): captureItem, capturePayload, Client, Event, NoopClient, PostHogClient, PostHogConfig, EnvironmentFromEnv() (+15 more)
 
 ### Community 380 - "Areal Sglang Engine"
-Cohesion: 0.10
-Nodes (22): AddSquadMemberParams, ArchiveSquadParams, CreateSquadParams, GetSquadByAssigneeParams, GetSquadInWorkspaceParams, IsSquadMemberParams, ListSquadMemberPreviewRowsBySquadRow, ListSquadMemberPreviewRowsRow (+14 more)
+Cohesion: 0.12
+Nodes (31): _get_local_tensor(), PerLayerOptimWrapper, Extract the underlying tensor from a DTensor, or return as-is., Accelerate offloaded optimizer step by streaming states per-layer to device., Pin optimizer state tensors in memory for async H2D/D2H transfers.          With, Re-apply state invariants after checkpoint load.          ``load_state_dict`` /, _assert_params_close(), _clip_grad_norm() (+23 more)
 
 ### Community 381 - "Runner Archon Areal"
-Cohesion: 0.22
-Nodes (9): _NullOutputChunks, PipelinedRunner, Any, list, PipelineStage, Tensor, Unified pipeline-parallel runner supporting all schedule types., Patch schedule to skip output merging, halving memory usage.          TODO(pytor (+1 more)
+Cohesion: 0.09
+Nodes (24): fakeRuntimeLookupDBTX, fakeRuntimeRow, findOnlineSandboxRuntime(), DBTX, envSandboxLifecycleDepsAdapter, CommandTag, Row, Rows (+16 more)
 
 ### Community 382 - "Openai Proxy Areal"
 Cohesion: 0.07
 Nodes (27): 10. Acceptance (message), 11. Decision log, 12. Open (non-blocking), 1.1 Kind split (render grouping), 1.2 Data in / data out, 1. Information architecture (locked), 2.1 Layout by count (Slack-ish), 2.2 Interaction (+19 more)
 
 ### Community 383 - "Areal Experimental Weight"
-Cohesion: 0.15
-Nodes (22): Save model weights and optimizer states for later use.          Parameters, Load model weights and optimizer states from a file.          Parameters, SaveLoadMeta, ConnectRequest, ConnectResponse, DisconnectRequest, DisconnectResponse, HealthResponse (+14 more)
+Cohesion: 0.12
+Nodes (18): envDispatchCloneAdapter, CloneEnvDispatchAgentTx(), DBTX, Handler, CloneEnvDispatchAgent(), RawMessage, cloneInput(), T (+10 more)
 
 ### Community 384 - "Areal Connection Db"
 Cohesion: 0.08
@@ -3628,7 +3628,7 @@ Nodes (17): _convert_qwen3_vl_lm_attention(), _convert_qwen3_vl_lm_global(), con
 
 ### Community 385 - "Service Arealrl Multica"
 Cohesion: 0.09
-Nodes (28): EditIssue(), IssueAssigneePickerRoute(), IssueDueDatePickerRoute(), IssuePriorityPickerRoute(), IssueStatusPickerRoute(), NewIssueAssigneePickerRoute(), NewIssueDueDatePickerRoute(), NewIssuePriorityPickerRoute() (+20 more)
+Nodes (23): IssueRunsRoute(), PAST_STATUS_ORDER, AgentActivityRow(), Props, AgentHeaderBadge(), Props, ACTIVE_STATUSES, CancelButton() (+15 more)
 
 ### Community 386 - "Testcloudpatverifier Server Pat"
 Cohesion: 0.25
@@ -3643,12 +3643,12 @@ Cohesion: 0.07
 Nodes (26): 6a. Clone upstream source, 6b. Audit API signatures, 6c. Check version-guarded code, 6d. Apply code changes (if any), 6e. Update checklist file, 6f. Clean up cloned repositories, Architecture, Checklist File Status (+18 more)
 
 ### Community 389 - "Landing Multica Apps"
-Cohesion: 0.18
-Nodes (19): githubUrl, dictionaryFactories, LocaleContext, LocaleContextValue, LocaleProvider(), createEnDict(), createJaDict(), createKoDict() (+11 more)
+Cohesion: 0.14
+Nodes (22): Save model weights and optimizer states for later use.          Parameters, Load model weights and optimizer states from a file.          Parameters, SaveLoadMeta, ConnectRequest, ConnectResponse, DisconnectRequest, DisconnectResponse, HealthResponse (+14 more)
 
 ### Community 390 - "Ui Multica Packages"
-Cohesion: 0.13
-Nodes (21): InMemoryUpdateStore, redisUpdateEnvelope, RedisUpdateStore, updateError, UpdateRequest, UpdateStatus, UpdateStore, applyUpdateTimeout() (+13 more)
+Cohesion: 0.10
+Nodes (14): Dispatcher, DispatchRequest, Partitioned HTTP dispatcher for one 5D-parallel worker group., Close the underlying HTTP session., Return a dispatch builder for *path*.          Dispatch operations route tensors, discover_topology(), WorkerInfo, WorkerTopology (+6 more)
 
 ### Community 391 - "Multica Server Pkg"
 Cohesion: 0.22
@@ -3656,19 +3656,19 @@ Nodes (7): Logger, platformCopilotInvocation(), Logger, platformCursorInvocation
 
 ### Community 392 - "Engine Areal Batch"
 Cohesion: 0.01
-Nodes (556): queryKey(), RFC-1918, RFC-2142, AppContent(), DaemonRuntimeActions(), CheckState, WindowOverlay(), WindowOverlayInner() (+548 more)
+Nodes (222): queryKey(), AgentUsernameError, validateAgentUsername(), agentRunCounts30dOptions(), VISIBILITY_DESCRIPTION, VISIBILITY_LABEL, VISIBILITY_TOOLTIP, useChatStore (+214 more)
 
 ### Community 393 - "Router Service V2"
 Cohesion: 0.05
-Nodes (27): GroupInfo, GroupRegistry, ModelInfo, ModelRegistry, Store both session_key→worker and session_id→worker. Upsert semantics., Return the worker address pinned to a session API key, or None., Return the worker address pinned to a session ID, or None., Remove all sessions pinned to a worker (cascade on deletion).          Returns t (+19 more)
+Nodes (23): GroupInfo, GroupRegistry, ModelInfo, ModelRegistry, Store both session_key→worker and session_id→worker. Upsert semantics., Return the worker address pinned to a session API key, or None., Return the worker address pinned to a session ID, or None., Remove all sessions pinned to a worker (cascade on deletion).          Returns t (+15 more)
 
 ### Community 394 - "Auth Multica Server"
 Cohesion: 0.12
 Nodes (28): DaemonTokenCache, DaemonTokenIdentity, daemonContextKey, daemonTokenCacheKey(), Client, Duration, NewDaemonTokenCache(), T (+20 more)
 
 ### Community 395 - "Client Cloudruntime Multica"
-Cohesion: 0.07
-Nodes (28): Client, closeSegmentResponse, exportRequest, startSessionResponse, APIClient, UploadFileOptions, Client, Config (+20 more)
+Cohesion: 0.14
+Nodes (28): CreateProjectRequest, CreateProjectResourceRequestPayload, ProjectResponse, SearchProjectResponse, UpdateProjectRequest, buildSearchQuery(), extractSnippet(), findRuneSubstring() (+20 more)
 
 ### Community 396 - "Sandbox Customized Areal"
 Cohesion: 0.12
@@ -3679,7 +3679,7 @@ Cohesion: 0.13
 Nodes (17): ArchiveAllInboxParams, ArchiveAllReadInboxParams, ArchiveCompletedInboxParams, ArchiveInboxByIssueAndTypeParams, ArchiveInboxByIssueAndTypeRow, ArchiveInboxByIssueParams, CountUnreadInboxParams, CreateInboxItemParams (+9 more)
 
 ### Community 398 - "Generated Queries Github"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (16): CreateGitHubInstallationParams, DeleteGitHubInstallationByInstallationIDRow, DeleteGitHubInstallationParams, GetGitHubPullRequestParams, GetIssuePullRequestCloseAggregateRow, GithubInstallation, LinkIssueToPullRequestParams, ListPullRequestsByIssueRow (+8 more)
 
 ### Community 399 - "Memorycuration L3 Reviewer"
@@ -3691,8 +3691,8 @@ Cohesion: 0.13
 Nodes (33): output, Time, main(), run(), candidateArgs(), DeleteLegacyRuntimeSystemMessages(), Pool, Rows (+25 more)
 
 ### Community 401 - "Service Taskservice Quick"
-Cohesion: 0.40
-Nodes (4): HTTPClientConfig, Client, Logger, Time
+Cohesion: 0.01
+Nodes (157): _DatasetConfig, EvaluatorConfig, Configuration for model evaluation scheduling and timing., Configuration for Trackio experiment tracking (Hugging Face).      Trackio is a, Validate Trackio configuration., Configuration for experiment statistics logging and tracking services., Configuration for dataset loading and preprocessing., Configuration for training dataset loading and preprocessing. (+149 more)
 
 ### Community 402 - "Agenttmpl Multica Server"
 Cohesion: 0.12
@@ -3711,12 +3711,12 @@ Cohesion: 0.07
 Nodes (17): Any, Result object for scaffolding requests.      Uses a thread-safe ``queue.Queue``, Asynchronously wait for the next item from the thread-safe queue., ScaffoldingResult, Task, Worker, Create a generator wrapper for the controller., Schedule a single request for execution. (+9 more)
 
 ### Community 406 - "Execenv Multica Server"
-Cohesion: 0.13
-Nodes (28): GCMetaKind, PrepareParams, RepoContextForEnv, ReuseParams, SkillContextForEnv, SkillFileContextForEnv, TaskContextForEnv, copyDirTree() (+20 more)
+Cohesion: 0.11
+Nodes (19): _admin_headers(), _client(), Unit tests for the proxy rollout server's session key handling., Key bound to an active (unfinished) session → 409., end_session response includes interaction_count field., Tests for the export_trajectories endpoint.      The endpoint requires an explic, Export succeeds with required session_id + admin key., Reset all module-level globals before each test. (+11 more)
 
 ### Community 407 - "Handler Multica Server"
-Cohesion: 0.14
-Nodes (28): CreateProjectRequest, CreateProjectResourceRequestPayload, ProjectResponse, SearchProjectResponse, UpdateProjectRequest, buildSearchQuery(), extractSnippet(), findRuneSubstring() (+20 more)
+Cohesion: 0.03
+Nodes (97): BatchDeleteIssuesRequest, BatchUpdateIssuesRequest, ChannelIssuesResponse, channelMemberSystemEventActorRef, channelMemberSystemEventParams, channelMemberSystemEventPart, CreateIssueRequest, groupedIssueRow (+89 more)
 
 ### Community 408 - "Service Env Checkpoint"
 Cohesion: 0.07
@@ -3727,8 +3727,8 @@ Cohesion: 0.05
 Nodes (73): CloudFrontSigner, Cookie, mockStorage, mockStorageNoCdn, cfBase64Encode(), PrivateKey, Time, loadKeyFromSecretsManager() (+65 more)
 
 ### Community 410 - "Lark Outcome Replier"
-Cohesion: 0.24
-Nodes (30): containsString(), equalStrings(), Client, HandlerFunc, T, importedFilePaths(), newGitHubFixtureClient(), TestDetectImportSource_RecognizesGitHub() (+22 more)
+Cohesion: 0.09
+Nodes (17): _deserialize_batch_response_bytes(), _deserialize_response_bytes(), Tensor, PUT a tensor then GET it back → deserialized tensor matches original., GET /data/{random-uuid} for a non-existent shard → 404., PUT 3 tensors with different shapes, POST /data/batch → all 3 match originals., POST /data/batch with a missing shard_id → 400 with error details., POST /data/batch with shard_ids as a non-list → 400/422 validation error. (+9 more)
 
 ### Community 411 - "Metrics Business Sampler"
 Cohesion: 0.09
@@ -3743,8 +3743,8 @@ Cohesion: 0.09
 Nodes (20): installNavigationGestures(), appInfo, DaemonAPI, DaemonPrefs, DaemonReauthResult, DaemonStatus, DesktopAPI, UpdaterAPI (+12 more)
 
 ### Community 414 - "Inbound Enricher Multica"
-Cohesion: 0.26
-Nodes (28): appMsg(), T, groupCfg(), TestEnrichForwardedResolvesNames(), TestEnrichRecentContextEmptyWindow(), TestEnrichRecentContextFetchError(), TestEnrichRecentContextGroupMention(), TestEnrichRecentContextNameFallback() (+20 more)
+Cohesion: 0.21
+Nodes (30): enricherFakeClient, appMsg(), T, groupCfg(), TestEnrichForwardedResolvesNames(), TestEnrichRecentContextEmptyWindow(), TestEnrichRecentContextFetchError(), TestEnrichRecentContextGroupMention() (+22 more)
 
 ### Community 415 - "Ratelimit Multica Server"
 Cohesion: 0.15
@@ -3755,8 +3755,8 @@ Cohesion: 0.18
 Nodes (23): appendFileSection(), appendFileSectionWithinContext(), appendOptionalRows(), appendPreparedRowsWithinBudget(), appendRequiredRows(), appendRotatingRequiredRows(), appendRowsWithinBudget(), Builder (+15 more)
 
 ### Community 417 - "Service Skills Multica"
-Cohesion: 0.17
-Nodes (25): TaskService, loadBuiltinSkill(), loadBuiltinSkills(), findSkill(), T, skillHasFile(), splitFrontmatter(), TestAutopilotsSkillCoversDispatchAndSideEffects() (+17 more)
+Cohesion: 0.27
+Nodes (19): TaskService, loadBuiltinSkill(), loadBuiltinSkills(), findSkill(), T, skillHasFile(), splitFrontmatter(), TestAutopilotsSkillCoversDispatchAndSideEffects() (+11 more)
 
 ### Community 418 - "Service Multica Server"
 Cohesion: 0.15
@@ -3783,15 +3783,15 @@ Cohesion: 0.10
 Nodes (30): create_app(), _forward_get(), _forward_post(), Exception, FastAPI, GatewayConfig, JSONResponse, _router_error_response() (+22 more)
 
 ### Community 424 - "Areal V2 Service"
-Cohesion: 0.23
-Nodes (22): Normalize(), T, TestNormalizeAttachmentPart(), TestNormalizeAttachmentRequiresID(), TestNormalizeBuildsFallbackContentFromParts(), TestNormalizeKeepsInlineBreakText(), TestNormalizeReferenceParts(), TestNormalizeReferencePartsRejectsAllMention() (+14 more)
+Cohesion: 0.16
+Nodes (30): structuredVisibleMessage, Decode(), FallbackContent(), findEmbeddedStructuredMessageSend(), firstNonEmpty(), MessagePart, matchingJSONObjectEnd(), Normalize() (+22 more)
 
 ### Community 425 - "Weight Update Awex"
 Cohesion: 0.10
 Nodes (12): AwexMegatronAdapter, AwexTrainingAdapter, ParameterMeta, RankInfo, Tensor, Release GPU memory for specified tags by offloading to CPU.          Supported t, Resume GPU memory for specified tags by reloading from CPU.          Supported t, Awex training adapter for MegatronEngine supporting DP, TP, and PP.      PP: get (+4 more)
 
 ### Community 426 - "Daemon Multica Server"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (14): gcAction, gcStats, GCMeta, Time, agentWorktreeBranches(), dirSize(), Daemon, Duration (+6 more)
 
 ### Community 427 - "Gsm8K Grpo Math"
@@ -3799,8 +3799,8 @@ Cohesion: 0.16
 Nodes (28): GSM8K DR-GRPO Training Config, GSM8K GRPO 2-GPU Training Config, GSM8K GRPO CPU Training Config, GRPO (Group Relative Policy Optimization) Algorithm, GSM8K GRPO Training Config, GSM8K GRPO LoRA Training Config, LoRA Parameter-Efficient Fine-Tuning, GSM8K GRPO Megatron FP8 Training Config (+20 more)
 
 ### Community 428 - "Generated Queries Sql"
-Cohesion: 0.07
-Nodes (28): ActivityLog, CountAssigneeChangesByActorParams, CountAssigneeChangesByActorRow, CreateActivityParams, CreateForkedIssueParams, GetTaskMessageAtSeqParams, HasSquadLeaderNoActionEvaluationForTaskParams, ListActivitiesForIssueParams (+20 more)
+Cohesion: 0.19
+Nodes (10): CreateForkedIssueParams, GetTaskMessageAtSeqParams, ListActivityLogForIssueAfterParams, Date, Queries, Int4, Issue, Text (+2 more)
 
 ### Community 429 - "Handler Cloud Multica"
 Cohesion: 0.17
@@ -3815,8 +3815,8 @@ Cohesion: 0.21
 Nodes (25): add_to_path(), check_docker(), checkout_server_ref(), command_exists(), detect_os(), _dump_brew_log(), env_file_value(), fail() (+17 more)
 
 ### Community 432 - "Scheduler Jobs Multica"
-Cohesion: 0.11
-Nodes (19): CreateAttachmentParams, DeleteAttachmentParams, GetAttachmentParams, LinkAttachmentsToChannelMessageParams, LinkAttachmentsToChatMessageParams, LinkAttachmentsToCommentParams, LinkAttachmentsToIssueParams, LinkOwnedAttachmentsToChannelMessageParams (+11 more)
+Cohesion: 0.07
+Nodes (42): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction() (+34 more)
 
 ### Community 433 - "Service Evolution Multica"
 Cohesion: 0.07
@@ -3836,19 +3836,19 @@ Nodes (27): API 参考, FAQ, `GET /health`, `POST /chat/completions`, `POST /res
 
 ### Community 437 - "Experimental Inference Service"
 Cohesion: 0.04
-Nodes (73): key(), createMemoryStorage(), AppLayout(), CommentEmojiPickerRoute(), confirmDelete(), IssueDetail(), IssuePinRow(), MissingPinRow() (+65 more)
+Nodes (70): key(), createMemoryStorage(), CommentEmojiPickerRoute(), EditIssue(), IssueAssigneePickerRoute(), IssueDueDatePickerRoute(), IssueLabelPickerRoute(), IssuePriorityPickerRoute() (+62 more)
 
 ### Community 438 - "Areal Session Experimental"
-Cohesion: 0.07
-Nodes (27): OpenAIProxyClient, Return Authorization headers with admin API key., Return Authorization headers with session API key., Set reward for a specific completion/response by its ID., Set reward for the most recent completion/response., Export interactions for this session via HTTP.          This method should be ca, Start the RL session via HTTP request., End the RL session via HTTP request.          Always attempts to end the session (+19 more)
+Cohesion: 0.02
+Nodes (70): Wait for a server to become healthy., ArgumentError, DistributedKVStore, _Entry, Etcd3NameRecordRepository, make_repository(), MemoryNameRecordRepository, NameEntryExistsError (+62 more)
 
 ### Community 439 - "V2 Inference Service"
-Cohesion: 0.08
-Nodes (49): RealtimeSubscriptions(), SHEET_OPTIONS, unstable_settings, WorkspaceLayout(), ModalCloseButton(), inboxKeys, issueKeys, projectKeys (+41 more)
+Cohesion: 0.09
+Nodes (40): RealtimeSubscriptions(), SHEET_OPTIONS, unstable_settings, WorkspaceLayout(), ModalCloseButton(), inboxKeys, dropInboxItemsByIssue(), patchInboxIssueStatus() (+32 more)
 
 ### Community 440 - "Handler Profile Multica"
-Cohesion: 0.11
-Nodes (26): AgentRecentActivityItem, MemberProfileResponse, recentTaskActivityMessage, Agent, DBTX, Handler, Tx, UUID (+18 more)
+Cohesion: 0.15
+Nodes (21): AgentRecentActivityItem, MemberProfileResponse, recentTaskActivityMessage, activeActivityLabel(), Agent, Handler, ResponseWriter, Text (+13 more)
 
 ### Community 441 - "Handler Webhook Rate"
 Cohesion: 0.16
@@ -3863,12 +3863,12 @@ Cohesion: 0.07
 Nodes (26): 1. Why this doc exists, 2. Alternatives considered, 3.1 Defaults first, 3.2 iOS native > RNR > discuss, 3.3 Theming, 3.4 Three-tier component classification (see §4), 3.5 Hard rule (lives in CLAUDE.md), 3. Decision — RNR (+18 more)
 
 ### Community 444 - "Server Multica Cmd"
-Cohesion: 0.08
-Nodes (44): HeartbeatScheduler, contextKey, workspaceResolver, T, TestRouterWiresEphemeralSandboxManagerAtStartup(), T, TestMainRouterDoesNotExposePrometheusMetrics(), TestMainRouterHasChannelMessageEditDeleteRoutes() (+36 more)
+Cohesion: 0.07
+Nodes (46): HeartbeatScheduler, contextKey, workspaceResolver, T, TestRouterWiresEphemeralSandboxManagerAtStartup(), T, TestMainRouterDoesNotExposePrometheusMetrics(), TestMainRouterHasChannelMessageEditDeleteRoutes() (+38 more)
 
 ### Community 445 - "Scheduler Multica Server"
-Cohesion: 0.08
-Nodes (18): SelectWorkspace(), SwitchWorkspaceRoute(), BADGE_STYLE, TabsLayout(), MoreTabDropdownAnchor(), NAV_ITEMS, NavItem, useCurrentWorkspace() (+10 more)
+Cohesion: 0.14
+Nodes (20): create_app(), FastAPI, RawResponse, TrainDataProxyConfig, _raw_json_response(), TrainDataProxyConfig, Dispatcher, Partitioned HTTP dispatcher for one 5D-parallel worker group. (+12 more)
 
 ### Community 446 - "Areal Vllm Server"
 Cohesion: 0.14
@@ -3879,60 +3879,60 @@ Cohesion: 0.11
 Nodes (16): create_app(), _extract_bearer_token(), _probe_model_health(), Any, BaseModel, FastAPI, ModelRegistry, RouterConfig (+8 more)
 
 ### Community 448 - "Rdataset Areal Infra"
-Cohesion: 0.15
-Nodes (14): IssueRunsRoute(), PAST_STATUS_ORDER, AgentActivityRow(), Props, AgentHeaderBadge(), Props, AvatarStack(), dedupe() (+6 more)
+Cohesion: 0.13
+Nodes (19): stickerCatalogKeys, stickerCatalogOptions(), StickerAsset, copyTextMock, presenceDetailMock, renderWithStickerCatalog(), absolutizeStickerURL(), buildStickerAssetIndex() (+11 more)
 
 ### Community 449 - "Workflow Context Areal"
 Cohesion: 0.07
 Nodes (26): Authentication, Autopilot Commands, Browser Login, Build from Source, Check Status, CLI and Agent Daemon Guide, Configuration, Create / Update / Delete (+18 more)
 
 ### Community 450 - "Ulysses Areal Fsdp"
-Cohesion: 0.08
-Nodes (25): _FakeClient, _logits_one_hot(), _node(), TestBatchBuilder, TestCombinedLoss, TestCriticLoss, TestExpectedValueFromLogits, _FakeTokenizer (+17 more)
+Cohesion: 0.12
+Nodes (14): wrap(), wrap_get_method(), wrap_get_method_name(), wrap_remove_meta(), wrapable(), Test basic functionality of AsyncTaskRunner., Test that runner can be initialized and shut down cleanly., Test submitting and waiting for a single task. (+6 more)
 
 ### Community 451 - "Areal V2 Training"
-Cohesion: 0.06
-Nodes (46): get_default_uvicorn_kwargs(), Return shared uvicorn capacity kwargs to spread into uvicorn.run()., Refuse to start an HTTP service on a non-loopback bind with the default admin ke, validate_admin_api_key(), Force all HTTP-related loggers to WARNING.      Call this from service __main__., suppress_http_loggers(), main(), main() (+38 more)
+Cohesion: 0.07
+Nodes (34): create_app(), _forward_get(), _forward_post(), Exception, FastAPI, GatewayConfig, JSONResponse, _router_error_response() (+26 more)
 
 ### Community 452 - "Gateway Training Service"
 Cohesion: 0.07
 Nodes (26): ADDED Requirements, Requirement: AssembledDag assembly from recorded rows, Requirement: /dag endpoint cross-workspace rejection, Requirement: /dag endpoint failed-rollout status, Requirement: Multi-shard tensor-ref contract, Requirement: Retry-attempt areal RL session lifecycle, Requirement: Session-to-agent-run recording at session open, Requirement: Trained-rollout segment recording gating (+18 more)
 
 ### Community 453 - "Weight Update V2"
-Cohesion: 0.06
-Nodes (28): Pipeline parallelism size (abbreviated)., awex_wu_use_group(), Resolve whether ``batch_send_recv`` should use ``use_group=True``.      Why: on, AwexSGLangAdapter, Any, AwexInferenceAdapter, Module, ParameterMeta (+20 more)
+Cohesion: 0.13
+Nodes (16): init_custom_process_group(), init_weights_update_group(), Perform a simple communication using batch_isend_irecv to avoid the hang for lat, # NOTE: Processes launched with torchrun will set the following env var to True,, # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6, Initialize the Torch process group for model parameter updates., setup_batch_isend_irecv(), print_rank0() (+8 more)
 
 ### Community 454 - "Tool Tir Examples"
 Cohesion: 0.09
 Nodes (16): test_tool_registry_enables_daytona_python(), test_tool_registry_none_uses_builtin_defaults(), test_tool_registry_only_constructs_enabled_tools(), test_tool_registry_rejects_two_python_backends(), _build_daytona_python_tool(), Tool registry, routing, and execution helpers for the TIR example., Get all start markers for enabled tools only.          Returns:             List, Get all end markers for enabled tools only.          Returns:             List[s (+8 more)
 
 ### Community 455 - "Features Section Multica"
-Cohesion: 0.10
-Nodes (22): allAssignees, Assignee, AutonomousVisual(), buildFeatures(), buildHeatmapCells(), formatTokens(), getHeatmapColor(), mockFileTree (+14 more)
+Cohesion: 0.19
+Nodes (9): Per-expert FP8 for-loop fallback (no grouped_mm FP8 support yet).      .. note::, _run_experts_fp8_for_loop(), make_expert_weights(), dtype, Tensor, Create MoE expert weights with Xavier-like 1/sqrt(fan_in) scale., MoE FP8 dispatch unit tests.  Covers _run_experts_fp8_for_loop: BF16 parity, edg, _run_bf16_for_loop() (+1 more)
 
 ### Community 456 - "Squad Briefing Multica"
 Cohesion: 0.21
 Nodes (25): buildSquadLeaderBriefing(), buildSquadRoster(), formatMention(), formatRosterRow(), Queries, Squad, SquadMember, renderMemberRow() (+17 more)
 
 ### Community 457 - "Realtime Hub Multica"
-Cohesion: 0.13
-Nodes (25): authenticateToken(), checkOrigin(), firstForwardedHost(), firstMessageAuth(), Conn, Prefix, RawMessage, ResponseWriter (+17 more)
+Cohesion: 0.15
+Nodes (9): Handler, UUID, trimAmbientContent(), Time, Timestamptz, UUID, Store, nullableUUID() (+1 more)
 
 ### Community 458 - "Realtime Shardedstreamrelay Sharded"
-Cohesion: 0.13
-Nodes (11): HeartbeatKey(), DefaultShardedStreamRelayConfig(), Client, Duration, Hub, Mutex, WaitGroup, NewShardedStreamRelay() (+3 more)
+Cohesion: 0.14
+Nodes (9): AwexSGLangAdapter, Any, AwexInferenceAdapter, Module, ParameterMeta, RankInfo, Tensor, Split SGLang fused parameters into HuggingFace-style unfused pairs.          SGL (+1 more)
 
 ### Community 460 - "Grad Fsdp Tensor"
-Cohesion: 0.06
-Nodes (43): clip_grad_by_total_norm_fp32(), device_mesh_has_dim(), fsdp2_clip_grad_norm(), get_grad_norm_fp32(), get_main_grads_for_grad_norm(), is_param_not_tensor_parallel_duplicate(), DeviceMesh, DTensor (+35 more)
+Cohesion: 0.11
+Nodes (16): Request to start a new RL session., Require one stable session namespace while retaining legacy clients., Return the new session reference or the legacy task identifier., StartSessionRequest, _admin_headers(), _client(), Test suite for env_id in StartSessionRequest and SessionData., start_session endpoint passes env_id from request to SessionData. (+8 more)
 
 ### Community 461 - "Deepgemm Fp8 Areal"
-Cohesion: 0.16
-Nodes (28): lang_config(), Return the language-model side of a (possibly nested) HF config.      Qwen3-VL a, _convert_vision_qkv_hf_to_mcore(), _get_shape(), _get_tp_slice(), _load_fused_qkv_weight(), _merge_gate_up_weights(), _merge_qkv_weights() (+20 more)
+Cohesion: 0.07
+Nodes (15): AwexTrainingAdapter, Protocol, Tensor, Protocol for training-side weight update adapters., Report parallelism strategy.          Returns dict with world_size, tp_size, pp_, Extract this worker's parameter shard metadata in awex format.          Returns, Return local shard tensors in canonical HF naming., Pull peer meta from KV store, build local send plan, join NCCL group. (+7 more)
 
 ### Community 462 - "Areal Transformers Ulysses"
-Cohesion: 0.08
-Nodes (44): Prepare micro-batch inputs with Ulysses sequence parallel handling.          Thi, _gather_heads_scatter_seq(), _gather_seq_scatter_heads(), get_ulysses_sequence_parallel_group(), get_ulysses_sequence_parallel_rank(), get_ulysses_sequence_parallel_world_size(), _pad_tensor(), ProcessGroup (+36 more)
+Cohesion: 0.11
+Nodes (23): get_ulysses_sequence_parallel_rank(), get_ulysses_sequence_parallel_world_size(), Get ulysses sequence parallel world size., Get ulysses sequence parallel rank., LongTensor, Tensor, # NOTE: This is the unpatched vanilla implementation in transformers, ulysses_flash_attn_forward() (+15 more)
 
 ### Community 463 - "Update Weight V2"
 Cohesion: 0.08
@@ -3943,8 +3943,8 @@ Cohesion: 0.08
 Nodes (25): AReal side (Python) — `backend/areal/customized_areal/tree_search/`, Build / image assets, Conventions, DAG credit backup (Phase 3, load-bearing) — `customized_areal/tree_search/`, File Structure, Multica side (Go) — `multica/server/`, Self-Review, SWE-Lego Docker × Multica Remote Mode × AReaL RL — Implementation Plan (+17 more)
 
 ### Community 465 - "Weight Update Training"
-Cohesion: 0.07
-Nodes (45): appendClassicStateEvent(), appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), applyClassicTransition(), applyStateUpdate(), applyTransitionEvent(), atomicWrite2() (+37 more)
+Cohesion: 0.09
+Nodes (31): booleanValue(), classicStateFromDocument(), documentRecord(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger() (+23 more)
 
 ### Community 466 - "Customized Areal Db"
 Cohesion: 0.12
@@ -3955,8 +3955,8 @@ Cohesion: 0.13
 Nodes (23): AsyncOpenAI, Use HLE-style LLM judge to verify if the predicted answer is correct.     Return, Use GAIA-style judge to verify if the predicted answer is correct., Verify the answer for a given dataset., Use LLM to verify if the predicted answer is correct.     Expects the LLM to cho, verify_answer_for_datasets(), verify_answer_gaia(), verify_answer_llm_hle() (+15 more)
 
 ### Community 468 - "Server Integration Multica"
-Cohesion: 0.18
-Nodes (24): cleanupIntegrationTestFixture(), generateTestJWT(), M, Pool, T, readJSON(), setupIntegrationTestFixture(), TestAgentsThroughRouter() (+16 more)
+Cohesion: 0.01
+Nodes (213): DistributedDataParallelConfig, MemoryProfilerConfig, PPOActorConfig, Configuration for PPO actor model, a subclass of a TrainEngine., Determine if forward pass is needed for proximal log-probabilities.          Ret, Validate PPO actor configuration., Configuration for Weights & Biases experiment tracking., Validate WandB configuration. (+205 more)
 
 ### Community 469 - "Issue Handler Involvesuserid"
 Cohesion: 0.29
@@ -3975,12 +3975,12 @@ Cohesion: 0.22
 Nodes (25): Add-ToUserPath(), Checkout-ServerRef(), Convert-ToCliArch(), Get-EnvFileValue(), Get-InstalledCliVersion(), Get-LatestVersion(), Get-SelfHostBackendPort(), Get-SelfHostFrontendPort() (+17 more)
 
 ### Community 473 - "Server Integration Comment"
-Cohesion: 0.34
-Nodes (24): T, TestEditCommentTriggers(), authRequestWithAgent(), clearTasks(), countPendingTasks(), createIssue(), createIssueAssignedToAgent(), createSecondAgent() (+16 more)
+Cohesion: 0.06
+Nodes (78): StickerAssetResponse, StickerPackResponse, Command, printStickerTable(), runStickerList(), runStickerSearch(), stickerName(), stickersToJSON() (+70 more)
 
 ### Community 474 - "Multica Server Handler"
-Cohesion: 0.12
-Nodes (26): noopReplier, OutcomeReplier, OutcomeReplierConfig, OutcomeReplierQueries, stubCredentialsResolver, stubReplierQueries, APIClient, Logger (+18 more)
+Cohesion: 0.17
+Nodes (13): CreateProjectParams, CreateProjectWithEnvParams, DeleteProjectParams, GetProjectByEnvIDParams, GetProjectInWorkspaceParams, GetProjectIssueStatsRow, ListProjectsParams, SetProjectEnvIDParams (+5 more)
 
 ### Community 475 - "Swe Lego Service"
 Cohesion: 0.18
@@ -3995,16 +3995,16 @@ Cohesion: 0.17
 Nodes (23): antigravityBackend, antigravityFormatTimeout(), antigravityModelError(), buildAntigravityArgs(), Config, Duration, Logger, isAntigravityWrapperLine() (+15 more)
 
 ### Community 478 - "Daemon Multica Server"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (20): AgentCredentialResponse, cachedAgentCredential, agentCredentialCachePath(), Config, Time, readCachedAgentCredential(), T, TestAgentCredentialCacheInvalidatesScopeAndNearExpiry() (+12 more)
 
 ### Community 479 - "Daemon Multica Server"
-Cohesion: 0.08
-Nodes (56): EvolutionSubmissionBundle, runtimeLocalSkillBundle, runtimeLocalSkillSummary, SkillFileData, userHomeDir(), collectLocalSkillFiles(), enumerateLocalSkills(), isIgnoredLocalSkillEntry() (+48 more)
+Cohesion: 0.04
+Nodes (106): AgentData, ArealProxy, ChatAttachmentMeta, evolutionCandidateParseIssue, EvolutionSubmissionBundle, EvolutionSubmissionSyncPayload, ProjectResourceData, RepoData (+98 more)
 
 ### Community 480 - "Wrapper Task Runner"
-Cohesion: 0.12
-Nodes (14): wrap(), wrap_get_method(), wrap_get_method_name(), wrap_remove_meta(), wrapable(), Test basic functionality of AsyncTaskRunner., Test that runner can be initialized and shut down cleanly., Test submitting and waiting for a single task. (+6 more)
+Cohesion: 0.07
+Nodes (28): ADDED Requirements, Requirement: Addressed source agent produces a derived global agent, Requirement: Client reports terminal failures, Requirement: Credentials are isolated by source binding, Requirement: Derived agent produces a valid DAG, Requirement: Derived dispatch cleanup is complete and idempotent, Requirement: Env-dispatch uses the frontend sandbox lifecycle, Requirement: First-address provisioning is single-flight (+20 more)
 
 ### Community 481 - "Areal V2 Weight"
 Cohesion: 0.08
@@ -4015,8 +4015,8 @@ Cohesion: 0.13
 Nodes (22): build_critic_score_prompt(), expected_score_value(), expected_value_from_logits_py(), parse_score(), Tensor, Generative critic score -- the actor in "critic mode" (Phase 3, Task 6).  The cr, Render the critic prompt: the filtered observation + scoring instruction., Extract the integer from ``<score>N</score>`` and clamp to [0, 10].      Raises (+14 more)
 
 ### Community 483 - "Generated Queries Project"
-Cohesion: 0.15
-Nodes (14): CreateProjectParams, CreateProjectWithEnvParams, DeleteProjectParams, GetProjectByEnvIDParams, GetProjectInWorkspaceParams, GetProjectIssueStatsRow, ListProjectsParams, SetProjectEnvIDParams (+6 more)
+Cohesion: 0.17
+Nodes (8): AwexFSDPAdapter, AwexTrainingAdapter, DTensor, ParameterMeta, ParameterShardMeta, RankInfo, Tensor, Awex training adapter wrapping FSDPEngine for shard-direct NCCL P2P updates.
 
 ### Community 484 - "Workgraph Issue Multica"
 Cohesion: 0.08
@@ -4043,8 +4043,8 @@ Cohesion: 0.13
 Nodes (21): classifyPaste(), collectRawHtmlTagsInSegment(), collectTagsOutsideCodeSpans(), countOccurrences(), escapeRawHtmlTagsInSegment(), escapeRawHtmlTagsOutsideCode(), escapeTagsOutsideCodeSpans(), findRawHtmlTagsOutsideCode() (+13 more)
 
 ### Community 490 - "Service Envsandboxlifecycleservice Env"
-Cohesion: 0.06
-Nodes (35): CreateEnvCheckpointRequest, EnvCheckpointListResponse, EnvCheckpointResponse, EnvCheckpointServiceAPI, envSandboxLifecycleDepsAdapter, ephemeralSandboxCleanerAdapter, fakeRetrySandboxLifecycle, ResumeFromCheckpointResponse (+27 more)
+Cohesion: 0.03
+Nodes (104): CreateEnvCheckpointRequest, CreateSandboxNodeRequest, CreateSandboxRequest, EnvCheckpointListResponse, EnvCheckpointResponse, EnvCheckpointServiceAPI, ephemeralSandboxCleanerAdapter, fakeRetrySandboxLifecycle (+96 more)
 
 ### Community 491 - "Redact Multica Server"
 Cohesion: 0.19
@@ -4055,8 +4055,8 @@ Cohesion: 0.17
 Nodes (21): geminiBackend, geminiModelStats, geminiStreamError, geminiStreamEvent, geminiStreamStats, buildGeminiArgs(), buildGeminiEnv(), Config (+13 more)
 
 ### Community 493 - "Openai Areal Experimental"
-Cohesion: 0.07
-Nodes (42): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction() (+34 more)
+Cohesion: 0.12
+Nodes (24): artifactHash(), artifactKey(), assertInside(), createSkillSnapshot(), ensureClassicRun(), hashSkillPackage(), hashSnapshot(), migrationArtifacts() (+16 more)
 
 ### Community 494 - "Check Pyproject Consistency"
 Cohesion: 0.19
@@ -4067,16 +4067,16 @@ Cohesion: 0.13
 Nodes (11): kk_allocate(), Partition *values* into groups using the Karmarkar-Karp differencing method., Test kk_allocate() with capacity and min_groups., When KK violates capacity it falls back to FFD, which respects it., When capacity is huge, all items should go into min_groups bins., Verify k = min(k, len(values)) prevents k from exceeding n.          With 10 ite, n_groups_divisor roundup can push k above n — should be clamped., When KK naturally satisfies capacity, no FFD fallback is needed. (+3 more)
 
 ### Community 496 - "Areal Sglang V2"
-Cohesion: 0.13
-Nodes (14): FastAPI, RpcProxy, Register ``/awex/*`` weight-update endpoints on the SGLang FastAPI app.      Eac, register_awex_endpoints(), areal_launch_server(), Any, PortArgs, ZMQ proxy bridging the HTTP process to scheduler subprocesses.      Two independ (+6 more)
+Cohesion: 0.09
+Nodes (18): FastAPI, RpcProxy, Register ``/awex/*`` weight-update endpoints on the SGLang FastAPI app.      Eac, register_awex_endpoints(), areal_launch_server(), Any, PortArgs, ZMQ proxy bridging the HTTP process to scheduler subprocesses.      Two independ (+10 more)
 
 ### Community 497 - "Handler Squad Multica"
-Cohesion: 0.05
-Nodes (54): commentAgentTrigger, commentAgentTriggerSource, commentFetchError, CommentTriggerAgentResponse, CommentTriggerPreviewRequest, CommentTriggerPreviewResponse, CreateCommentRequest, fetchCommentsArgs (+46 more)
+Cohesion: 0.06
+Nodes (51): commentAgentTrigger, commentAgentTriggerSource, commentFetchError, CommentTriggerAgentResponse, CommentTriggerPreviewRequest, CommentTriggerPreviewResponse, CreateCommentRequest, fetchCommentsArgs (+43 more)
 
 ### Community 498 - "Lark Binding Token"
-Cohesion: 0.17
-Nodes (20): BindingToken, BindingTokenService, InstallerBindParams, OpenID, PollResult, RedeemedBindingToken, Queries, Time (+12 more)
+Cohesion: 0.16
+Nodes (21): BindingToken, BindingTokenService, fakeInstallerBinder, InstallerBindParams, OpenID, RedeemedBindingToken, Queries, Time (+13 more)
 
 ### Community 499 - "Lark Ws Chunk"
 Cohesion: 0.17
@@ -4091,28 +4091,28 @@ Cohesion: 0.13
 Nodes (8): AnyHandler, EventHandler, Logger, noopLogger, State, WSClient, WSClientOptions, WSEventPayload
 
 ### Community 502 - "Landing Multica Apps"
-Cohesion: 0.09
-Nodes (25): metadata, metadata, LandingPage(), metadata, ExtraFrontmatter, AboutPageClient(), FAQSection(), FeaturesSection() (+17 more)
+Cohesion: 0.13
+Nodes (25): authenticateToken(), checkOrigin(), firstForwardedHost(), firstMessageAuth(), Conn, Prefix, RawMessage, ResponseWriter (+17 more)
 
 ### Community 503 - "Upload Multica Packages"
 Cohesion: 0.14
 Nodes (17): applyImageDimensions(), createFileUploadExtension(), dedupFiles(), FileUploadExtensionOptions, finalizeFileCard(), findImagePosBySrc(), MediaMode, moveSelectionToParagraphAfterImage() (+9 more)
 
 ### Community 504 - "Realtime Hub Server"
-Cohesion: 0.19
-Nodes (20): connectWS(), Buffer, Conn, Hub, Mutex, Server, T, makeTestToken() (+12 more)
+Cohesion: 0.42
+Nodes (11): T, projectIDForEnvDispatchStoreFixture(), setupEnvDispatchChannelStoreFixture(), TestAgentLineageRejectsCrossWorkspaceSource(), TestEnvDispatchAdapter_CreateChannelPersistsCanonicalPolicy(), TestEnvDispatchBindingIdentityAndRetryState(), TestEnvDispatchChannelStoreClaimProvisioningIsSingleWinner(), TestEnvDispatchChannelStoreClaimProvisioningRetainsRuntimePolicy() (+3 more)
 
 ### Community 505 - "Service Env Checkpoint"
-Cohesion: 0.30
-Nodes (22): NewEnvCheckpointService(), RawMessage, T, newFakeCheckpointRepo(), TestEnvCheckpointCreateEmptyResumeTriggerWhenNoInFlightTask(), TestEnvCheckpointCreateRecordsSaveFailureStatus(), TestEnvCheckpointCreateRecordsTimeoutStatus(), TestEnvCheckpointCreateRejectsFleetOnlyEnv() (+14 more)
+Cohesion: 0.10
+Nodes (44): RawMessage, Time, NewEnvCheckpointService(), EnvCheckpoint, Mutex, RawMessage, T, newFakeCheckpointRepo() (+36 more)
 
 ### Community 506 - "Training Service Multica"
 Cohesion: 0.25
 Nodes (22): buildDiagnoser(), Duration, Queries, LoadTrainingConfig(), NewTrainingSessionDeps(), clearTrainingEnv(), T, TestLoadTrainingConfig_DAGEnabledDefaultAndDisable() (+14 more)
 
 ### Community 507 - "Failure Teacher Recovery"
-Cohesion: 0.20
-Nodes (17): DiagnoseFailureProvider, DummyTokenizer, _install_workflow_stubs(), _load_workflow_module(), LossMode, _make_node(), _make_workflow(), Node (+9 more)
+Cohesion: 0.06
+Nodes (43): clip_grad_by_total_norm_fp32(), device_mesh_has_dim(), fsdp2_clip_grad_norm(), get_grad_norm_fp32(), get_main_grads_for_grad_norm(), is_param_not_tensor_parallel_duplicate(), DeviceMesh, DTensor (+35 more)
 
 ### Community 508 - "Client Infra Sandbox"
 Cohesion: 0.18
@@ -4123,8 +4123,8 @@ Cohesion: 0.10
 Nodes (9): Thread-safe worker registry with health tracking., Add a worker. Returns existing worker_id if already registered., Remove a worker by address. No-op if not found., Remove a worker by ID. Returns the worker_addr or None if not found., Return only workers with ``is_healthy == True``., Return all workers regardless of health., Return all registered worker addresses., WorkerRegistry (+1 more)
 
 ### Community 510 - "Daemon Wakeup Multica"
-Cohesion: 0.20
-Nodes (11): taskWakeup, Conn, Daemon, Duration, HeartbeatResponse, RawMessage, jitterDuration(), marshalRaw() (+3 more)
+Cohesion: 0.16
+Nodes (14): taskWakeup, Conn, Daemon, Duration, HeartbeatResponse, RawMessage, jitterDuration(), marshalRaw() (+6 more)
 
 ### Community 511 - "Daytona Python Tool"
 Cohesion: 0.11
@@ -4135,15 +4135,15 @@ Cohesion: 0.13
 Nodes (21): Float8BlockwiseQTensor, _create_test_tensors(), high_precision_to_te_blockwise_fp8(), _log_tensor_comparison(), _perform_fp8_gemm(), device, DType, Tensor (+13 more)
 
 ### Community 513 - "Generated Queries Issue"
-Cohesion: 0.12
-Nodes (20): AttachLabelToIssueParams, CreateLabelParams, DeleteLabelParams, DetachLabelFromIssueParams, GetLabelParams, IssueLabel, ListLabelsByIssueParams, ListLabelsForIssuesParams (+12 more)
+Cohesion: 0.16
+Nodes (14): AttachLabelToIssueParams, CreateLabelParams, DeleteLabelParams, DetachLabelFromIssueParams, GetLabelParams, IssueLabel, ListLabelsByIssueParams, ListLabelsForIssuesParams (+6 more)
 
 ### Community 514 - "Handler Agent Credential"
 Cohesion: 0.07
 Nodes (27): 1. 锚：**chat 面 → 对 raft · issue 面 → 对 Linear**, 2.1 status = 七个（`GET /api/issues?limit=200` distinct 查实）, 2.2 ★ 锁定的显示顺序（**离 done 近 → 远，完成/取消垫底**）, 2.3 ⚠️ 排序必须在服务端 —— **服务端契约 `可执行`｜owner: @Ronan ✅ 已签；客户端禁重排仍 `仅文档`**（见 §5.3）, 2.4 priority 枚举, 2. 状态与优先级枚举（**服务端实证、不是记忆**）, 3.1 机制：**服务端 anchor 成 part、前端不搜文本**, 3.2 ★ 正文不可变 / 实体状态一律现查 —— **`可执行`（已落地）** (+19 more)
 
 ### Community 515 - "Handler Project Resource"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (23): CreateProjectResourceRequest, githubRepoRef, localDirectoryRef, ProjectResourceResponse, registerManagedWorkdirRequest, UpdateProjectResourceRequest, Handler, Project (+15 more)
 
 ### Community 517 - "Navigation Multica Apps"
@@ -4151,40 +4151,40 @@ Cohesion: 0.17
 Nodes (19): currentActiveTab(), DesktopNavigationProvider(), extractWorkspaceSlug(), requireRuntimeAppUrl(), routerLocationPath(), TabNavigationProvider(), captureAdapter(), makeMockRouter() (+11 more)
 
 ### Community 518 - "Ui Multica Packages"
-Cohesion: 0.16
-Nodes (26): Pool, interactionDAGTestPool(), callOrderIndex(), ephemeralRetryMarker(), Agent, Issue, Mutex, Project (+18 more)
+Cohesion: 0.17
+Nodes (24): callOrderIndex(), ephemeralRetryMarker(), Agent, Issue, Mutex, Project, RawMessage, T (+16 more)
 
 ### Community 519 - "Cmd Multica Workspace"
 Cohesion: 0.01
-Nodes (135): Get the workflow executor of the inference engine., Scheduler, Raised when an AsyncTaskRunner queue is full., Wrapper for task results with creation timestamp.      Attributes     ----------, TaskQueueFullError, TimedResult, Scheduler, # NOTE: remote task input has a slightly different (+127 more)
+Nodes (247): _dispatch_tensors(), _find_in_structure(), _is_tensor_like(), _item_weight(), _merge_tensors(), _pad_eval_batch(), Any, StatefulDataLoader (+239 more)
 
 ### Community 520 - "Scheduler Jobs Agent"
-Cohesion: 0.10
-Nodes (15): A registered data proxy worker., Add a worker. Returns existing worker_id if already registered., Return only workers with ``is_healthy == True``., Return all workers regardless of health., WorkerInfo, get_strategy(), Protocol, WorkerInfo (+7 more)
+Cohesion: 0.13
+Nodes (11): DefaultShardedStreamRelayConfig(), Client, Duration, Hub, Mutex, WaitGroup, XMessage, NewShardedStreamRelay() (+3 more)
 
 ### Community 521 - "Weight Update Sglang"
-Cohesion: 0.16
-Nodes (9): AwexSGLangAdapter, Any, AwexInferenceAdapter, Module, ParameterMeta, RankInfo, Tensor, Split SGLang fused parameters into HuggingFace-style unfused pairs.          SGL (+1 more)
+Cohesion: 0.05
+Nodes (28): Pipeline parallelism size (abbreviated)., AwexSGLangAdapter, Any, AwexInferenceAdapter, Module, ParameterMeta, RankInfo, Tensor (+20 more)
 
 ### Community 522 - "Controller Update Areal"
-Cohesion: 0.07
-Nodes (15): AwexTrainingAdapter, Protocol, Tensor, Protocol for training-side weight update adapters., Report parallelism strategy.          Returns dict with world_size, tp_size, pp_, Extract this worker's parameter shard metadata in awex format.          Returns, Return local shard tensors in canonical HF naming., Pull peer meta from KV store, build local send plan, join NCCL group. (+7 more)
+Cohesion: 0.21
+Nodes (22): AgentRadarScheduleJob(), cancelUnauthorizedWorkspaceRadar(), deferUnchangedWorkspaceRadar(), deferWorkspaceRadarForBudget(), Handler, Pool, TaskService, Time (+14 more)
 
 ### Community 523 - "Cli V2 Inference"
 Cohesion: 0.16
 Nodes (13): cli(), do_run(), Path, run_cmd(), train(), test_agent_help_contains_expected_commands(), test_agent_help_does_not_register_session_commands(), test_agent_run_does_not_accept_initial_session_key() (+5 more)
 
 ### Community 524 - "Weight Update Awex"
-Cohesion: 0.14
-Nodes (9): _create_training_adapter(), AwexFSDPAdapter, AwexTrainingAdapter, DTensor, ParameterMeta, ParameterShardMeta, RankInfo, Tensor (+1 more)
+Cohesion: 0.16
+Nodes (8): AwexFSDPAdapter, AwexTrainingAdapter, DTensor, ParameterMeta, ParameterShardMeta, RankInfo, Tensor, Awex training adapter wrapping FSDPEngine for shard-direct NCCL P2P updates.
 
 ### Community 525 - "Critic Customized Areal"
 Cohesion: 0.08
 Nodes (24): env-dispatch-dag-db-bridge Implementation Plan, File Structure, Global Constraints, Phase A - db_bridge side/group reconciliation (multica repo), Phase B - db_bridge stub / executor / schema (multica repo), Phase C - multica arealrl verification (multica repo, read-only), Phase D - areal client + docs (areal repo), Phase E - tests + verify (both repos) (+16 more)
 
 ### Community 526 - "Daemon Diskusage Multica"
-Cohesion: 0.07
-Nodes (42): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction() (+34 more)
+Cohesion: 0.11
+Nodes (28): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactHash(), artifactKey(), atomicWrite(), clearPendingAction(), ensureClassicRun() (+20 more)
 
 ### Community 527 - "Design Docs Superpowers"
 Cohesion: 0.08
@@ -4195,20 +4195,20 @@ Cohesion: 0.10
 Nodes (14): MessagePreprocessor, NormalizeSystemReminder, NormalizeToolCallArguments, Protocol, Message preprocessors for SWE-bench agent rollouts.  Preprocessors transform mes, Protocol for message preprocessors., Remove per-request Anthropic billing header lines from system prompts., Remove volatile ``currentDate`` lines from system reminders. (+6 more)
 
 ### Community 529 - "Generated Queries Webhook"
-Cohesion: 0.21
+Cohesion: 0.20
 Nodes (13): CreateWebhookDeliveryParams, GetWebhookDeliveryByTriggerAndDedupeParams, GetWebhookDeliveryInWorkspaceParams, ListWebhookDeliveriesByAutopilotParams, ListWebhookDeliveriesByAutopilotRow, UpdateWebhookDeliveryDispatchedParams, UpdateWebhookDeliveryTerminalParams, Queries (+5 more)
 
 ### Community 530 - "Generated Queries Task"
-Cohesion: 0.15
-Nodes (16): CreateAgentInboxExecutionParams, GetAgentInboxExecutionParams, GetIssueUsageSummaryRow, ListDashboardAgentRunTimeParams, ListDashboardAgentRunTimeRow, ListDashboardRunTimeDailyParams, ListDashboardRunTimeDailyRow, ListDashboardUsageByAgentParams (+8 more)
+Cohesion: 0.05
+Nodes (44): CreateAgentInboxExecutionParams, GetAgentInboxExecutionParams, GetIssueUsageSummaryRow, GetRuntimeTaskHourlyActivityParams, GetRuntimeTaskHourlyActivityRow, GetRuntimeUsageByHourParams, GetRuntimeUsageByHourRow, ListDashboardAgentRunTimeParams (+36 more)
 
 ### Community 531 - "Multica Server Classify"
-Cohesion: 0.03
-Nodes (80): BatchShardRequest, clear_batch_data(), ClearShardRequest, BaseModel, Clear specified batch data shards., Base model for requests containing a list of shard IDs., Request to retrieve multiple tensor shards., Request to clear specific tensor shards. (+72 more)
+Cohesion: 0.11
+Nodes (11): _make_client(), _MockAiohttpResponse, _MockAiohttpSession, Unit tests for the proxy gateway (FastAPI gateway)., Simulates an aiohttp response for the gateway's ``_forward`` helper., Controllable aiohttp session returning pre-enqueued responses.      Responses ar, Create an httpx.AsyncClient backed by the proxy gateway ASGI app., TestHealthEndpoint (+3 more)
 
 ### Community 532 - "Service Skill Multica"
-Cohesion: 0.13
-Nodes (42): autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2(), fieldStatus(), gitOutput() (+34 more)
+Cohesion: 0.10
+Nodes (52): applyTransitionEvent(), atomicWrite2(), autoTransition(), check2(), configCandidates(), contextCompression(), exists6(), fail2() (+44 more)
 
 ### Community 533 - "Project Openspec Changes"
 Cohesion: 0.12
@@ -4219,8 +4219,8 @@ Cohesion: 0.08
 Nodes (24): 10. Deprecation shim — `BootstrapOnboarding*`, 1. 背景, 2. 设计 — 5 条核心原则, 3.1 新用户,Step 3 选 runtime, 3.2 新用户,Step 3 点 Skip, 3.3 被邀请用户, 3. 4 类用户链路, 3.4 老用户回访 (+16 more)
 
 ### Community 535 - "Math Agent Areal"
-Cohesion: 0.04
-Nodes (48): Replace GAE advantages with per-query GRPO-normalized outcome_rewards.      Read, TreeAdvantageComputer, MultiCandidateFSDPEngine, Any, Tensor, Compute logprobs with multi-candidate support (entropy discarded).          This, Gather multi-candidate logprobs from packed-tree logits.          The packed tre, FSDP Engine with multi-candidate logprob gathering support.      This engine ext (+40 more)
+Cohesion: 0.11
+Nodes (16): MultiCandidateFSDPEngine, Any, Tensor, Compute logprobs with multi-candidate support (entropy discarded).          This, Gather multi-candidate logprobs from packed-tree logits.          The packed tre, FSDP Engine with multi-candidate logprob gathering support.      This engine ext, Prepare 2D labels for multi-candidate logprob gathering.          Reads the resp, Compute logprobs/entropy and return scaled loss with multi-candidate support. (+8 more)
 
 ### Community 536 - "Observation Critic Customized"
 Cohesion: 0.21
@@ -4231,8 +4231,8 @@ Cohesion: 0.20
 Nodes (16): buildTaskMessagesUrl(), parseSetRewardArgs(), verifierRlExtension(), buildExportTrajectoriesRequest(), buildSetRewardRequest(), exportTrajectories(), ExportTrajectoriesArgs, FetchLike (+8 more)
 
 ### Community 538 - "Execenv Multica Server"
-Cohesion: 0.19
-Nodes (19): projectResourceFile, ensureSkillFrontmatter(), frontmatterBodyStart(), frontmatterParts(), ProjectResourceForEnv, hasFrontmatterName(), isFrontmatterValidYAML(), renderAutopilotContext() (+11 more)
+Cohesion: 0.09
+Nodes (39): GCMetaKind, PrepareParams, projectResourceFile, RepoContextForEnv, ReuseParams, SkillContextForEnv, SkillFileContextForEnv, TaskContextForEnv (+31 more)
 
 ### Community 539 - "Docs Multica Apps"
 Cohesion: 0.08
@@ -4247,8 +4247,8 @@ Cohesion: 0.05
 Nodes (36): `agent_memory`, `agent_shared_skill`, Agent Skill Suggestions, Current Limitations, Database Writes: Governed Shared Units, Database Writes: Inbound Submissions, Design principles, End-to-End Summary (+28 more)
 
 ### Community 542 - "Multica Server Middleware"
-Cohesion: 0.19
-Nodes (18): Queries, ownerLookupFor(), Queries, T, UUID, pgtypeUniqueEmail(), seedOwnerLookupUser(), TestOwnerLookupFor_DBError() (+10 more)
+Cohesion: 0.17
+Nodes (20): UUID, uuidToString(), Queries, ownerLookupFor(), Queries, T, UUID, pgtypeUniqueEmail() (+12 more)
 
 ### Community 543 - "Multica Session Lifecycle"
 Cohesion: 0.15
@@ -4263,8 +4263,8 @@ Cohesion: 0.30
 Nodes (20): _add_common(), _add_read_filters(), _apply_eq_filters(), build_parser(), _client(), cmd_delete(), cmd_get(), cmd_insert() (+12 more)
 
 ### Community 546 - "Secretbox Multica Server"
-Cohesion: 0.08
-Nodes (29): AEAD, ioErrReader, CredentialsDecrypter, InstallationParams, InstallationService, LarkInstallation, Queries, Text (+21 more)
+Cohesion: 0.10
+Nodes (20): 10.1 CPU numerical tests, 10.2 Reference contract tests, 10.3 FSDP and integration tests, 10. Verification strategy, 11. Implementation sequence and rollback, 1. Design boundary, 2. Mathematical contract, 3. Configuration (+12 more)
 
 ### Community 547 - "Weight Update Adapter"
 Cohesion: 0.08
@@ -4275,8 +4275,8 @@ Cohesion: 0.05
 Nodes (38): Common Rationalizations, Debugging Integration, Example: Bug Fix, Final Rule, Good Tests, GREEN - Minimal Code, Overview, Red Flags - STOP and Start Over (+30 more)
 
 ### Community 549 - "Sp Vision Shard"
-Cohesion: 0.05
-Nodes (46): apply_vision_sp_shard_patch(), _assign_images_to_dp_ranks(), create_dp_vision_forward(), _gather_vision_embeddings(), GatherVisionEmbeddings, _get_image_embedding_counts(), _get_image_patch_counts(), _patch_vision_class() (+38 more)
+Cohesion: 0.07
+Nodes (28): apply_vision_sp_shard_patch(), create_dp_vision_forward(), _gather_vision_embeddings(), GatherVisionEmbeddings, _patch_vision_class(), Function, Tensor, All-gather vision embeddings across DP ranks with gradient support.      Forward (+20 more)
 
 ### Community 550 - "Multica Server Logger"
 Cohesion: 0.20
@@ -4291,8 +4291,8 @@ Cohesion: 0.21
 Nodes (10): CreateInvitationParams, ExpireStalePendingInvitationsParams, GetPendingInvitationByEmailParams, ListPendingInvitationsByWorkspaceRow, ListPendingInvitationsForUserParams, ListPendingInvitationsForUserRow, WorkspaceInvitation, Queries (+2 more)
 
 ### Community 553 - "Handler Env Checkpoint"
-Cohesion: 0.40
-Nodes (3): TaskStatus, Handle text generation requests.          Parameters         ----------, Handle chat completion requests.          This method extends the base OpenaiWor
+Cohesion: 0.14
+Nodes (17): _admin_headers(), _make_mocked_client(), Create gateway client + mock aiohttp session for forwarding tests.      The http, Tests for the session refresh (API key reuse) feature., Full refresh: end old session, wait for ready worker, start new., Refresh with no ready worker within timeout returns 429., Known key with no active route goes through normal flow with key., Unknown api_key is stripped — worker generates a fresh key. (+9 more)
 
 ### Community 554 - "Bundle Cli Multica"
 Cohesion: 0.11
@@ -4307,16 +4307,16 @@ Cohesion: 0.13
 Nodes (12): FILE_CARD_MARKDOWN_RE, FileCardExtension, FileCardView(), fileCardRenderMarkdown, imageRenderMarkdown, tokenize, { getAttachmentTextContentMock, resolveAttachmentMock, openByUrlMock, tryOpenMock }, editors (+4 more)
 
 ### Community 557 - "Agent Health Multica"
-Cohesion: 0.09
-Nodes (57): evolutionVersionFixture, createAgentHealthEvent(), createAgentHealthFixture(), createAgentHealthFixtureWithRuntimeAccess(), dbAgentForHealthTest(), Agent, T, Time (+49 more)
+Cohesion: 0.31
+Nodes (16): evolutionVersionFixture, dbMemberForEvolutionVersionTest(), evolutionVersionMetadata(), evolutionVersionRequest(), Member, T, seedEvolutionVersionFixture(), stringSlicesEqualForTest() (+8 more)
 
 ### Community 558 - "Runtime Local Skills"
 Cohesion: 0.08
 Nodes (23): 1. Install/upgrade any dependency: check `dist-tags` first, 1. Read the real web/desktop implementation, 2. New source subdirectory: verify git tracking, 2. Show the user the interaction plan + parity points (≤30s to read), 3. ApiClient capability list (4 must-haves), 3. Wait for an explicit "do it / go / start" before writing code, 4. Every read query must pass `signal` to fetch; api.ts always has a hard timeout, 5. Modal container selection: match container to content, don't copy the first sheet (+15 more)
 
 ### Community 559 - "Multica Server Jobs"
-Cohesion: 0.22
-Nodes (15): activeMemoryCurationAgentIDs(), Handler, Pool, Time, makeMemoryCurationIntentHandler(), memoryCurationJob(), MemoryCurationJobs(), normalizeScheduledMemoryCurationStage() (+7 more)
+Cohesion: 0.18
+Nodes (18): Stage, NormalizeStage(), activeMemoryCurationAgentIDs(), Handler, Pool, Time, makeMemoryCurationIntentHandler(), memoryCurationJob() (+10 more)
 
 ### Community 560 - "Sandboxws Hub Multica"
 Cohesion: 0.17
@@ -4355,24 +4355,24 @@ Cohesion: 0.13
 Nodes (10): Any, Thread-safe in-memory KV store for metadata exchange.      Values are stored as-, Get value for key under pair_name. Returns None if not found., Store value under pair_name/key., Delete key from pair. Returns True if key existed., Add value to a set under pair_name/key. Used for barrier sync., Get size of set under pair_name/key. Returns 0 if not found., Remove all data and sets for a pair. (+2 more)
 
 ### Community 569 - "Math Agent Anthropic"
-Cohesion: 0.03
-Nodes (68): AsyncRewardWrapper, _get_device_count_safely(), ProcessPoolExecutor, Shut down all executors before ``_python_exit`` to prevent         worker proces, Safely get device count without initializing CUDA context., This function is a placeholder for the reward function that will be used in the, Wraps a synchronous reward function for async execution with timeout and retries, reward_fn() (+60 more)
+Cohesion: 0.04
+Nodes (58): AsyncRewardWrapper, _get_device_count_safely(), ProcessPoolExecutor, Shut down all executors before ``_python_exit`` to prevent         worker proces, Safely get device count without initializing CUDA context., This function is a placeholder for the reward function that will be used in the, Wraps a synchronous reward function for async execution with timeout and retries, reward_fn() (+50 more)
 
 ### Community 570 - "Business Pairing Multica"
 Cohesion: 0.20
 Nodes (18): BlockStmt, CallExpr, Expr, analyticsBackedIdents(), analyticsEventNames(), analyticsHelperCall(), constantNameForEvent(), defaultPropsForEvent() (+10 more)
 
 ### Community 571 - "Customized Areal Dynamic"
-Cohesion: 0.14
-Nodes (21): ConnectRequest, ConnectResponse, DisconnectRequest, DisconnectResponse, HealthResponse, KVDeleteResponse, KVGetResponse, KVPutBody (+13 more)
+Cohesion: 0.20
+Nodes (25): Duration, NewEnvSandboxLifecycleService(), RawMessage, T, lifecycleRef(), TestCloneSandboxInstanceCompensatesRuntimeWhenJobInsertFails(), TestCloneSandboxInstanceCreatesOfflineRuntimeAndCloneJob(), TestEnvSandboxLifecycleCreateCompensatesPostInsertFailures() (+17 more)
 
 ### Community 572 - "Examples Openclaw Fmt"
 Cohesion: 0.25
 Nodes (15): main(), _step(), arrow(), die(), dim(), error(), header(), info() (+7 more)
 
 ### Community 573 - "Generated Queries Member"
-Cohesion: 0.10
-Nodes (14): _node(), TestAdaptiveMCWeight, TestComputeCriticTargets, TestComputeCriticTargetsJudgeShaping, AdaptiveMCWeight, compute_critic_targets(), _episode_groups(), Any (+6 more)
+Cohesion: 0.19
+Nodes (14): eventResult, opencodeBackend, opencodeCacheTokens, opencodeErrData, opencodeError, opencodeEvent, opencodeEventPart, opencodeTokens (+6 more)
 
 ### Community 574 - "Generated Queries User"
 Cohesion: 0.08
@@ -4391,8 +4391,8 @@ Cohesion: 0.22
 Nodes (17): PreviewContent(), AUDIO_EXTS, BASENAME_LANGUAGE_MAP, baseOf(), EXT_LANGUAGE_MAP, extensionToLanguage(), extOf(), getPreviewKind() (+9 more)
 
 ### Community 578 - "Server Listeners Multica"
-Cohesion: 0.09
-Nodes (22): Mode, ChatComposer(), Props, makeLocalId(), MessageComposer(), MessageComposerReplyTarget, Props, serializeMentions() (+14 more)
+Cohesion: 0.10
+Nodes (18): ChatComposer(), Props, makeLocalId(), MessageComposer(), MessageComposerReplyTarget, Props, serializeMentions(), AttachmentChipProps (+10 more)
 
 ### Community 579 - "Server Quick Create"
 Cohesion: 0.35
@@ -4403,8 +4403,8 @@ Cohesion: 0.19
 Nodes (8): Bool, Int64, Map, RWMutex, Value, loadOrInitCounter(), snapshotCounters(), Metrics
 
 ### Community 581 - "Storage S3Storage S3"
-Cohesion: 0.16
-Nodes (7): Client, Duration, ReadCloser, looksLikeS3Hostname(), NewS3StorageFromEnv(), S3Storage, StorageClass
+Cohesion: 0.08
+Nodes (27): Client, Duration, ReadCloser, looksLikeS3Hostname(), NewS3StorageFromEnv(), T, TestLooksLikeS3Hostname(), TestS3StorageCdnDomainPrefersPublicBaseURL() (+19 more)
 
 ### Community 582 - "Client Experimental Openai"
 Cohesion: 0.09
@@ -4423,12 +4423,12 @@ Cohesion: 0.15
 Nodes (14): build_command_script(), _file_size(), ABC, RuntimeError, Command executor abstraction for the AReaL remote shell runner.  The runner driv, Real executor that runs commands in command-scoped tmux sessions.      Each comm, Raised when the executor backend (e.g. tmux) is unavailable or fails., Build the shell wrapper for one arbitrary command.      The user command runs in (+6 more)
 
 ### Community 586 - "Checkpointer Areal Engine"
-Cohesion: 0.14
-Nodes (13): get_device_name(), load_dist_checkpointing(), log_with_rank(), MegatronCheckpointManager, Checkpoint manager for Megatron-LM distributed training.      This class manages, collect rng state across data parallel ranks, Determine the directory name for this rank's checkpoint., Non-blocking finalize of any background save processes that have finished. (+5 more)
+Cohesion: 0.16
+Nodes (12): Any, Future, Callback to controller to initialize weight update group on inference side., Callback to controller to receive weights on inference side.          This metho, Callback to controller to load weights from disk on inference side.          Thi, Callback to controller to pause inference generation.          This is synchrono, Callback to controller to resume inference generation.          This is synchron, Callback interface for train workers to coordinate with TrainController.      Th (+4 more)
 
 ### Community 587 - "Parallel Dims Areal"
-Cohesion: 0.14
-Nodes (11): _get_logger(), DeviceMesh, Logger, ProcessGroup, Get rank-aware logger for this module., Build device mesh for all parallelism dimensions., Build mesh when EP is disabled., Build mesh when EP is enabled.          Handles both etp=1 and etp=tp cases: (+3 more)
+Cohesion: 0.12
+Nodes (26): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactsHash2(), atomicWrite(), clearPendingAction(), completedHandoffIsCurrent(), hashText2() (+18 more)
 
 ### Community 588 - "Platform Platforms Areal"
 Cohesion: 0.05
@@ -4443,8 +4443,8 @@ Cohesion: 0.12
 Nodes (15): Advantage Normalization, Approaching QwQ-32B's performance using only 200 data samples, Base Model, Conclusion & Future Work, Dataset Curation, Evaluation Best Practices, Introduction, Key Hyperparameters (+7 more)
 
 ### Community 591 - "Judge Prompt Customized"
-Cohesion: 0.21
-Nodes (6): build_judge_instruction(), parse_turn_scores(), Build the judge instruction appended after the full episode.      The judge is a, Extract ``{turn_idx: score}`` from a judge XML response.      Robust to surround, TestBuildJudgeInstruction, TestParseTurnScores
+Cohesion: 0.12
+Nodes (16): A registered data proxy worker., WorkerInfo, get_strategy(), Protocol, WorkerInfo, Protocol for routing strategy implementations., Select a worker from the list, or return None if empty., Cycle through workers in order. (+8 more)
 
 ### Community 592 - "Docs Zh Workflow"
 Cohesion: 0.09
@@ -4452,7 +4452,7 @@ Nodes (22): 10. File summary, 1. Overview, 2. Goals and non-goals, 3. Architectu
 
 ### Community 593 - "Generated Queries Project"
 Cohesion: 0.09
-Nodes (38): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), collectClassicEvidence(), deltaSpecEvidence(), directFileEvidence(), documentRecord(), fileExists() (+30 more)
+Nodes (31): booleanValue(), classicStateFromDocument(), documentRecord(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger() (+23 more)
 
 ### Community 594 - "Handler Heartbeat Scheduler"
 Cohesion: 0.09
@@ -4471,8 +4471,8 @@ Cohesion: 0.13
 Nodes (11): baseEditFlags, CapturedMenuItem, ContextMenuParams, ctx, invokeByLabel(), lastMenu(), lastMenuLabels(), Listener (+3 more)
 
 ### Community 598 - "Multica Apps Web"
-Cohesion: 0.16
-Nodes (11): DownloadPage(), metadata, emptyRelease(), fetchLatestRelease(), GitHubReleasePayload, isWithinFreshWindow(), SAMPLE_LATEST_ASSET, SAMPLE_PREV_ASSET (+3 more)
+Cohesion: 0.23
+Nodes (18): evolutionCandidateRerunAudit, EvolutionCandidateRerunResponse, EvolutionMaterializedSkillResponse, EvolutionReviewAppliesResponse, evolutionReviewDecisionRequest, EvolutionReviewEvidenceResponse, EvolutionReviewFileResponse, EvolutionReviewSubmissionResponse (+10 more)
 
 ### Community 599 - "Linkify Multica Packages"
 Cohesion: 0.22
@@ -4491,36 +4491,36 @@ Cohesion: 0.33
 Nodes (17): Daemon, Int32, T, newAutoUpdateTestDaemon(), TestAutoUpdateLoop_EarlyExits(), TestTryAutoUpdate_DefersWhenClaimInFlightAtBarrier(), TestTryAutoUpdate_DoesNotRestartOnUpgradeFailure(), TestTryAutoUpdate_HoldsBarrierAcrossRestart() (+9 more)
 
 ### Community 603 - "Multica Server Handler"
-Cohesion: 0.24
-Nodes (17): shouldInheritParentMentions(), Issue, T, Text, UUID, issueNoAssignee(), issueWithAgentAssignee(), TestCommentMentionsOthersButNotAssignee() (+9 more)
+Cohesion: 0.11
+Nodes (18): 1. 一句话模型, 2. 每个 agent 都有隔离的记忆根目录, 3.1 常用写入判断, 3. 写入时先判断“对谁生效”, 4.1 只让 agent A 永久记住, 4.2 群里未 `@` 的“都给我记住”, 4.3 群消息边界, 4. 单 agent 记忆与群体记忆 (+10 more)
 
 ### Community 604 - "Controller Inference Experimental"
 Cohesion: 0.09
 Nodes (21): 10. `vllm.v1.worker.gpu_worker.Worker` / `vllm.worker.worker.Worker`, 11. `vllm.reasoning.ReasoningParserManager` and `vllm.tool_parsers.ToolParserManager`, 12. `vllm.utils.argparse_utils.FlexibleArgumentParser`, 13. `vllm.logger.init_logger`, 14. vLLM CLI flag compatibility, 1. `vllm.entrypoints.openai.api_server.build_app` and `.run_server`, 2. `vllm.entrypoints.openai.cli_args.make_arg_parser` and `.validate_parsed_serve_args`, 3. `vllm.entrypoints.openai.completion` — protocol and router (+13 more)
 
 ### Community 605 - "Ipo Dpo Loss"
-Cohesion: 0.10
-Nodes (15): Node, GRPO-normalize per-node credit across all nodes in each query group.          Ea, Compute GAE advantages/returns in-place on the given nodes., Extract query_id from Node., Current critic error-variance estimate (live if available)., Critic value for ``node``, blended with LOO MC when eligible., Compute hybrid GAE advantages/returns in-place on the given nodes., Replace GAE advantages with per-episode GRPO-normalized outcome_rewards. (+7 more)
+Cohesion: 0.14
+Nodes (11): _get_logger(), DeviceMesh, Logger, ProcessGroup, Get rank-aware logger for this module., Build device mesh for all parallelism dimensions., Build mesh when EP is disabled., Build mesh when EP is enabled.          Handles both etp=1 and etp=tp cases: (+3 more)
 
 ### Community 606 - "Grad Fsdp Norm"
-Cohesion: 0.24
-Nodes (8): _CapturingSession, _make_dispatcher(), _make_tensor_item(), Dispatcher, Tensor, Tests for _scalar_fan_out: non-partitionable payloads must reach all workers., TestDispatcherParityWithTrainController, TestScalarFanOut
+Cohesion: 0.22
+Nodes (16): agentHandleBackfillRow, Pool, isHistoricDefaultHandle(), planAgentASCIIHandleBackfill(), planAgentDefaultHandleRepair(), runAgentASCIIHandleBackfillHook(), runAgentDefaultHandleRepairHook(), runAgentHandleRepairHook() (+8 more)
 
 ### Community 607 - "Math Verify Reward"
 Cohesion: 0.11
 Nodes (10): Advanced tests for Geometry3K with complex expressions., Test angle with units., Test fractional angles with explicit values., Test negative coordinates., Test square root in answer., Test decimal vs exact form., Test text with multiple brackets, should use last., Test scientific notation via power in geometry. (+2 more)
 
 ### Community 608 - "Top Logprobs Sglang"
-Cohesion: 0.09
-Nodes (37): artifactHash(), artifactKey(), artifactsHash2(), atomicWrite(), clearPendingAction(), completedHandoffIsCurrent(), computeContextHash(), ensureClassicRun() (+29 more)
+Cohesion: 0.18
+Nodes (19): artifactsHash2(), completedHandoffIsCurrent(), computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), hashText2() (+11 more)
 
 ### Community 609 - "Pp Weight Sync"
 Cohesion: 0.08
 Nodes (24): Claim And Lease Safety, Curator Agent, Curator Agent And L3 Review, Curator Profile, Daemon, Database Changes, Dry-run, Frontend Changes (+16 more)
 
 ### Community 610 - "External V2 Inference"
-Cohesion: 0.14
-Nodes (6): Thread-safe worker registry with health tracking., Remove a worker by address. No-op if not found., Remove a worker by ID. Returns the worker_addr or None if not found., Return all registered worker addresses., WorkerRegistry, TestWorkerRegistry
+Cohesion: 0.10
+Nodes (9): Thread-safe worker registry with health tracking., Add a worker. Returns existing worker_id if already registered., Remove a worker by address. No-op if not found., Remove a worker by ID. Returns the worker_addr or None if not found., Return only workers with ``is_healthy == True``., Return all workers regardless of health., Return all registered worker addresses., WorkerRegistry (+1 more)
 
 ### Community 611 - "Optimizer Areal Engine"
 Cohesion: 0.09
@@ -4539,24 +4539,24 @@ Cohesion: 0.09
 Nodes (21): 1. Hang Debugging (Deadlocks, Synchronization), 2. Wrong Results (Gradient, Reduction Issues), 3. OOM Issues (Memory, Sharding), 4. Communication Errors, Check Device Mesh, Debug Distributed Training, Debugging Principles, Debugging Tools (+13 more)
 
 ### Community 615 - "Pair Registry V2"
-Cohesion: 0.09
-Nodes (24): AgentReminderFireJob(), Handler, Pool, T, TestAgentReminderFireJobSpec(), AgentUsageHourlyJob(), Handler, Pool (+16 more)
+Cohesion: 0.13
+Nodes (19): create_proxy_gateway_app(), FastAPI, Create and configure the proxy gateway FastAPI app.      Parameters     --------, A proxy worker registered as ready to accept an external session.      Created b, Routing entry for an active session.      Attributes     ----------     worker_a, _ReadyWorkerEntry, _SessionRoute, ExportTrajectoriesRequest (+11 more)
 
 ### Community 616 - "Auth Daemon Token"
-Cohesion: 0.13
-Nodes (24): get_device_sm(), is_blackwell(), is_hopper(), is_sm90_or_above(), Check if device is Hopper (SM90-99)., Check if device is Blackwell (SM100+)., Check if device is SM90 or above (Hopper+)., Get device SM version (e.g., 90 for Hopper, 100 for Blackwell). (+16 more)
+Cohesion: 0.15
+Nodes (19): Thread-safe in-memory KV store for metadata exchange.      Values are stored as-, Add value to a set under pair_name/key. Used for barrier sync., Remove all data and sets for a pair., WeightMetaStore, ConnectRequest, ConnectResponse, DisconnectRequest, DisconnectResponse (+11 more)
 
 ### Community 617 - "Tpfc Dataset Areal"
 Cohesion: 0.22
 Nodes (20): DiskUsageReport, TaskDiskUsage, WorkspaceDiskUsage, buildPatternSet(), buildTaskUsage(), Time, ratio(), ScanDiskUsage() (+12 more)
 
 ### Community 618 - "Daemon Health Multica"
-Cohesion: 0.10
-Nodes (19): AReaLOpenAICompatibleModel, AReaLTokenCounter, Any, AsyncOpenAI, BaseModel, ChatCompletion, ChatCompletionChunk, Stream (+11 more)
+Cohesion: 0.11
+Nodes (16): AReaLTokenCounter, Any, AsyncOpenAI, BaseModel, ChatCompletion, ChatCompletionChunk, Stream, r"""Runs inference of OpenAI chat completion.          Args:             message (+8 more)
 
 ### Community 619 - "Daemon Workdir Files"
-Cohesion: 0.14
-Nodes (15): AgentFilesResponse, ChannelProjectFileContentResponse, ChannelProjectFilesResponse, setChannelProjectRequest, T, TestSeedAgentContextFilesCreatesRootAndAppendsWhitelistedMarkdown(), TestWalkWorkdirFiles(), TestWalkWorkdirFiles_EntryCapTruncates() (+7 more)
+Cohesion: 0.28
+Nodes (10): agentFileAccessMode, AgentFileContentResponse, UpdateAgentFileContentRequest, UpdateAgentFileContentResponse, agentFileRuntimeID(), agentRootRelPath(), Agent, Handler (+2 more)
 
 ### Community 620 - "Branch Docs Superpowers"
 Cohesion: 0.09
@@ -4567,12 +4567,12 @@ Cohesion: 0.19
 Nodes (13): _configured_agent_config(), _configured_agent_type(), _configured_aweagent_root(), _default_aweagent_root(), _ensure_aweagent_importable(), Any, AReaL-SWEAgent workflow for AReaL proxy mode.  This module runs AReaL-SWEAgent-b, AReaL-SWEAgent workflow for AReaL proxy mode.      This workflow runs an AReaL-S (+5 more)
 
 ### Community 622 - "Tir Workflow Examples"
-Cohesion: 0.22
-Nodes (14): localFirstDaemonRelayPublisher, recordingRelayPublisher, mustMarshalRaw(), NewHub(), attachDaemonTestClient(), client, Hub, T (+6 more)
+Cohesion: 0.14
+Nodes (9): BailingMoeBridge, Tensor, Override to return heterogeneous layer specs (Lightning + MLA).          PP slic, Override to handle MLA duplicated weights.          linear_q_down_proj and linea, Convert HF weights to mcore format.          For Lightning Attention layers, the, Convert mcore weights to HF format.          For Lightning Attention layers, con, Dispatch to Lightning or MLA mapping based on layer number., Bridge for BailingMoeV2.5 with heterogeneous Lightning + MLA attention. (+1 more)
 
 ### Community 623 - "Generated Queries Runtime"
-Cohesion: 0.21
-Nodes (12): GetRuntimeTaskHourlyActivityParams, GetRuntimeTaskHourlyActivityRow, GetRuntimeUsageByHourParams, GetRuntimeUsageByHourRow, ListRuntimeUsageByAgentParams, ListRuntimeUsageByAgentRow, ListRuntimeUsageParams, ListRuntimeUsageRow (+4 more)
+Cohesion: 0.19
+Nodes (20): connectWS(), Buffer, Conn, Hub, Mutex, Server, T, makeTestToken() (+12 more)
 
 ### Community 624 - "Handler Multica Server"
 Cohesion: 0.13
@@ -4584,15 +4584,15 @@ Nodes (16): CreateContactSalesRequest, clearContactSalesForEmail(), T, newContac
 
 ### Community 626 - "Metrics Multica Server"
 Cohesion: 0.18
-Nodes (15): Histogram, businessEventMetrics, Collector, CounterVec, HistogramVec, newBusinessEventMetrics(), NewBusinessMetrics(), exerciseEvent() (+7 more)
+Nodes (16): Histogram, businessEventMetrics, Collector, CounterVec, HistogramVec, newBusinessEventMetrics(), NewBusinessMetrics(), exerciseEvent() (+8 more)
 
 ### Community 627 - "Page Contact Sales"
-Cohesion: 0.13
-Nodes (7): metadata, CLIENT_FREE_EMAIL_DOMAINS, ContactSalesPageClient(), EMPTY_FORM, FormDict, FormState, SubmitState
+Cohesion: 0.20
+Nodes (17): DiagnoseFailureProvider, DummyTokenizer, _install_workflow_stubs(), _load_workflow_module(), LossMode, _make_node(), _make_workflow(), Node (+9 more)
 
 ### Community 628 - "Cmd Multica Attachment"
 Cohesion: 0.10
-Nodes (35): formatByteSize(), APIClient, Command, resolveAttachmentViewID(), resolveChannelIDFromUploadTarget(), runAttachmentUpload(), runAttachmentView(), T (+27 more)
+Nodes (33): formatByteSize(), APIClient, Command, resolveAttachmentViewID(), resolveChannelIDFromUploadTarget(), runAttachmentUpload(), runAttachmentView(), T (+25 more)
 
 ### Community 629 - "Server Scope Authorizer"
 Cohesion: 0.24
@@ -4603,8 +4603,8 @@ Cohesion: 0.09
 Nodes (21): 1. `set_last_rewards` sends `""` instead of `None`, 1. TeacherConfig, 2. `_compute_logprobs_and_loss` mutates `ctx.model_inputs` without try/finally, 2. TeacherClient (`core/teacher_client.py`), 3. \_compute_token_rewards (`core/reward_compute.py`), 3. Statistics logging gap in patched `_ppo_update`, 4. Modified OnPolicyDistillAgent (`core/agent.py`), 4. Tree training path duplication (+13 more)
 
 ### Community 631 - "Multica Server Execenv"
-Cohesion: 0.20
-Nodes (6): Logger, removeGitWorktree(), repoNameFromURL(), runGitWorktreeAdd(), sanitizeName(), setupGitWorktree()
+Cohesion: 0.13
+Nodes (11): PredictRootDir(), Logger, removeGitWorktree(), repoNameFromURL(), runGitWorktreeAdd(), sanitizeName(), setupGitWorktree(), shortID() (+3 more)
 
 ### Community 632 - "Report Daemon Multica"
 Cohesion: 0.30
@@ -4615,8 +4615,8 @@ Cohesion: 0.33
 Nodes (15): T, newLanguageTestUser(), newPatchMeRequest(), TestUpdateMeAcceptsJapaneseLanguage(), TestUpdateMeAcceptsKoreanLanguage(), TestUpdateMeAcceptsLanguage(), TestUpdateMePreservesDisplayNameWhenNotProvided(), TestUpdateMePreservesLanguageWhenNotProvided() (+7 more)
 
 ### Community 634 - "Messageparts Multica Server"
-Cohesion: 0.12
-Nodes (20): CancelledChatMessageResponse, CancelTaskByUserResponse, ChatMessageResponse, ChatMessagesCursorResponse, ChatMessagesPageResponse, CreateChatSessionRequest, PendingChatTaskItem, PendingChatTaskResponse (+12 more)
+Cohesion: 0.13
+Nodes (15): _OnlineAgent, Any, Internal agent that waits for external user sessions.      Registers the assigne, Wait for an external user to complete a session.          Parameters         ---, CompletedSessionInfo, Credentials of a completed external session.      Returned by ``/internal/wait_f, Unit tests for _OnlineAgent., Test that _OnlineAgent.run() returns CompletedSessionInfo on success.          M (+7 more)
 
 ### Community 635 - "Streaming Chat Completions"
 Cohesion: 0.17
@@ -4631,12 +4631,12 @@ Cohesion: 0.09
 Nodes (21): 1.1 TIRWorkflow (`tir_workflow.py`), 1.2 ToolManager (`tool_manager.py`), 1.3 工具实现 (`tools/`), 1.4 训练脚本 (`train_tir.py`), 1. 实验设置, 1. 核心组件, 1. 环境准备, 2.1 工具调用格式 (+13 more)
 
 ### Community 638 - "All Ulysses Torchrun"
-Cohesion: 0.22
-Nodes (15): all_to_all_tensor(), Set ulysses sequence parallel process group., All-to-all communication for multi-dimensional tensors.      Uses all_to_all_sin, set_ulysses_sequence_parallel_group(), main(), Test suite for ulysses all_to_all_tensor using all_to_all_single_autograd.  This, Test autograd backward pass., Test torch.compile compatibility. (+7 more)
+Cohesion: 0.23
+Nodes (13): Set ulysses sequence parallel process group., set_ulysses_sequence_parallel_group(), main(), Test suite for ulysses all_to_all_tensor using all_to_all_single_autograd.  This, Test autograd backward pass., Test torch.compile compatibility., Reference implementation using dist.all_to_all for comparison., Test that new implementation matches reference. (+5 more)
 
 ### Community 639 - "Vision Sp Shard"
 Cohesion: 0.09
-Nodes (32): artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction(), createSkillSnapshot(), ensureClassicRun(), hashSkillPackage() (+24 more)
+Nodes (6): InputGroup(), InputGroupAddon(), inputGroupAddonVariants, InputGroupButton(), inputGroupButtonVariants, InputGroupInput()
 
 ### Community 640 - "Profile Archon Areal"
 Cohesion: 0.18
@@ -4675,7 +4675,7 @@ Cohesion: 0.20
 Nodes (10): EnvDispatchRequest, CreateEnvDispatchRequestParams, CreateEnvironmentParams, DeleteEnvironmentParams, GetEnvDispatchRequestParams, GetEnvironmentParams, Environment, Queries (+2 more)
 
 ### Community 649 - "Service Evolutionmockrows Commandtag"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (6): FieldDescription, assignEvolutionValues(), CommandTag, Conn, evolutionMockRow, evolutionMockRows
 
 ### Community 650 - "Generated Queries Pinned"
@@ -4684,11 +4684,11 @@ Nodes (21): ADDED Requirements, Requirement: Incremental interaction-DAG recordi
 
 ### Community 651 - "Memorycuration Multica Server"
 Cohesion: 0.09
-Nodes (31): booleanValue(), classicStateFromDocument(), documentRecord(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger() (+23 more)
+Nodes (30): booleanValue(), classicStateFromDocument(), documentRecord(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger() (+22 more)
 
 ### Community 652 - "Page Changelog Multica"
-Cohesion: 0.23
-Nodes (11): metadata, anchorId(), ChangelogPageClient(), fullDateLabel(), groupByMonth(), MonthGroup, monthYearLabel(), parseDate() (+3 more)
+Cohesion: 0.18
+Nodes (17): localFirstDaemonRelayPublisher, recordingRelayPublisher, RelayNotifier, mustMarshalRaw(), NewHub(), attachDaemonTestClient(), client, Hub (+9 more)
 
 ### Community 653 - "Multica Packages Views"
 Cohesion: 0.15
@@ -4703,8 +4703,8 @@ Cohesion: 0.25
 Nodes (14): activeThreadID(), BuildColdCommentsHint(), BuildCommentReplyInstructions(), BuildNewCommentsHint(), BuildResumedCommentsHint(), T, TestBuildCommentReplyInstructionsCodexLinux(), TestBuildCommentReplyInstructionsEmptyWhenNoTrigger() (+6 more)
 
 ### Community 656 - "Realtime Relay Multica"
-Cohesion: 0.16
-Nodes (18): NewHub(), T, TestHubImplementsBroadcaster(), TestMetrics_RecordEvent(), TestMetrics_RecordEvent_Concurrent(), TestMetrics_Snapshot_IncludesCounters(), attachRealtimeTestClient(), Client (+10 more)
+Cohesion: 0.15
+Nodes (17): NewHub(), T, TestHubImplementsBroadcaster(), TestMetrics_RecordEvent(), TestMetrics_RecordEvent_Concurrent(), TestMetrics_Snapshot_IncludesCounters(), attachRealtimeTestClient(), Client (+9 more)
 
 ### Community 657 - "Dag Interaction Segment"
 Cohesion: 0.09
@@ -4735,16 +4735,16 @@ Cohesion: 0.18
 Nodes (5): _KKState, Represents one candidate partitioning state in the KK priority queue.      Each, Verify _KKState init, merge, spread, and ordering., Larger spread compares as 'less than' (max-heap semantics)., TestKKState
 
 ### Community 664 - "State Areal V2"
-Cohesion: 0.11
-Nodes (12): InferenceStateStore, Path, Inference-specific extension of the scaffold ``NamespacedStateStore``.      The, ``$AREAL_HOME/<namespace>/models`` — created lazily., Per-service flock on the model-registry file. Held across         register / der, Walk BOTH service-state and model-state JSON for ``pid`` /         ``pids`` keys, atomic_write_json(), Any (+4 more)
+Cohesion: 0.13
+Nodes (11): InferenceStateStore, Path, Inference-specific extension of the scaffold ``NamespacedStateStore``.      The, ``$AREAL_HOME/<namespace>/models`` — created lazily., Per-service flock on the model-registry file. Held across         register / der, atomic_write_json(), Any, Atomically write ``data`` as JSON to ``path``.      Writes to a unique tempfile (+3 more)
 
 ### Community 665 - "Auth Membership Cache"
-Cohesion: 0.09
-Nodes (22): 0. 标签制（本文的使用规则）, 1.1 destination-first 统一 finalizer — `可执行`（已落地）, 1.2 所有可见 occurrence 都要锚 — `可执行`（owner: @Barry ✅ 已签）, 1.3 写读不拆部署 / reader-first 删除 — `仅文档`（门禁尚未落地）, 1. 消息写入管道（BE）, 2.1 服务端给 entity，前端不搜文本 — `可执行`（地基）, 2.2 正文不可变 / 实体状态一律现查 — `可执行`（已落地）, 2.3 一处概念一个长相；兼容的是路径不是外观 — `可执行` (+14 more)
+Cohesion: 0.08
+Nodes (24): 0. 标签制（本文的使用规则）, 1.1 destination-first 统一 finalizer — `可执行`（已落地）, 1.2 所有可见 occurrence 都要锚 — `可执行`（owner: @Barry ✅ 已签）, 1.3 写读不拆部署 / reader-first 删除 — `仅文档`（门禁尚未落地）, 1. 消息写入管道（BE）, 2.1 服务端给 entity，前端不搜文本 — `可执行`（地基）, 2.2 正文不可变 / 实体状态一律现查 — `可执行`（已落地）, 2.3 一处概念一个长相；兼容的是路径不是外观 — `可执行` (+16 more)
 
 ### Community 666 - "Claude Skill Rules"
-Cohesion: 0.16
-Nodes (14): buildQuickCreateReturnContent(), DBTX, Issue, Row, Rows, TaskService, Text, Timestamptz (+6 more)
+Cohesion: 0.17
+Nodes (14): assembleEnvSnapshot(), decodeTensorRef(), encodeEnvSnapshot(), extractShardRef(), RawMessage, StepReward, Text, pgText() (+6 more)
 
 ### Community 667 - "Daemon Workdir Files"
 Cohesion: 0.10
@@ -4763,12 +4763,12 @@ Cohesion: 0.22
 Nodes (11): _do_round(), main(), _patch_zeroclaw_config(), _print_header(), Path, _restore_zeroclaw_config(), _set_reward(), _strip_ansi() (+3 more)
 
 ### Community 671 - "Handler Github Files"
-Cohesion: 0.23
-Nodes (9): githubAPIGetJSON(), Handler, UUID, ignoredTreePath(), mediaMimeGH(), parseGitHubRepoURL(), T, TestIgnoredTreePath() (+1 more)
+Cohesion: 0.03
+Nodes (101): codexClient, APIClient, UploadFileOptions, ghCheckSuitePayload, ghInstallationPayload, ghPRChanges, ghPullRequestPayload, GitHubConnectResponse (+93 more)
 
 ### Community 672 - "Handler Runtime Liveness"
-Cohesion: 0.16
-Nodes (12): noopLivenessStore, RedisLivenessStore, Client, Duration, NewRedisLivenessStore(), runtimeLivenessKey(), T, TestNoopLivenessStore_AlwaysUnavailable() (+4 more)
+Cohesion: 0.15
+Nodes (14): LivenessStore, noopLivenessStore, RedisLivenessStore, Client, Duration, NewNoopLivenessStore(), NewRedisLivenessStore(), runtimeLivenessKey() (+6 more)
 
 ### Community 673 - "Multica Cli Readme"
 Cohesion: 0.05
@@ -4780,7 +4780,7 @@ Nodes (12): binaryName(), downloadToFile(), ensureManagedCli(), extractArchive()
 
 ### Community 675 - "Renderer Recovery Multica"
 Cohesion: 0.20
-Nodes (12): createElectronReloadPrompt(), formatError(), installRendererRecoveryHandlers(), isRecoverableRendererExit(), ReloadPromptPayload, ReloadPromptResult, rendererRecoveryDetail(), rendererRecoveryMessage() (+4 more)
+Nodes (11): createElectronReloadPrompt(), formatError(), installRendererRecoveryHandlers(), isRecoverableRendererExit(), ReloadPromptPayload, ReloadPromptResult, rendererRecoveryDetail(), rendererRecoveryMessage() (+3 more)
 
 ### Community 676 - "Updater Multica Apps"
 Cohesion: 0.17
@@ -4819,12 +4819,12 @@ Cohesion: 0.10
 Nodes (20): Build / Test / Lint, Code Pattern Consistency, Coherence, Commits under review (multica main), Completeness, Correctness, CRITICAL (Must fix before archive), Design Adherence (D1-D6) (+12 more)
 
 ### Community 685 - "Logprobs Proxy Experimental"
-Cohesion: 0.05
-Nodes (26): AwexFSDPAdapter, AwexTrainingAdapter, DTensor, ParameterMeta, ParameterShardMeta, RankInfo, Tensor, Awex training adapter wrapping FSDPEngine for shard-direct NCCL P2P updates. (+18 more)
+Cohesion: 0.24
+Nodes (8): _CapturingSession, _make_dispatcher(), _make_tensor_item(), Dispatcher, Tensor, Tests for _scalar_fan_out: non-partitionable payloads must reach all workers., TestDispatcherParityWithTrainController, TestScalarFanOut
 
 ### Community 686 - "Tool Call Parser"
-Cohesion: 0.25
-Nodes (10): _assert_tool_calls(), FakeReasoningParser, _patch_vllm_parsers(), MonkeyPatch, _raise_module_not_found(), _run_process_tool_calls(), test_process_tool_calls_qwen25_chat_completions_sglang(), test_process_tool_calls_qwen25_chat_completions_vllm() (+2 more)
+Cohesion: 0.18
+Nodes (18): AgentHealthEvent, AgentHealthSummary, AgentHealthEvent, AgentHealthResponse, AgentHealthSummary, agentHealthCurrentEvent(), agentHealthEventState(), agentHealthMissingRuntimeSummary() (+10 more)
 
 ### Community 687 - "Megatron Agents Claude"
 Cohesion: 0.10
@@ -4875,20 +4875,20 @@ Cohesion: 0.25
 Nodes (9): CreateEnvCheckpointParams, GetEnvCheckpointForWorkspaceParams, ListEnvCheckpointsForProjectParams, UpdateEnvCheckpointSaveStatusParams, EnvCheckpoint, Float8, Queries, Text (+1 more)
 
 ### Community 699 - "Handler Memory Curation"
-Cohesion: 0.33
-Nodes (10): publicMemoryCurationStats(), T, TestAgentIDsBelongToWorkspaceRejectsForeignAgent(), TestDeleteRuntimeFailsIncompleteMemoryCurationRuns(), TestGetAgentMemoryCurationStatusRejectsInvalidAgentID(), TestGetMemoryCurationRunRejectsInvalidRunID(), TestMemoryCuratorProfileQueuesAndCompletesDaemonRun(), TestParseUniqueAgentIDsRejectsInvalidUUID() (+2 more)
+Cohesion: 0.22
+Nodes (19): all_to_all_tensor(), _gather_heads_scatter_seq(), _gather_seq_scatter_heads(), get_ulysses_sequence_parallel_group(), _pad_tensor(), ProcessGroup, Tensor, _gather_seq_scatter_heads with global group. (+11 more)
 
 ### Community 700 - "Handler Mockstorage Cdndomain"
-Cohesion: 0.03
-Nodes (69): ContextBadge(), DaemonPanel(), DaemonPanelProps, DisplayItem, GroupRows(), highlight(), LEVEL_BADGE_CLASS, LEVELS (+61 more)
+Cohesion: 0.25
+Nodes (14): EvolutionSkillVersionDetailResponse, EvolutionSkillVersionFileResponse, EvolutionSkillVersionResponse, evolutionSkillVersionRollbackRequest, evolutionSkillVersionRollbackResponse, evolutionSkillVersionFileResponses(), evolutionSkillVersionIDs(), evolutionSkillVersionResponse() (+6 more)
 
 ### Community 701 - "Memorycuration Evidence Multica"
 Cohesion: 0.22
 Nodes (20): AgentError, EvidenceDB, EvidenceItem, Options, Result, RunEvent, Stage, StageAgent (+12 more)
 
 ### Community 702 - "Memorycuration Shared Multica"
-Cohesion: 0.14
-Nodes (23): reviewEntry, sharedMemoryCandidate, entryEligibleForL3Review(), sortEntries(), defaultString(), Time, parseMeta(), parseReview() (+15 more)
+Cohesion: 0.17
+Nodes (18): sharedMemoryCandidate, defaultString(), parseMeta(), parseReview(), splitCSV(), entryEligibleForSharedMemory(), Time, hashSharedContent() (+10 more)
 
 ### Community 703 - "Multica Shell Router"
 Cohesion: 0.10
@@ -4907,8 +4907,8 @@ Cohesion: 0.32
 Nodes (10): AttachmentCard(), AttachmentCardProps, ARCHIVE_EXTS, EXCEL_EXTS, FileTypeCategory, formatFileSize(), getFileExtension(), getFileTypeCategory() (+2 more)
 
 ### Community 707 - "Github Tab Multica"
-Cohesion: 0.11
-Nodes (19): _admin_headers(), _client(), Unit tests for the proxy rollout server's session key handling., Key bound to an active (unfinished) session → 409., end_session response includes interaction_count field., Tests for the export_trajectories endpoint.      The endpoint requires an explic, Export succeeds with required session_id + admin key., Reset all module-level globals before each test. (+11 more)
+Cohesion: 0.20
+Nodes (17): actionPlanJSONCandidates(), BuildAmbientChannelPrompt(), BuildIdleNudgeChannelPrompt(), BuildPrompt(), decodeActionPlan(), extractFirstJSONObject(), RawMessage, ParseActionPlan() (+9 more)
 
 ### Community 708 - "Cmd Multica Reminder"
 Cohesion: 0.31
@@ -4919,12 +4919,12 @@ Cohesion: 0.59
 Nodes (13): agentExists(), T, runtimeExists(), seedAgentOnRuntime(), seedIsolatedRuntime(), seedSquad(), squadExists(), TestDeleteAgentRuntime_ActiveSquadWithArchivedLeaderReturnsConflict() (+5 more)
 
 ### Community 710 - "Service Task Resume"
-Cohesion: 0.27
-Nodes (9): NewTaskResumeRunner(), T, TestResumeAgentRunReactivatesExistingTask(), TestResumeAgentRunRejectsInvalidTaskID(), TestResumeAgentRunRejectsTerminalTask(), fakeWaker, InFlightTaskResetter, taskResumeRunner (+1 more)
+Cohesion: 0.18
+Nodes (19): artifactsHash2(), completedHandoffIsCurrent(), computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), hashText2() (+11 more)
 
 ### Community 711 - "S3 Multica Server"
-Cohesion: 0.26
-Nodes (13): T, TestLooksLikeS3Hostname(), TestS3StorageCdnDomainPrefersPublicBaseURL(), TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(), TestS3StorageKeyFromURL_CustomEndpointVirtualHostedStyle(), TestS3StorageKeyFromURL_CustomEndpointWithTrailingSlash(), TestS3StorageKeyFromURL_LegacyBucketOnlyHostStillRoundTrips(), TestS3StorageKeyFromURL_PathStylePreservesNestedKey() (+5 more)
+Cohesion: 0.15
+Nodes (18): backend(), _make_response(), Tests for SGLangBackend.parse_generation_response output_top_logprobs parsing., String token keys in top_logprobs should be skipped (no tokenizer to convert)., Abort responses should still have output_top_logprobs as None., All None positions should produce a list of empty lists., Empty dict positions should produce empty lists., Build a minimal SGLang response dict for testing. (+10 more)
 
 ### Community 712 - "Math Verify Reward"
 Cohesion: 0.13
@@ -4947,20 +4947,20 @@ Cohesion: 0.29
 Nodes (10): semver, CheckMinCLIVersion(), CheckMinVersion(), parseSemver(), T, TestCheckMinCLIVersion(), TestCheckMinVersion(), TestExtractVersionLine() (+2 more)
 
 ### Community 717 - "Session Areal Experimental"
-Cohesion: 0.07
-Nodes (57): create_app(), _execute_compute(), _init_engine_thread(), _parse_args_kwargs(), Any, TrainWorkerConfig, _require_engine(), _submit_to_engine_thread() (+49 more)
+Cohesion: 0.22
+Nodes (15): channelAgentRuntimeFixture, channelAgentRuntimeSpec, Handler, MessagePart, T, newChannelAgentRuntimeFixture(), T, TestCollaborationSessionBindsIssueOptionally() (+7 more)
 
 ### Community 718 - "Inference Areal Experimental"
-Cohesion: 0.09
-Nodes (29): appendClassicStateEvent(), applyClassicTransition(), applyStateUpdate(), dateOnly(), documentRecord(), green2(), parseClassicStateDocument(), preflight() (+21 more)
+Cohesion: 0.07
+Nodes (45): appendClassicStateEvent(), appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), applyClassicTransition(), applyStateUpdate(), applyTransitionEvent(), atomicWrite2() (+37 more)
 
 ### Community 719 - "Areal Infra Service"
-Cohesion: 0.16
-Nodes (6): admin_headers(), _register_dataset(), TestBroadcastEndpoints, TestDatasetRegistration, TestShutdown, TestStatusAndWorkers
+Cohesion: 0.24
+Nodes (17): shouldInheritParentMentions(), Issue, T, Text, UUID, issueNoAssignee(), issueWithAgentAssignee(), TestCommentMentionsOthersButNotAssignee() (+9 more)
 
 ### Community 720 - "Logging Areal Loggercoloredformatter"
-Cohesion: 0.12
-Nodes (20): _group_norm_config(), Tensor, Tests for variable-size group support in reward/advantage normalization.  These, A size-1 leave-one-out group has no peer baseline, so it is zeroed., Boundaries whose sizes do not sum to the batch size are rejected., Boundaries containing a non-positive size are rejected., Token-level (2D) advantages normalize per variable-size group on dim 0.      Mir, Reference: independently mean/std normalize each variable-size group. (+12 more)
+Cohesion: 0.18
+Nodes (17): _build_init_weights_group_payload(), _get_pp_rank(), _get_pp_size(), _get_weight_update_group_name(), _is_pp_head(), main(), Distributed test worker for sglang PP weight synchronization.  Run via torchrun, Return the effective PP size on the training side.      FSDP folds PP into DP, s (+9 more)
 
 ### Community 721 - "Auth Cloudfront Multica"
 Cohesion: 0.10
@@ -5027,12 +5027,12 @@ Cohesion: 0.31
 Nodes (4): combine_nums(), CountDown, create_countdown_datasets(), get_existing_problems()
 
 ### Community 738 - "Metrics Http Multica"
-Cohesion: 0.15
-Nodes (13): Gauge, HTTPMetrics, Registry, Collector, CounterVec, Handler, HistogramVec, isHealthProbePath() (+5 more)
+Cohesion: 0.21
+Nodes (9): Gauge, HTTPMetrics, Collector, CounterVec, Handler, HistogramVec, isHealthProbePath(), NewHTTPMetrics() (+1 more)
 
 ### Community 739 - "Generated Queries Verification"
-Cohesion: 0.21
-Nodes (5): CreateVerificationCodeParams, VerificationCode, Queries, Timestamptz, UUID
+Cohesion: 0.22
+Nodes (10): NewTaskResumeRunner(), T, TestResumeAgentRunReactivatesExistingTask(), TestResumeAgentRunRejectsInvalidTaskID(), TestResumeAgentRunRejectsTerminalTask(), fakeInFlightResetter, fakeWaker, InFlightTaskResetter (+2 more)
 
 ### Community 740 - "Handler Onboarding Shim"
 Cohesion: 0.20
@@ -5071,12 +5071,12 @@ Cohesion: 0.34
 Nodes (13): createIssueForTimeline(), fetchTimeline(), fetchTimelineWrapped(), T, seedTimelineEntries(), TestListTimeline_EmptyIssue(), TestListTimeline_LegacyWrappedShape_AroundFillsTargetIndex(), TestListTimeline_LegacyWrappedShape_OnPaginationParams() (+5 more)
 
 ### Community 749 - "Storage Localstorage Local"
-Cohesion: 0.20
-Nodes (6): ReadCloser, ResponseWriter, isUnder(), readLocalMeta(), localMeta, LocalStorage
+Cohesion: 0.16
+Nodes (7): ReadCloser, Reader, ResponseWriter, isUnder(), readLocalMeta(), localMeta, LocalStorage
 
 ### Community 750 - "Parallel Experimental Archon"
-Cohesion: 0.13
-Nodes (15): envAgentSandboxBinding, envCollaborationTrigger, envDispatchBindingRowScanner, envDispatchChannelStore, ProvisionEnvDispatchAgentInput, ProvisionEnvDispatchAgentResult, ChatSession, DBTX (+7 more)
+Cohesion: 0.09
+Nodes (27): envAgentSandboxBinding, envCollaborationTrigger, envDispatchBindingRowScanner, envDispatchChannelStore, envDispatchSandboxConfig, ProvisionEnvDispatchAgentInput, ProvisionEnvDispatchAgentResult, decodeEnvDispatchSandboxConfig() (+19 more)
 
 ### Community 751 - "Controller Unit V2"
 Cohesion: 0.10
@@ -5091,32 +5091,32 @@ Cohesion: 0.38
 Nodes (10): build_specs(), find_repo_root(), main(), normalized(), parse_mode(), Path, sync_one(), SyncSpec (+2 more)
 
 ### Community 754 - "Megatron Lora Areal"
-Cohesion: 0.15
-Nodes (20): ephemeralSandboxManager, mergeEphemeralSandboxContext(), T, setupBoundRuntimeAgent(), setupSquadIssueFixture(), TestDispatch_EnqueueAgentRunIssueSquadSetsAssigneeLeaderAndActor(), TestPrecreateAgentRuntimeRejectsNonPiBoundRuntime(), TestPrecreateAgentRuntimeUsesBoundRuntimeProvider() (+12 more)
+Cohesion: 0.18
+Nodes (14): _content_to_text(), convert_image_to_bytes(), get_tpfc_rl_dataset(), Any, TPFC Dataset loader for AReaL RL training.  This module provides dataset loading, Load TPFC RL dataset from parquet file.      The parquet file has columns:     -, Convert image input from parquet to JPEG bytes.      Args:         image_input:, _to_dict() (+6 more)
 
 ### Community 755 - "Store Areal Experimental"
-Cohesion: 0.18
-Nodes (6): Any, Get value for key under pair_name. Returns None if not found., Store value under pair_name/key., Delete key from pair. Returns True if key existed., Get size of set under pair_name/key. Returns 0 if not found., List all keys for a pair.
+Cohesion: 0.14
+Nodes (13): Context, D1. VIMPO is an advantage/training mode, not a learned critic, D2. Use a frozen initial-model SGLang reference, D3. Use actor top-k with exact full-vocabulary normalizers, D4. Compute detached token advantages after reference scoring, D5. Preserve episode-level terminal loss across multi-turn Nodes, D6. Combine value and actor losses in one FSDP backward pass, Data Flow (+5 more)
 
 ### Community 756 - "Vision Sp Shard"
 Cohesion: 0.10
 Nodes (19): ADDED Requirements, Requirement: Critic agent configuration, Requirement: Critic agent squad role, Requirement: Deferred session-close on critic-completion, Requirement: Entropy recording from proxied LLM traffic, Requirement: env_id emission at session-open, Requirement: Persisted critic intent, Scenario: critic_agent_id empty (+11 more)
 
 ### Community 757 - "Dpo Loss Ipo"
-Cohesion: 0.13
-Nodes (22): create_router_app(), _extract_bearer_token(), BaseModel, FastAPI, RouterConfig, RegisterWorkerRequest, _require_admin_key(), UnregisterWorkerRequest (+14 more)
+Cohesion: 0.09
+Nodes (22): Cleanup Lifecycle, comet_change: env-dispatch-agent-runtime-config role: technical-design canonical_spec: openspec, Create a derived global agent, Credential Resolution, Deployed verification, Derived-Agent Creation, Do not pre-create an agent runtime row, EnvDispatch Sandbox Runtime and Derived-Agent Provisioning (+14 more)
 
 ### Community 758 - "Kk Allocate Testcomputepackingmetrics"
-Cohesion: 0.25
-Nodes (5): _compute_packing_metrics(), Compute comprehensive packing quality metrics for a given partition.      Args:, Tests for Karmarkar-Karp (KK) sequence packing algorithm and configurable dispat, Test _compute_packing_metrics helper function., TestComputePackingMetrics
+Cohesion: 0.36
+Nodes (4): _compute_packing_metrics(), Compute comprehensive packing quality metrics for a given partition.      Args:, Test _compute_packing_metrics helper function., TestComputePackingMetrics
 
 ### Community 759 - "Version Areal Versioninfo"
 Cohesion: 0.22
 Nodes (3): _get_package_version(), Get version from installed package metadata (single source of truth)., VersionInfo
 
 ### Community 760 - "Areal Workflow Vision"
-Cohesion: 0.27
-Nodes (7): Any, AutoProcessor, PreTrainedTokenizerFast, Tensor, Decode completion and compute reward.          Traces reward phase execution for, Generate one sample and compute its reward.          Registers a new session for, VisionRLVRWorkflow
+Cohesion: 0.18
+Nodes (4): admin_headers(), session_headers(), TestGatewayExternalEndpoints, TestRouterExternalEndpoints
 
 ### Community 761 - "Customized Areal Tpfc"
 Cohesion: 0.18
@@ -5147,16 +5147,16 @@ Cohesion: 0.33
 Nodes (10): arrow(), die(), error(), header(), info(), main(), Print a boxed header., show_request() (+2 more)
 
 ### Community 768 - "Handler Contact Sales"
-Cohesion: 0.27
-Nodes (9): ContactSalesResponse, canonicalBusinessEmail(), Addr, Handler, ResponseWriter, isBusinessEmailDomain(), requireTrimmedField(), submitterIP() (+1 more)
+Cohesion: 0.17
+Nodes (12): create_app(), FastAPI, WeightUpdateConfig, extract_bearer_token(), require_admin_key(), PairInfo, BaseModel, Configuration for the weight update service. (+4 more)
 
 ### Community 769 - "Handler Mention Trigger"
 Cohesion: 0.49
 Nodes (10): selfMentionFixture, countQueuedOrDispatched(), enqueueMentionedAgentTasksForTest(), Comment, Issue, T, newSelfMentionFixture(), TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues() (+2 more)
 
 ### Community 770 - "Lark Larkfakeserver Server"
-Cohesion: 0.03
-Nodes (88): IssueDependency, WorkNode, AckAgentInboxEventRequest, agentFileAccessMode, AgentFileContentResponse, AgentInboxEventResponse, AgentInboxExecutionRequest, CompleteAgentInboxEventRequest (+80 more)
+Cohesion: 0.16
+Nodes (11): New(), T, TestNewHasStackAndMessage(), TestStackOfExtractsThroughFmtWrap(), TestWrapCapturesStackAndCause(), TestWrapNil(), TestWrapOnStackErrorDoesNotReCapture(), TestWrapPreservesSentinelThroughUnwrap() (+3 more)
 
 ### Community 771 - "Memorycuration Multica Server"
 Cohesion: 0.11
@@ -5196,7 +5196,7 @@ Nodes (18): persistentRuntimeIdentity, persistentRuntimeLease, persistentRuntime
 
 ### Community 781 - "Bus Multica Server"
 Cohesion: 0.12
-Nodes (24): MembershipCache, PATCache, Client, membershipKey(), NewMembershipCache(), T, TestMembershipCache_IsolatesKeysByUser(), TestMembershipCache_NilSafe() (+16 more)
+Nodes (26): MembershipCache, PATCache, Client, membershipKey(), NewMembershipCache(), T, TestMembershipCache_IsolatesKeysByUser(), TestMembershipCache_NilSafe() (+18 more)
 
 ### Community 782 - "Runtime Cascade Multica"
 Cohesion: 0.42
@@ -5219,8 +5219,8 @@ Cohesion: 0.11
 Nodes (19): Configuration, Configuration, Grouped Rollout, How It Works, Implementation, Implementing Custom Workflows, Interface, Output Format (+11 more)
 
 ### Community 787 - "Kk Allocate Rationale"
-Cohesion: 0.20
-Nodes (7): generate_bimodal_seqlens(), Comparative tests demonstrating KK advantage over FFD., KK should produce partitions with spread <= FFD spread., Over many random trials, KK should win or tie majority of times., KK produces good balance across different sequence length distributions., Switching algorithm via config produces valid results for both., TestKKVsFFDComparison
+Cohesion: 0.25
+Nodes (6): generate_bimodal_seqlens(), Comparative tests demonstrating KK advantage over FFD., KK should produce partitions with spread <= FFD spread., Over many random trials, KK should win or tie majority of times., KK produces good balance across different sequence length distributions., TestKKVsFFDComparison
 
 ### Community 788 - "Guard Agent Service"
 Cohesion: 0.18
@@ -5235,8 +5235,8 @@ Cohesion: 0.12
 Nodes (15): Agent Protocol, Agent Service, AgentRequest, AgentResponse, Architecture, Code Organization, Components, DataProxy (+7 more)
 
 ### Community 791 - "Areal Experimental Inference"
-Cohesion: 0.22
-Nodes (10): _extract_bearer_token(), SessionData, SessionStore, Extract API token from Authorization header.      Raises HTTPException(401) if m, Validate that the request carries the admin API key., Resolve session_id from the session API key in the Authorization header., Resolve a session from the bearer token.      Session key → lookup by API key., _require_admin_key() (+2 more)
+Cohesion: 0.18
+Nodes (13): booleanValue(), classicStateFromDocument(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger(), nullableString() (+5 more)
 
 ### Community 792 - "Kernels Indices Areal"
 Cohesion: 0.11
@@ -5307,8 +5307,8 @@ Cohesion: 0.36
 Nodes (5): GetNotificationPreferenceParams, ListNotificationPreferencesByUsersParams, UpsertNotificationPreferenceParams, Queries, UUID
 
 ### Community 809 - "Chat Agent Dm"
-Cohesion: 0.27
-Nodes (8): AgentDirectMessageRequest, applyDMSalutation(), dmSessionTitle(), isSalutationTail(), T, TestApplyDMSalutation(), salutationPrefixOK(), stripLeadingSalutation()
+Cohesion: 0.24
+Nodes (13): PairInfo, PairRegistry, PairInfo, registry(), sample_pair_info(), test_get_by_name_returns_none_for_unregistered_name(), test_get_by_name_returns_pair_info(), test_list_pairs_after_unregister() (+5 more)
 
 ### Community 810 - "Handler Workspace Revoke"
 Cohesion: 0.11
@@ -5347,20 +5347,20 @@ Cohesion: 0.29
 Nodes (7): Command, runThreadUnfollow(), Command, T, newThreadUnfollowTestCmd(), TestRunThreadUnfollowPostsRawTargetToAgentTransport(), TestRunThreadUnfollowRejectsInvalidTarget()
 
 ### Community 821 - "Server Health Realtime"
-Cohesion: 0.31
-Nodes (8): HandlerFunc, hasBearerToken(), hasForwardingHeader(), isDirectLoopbackRequest(), realtimeMetricsHandler(), T, TestRealtimeMetricsHandler_NoToken_LoopbackOnly(), TestRealtimeMetricsHandler_TokenRequired()
+Cohesion: 0.15
+Nodes (12): File Structure, Global Constraints, Task 1: Configuration Contract and Pure VIMPO Mathematics, Task 2: Workflow Episode Metadata and Centered Targets, Task 3: Episode-Atomic PPO and FSDP Microbatch Allocation, Task 4: Frozen SGLang Reference Candidate Scorer, Task 5: FSDP Actor Candidate Statistics, Task 6: Combined Episode-Level VIMPO Loss and Two-Denominator Backward (+4 more)
 
 ### Community 822 - "Sandbox Lifecycle Env"
 Cohesion: 0.11
 Nodes (18): Antigravity, Claude Code, Codex, Copilot, Cursor, Gemini, Hermes, Kimi (+10 more)
 
 ### Community 823 - "Ep Tp Etp"
-Cohesion: 0.20
-Nodes (6): Test ETP mesh dimension configurations., Test EP only configuration (etp=1)., Test EP+TP configuration with etp=1 (TP borrowed by EP)., Test EP+TP configuration with etp=tp (ExpertTensorParallel)., Test TP only configuration (ep=1)., TestETPMeshConfiguration
+Cohesion: 0.24
+Nodes (8): CountAssigneeChangesByActorParams, CountAssigneeChangesByActorRow, CreateActivityParams, HasSquadLeaderNoActionEvaluationForTaskParams, ListActivitiesForIssueParams, Queries, Text, UUID
 
 ### Community 824 - "Parallel Pp Experimental"
-Cohesion: 0.20
-Nodes (6): Test PP (Pipeline Parallelism) constraint validation in ArchonParallelDims., Test that dp_shard auto-calculation includes pp., Test that world_size validation includes pp., Test pp_enabled property., Test context_and_model_parallel_size property (cp * tp * pp)., TestPPValidation
+Cohesion: 0.21
+Nodes (8): _assign_images_to_dp_ranks(), Assign whole images to DP ranks via greedy contiguous bin-packing., _assert_all_images_assigned(), With unequal patch counts, greedy balancing should reduce imbalance., All images are covered exactly once across ranks for various dp_size., Assert every image index in [0, num_images) appears exactly once., TestAssignImagesToDpRanks, TestIntegration
 
 ### Community 825 - "Parallel Dims Mesh"
 Cohesion: 0.11
@@ -5375,8 +5375,8 @@ Cohesion: 0.22
 Nodes (26): assertArray(), assertEnum(), assertObject(), assertOptionalBoolean(), assertOptionalString(), assertString(), assertStringArray(), invalidDocument() (+18 more)
 
 ### Community 828 - "Experimental Archon Weight"
-Cohesion: 0.17
-Nodes (12): create_app(), FastAPI, WeightUpdateConfig, extract_bearer_token(), require_admin_key(), PairInfo, BaseModel, Configuration for the weight update service. (+4 more)
+Cohesion: 0.27
+Nodes (3): Queries, SandboxNode, scanSandboxNode()
 
 ### Community 829 - "Dpo Token Testdpolossintrasequenceshift"
 Cohesion: 0.11
@@ -5395,8 +5395,8 @@ Cohesion: 0.35
 Nodes (18): create_multica_app(), FastAPI, Build the multica server app.      ``bridge_db`` / ``shell_db`` may be injected, _auth(), _bridge_db(), _client(), _config(), _executor_complete_one() (+10 more)
 
 ### Community 833 - "Unpack Vision Sp"
-Cohesion: 0.29
-Nodes (9): Entropy-gated checkpoint decision helper for AReaL env-dispatch rollouts.  AReaL, Return ``True`` iff an entropy-gated checkpoint should be created.      Skips wh, should_create_entropy_checkpoint(), Tests for the entropy-gated checkpoint decision helper., test_entropy_checkpoint_boundary_equal(), test_entropy_checkpoint_skips_missing_logprobs(), test_entropy_checkpoint_skips_missing_threshold(), test_entropy_checkpoint_threshold_false() (+1 more)
+Cohesion: 0.22
+Nodes (9): CloudPATIdentity, CloudPATInvalidError, CloudPATVerifier, CloudPATVerifierConfig, fleetVerifyRequest, fleetVerifyResponse, OwnerLookupFunc, cloudPATCacheKey() (+1 more)
 
 ### Community 834 - "Expert Codex Agents"
 Cohesion: 0.08
@@ -5411,8 +5411,8 @@ Cohesion: 0.11
 Nodes (17): Add Unit Tests, Assertions, Common Mistakes, GPU Test Constraints, Integration with Other Skills, Key Requirements (Based on testing.md), Mocking Distributed, Reference Implementations (+9 more)
 
 ### Community 837 - "Docs Superpowers Turn"
-Cohesion: 0.27
-Nodes (6): ConfigLoader, Path, Subclass and set ``namespace`` + ``bindings`` (or pass them in)., Return a ``click`` ``default_map`` built by merging the         namespace's defa, Flatten nested TOML tables to ``(section, key) -> value``.          Nested keys, BindingMap
+Cohesion: 0.16
+Nodes (10): ConfigLoader, Path, Subclass and set ``namespace`` + ``bindings`` (or pass them in)., Return a ``click`` ``default_map`` built by merging the         namespace's defa, Flatten nested TOML tables to ``(section, key) -> value``.          Nested keys, load_click_default_map(), Path, inf() (+2 more)
 
 ### Community 838 - "Replay Docs Superpowers"
 Cohesion: 0.11
@@ -5446,13 +5446,17 @@ Nodes (6): DaemonWSCollector, Desc, Metric, Metrics, NewDaemonWSCollector(), new
 Cohesion: 0.36
 Nodes (6): DBCollector, Desc, Metric, Pool, NewDBCollector(), newDBDesc()
 
+### Community 847 - "Multica Db Bridge"
+Cohesion: 0.16
+Nodes (15): askUser(), confidenceValue(), enumValue2(), hasEvidence(), hasRiskSignal(), isRecord(), nonNegativeIntegerValue(), optionalBooleanValue() (+7 more)
+
 ### Community 848 - "Relay Bridge Headers"
 Cohesion: 0.22
 Nodes (26): assertArray(), assertEnum(), assertObject(), assertOptionalBoolean(), assertOptionalString(), assertString(), assertStringArray(), invalidDocument() (+18 more)
 
 ### Community 849 - "Db Integration E2E"
-Cohesion: 0.33
-Nodes (8): _config(), _gateway_upstream(), _leagent_upstream(), End-to-end simulated-isolation test (Task 9).  Models the production topology wh, Mocked real AReaL proxy gateway (lives on the AReaL host)., Mocked real le-agent API (lives on the le-agent host)., test_full_agent_and_rl_lifecycle_over_shared_db_only(), two_isolated_sides()
+Cohesion: 0.23
+Nodes (11): metadata, anchorId(), ChangelogPageClient(), fullDateLabel(), groupByMonth(), MonthGroup, monthYearLabel(), parseDate() (+3 more)
 
 ### Community 851 - "Ui Time Input"
 Cohesion: 0.31
@@ -5463,8 +5467,8 @@ Cohesion: 0.22
 Nodes (7): data, jsonPath, lines, raw, repoRoot, seen, tsPath
 
 ### Community 853 - "Cmd Multica Autopilot"
-Cohesion: 0.11
-Nodes (18): Actors, AReaL Entropy Gating, AReaL, Multica, and Remote Sandbox Environment Protocol, AReaL → Multica API Surface, Branch / Resume Lifecycle, Current Integration Status, Design Boundaries, Endpoints (+10 more)
+Cohesion: 0.08
+Nodes (24): Actors, AReaL Entropy Gating, AReaL, Multica, and Remote Sandbox Environment Protocol, AReaL → Multica API Surface, Branch errors, Branch / Resume Lifecycle, Channel-first message dispatch & branch collaboration, Channel-first routes (Task 7) (+16 more)
 
 ### Community 854 - "Thread Multica Server"
 Cohesion: 0.36
@@ -5483,8 +5487,8 @@ Cohesion: 0.11
 Nodes (17): 1. AReaL: `areal/infra/scheduler/local.py` (lines 323-344), 2. AReaL: `customized_areal/.env` (line 50), 3. db_bridge: `db_bridge/config.py`, 4. db_bridge: `db_bridge/executor.py`, 5. db_bridge: `db_bridge/.env.areal.example` (lines 14-19), Approach, Changes, Design decisions (confirmed with user) (+9 more)
 
 ### Community 858 - "Multica Server Storage"
-Cohesion: 0.36
-Nodes (7): AttachmentContentDisposition(), ContentDisposition(), isInlineContentType(), sanitizeFilename(), T, TestContentDisposition(), TestIsInlineContentType()
+Cohesion: 0.12
+Nodes (9): RTensor.localize() on a batch of 4 should produce 4 trajectory dicts., Test the full initialization path where the controller launches SGLang itself., server_infos should be populated after full init., The inference server launched by the controller should be healthy., Gateway should be healthy after full init., Data proxies should be healthy after full init., Data proxies should have been forked via RPCGuard in full init path., Full e2e: start_session → /chat/completions → validate → set_reward(finish=True) (+1 more)
 
 ### Community 859 - "Env Dispatch Sandbox"
 Cohesion: 0.11
@@ -5495,8 +5499,8 @@ Cohesion: 0.28
 Nodes (9): fsdp:d1 Actor Backend, GRPO Test Config, sglang:d1 Rollout Backend, archon:d1 Actor Backend, SFT Archon Test Config, fsdp:d1p1t1 Actor Backend, SFT FSDP Test Config, megatron:d1 Actor Backend (+1 more)
 
 ### Community 861 - "Pause V2 Inference"
-Cohesion: 0.31
-Nodes (5): PauseState, Helper to set pause state in async mock side effects., Test PauseState flag transitions., _set_paused(), TestPauseState
+Cohesion: 0.16
+Nodes (15): askUser(), confidenceValue(), enumValue2(), hasEvidence(), hasRiskSignal(), isRecord(), nonNegativeIntegerValue(), optionalBooleanValue() (+7 more)
 
 ### Community 862 - "Validation Areal Tools"
 Cohesion: 0.25
@@ -5511,8 +5515,8 @@ Cohesion: 0.10
 Nodes (26): activeChanges(), allowed(), allowsFirstSuperpowersArtifactWrite(), allowsSuperpowersArtifacts(), blocked(), blockedMissingDesignDoc(), blockedMultipleChanges(), blockedStaleSelection() (+18 more)
 
 ### Community 865 - "Megatron Docs En"
-Cohesion: 0.01
-Nodes (331): Affected Files, Primary (engine layer — most likely to break), Secondary (model / infra layer — HIGH RISK: monkey-patching), Tertiary (tests and examples), Version-Guarded Code, GRPOConfig, load_expr_config(), PPOConfig (+323 more)
+Cohesion: 0.08
+Nodes (14): # IMPORTANT: Any output you want to see MUST be printed to standard output using, MultiTurnReactAgent, parse_judge_result(), Message, today_date(), Search, Read webpage content using Jina service.          Args:             url: The URL, Read and summarize a webpage using Jina + LLM extractor. (+6 more)
 
 ### Community 866 - "Lang Toggle Docs"
 Cohesion: 0.54
@@ -5579,8 +5583,8 @@ Cohesion: 0.22
 Nodes (26): assertArray(), assertEnum(), assertObject(), assertOptionalBoolean(), assertOptionalString(), assertString(), assertStringArray(), invalidDocument() (+18 more)
 
 ### Community 885 - "Locales Parity Multica"
-Cohesion: 0.11
-Nodes (25): assertInside(), assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), createSkillSnapshot(), currentBranch(), currentChange() (+17 more)
+Cohesion: 0.07
+Nodes (42): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction() (+34 more)
 
 ### Community 886 - "Source Backfill Dismiss"
 Cohesion: 0.11
@@ -5591,32 +5595,32 @@ Cohesion: 0.61
 Nodes (7): _run_installer(), _setup_sandbox(), install.test.sh script, test_brew_install_failure_falls_back_to_release_binary(), test_brew_present_without_package_uses_release_binary(), test_brew_tap_failure_falls_back_to_release_binary(), test_legacy_brew_package_uses_release_binary()
 
 ### Community 888 - "Cmd Multica Channel"
-Cohesion: 0.10
-Nodes (6): InputGroup(), InputGroupAddon(), inputGroupAddonVariants, InputGroupButton(), inputGroupButtonVariants, InputGroupInput()
+Cohesion: 0.01
+Nodes (163): RFC-4122, AttachmentPreviewRoute(), href(), AgentPanelState, useAgentPanelStore, PreviewTooLargeError, PreviewUnsupportedError, ConfigState (+155 more)
 
 ### Community 889 - "Agent Thinking Multica"
 Cohesion: 0.64
-Nodes (7): createAgentOnRuntime(), createClaudeProviderRuntime(), createCodexProviderRuntime(), T, TestCreateAgent_ThinkingLevel_ValidationConsistency(), TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(), TestUpdateAgent_ThinkingLevel_TriState()
+Nodes (7): createAgentOnRuntime(), createClaudeProviderRuntime(), createCodexProviderRuntime(), T, TestCreateAgent_ThinkingLevel_ValidationConsistency(), TestUpdateAgent_RuntimeSwitch_ReconcilesInvalidThinkingLevel(), TestUpdateAgent_ThinkingLevel_TriState()
 
 ### Community 890 - "Pgcron Concurrent Multica"
 Cohesion: 0.57
 Nodes (7): cleanupRollupFixture(), countHourlyRowsForWorkspace(), Pool, T, seedRollupFixture(), TestPgCronConcurrentNoDoubleWrite(), uniqueSuffix()
 
 ### Community 892 - "Etp Tp Experimental"
-Cohesion: 0.25
-Nodes (5): Test ETP constraint validation in ArchonParallelDims., Test that etp must be 1 or equal to tp., Test that when etp=1, EP borrows from dp_shard * cp * tp., Test that when etp=tp, EP borrows from dp_shard * cp only (not tp)., TestETPValidation
+Cohesion: 0.17
+Nodes (3): Any, Task, Using _compat imports should produce the same result as core imports.
 
 ### Community 893 - "Etp Ep Experimental"
-Cohesion: 0.25
-Nodes (5): Test world size calculations with ETP configurations., Test 4 GPU configuration with EP+ETP., Test 4 GPU configuration with EP only (etp=1)., Test 8 GPU configuration with EP+ETP., TestETPWorldSizeCalculation
+Cohesion: 0.23
+Nodes (7): AgentRequest, AgentResponse, EventEmitter, The single ``/run`` endpoint relays an agent's :class:`StreamResponse`     verba, Returns a :class:`StreamResponse` from ``run`` when the turn carries a     ``cha, _StreamAgent, TestWorkerRunStream
 
 ### Community 894 - "Kk Allocate Testmicrobatchspecpacking"
-Cohesion: 0.25
-Nodes (3): Test MicroBatchSpec-like config validation (standalone)., Simulate config-driven allocation: read algorithm from config, dispatch., TestMicroBatchSpecPacking
+Cohesion: 0.20
+Nodes (4): Test MicroBatchSpec-like config validation (standalone)., Simulate config-driven allocation: read algorithm from config, dispatch., Switching algorithm via config produces valid results for both., TestMicroBatchSpecPacking
 
 ### Community 895 - "Top Logprobs Response"
-Cohesion: 0.29
-Nodes (4): Any, Create a reward task from a completed generation task.          Parameters, create_from_generation_task should correctly populate all fields., Should handle GenerationTask with None output gracefully.
+Cohesion: 0.04
+Nodes (29): _parse_judge_result(), Any, Task, Process tasks by sending judge prompts to the LLM worker.          For each task, Process reward tasks and compute rewards.          This method computes rewards, Compute reward from a generation task.          Parameters         ----------, Called before tasks are yielded to workers.          Parameters         --------, Called after tasks return from workers.          Creates InteractionWithTokenLog (+21 more)
 
 ### Community 896 - "Venv Bin Files"
 Cohesion: 0.10
@@ -5631,8 +5635,8 @@ Cohesion: 0.12
 Nodes (15): Agent Protocol, Agent Service, AgentRequest, AgentResponse, Architecture, Code Organization, Components, DataProxy (+7 more)
 
 ### Community 899 - "Areal Infra Platforms"
-Cohesion: 0.09
-Nodes (26): appendClassicStateEvent(), applyClassicTransition(), applyStateUpdate(), assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch() (+18 more)
+Cohesion: 0.11
+Nodes (26): FieldError(), assertInside(), assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), createSkillSnapshot(), currentBranch() (+18 more)
 
 ### Community 900 - "Prepare Vision Sp"
 Cohesion: 0.11
@@ -5651,8 +5655,8 @@ Cohesion: 0.33
 Nodes (4): DynamicInstallationValidator, main(), Validates installation based on pyproject.toml dependencies., Get the title for validation output.
 
 ### Community 904 - "Pairregistry Areal V2"
-Cohesion: 0.11
-Nodes (10): Tests for edge cases (Issue 15)., All-zero loss_mask should produce no filtering and zero fraction., Single-token sequences should work correctly., When all tokens exceed threshold, everything should be filtered., Clamp mode with explicit lower bound should clamp from both sides., Token with ratio exactly equal to upper should pass (<=)., Non-finite log-probs (both -inf) should not produce NaN., Sequence with all tokens masked should pass bounds check with max agg. (+2 more)
+Cohesion: 0.23
+Nodes (9): FakeTokenizer, main(), Test tool manager error handling with real execution, Test TIR workflow initialization., test_data_loading(), test_tir_workflow(), test_tool_manager(), test_tool_manager_error_handling() (+1 more)
 
 ### Community 906 - "Customized Areal Critic"
 Cohesion: 0.12
@@ -5759,8 +5763,8 @@ Cohesion: 0.47
 Nodes (3): EngineError, FrameworkError, Exception
 
 ### Community 934 - "Opsx Claude Commands"
-Cohesion: 0.21
-Nodes (8): memoryCuratorProfileResponse, updateMemoryCuratorProfileRequest, agentIDsSubset(), defaultMemoryCuratorProfile(), Handler, ResponseWriter, Time, validCuratorMode()
+Cohesion: 0.30
+Nodes (7): childAssigneeIsSquad(), Comment, Handler, Issue, UUID, sanitizeChildTitleForSystemComment(), sanitizeMentionLabel()
 
 ### Community 935 - "Graphify Claude Skills"
 Cohesion: 0.08
@@ -5812,11 +5816,11 @@ Nodes (3): CreateFeedbackParams, Queries, UUID
 
 ### Community 947 - "Handler Channel Member"
 Cohesion: 0.23
-Nodes (10): ConnectorFactory, NoopConnector, EventEmitter, LarkInstallation, Logger, NewNoopConnector(), NoopConnectorFactory(), T (+2 more)
+Nodes (9): githubAPIGetJSON(), Handler, UUID, ignoredTreePath(), mediaMimeGH(), parseGitHubRepoURL(), T, TestIgnoredTreePath() (+1 more)
 
 ### Community 948 - "Memorycuration Types Agenterror"
-Cohesion: 0.18
-Nodes (9): _make_controller(), Unit tests for GatewayInferenceController version management.  Tests set_version, Create a controller with minimal config and manually injected state.      Does N, Test GatewayInferenceController.set_version., When _gateway_addr is empty, set_version updates local but makes no HTTP calls., When gateway_addr is set and 2 workers exist, broadcasts to both., Test GatewayInferenceController.get_version., TestControllerGetVersion (+1 more)
+Cohesion: 0.03
+Nodes (51): InferenceServiceWorkflow, Any, ClientSession, RolloutControllerV2, GatewayInferenceController, get_vlm_test_model_path(), has_gpu(), Check if GPU is available.      Returns:         bool: True if CUDA is available (+43 more)
 
 ### Community 949 - "Multica Docker Compose"
 Cohesion: 0.40
@@ -5847,8 +5851,8 @@ Cohesion: 0.09
 Nodes (21): 10. 边界情况, 11. 测试, 12. 待评审者确认的开放点, 13. v2 展望, 1. 背景与问题, 2. 目标 / 非目标, 3. 已确认的设计决策(来自评审问答), 4. 方案选型 (+13 more)
 
 ### Community 957 - "Content Mentions Viewer"
-Cohesion: 0.33
-Nodes (6): preprocessMentionShortcodes(), contentMentionsViewer(), includesMemberMention(), isMentionIdChar(), messageMentionsViewer(), preprocessMarkdown()
+Cohesion: 0.46
+Nodes (5): preprocessMentionShortcodes(), contentMentionsViewer(), includesMemberMention(), isMentionIdChar(), messageMentionsViewer()
 
 ### Community 958 - "Tree Multica Packages"
 Cohesion: 0.12
@@ -5859,8 +5863,8 @@ Cohesion: 0.53
 Nodes (5): AGENT_NAMES, append_jsonl(), ensure_agent_root(), reset-pi-agent-test-data.sh script, write_skill_draft()
 
 ### Community 960 - "Cmd Multica Memory"
-Cohesion: 0.16
-Nodes (9): device, Module, Optimizer, Parameter, Stream, Assert all param_groups share identical hyperparameters.          PerLayerOptimW, Group params by FSDP2-wrapped sub-modules (excluding root).          After apply, Pre-allocate streams and events for pipeline synchronization. (+1 more)
+Cohesion: 0.24
+Nodes (13): GitHubRelease, GitHubReleaseAsset, CachedRuntimeReleaseSource, RuntimeRelease, RuntimeReleaseSource, IsReleaseVersion(), Duration, Mutex (+5 more)
 
 ### Community 961 - "Env Dispatch Squad"
 Cohesion: 0.67
@@ -5871,20 +5875,20 @@ Cohesion: 0.67
 Nodes (5): clearFeedbackForTestUser(), T, TestCreateFeedbackEmptyMessage(), TestCreateFeedbackHappyPath(), TestCreateFeedbackRateLimit()
 
 ### Community 963 - "Dedupe Multica Server"
-Cohesion: 0.39
-Nodes (7): dedupeTokens(), lexicalSimilarity(), semanticDuplicate(), weightedJaccard(), weightedTokens(), existingSemanticDuplicate(), hasSemanticDuplicate()
+Cohesion: 0.48
+Nodes (6): dedupeTokens(), lexicalSimilarity(), semanticDuplicate(), weightedJaccard(), weightedTokens(), hasSemanticDuplicate()
 
 ### Community 964 - "Csp Multica Server"
 Cohesion: 0.33
 Nodes (4): ContentSecurityPolicy(), Handler, T, TestContentSecurityPolicy()
 
 ### Community 965 - "Metrics Multica Server"
-Cohesion: 0.26
-Nodes (10): create_app(), FastAPI, RawResponse, TrainDataProxyConfig, _raw_json_response(), TrainDataProxyConfig, Any, FastAPI (+2 more)
+Cohesion: 0.17
+Nodes (7): Test that correct strategy would be selected based on EP/TP/ETP config.      Str, EP=1, TP=1: No parallelism, weights replicated., EP=1, TP>1: TensorParallel for experts., EP>1, TP=1: ExpertParallel only., EP>1, TP>1, etp=1: ExpertParallel (TP borrowed by EP)., EP>1, TP>1, etp=tp: ExpertTensorParallel (2D sharding)., TestETPStrategySelection
 
 ### Community 966 - "Service Multica Server"
-Cohesion: 0.22
-Nodes (9): CloudPATIdentity, CloudPATInvalidError, CloudPATVerifier, CloudPATVerifierConfig, fleetVerifyRequest, fleetVerifyResponse, OwnerLookupFunc, cloudPATCacheKey() (+1 more)
+Cohesion: 0.31
+Nodes (3): Iherited from vllm codebase, set_current_vllm_config(), VLLMWorkerExtension
 
 ### Community 967 - "Conftest Bind Ipv4"
 Cohesion: 0.12
@@ -5895,12 +5899,12 @@ Cohesion: 0.60
 Nodes (3): AgentRequest, AgentResponse, EventEmitter
 
 ### Community 969 - "Experimental Archon Checkpoint"
-Cohesion: 0.33
-Nodes (4): Tests that verify weight values are preserved after conversion., Get path to Qwen3-0.6B dense model., Test that adapter roundtrip preserves exact weight values., TestWeightComparisonAfterConversion
+Cohesion: 0.25
+Nodes (14): T, TestBrewUpdateConfiguredIgnoresLegacyUpstreamTap(), TestFindChecksumManifestAsset(), TestFindReleaseAsset(), TestIsNewerVersion(), TestIsReleaseVersion(), TestParseChecksumManifest(), TestReleaseAssetCandidates() (+6 more)
 
 ### Community 970 - "Pp Ep Experimental"
-Cohesion: 0.33
-Nodes (4): Test PP combined with EP configurations., Test PP with EP when etp=1., Test PP with EP when etp=tp., TestPPWithEP
+Cohesion: 0.09
+Nodes (26): appendClassicStateEvent(), applyClassicTransition(), applyStateUpdate(), assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch() (+18 more)
 
 ### Community 971 - "Seq Idx Experimental"
 Cohesion: 0.12
@@ -5983,8 +5987,8 @@ Cohesion: 0.10
 Nodes (20): Code Architecture, Configure `tiktoken`, Docker Compose / Buildx, Included Configurations, Install Example Dependencies, Install SGLang for NPU, Manual Dependency Path, Notes (+12 more)
 
 ### Community 993 - "Calculator Examples Tir"
-Cohesion: 0.02
-Nodes (121): aggregate_eval_losses(), compute_total_loss_weight(), Any, ProcessGroup, Tensor, Aggregate, reorder, and pad forward outputs from micro-batches.      This handle, Compute total loss weight and all_reduce across data parallel group.      This a, Aggregate evaluation losses from micro-batches.      Parameters     ---------- (+113 more)
+Cohesion: 0.18
+Nodes (10): 1. Confirm both services are healthy, 2. Probe the exact outbound path as the runner user, 3. Read the runner diagnostics for the failed job, 4. Decide whether a rerun is safe, Normal deploy verification, Prevention and monitoring, Read-only triage, s89 deployment and runner operations (+2 more)
 
 ### Community 994 - "Handler Channel Project"
 Cohesion: 0.12
@@ -6010,13 +6014,17 @@ Nodes (14): Commit Conventions, Commit Message Format, Examples, How to Update, 
 Cohesion: 0.22
 Nodes (8): Command surface（对齐 raft）, Endpoint mapping（全部复用现有 API，V1 零 server 改动）, Gaps（如实入档，不做 V1 范围）, `multica server info` — Design (V1), Problem, 生效层声明（#320 checklist）, 输出形状（human-readable，逐段对齐 raft）, 验收
 
+### Community 1004 - "Setup Multica Packages"
+Cohesion: 0.18
+Nodes (9): _make_controller(), Unit tests for GatewayInferenceController version management.  Tests set_version, Create a controller with minimal config and manually injected state.      Does N, Test GatewayInferenceController.set_version., When _gateway_addr is empty, set_version updates local but makes no HTTP calls., When gateway_addr is set and 2 workers exist, broadcasts to both., Test GatewayInferenceController.get_version., TestControllerGetVersion (+1 more)
+
 ### Community 1005 - "Seed Web Evolution"
 Cohesion: 0.70
 Nodes (4): download_skill_md_only(), ensure_agent_root(), seed-web-evolution-skills.sh script, write_skill_candidate()
 
 ### Community 1006 - "Server Comment Attachment"
-Cohesion: 0.80
-Nodes (4): createTestAttachment(), T, listCommentAttachmentIDs(), TestUpdateCommentAttachments()
+Cohesion: 0.17
+Nodes (8): Mirror of TestVLLMMultiNode for the SGLang backend., Helper that patches sglang version checks away., Single-node (default) should have nnodes=1, node_rank=0., Head node (rank 0) with n_nodes > 1 should set nnodes and dist_init_addr., Worker node (rank > 0) should set nnodes and node_rank., Multi-node without dist_init_addr should have dist_init_addr=None., build_cmd with multi-node should produce CLI flags for nnodes and node-rank., TestSGLangMultiNode
 
 ### Community 1007 - "Text Multica Server"
 Cohesion: 0.22
@@ -6055,24 +6063,24 @@ Cohesion: 0.60
 Nodes (3): AgentRequest, AgentResponse, EventEmitter
 
 ### Community 1016 - "Vision Patch Sp"
-Cohesion: 0.26
-Nodes (13): store(), test_add_to_set_and_set_size(), test_clear_pair_removes_all_data(), test_delete_nonexistent_returns_false(), test_delete_removes_entry(), test_get_missing_key_returns_none(), test_list_keys(), test_pair_isolation() (+5 more)
+Cohesion: 0.27
+Nodes (8): compute_score(), evaluate_equation(), extract_solution(), Validate that equation only uses available numbers and each number once., Safely evaluate the arithmetic equation using eval() with precautions., The scoring function for countdown task.      Args:         solution_str: the so, Extract the equation from the solution string., validate_equation()
 
 ### Community 1017 - "Lock Torchrun Distributed"
-Cohesion: 0.13
-Nodes (19): create_proxy_gateway_app(), FastAPI, Create and configure the proxy gateway FastAPI app.      Parameters     --------, A proxy worker registered as ready to accept an external session.      Created b, Routing entry for an active session.      Attributes     ----------     worker_a, _ReadyWorkerEntry, _SessionRoute, ExportTrajectoriesRequest (+11 more)
+Cohesion: 0.33
+Nodes (8): channelProjectSystemEventParams, channelProjectSystemEventPart, channelProjectSystemEventContent(), channelProjectSystemEventCountForTest(), T, latestChannelProjectSystemEventForTest(), TestSetChannelProjectPublishesSystemEventToChannelMembers(), TestSetChannelProjectWritesTypedSystemEvent()
 
 ### Community 1018 - "Standalone Admin V2"
-Cohesion: 0.26
-Nodes (4): # NOTE: This code relies on vLLM private APIs: _adapter_manager, _registered_ada, Iherited from vllm codebase, set_current_vllm_config(), VLLMWorkerExtension
+Cohesion: 0.16
+Nodes (9): device, Module, Optimizer, Parameter, Stream, Assert all param_groups share identical hyperparameters.          PerLayerOptimW, Group params by FSDP2-wrapped sub-modules (excluding root).          After apply, Pre-allocate streams and events for pipeline synchronization. (+1 more)
 
 ### Community 1019 - "Global Activate Venv"
-Cohesion: 0.12
-Nodes (25): appendRecoveryEvent(), appendRecoveryEvent2(), appendTrajectory(), artifactsHash2(), atomicWrite(), clearPendingAction(), completedHandoffIsCurrent(), hashText2() (+17 more)
+Cohesion: 0.18
+Nodes (19): artifactsHash2(), completedHandoffIsCurrent(), computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), hashText2() (+11 more)
 
 ### Community 1020 - "Jsonpointer Venv Bin"
-Cohesion: 0.12
-Nodes (24): artifactHash(), artifactKey(), assertInside(), createSkillSnapshot(), ensureClassicRun(), hashSkillPackage(), hashSnapshot(), migrationArtifacts() (+16 more)
+Cohesion: 0.09
+Nodes (32): artifactHash(), artifactKey(), assertInside(), atomicWrite(), clearPendingAction(), createSkillSnapshot(), ensureClassicRun(), hashSkillPackage() (+24 more)
 
 ### Community 1021 - "E1 Sessiondata Brief"
 Cohesion: 0.13
@@ -6083,8 +6091,8 @@ Cohesion: 0.13
 Nodes (14): File Structure, Global Constraints, Multica v2 Segment-DAG Recording + Assembly Implementation Plan, Self-Review, Task 10: U10 config + regression + E2E + grep (both repos), Task 1: multica `decodeTensorRef` multi-shard (contract fix, multica side), Task 2: areal `DataProxyTensorResolver` multi-shard (contract fix, areal side), Task 3: D10 `RecordSessionAgentRun` chokepoint (multica) (+6 more)
 
 ### Community 1023 - "Npuplatform Areal Infra"
-Cohesion: 0.25
-Nodes (24): NewEvolutionServiceWithReviewer(), rejectEvolutionSubmissionReason(), T, promoteLowRiskReview(), TestCurateSubmissionMissingContentHashRejects(), TestCurateSubmissionReviewDisabledLocalPathPromotes(), TestCurateSubmissionReviewDisabledLowConfidenceNeedsReview(), TestCurateSubmissionSourceHumanReviewGateSkipsReviewer() (+16 more)
+Cohesion: 0.20
+Nodes (9): 14. PR 依赖与推荐合并顺序, 17. Definition of Done, 18. 建议的第一个迭代, 1. 背景, 2.1 业务目标, 2.2 技术目标, 2. 改造目标, 3. 非目标 (+1 more)
 
 ### Community 1024 - "Visualize Areal Tree"
 Cohesion: 0.13
@@ -6139,8 +6147,8 @@ Cohesion: 0.13
 Nodes (14): Code Architecture, Configuration Files, Customer Service Agent Training with Tau2 Benchmark, Customization, Multi-Node Slurm, Notes, Overview, Prepare User Simulator Server (+6 more)
 
 ### Community 1038 - "Ai Assisted Harness"
-Cohesion: 0.30
-Nodes (7): childAssigneeIsSquad(), Comment, Handler, Issue, UUID, sanitizeChildTitleForSystemComment(), sanitizeMentionLabel()
+Cohesion: 0.20
+Nodes (10): 16.1 漏掉真实任务或独特贡献, 16.2 全员 Attention Probe 成本或延迟过高, 16.3 团队策略污染普通 Agent, 16.4 上下文过滤误删关键信息, 16.5 训练资源不足, 16.6 Agent 主动性被中心逻辑削弱, 16.7 主动举手重新造成噪声, 16.8 协作会话卡死或顺序错误 (+2 more)
 
 ### Community 1039 - "Countdown Readme Examples"
 Cohesion: 0.14
@@ -6158,17 +6166,21 @@ Nodes (4): Prox Approx GRPO Config (loglinear), Prox Approx GRPO Eval Config (me
 Cohesion: 0.50
 Nodes (3): Reward function for the search scaffolding example.  Checks whether the model pr, Compute reward for a search agent trajectory.      The function extracts the tex, search_reward_fn()
 
+### Community 1043 - "Task Create Chat"
+Cohesion: 0.02
+Nodes (146): ModelResponse, ChatTracer, LLMJudgeController, MultiTurnChatController, PipelineTrajectoryMaker, Enum, RLVR Controllers for Scaffolding Framework.  This module provides controllers fo, Compute reward for an RLVR reward task.          Parameters         ---------- (+138 more)
+
 ### Community 1044 - "Handler Workspace Reserved"
 Cohesion: 0.14
 Nodes (8): extract_answer(), geometry3k_reward_fn(), gsm8k_reward_fn(), get_math_verify_worker(), boba_reward_fn(), gsm8k_reward_fn(), TestMathVerifyWorkerRoundingCases, TestMathVerifyWorkerTextWrappedAnswers
 
 ### Community 1046 - "Chat Docs Multica"
-Cohesion: 0.23
-Nodes (22): agentCredentialTransportFixture, T, seedAgentCredentialTransportFixture(), seedHandlerTestRuntimeCapabilities(), seedHandlerTestRuntimeDaemonID(), seedHandlerTestRuntimeDaemonIDNull(), seedHandlerTestRuntimeOwner(), TestAgentCredentialAuthSetsBoundActorHeaders() (+14 more)
+Cohesion: 0.26
+Nodes (10): create_app(), FastAPI, RawResponse, TrainDataProxyConfig, _raw_json_response(), TrainDataProxyConfig, Any, FastAPI (+2 more)
 
 ### Community 1047 - "Conventions Docs Multica"
-Cohesion: 0.28
-Nodes (9): curationResultEnvelope, selfReviewOutput, teamCurationOutput, extractJSONObject(), Handler, RawMessage, normalizeCandidateScope(), normalizeCandidateType() (+1 more)
+Cohesion: 0.19
+Nodes (14): curationResultEnvelope, selfReviewOutput, teamCurationOutput, curationOutputMetadata(), extractJSONObject(), Handler, RawMessage, normalizeCandidateScope() (+6 more)
 
 ### Community 1048 - "Auto Analysis Multica"
 Cohesion: 0.13
@@ -6211,16 +6223,16 @@ Cohesion: 0.83
 Nodes (3): decodeCloudFrontBase64(), T, TestCloudFrontSignedURLWithContentDisposition()
 
 ### Community 1060 - "Channel Project Multica"
-Cohesion: 0.13
-Nodes (23): fileMutation, fileMutationTransaction, fileSnapshot, skillCandidate, defaultMemoryDestination(), inferExpiresAt(), preparePromoteEntry(), promoteEntry() (+15 more)
+Cohesion: 0.14
+Nodes (20): fileMutation, fileMutationTransaction, fileSnapshot, skillCandidate, defaultMemoryDestination(), commitFileMutations(), ensureFile(), fileContentWithoutTemplate() (+12 more)
 
 ### Community 1061 - "Daemon Areal Proxy"
 Cohesion: 0.15
 Nodes (12): 10. Testing, 11. Rollout risks, 1. Goal, 2. Invariants, 3. Runtime and sandbox identity, 4. Shared sandbox manager, 5. Fresh-sandbox retry flow, 6. Terminal cleanup (+4 more)
 
 ### Community 1062 - "Env Dispatch Squad"
-Cohesion: 0.38
-Nodes (10): createTestIssue(), deleteTestIssue(), T, TestBatchUpdateNoMutationReturnsZero(), TestBatchUpdateProjectWorkspaceBoundary(), TestBatchUpdateValidUpdatesPersistAndCount(), T, TestAutopilotCreateIssuePositionBelowCurrentMinimum() (+2 more)
+Cohesion: 0.24
+Nodes (16): envInt32(), Pool, logPoolConfig(), newDBPool(), newSamplerDBPool(), poolParamsFromURL(), runDBStatsLogger(), applyPoolSizing() (+8 more)
 
 ### Community 1063 - "Multica Skill Importing"
 Cohesion: 0.18
@@ -6259,8 +6271,8 @@ Cohesion: 0.16
 Nodes (10): 7-day signing limit (device only), Build it onto your iPhone, Day-to-day development (Mac in front of you), First-time setup, Just want to use it on your phone? (no development), Multica Mobile (iOS), Pointing at a different backend, Scripts (+2 more)
 
 ### Community 1072 - "Algorithm Claude Expert"
-Cohesion: 0.33
-Nodes (6): 3.6 Skill 技能, CLI 对应命令, 产品里的位置, 它怎么工作, 对应表, 数据形态
+Cohesion: 0.21
+Nodes (7): get_allocate_fn(), Return the allocation function for the given algorithm name.      Args:, generate_uniform_seqlens(), Tests for Karmarkar-Karp (KK) sequence packing algorithm and configurable dispat, Test configurable algorithm dispatch., Both algorithms should produce valid allocations., TestGetAllocateFn
 
 ### Community 1073 - "Dataset Skill Loader"
 Cohesion: 0.13
@@ -6311,16 +6323,24 @@ Cohesion: 0.67
 Nodes (3): Device Environment Variables Reference, NCCL InfiniBand Configuration, NPU HCCL Configuration
 
 ### Community 1095 - "Handler Evolutionmetricsresponse Evolutionunitmetricresponse"
-Cohesion: 0.33
-Nodes (6): EvolutionDailyMetricResponse, EvolutionMetricsResponse, EvolutionTaskEfficiencyResponse, EvolutionUnitMetricResponse, Handler, ResponseWriter
+Cohesion: 0.27
+Nodes (8): EvolutionCollaborationMetricResponse, EvolutionDailyMetricResponse, EvolutionMetricsResponse, EvolutionModelMetricResponse, EvolutionTaskEfficiencyResponse, EvolutionUnitMetricResponse, Handler, ResponseWriter
 
 ### Community 1098 - "Fakeclock Lark Now"
-Cohesion: 0.19
-Nodes (18): DateToPtr(), Date, Int8, Text, Int8ToPtr(), ParseCalendarDate(), PtrToText(), T (+10 more)
+Cohesion: 0.11
+Nodes (32): InboxItem, inboxItemToResponse(), quickCreateReturnMessagePayload(), agentToMap(), Agent, Comment, InboxItem, issueToMap() (+24 more)
+
+### Community 1099 - "Workspaces Docs Multica"
+Cohesion: 0.20
+Nodes (6): Test ETP mesh dimension configurations., Test EP only configuration (etp=1)., Test EP+TP configuration with etp=1 (TP borrowed by EP)., Test EP+TP configuration with etp=tp (ExpertTensorParallel)., Test TP only configuration (ep=1)., TestETPMeshConfiguration
 
 ### Community 1103 - "Page Multica Squads"
 Cohesion: 0.21
-Nodes (22): AgentRadarScheduleJob(), cancelUnauthorizedWorkspaceRadar(), deferUnchangedWorkspaceRadar(), deferWorkspaceRadarForBudget(), Handler, Pool, TaskService, Time (+14 more)
+Nodes (6): ClaimSandboxJobsForNodeParams, CompleteSandboxJobParams, CreateSandboxDeleteJobParams, CreateSandboxJobParams, SandboxJob, scanSandboxJob()
+
+### Community 1107 - "Ui Radio Group"
+Cohesion: 0.20
+Nodes (5): CreateAgentInboxTokenParams, CreateTaskTokenParams, Queries, Timestamptz, UUID
 
 ### Community 1118 - "Quick Create Source"
 Cohesion: 0.14
@@ -6387,12 +6407,12 @@ Cohesion: 0.18
 Nodes (10): Ephemeral Sandbox Reliability Implementation Plan, File map, Global Constraints, Task 1: Make sandbox lifecycle creation compensating, Task 2: Carry authoritative provider and cleanup actor, Task 3: Add scoped sweep and retry overrides, Task 4: Implement fresh-sandbox retry manager, Task 5: Make cleanup idempotent and wire every terminal path (+2 more)
 
 ### Community 1146 - "Allocator Settings Platform"
-Cohesion: 0.35
-Nodes (9): Classify(), containsAny(), T, TestClassify5xxRegex(), TestClassifyAlwaysReturnsAgentSide(), TestClassifyEmptyAndWhitespace(), TestClassifyOrderingPriorities(), TestClassifyRules() (+1 more)
+Cohesion: 0.22
+Nodes (7): CreateSandboxSnapshotParams, GetSandboxSnapshotForWorkspaceParams, ListSandboxSnapshotsByNodeParams, MarkSandboxSnapshotDeletingParams, MarkSandboxSnapshotReadyParams, SandboxSnapshot, scanSandboxSnapshot()
 
 ### Community 1147 - "Platform Numa Affinity"
-Cohesion: 0.39
-Nodes (8): _ffd_allocate(), min_abs_diff_partition(), partition_balanced(), partition_balanced_tuples(), ndarray, A greedy allocation algorithm that partitions a list of numbers     into k group, Partition an array into k subarrays with a minimum absolute difference     of su, reorder_to_balanced_batches()
+Cohesion: 0.22
+Nodes (7): fakeCredentials, fakePatcherQueries, Agent, ChatSession, LarkInstallation, Mutex, UUID
 
 ### Community 1149 - "Training Areal Tpfc"
 Cohesion: 0.20
@@ -6411,8 +6431,8 @@ Cohesion: 0.14
 Nodes (13): AReaL vs. verl: Multi-node Training Performance, Examples, Hardware, Key Contributions, Performance Comparison, Qwen2.5-VL-3B, Qwen2.5-VL-3B (ViRL39K, multi-node), Qwen3-VL-2B (+5 more)
 
 ### Community 1160 - "Batch Consistency Suite"
-Cohesion: 0.25
-Nodes (7): CreatePersonalAccessTokenParams, ExtendPersonalAccessTokenExpiryParams, RevokePersonalAccessTokenParams, Queries, PersonalAccessToken, Timestamptz, UUID
+Cohesion: 0.26
+Nodes (13): store(), test_add_to_set_and_set_size(), test_clear_pair_removes_all_data(), test_delete_nonexistent_returns_false(), test_delete_removes_entry(), test_get_missing_key_returns_none(), test_list_keys(), test_pair_isolation() (+5 more)
 
 ### Community 1161 - "Clip Cov Loss"
 Cohesion: 0.14
@@ -6440,7 +6460,7 @@ Nodes (13): 1. 拉取项目 + 一键启动后端, 2. 重要：保持生产安全
 
 ### Community 1167 - "Branching Branch Docs"
 Cohesion: 0.14
-Nodes (13): 2. 核心概念词典, 5. 产品地图（全部路由）, 6. 跨平台差异：Web vs 桌面, Multica 产品全景文档, Web 特有, 为什么两端要做差异, 公共 / 认证, 共享（绝大部分功能） (+5 more)
+Nodes (13): 2. 核心概念词典, 4. 系统架构全景, 5. 产品地图（全部路由）, AI / LLM 在哪里, Multica 产品全景文档, 公共 / 认证, 分层职责, 后台任务 (+5 more)
 
 ### Community 1168 - "Segment Dag Multiagentenvdispatchworkflow"
 Cohesion: 0.14
@@ -6459,8 +6479,8 @@ Cohesion: 0.18
 Nodes (10): GRPO 与 KD 联合, Joint Loss, On-Policy Distillation, On-Policy Distillation（Reverse KL）, 参考, 核心思想, 概述, 监督微调（Forward KL） (+2 more)
 
 ### Community 1172 - "Icepop Kpop Masking"
-Cohesion: 0.16
-Nodes (15): GrokACPBackend, grokACPProcess, Bool, Cmd, Config, Message, Mutex, Result (+7 more)
+Cohesion: 0.19
+Nodes (7): ParamTransferState, CPU and device copies of a parameter and its optimizer states for one H2D/D2H cy, H2D: copy layer's optimizer states (and params/grads if on CPU) to device., Run optimizer computation on device tensors for one layer., D2H: copy updated param data + optimizer states back to CPU.          Only copie, Mark device tensors as used by each *stream* for allocator safety.          Devi, Per-layer optimizer step with async prefetch pipeline.
 
 ### Community 1174 - "Daytona Sandbox Readme"
 Cohesion: 0.40
@@ -6491,8 +6511,8 @@ Cohesion: 0.33
 Nodes (5): Serving + rendering, Stickers — source map, Tests, The `multica sticker` command, The sticker library
 
 ### Community 1220 - "Deferred Close Critic"
-Cohesion: 0.17
-Nodes (19): branch_backup(), CreditAssignment, distribute_reward_over_dag(), Node, DAG-aware reward backup (Phase 3, load-bearing).  Distributes a terminal verifie, Explicit per-agent credit at a fan-in join (spec §2 decision 8).      The caller, Distribute ``terminal_reward`` backward along DAG edges.      Returns a ``{node_, MCTS-style value backup from a branch to its fork point (checkpoint node). (+11 more)
+Cohesion: 0.20
+Nodes (6): Test PP (Pipeline Parallelism) constraint validation in ArchonParallelDims., Test that dp_shard auto-calculation includes pp., Test that world_size validation includes pp., Test pp_enabled property., Test context_and_model_parallel_size property (cp * tp * pp)., TestPPValidation
 
 ### Community 1221 - "Entropy Critic Capture"
 Cohesion: 0.14
@@ -6519,8 +6539,8 @@ Cohesion: 0.14
 Nodes (13): MODIFIED Requirements, Requirement: Polling AssembledDag return at task completion, Requirement: V2 no-reward segment close, Scenario: Bridged poll preserves response semantics, Scenario: Bridged unknown project returns 404, Scenario: Close produces a reward-less trajectory, Scenario: Close segment routed through db_bridge, Scenario: Close without active completions is rejected (+5 more)
 
 ### Community 1227 - "Discount Snapshot Live"
-Cohesion: 0.12
-Nodes (22): classicRuntimeRoot(), directoryExists(), embeddedClassicRuntimePackage(), ensureClassicRuntimeRun(), ensureStrictClassicRuntimeRun(), evaluateClassicRuntimeStep(), evidenceSatisfied(), fileExists2() (+14 more)
+Cohesion: 0.09
+Nodes (30): classicRuntimeRoot(), collectClassicEvidence(), deltaSpecEvidence(), directFileEvidence(), directoryExists(), embeddedClassicRuntimePackage(), ensureClassicRuntimeRun(), ensureStrictClassicRuntimeRun() (+22 more)
 
 ### Community 1228 - "Trigger Resume Checkpoint"
 Cohesion: 0.15
@@ -6532,7 +6552,7 @@ Nodes (12): Hard Rules, Inputs, Output Shape, Phase 1: Resolve PR context, Phase
 
 ### Community 1230 - "Session Lifecycle Training"
 Cohesion: 0.23
-Nodes (21): Duration, NewEnvSandboxLifecycleService(), RawMessage, T, lifecycleRef(), TestCloneSandboxInstanceCompensatesRuntimeWhenJobInsertFails(), TestCloneSandboxInstanceCreatesOfflineRuntimeAndCloneJob(), TestEnvSandboxLifecycleCreateCompensatesPostInsertFailures() (+13 more)
+Nodes (6): Return the latest ready trajectory.          Caller must already hold ``self._lo, Record reward for the active trajectory., Internal result returned when an online session closes a trajectory., One ready-but-not-yet-exported online trajectory., ReadyTrajectory, RewardResult
 
 ### Community 1231 - "Recording V2 Segment"
 Cohesion: 0.10
@@ -6571,8 +6591,8 @@ Cohesion: 0.15
 Nodes (12): File Structure, Phase 1: Multica Entity Fork — Implementation Plan (Go), Self-Review Notes, Task 10: Register routes in router.go, Task 11: Run full Go test suite + pre-commit, Task 3: Migration — fork provenance columns on `issue`, Task 4: sqlc queries for issue fork, Task 5: Activity-log coverage check (+4 more)
 
 ### Community 1248 - "Jp Venv Bin"
-Cohesion: 0.14
-Nodes (18): EMPTY_RESULTS, HighlightTextProps, issueIconColor(), navigateOnTap(), RecentRow(), RecentRowProps, RowItem, SearchIssueRow() (+10 more)
+Cohesion: 0.07
+Nodes (32): ProjectsPage(), NewIssueModal(), NewIssueAssigneePickerRoute(), NewIssueDueDatePickerRoute(), NewIssuePriorityPickerRoute(), NewIssueProjectPickerRoute(), NewIssueStatusPickerRoute(), DescriptionField() (+24 more)
 
 ### Community 1249 - "Planner Agent Claude"
 Cohesion: 0.15
@@ -6643,8 +6663,8 @@ Cohesion: 0.15
 Nodes (12): 0. 为什么要做（已核代码）, 10. 待拍 / 开放点, 1. 模型, 2. 物理位置与访问（关键设计点，交 BE 评估）, 3. 读写流（动作合约）, 4. 权限, 5. 审计, 6. 容量 / 清理 / 导出 / 删除 (+4 more)
 
 ### Community 1318 - "Inputs Mutation Race"
-Cohesion: 0.18
-Nodes (18): main(), main(), T, TestCurateAndMatchWorkspaceRequiresTransactions(), TestCurateMemorySubmissionAssigns(), TestCurateMemorySubmissionUpdatesExistingSyncKey(), NewEvolutionService(), T (+10 more)
+Cohesion: 0.15
+Nodes (7): Any, Resume generation by calling the backend and clearing pause_state., Offload model memory on the backend inference server., Reload model memory on the backend inference server., Send an :class:`HttpRequest` and return the parsed JSON body.          Parameter, Generate a response for *req* via the configured backend.          Implements th, Pause generation by setting pause_state and calling the backend.
 
 ### Community 1319 - "Clipcovconfig"
 Cohesion: 0.15
@@ -6655,8 +6675,8 @@ Cohesion: 0.15
 Nodes (12): Autopilot, Child-done Parent Trigger, CLI, Comment / Mention, Create / Update, DB shape, Issue Assignment, Leader Briefing (+4 more)
 
 ### Community 1321 - "Treesearchrolloutresult"
-Cohesion: 0.19
-Nodes (14): eventResult, opencodeBackend, opencodeCacheTokens, opencodeErrData, opencodeError, opencodeEvent, opencodeEventPart, opencodeTokens (+6 more)
+Cohesion: 0.21
+Nodes (7): _get_image_embedding_counts(), _get_image_patch_counts(), Return [t*h*w for each image] from a [num_images, 3] grid_thw tensor., Return per-image embedding counts after spatial merging: t * (h/merge) * (w/merg, merge_size=1 path should produce identical results to _get_image_patch_counts., TestGetImageEmbeddingCounts, TestGetImagePatchCounts
 
 ### Community 1322 - "Lossmode Enum"
 Cohesion: 0.17
@@ -6824,11 +6844,11 @@ Nodes (12): 1. Start backend, frontend, and database, 2. Create a test user and 
 
 ### Community 1394 - "Unified Runtime"
 Cohesion: 0.20
-Nodes (6): Verify iterative convert_single_to_hf matches batch to_hf.      This is critical, Dense: iterative convert_single_to_hf == batch to_hf., MoE: iterative convert_single_to_hf == batch to_hf., Dense: no duplicate HF keys produced during iteration., MoE: no duplicate HF keys produced during iteration., TestIterativeVsBatchConversion
+Nodes (8): __getattr__(), Customized AReaL components for TPFC Agent., Any, TPFC Agent wrapper for AReaL integration.  This module provides a class-based ag, TPFC Agent for AReaL integration.      This class wraps the run_backend function, Initialize TPFC Agent.          Args:             user_id: Optional user ID for, Execute a single agent run and return the reward.          This method is compat, TPFCAgent
 
 ### Community 1395 - "Resend Backend"
-Cohesion: 0.18
-Nodes (4): Item(), ItemMedia(), itemMediaVariants, itemVariants
+Cohesion: 0.08
+Nodes (9): ButtonGroup(), buttonGroupVariants, Field(), fieldVariants, Item(), ItemMedia(), itemMediaVariants, itemVariants (+1 more)
 
 ### Community 1396 - "S3 Storage"
 Cohesion: 0.17
@@ -6851,8 +6871,8 @@ Cohesion: 0.17
 Nodes (11): deterministic_env(), CUDA deterministic mode regression tests.  Validates reproducibility of key PyTo, Verify torch.compile with Inductor produces reproducible forward/backward result, Verify compiled _gather_logprobs_entropy is bit-identical across calls.      Thi, Verify activation checkpointing + compile produces deterministic recompute., Set up and tear down a deterministic CUDA environment for testing., Verify torch._grouped_mm produces bit-identical results under deterministic mode, test_ac_recompute_compile_deterministic() (+3 more)
 
 ### Community 1415 - "Session Open Hook"
-Cohesion: 0.15
-Nodes (12): formatActivityTime(), timeFormatter(), COMPACTION, DIAG, EDIT, IDLE_STATUS, TEXT, TOOL (+4 more)
+Cohesion: 0.26
+Nodes (5): AgentCredential, CreateAgentCredentialParams, Queries, Timestamptz, UUID
 
 ### Community 1416 - "Trained Agent Llm"
 Cohesion: 0.18
@@ -6931,24 +6951,24 @@ Cohesion: 0.10
 Nodes (19): Bulletproofing Elements, Creation Log: Systematic Debugging Skill, Enhancement 1: TDD Reference, Extraction Decisions, Final Outcome, Initial Version, Iterations, Key Insight (+11 more)
 
 ### Community 1440 - "D6 Segment Semantics"
-Cohesion: 0.27
-Nodes (6): AddIssueSubscriberParams, IsIssueSubscriberParams, RemoveIssueSubscriberParams, Queries, IssueSubscriber, UUID
+Cohesion: 0.21
+Nodes (5): CreateVerificationCodeParams, VerificationCode, Queries, Timestamptz, UUID
 
 ### Community 1441 - "Session D7 Agent"
-Cohesion: 0.25
-Nodes (17): envCheckpointGetCall, envCheckpointListCall, envCheckpointResumeCall, fakeEnvCheckpointService, authedCheckpointRequest(), EnvCheckpoint, Handler, T (+9 more)
+Cohesion: 0.32
+Nodes (16): envCheckpointGetCall, envCheckpointListCall, envCheckpointResumeCall, fakeEnvCheckpointService, authedCheckpointRequest(), Handler, T, newCheckpointHandler() (+8 more)
 
 ### Community 1443 - "Session Agent Mapping"
-Cohesion: 0.26
-Nodes (5): ActivityEvent, compareEvents(), projectLatestActivity(), upsertActivityEvents(), activityMessagePermalink()
+Cohesion: 0.38
+Nodes (10): createTestIssue(), deleteTestIssue(), T, TestBatchUpdateNoMutationReturnsZero(), TestBatchUpdateProjectWorkspaceBoundary(), TestBatchUpdateValidUpdatesPersistAndCount(), T, TestAutopilotCreateIssuePositionBelowCurrentMinimum() (+2 more)
 
 ### Community 1444 - "Migration Db Queries"
 Cohesion: 0.18
 Nodes (10): Check for context, Ending Discovery, Guardrails, Handling Different Entry Points, OpenSpec Awareness, The Stance, What You Don't Have To Do, What You Might Do (+2 more)
 
 ### Community 1445 - "Interaction Id Surfacing"
-Cohesion: 0.18
-Nodes (19): artifactsHash2(), completedHandoffIsCurrent(), computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), hashText2() (+11 more)
+Cohesion: 0.33
+Nodes (12): computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), jsonEscape(), lineCount(), writeJsonContext() (+4 more)
 
 ### Community 1446 - "Incremental Recording Service"
 Cohesion: 0.18
@@ -7010,29 +7030,25 @@ Nodes (10): ADDED Requirements, Requirement: Lossless SuperNode serialization, R
 Cohesion: 0.18
 Nodes (10): Check for context, Ending Discovery, Guardrails, Handling Different Entry Points, OpenSpec Awareness, The Stance, What You Don't Have To Do, What You Might Do (+2 more)
 
-### Community 1461 - "Training Session Lifecycle"
-Cohesion: 0.18
-Nodes (17): get_retry_strategy(), log_retry(), post_json(), post_json_with_retry(), BaseModel, ClientSession, Exception, Check if exception is a retryable HTTP error (503, 502, 429, etc.) (+9 more)
-
 ### Community 1462 - "V2 Path Fan"
-Cohesion: 0.21
-Nodes (4): AwexSchedulerBridge, Any, Compose awex weight-update capabilities onto a plain Scheduler instance.      Li, Attach ``awex_*`` methods to the scheduler instance.          After this call, `
+Cohesion: 0.17
+Nodes (11): Clone a derived global agent, Context, Decisions, Discover runtime after registration, Goals / Non-Goals, Make readiness and cleanup transactional at the workflow level, Migration Plan, Open Questions (+3 more)
 
 ### Community 1463 - "Tensor Lifecycle Cleanup"
 Cohesion: 0.11
 Nodes (18): Auto-Transition Protocol, Automatic Phase Detection, Comet Ambient Resume, Comet — OpenSpec + Superpowers Dual-Star Development Workflow, .comet.yaml Field Reference, Context Recovery, Debug Gate Protocol, Decision Core (+10 more)
 
 ### Community 1464 - "V2 Segment Reward"
-Cohesion: 0.16
-Nodes (7): compute_query_uncertainty(), Bayesian uncertainty estimation for dynamic group size allocation., Compute step-adjusted Bayesian posterior variance for a query.      Returns U(q), Return True if all rewards are identical (no learning signal).      Discards onl, should_discard_query(), TestComputeQueryUncertainty, TestShouldDiscardQuery
+Cohesion: 0.33
+Nodes (8): _config(), _gateway_upstream(), _leagent_upstream(), End-to-end simulated-isolation test (Task 9).  Models the production topology wh, Mocked real AReaL proxy gateway (lives on the AReaL host)., Mocked real le-agent API (lives on the le-agent host)., test_full_agent_and_rl_lifecycle_over_shared_db_only(), two_isolated_sides()
 
 ### Community 1490 - "Accelerate"
-Cohesion: 0.18
-Nodes (12): piPersistentIdentity, piPersistentLease, piPersistentPool, piPersistentSession, Config, Daemon, Mutex, Once (+4 more)
+Cohesion: 0.21
+Nodes (10): piPersistentIdentity, piPersistentLease, piPersistentPool, piPersistentSession, Config, Daemon, Mutex, Once (+2 more)
 
 ### Community 1491 - "Accelerate"
-Cohesion: 0.20
-Nodes (18): memoryCurationAgentRunResponse, memoryCurationRunArtifact, memoryCurationRunDiagnostic, memoryCurationRunResponse, memoryCurationRunStatsResponse, memoryCurationRunTimelineItem, memoryCurationStageStatusResponse, memoryCurationTargetAgent (+10 more)
+Cohesion: 0.11
+Nodes (33): memoryCurationAgentRunResponse, memoryCurationRunArtifact, memoryCurationRunDiagnostic, memoryCurationRunResponse, memoryCurationRunStatsResponse, memoryCurationRunTimelineItem, memoryCurationStageStatusResponse, memoryCurationTargetAgent (+25 more)
 
 ### Community 1492 - "Accelerate Estimate Memory"
 Cohesion: 0.11
@@ -7051,12 +7067,12 @@ Cohesion: 0.11
 Nodes (18): Auto-Transition Protocol, Automatic Phase Detection, Comet Ambient Resume, Comet — OpenSpec + Superpowers Dual-Star Development Workflow, .comet.yaml Field Reference, Context Recovery, Debug Gate Protocol, Decision Core (+10 more)
 
 ### Community 1496 - "Dashscope"
-Cohesion: 0.18
-Nodes (19): artifactsHash2(), completedHandoffIsCurrent(), computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), hashText2() (+11 more)
+Cohesion: 0.42
+Nodes (7): advanceNextRun(), Queries, recoverLostTriggers(), runAutopilotScheduler(), tickScheduledAutopilots(), ComputeNextRun(), Time
 
 ### Community 1497 - "Distro"
-Cohesion: 0.12
-Nodes (19): assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch(), currentChange(), currentChangeFile(), green2() (+11 more)
+Cohesion: 0.09
+Nodes (26): appendClassicStateEvent(), applyClassicTransition(), applyStateUpdate(), assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch() (+18 more)
 
 ### Community 1498 - "Email Validator"
 Cohesion: 0.11
@@ -7067,24 +7083,24 @@ Cohesion: 0.11
 Nodes (17): Acknowledging Correct Feedback, Code Review Reception, Common Mistakes, Forbidden Responses, From External Reviewers, From your human partner, GitHub Thread Replies, Gracefully Correcting Your Pushback (+9 more)
 
 ### Community 1500 - "Flask"
-Cohesion: 0.16
-Nodes (16): MegatronEngineConfig, Configuration for Megatron-LM training framework.     Refer to Megatron-LM docum, engine(), _create_engine(), get_gpu_memory_allocated_gb(), Integration tests for offload functionality in FSDP and Megatron engines using T, Run function in a subprocess with TMS environment configured., Get currently allocated GPU memory in GB. (+8 more)
+Cohesion: 0.42
+Nodes (7): sanitizeCopiedCodexConfig(), stripSkillsConfigEntries(), T, TestSanitizeCopiedCodexConfig(), TestSanitizeCopiedCodexConfigMissingFile(), TestSanitizeCopiedCodexConfigNoop(), TestStripSkillsConfigEntries()
 
 ### Community 1501 - "Fonttools"
-Cohesion: 0.11
-Nodes (11): AwexInferenceAdapter, Protocol, Tensor, Protocol for inference-side weight update adapters., Report parallelism strategy.          Returns dict with world_size, tp_size, pp_, Extract this worker's parameter shard metadata in awex format.          Returns, Return local shard tensors in canonical HF naming., Pull peer meta from KV store, build local recv plan, join NCCL group. (+3 more)
+Cohesion: 0.22
+Nodes (10): _build_adapter_config_dict(), convert_qwen3_lora_to_hf(), convert_qwen3_moe_lora_to_hf(), get_vllm_lora_target_modules(), _infer_target_modules_from_adapter_weights(), _monkey_patch_save_hf_adapter(), Tensor, Infer PEFT target_modules from adapter weight parameter names.      Extracts mod (+2 more)
 
 ### Community 1502 - "Granian"
-Cohesion: 0.20
-Nodes (12): workdirWalkOptions, allowedInitialMemoryPath(), allowedInitialNotePath(), appendSeedContextFile(), confinedWorkdirPath(), contentHash(), Daemon, mediaMime() (+4 more)
+Cohesion: 0.13
+Nodes (21): workdirWalkOptions, allowedInitialMemoryPath(), allowedInitialNotePath(), appendSeedContextFile(), confinedWorkdirPath(), contentHash(), Daemon, mediaMime() (+13 more)
 
 ### Community 1503 - "Gunicorn"
 Cohesion: 0.17
 Nodes (8): FakeTokenizer, test_tir_workflow_invokes_aexecute(), Any, Run a complete TIR inference episode.         :param engine: The inference engin, Generate response with tool call detection support, Detect if text ends with tool start marker, Tool-Integrated Reasoning Workflow for multi-turn tool calling., TIRWorkflow
 
 ### Community 1504 - "Hf"
-Cohesion: 0.16
-Nodes (10): AddResourceRoute(), Login(), Verify(), MulticaLogo(), MulticaLogoProps, OtpInput, OtpInputProps, TextField() (+2 more)
+Cohesion: 0.04
+Nodes (44): SelectWorkspace(), initialsOf(), initialsOf(), ProfileSettingsScreen(), SettingsPage(), THEME_OPTIONS, AddResourceRoute(), SwitchWorkspaceRoute() (+36 more)
 
 ### Community 1505 - "Huggingface Cli"
 Cohesion: 0.12
@@ -7103,12 +7119,12 @@ Cohesion: 0.18
 Nodes (16): add_message(), _execute_with_retry(), _get_client(), get_llm_messages(), _parse_messages(), Any, _query_messages_by_task(), Message-related database operations. (+8 more)
 
 ### Community 1509 - "Latex2Text"
-Cohesion: 0.14
-Nodes (15): GoogleLoginRequest, googleTokenResponse, googleUserInfo, LoginResponse, SendCodeRequest, SignupError, UpdateMeRequest, UserResponse (+7 more)
+Cohesion: 0.07
+Nodes (47): AgentCredentialResponse, CreateAgentCredentialRequest, CreateAgentCredentialResponse, sandboxContextKey, GenerateAgentCredentialToken(), GenerateAgentInboxDeliveryToken(), GenerateAgentTaskToken(), GenerateDaemonToken() (+39 more)
 
 ### Community 1510 - "Latexencode"
-Cohesion: 0.12
-Nodes (17): appendClassicStateEvent(), applyClassicTransition(), applyStateUpdate(), dateOnly(), green2(), openSpecChangeNameError(), preflight(), pushCheck() (+9 more)
+Cohesion: 0.18
+Nodes (10): Build, Code review, Environmental Constraints (honest disclosure), Fresh Verification Evidence (run this session), Full Verification Checklist, Invariant Review, Outcome, Scope (+2 more)
 
 ### Community 1511 - "Latexwalker"
 Cohesion: 0.12
@@ -7151,8 +7167,8 @@ Cohesion: 0.12
 Nodes (15): API, Branch and resume flow, Cleanup and concurrency, Collaboration trigger, Core invariants, Data model, EnvDispatch Message Channels Design, Error behavior (+7 more)
 
 ### Community 1521 - "Proton Viewer"
-Cohesion: 0.21
-Nodes (9): ClaimLarkInboundDedupParams, LarkInboundMessageDedup, fakeDedupRow, fakeEnqueuer, fakeQueries, ChatSession, LarkInstallation, UUID (+1 more)
+Cohesion: 0.39
+Nodes (5): config, LEGACY_ROUTE_SEGMENTS, nextWithLocale(), proxy(), resolveLocale()
 
 ### Community 1522 - "Pwiz"
 Cohesion: 0.12
@@ -7195,12 +7211,8 @@ Cohesion: 0.13
 Nodes (13): Common Mistakes (Same as TDD), GREEN Phase: Write Minimal Skill (Make It Pass), Meta-Testing (When GREEN Isn't Working), Overview, Quick Reference (TDD Cycle), Real-World Impact, RED Phase: Baseline Testing (Watch It Fail), TDD Mapping for Skill Testing (+5 more)
 
 ### Community 1532 - "Rqworker"
-Cohesion: 0.17
-Nodes (10): Module, Unwraps a model to the underlying GPTModel instance.      Handles both plain GPT, unwrap_to_gpt_model(), Test unwrap_to_gpt_model with VLM model structures., Plain GPTModel (no wrapping) should return itself., GPTModel wrapped in DDP (via .module) should unwrap correctly., VLM model (e.g. Qwen2_5VLModel) with .language_model attribute unwraps., VLM model wrapped in DDP should unwrap to language_model. (+2 more)
-
-### Community 1533 - "Serve"
-Cohesion: 0.16
-Nodes (15): askUser(), confidenceValue(), enumValue2(), hasEvidence(), hasRiskSignal(), isRecord(), nonNegativeIntegerValue(), optionalBooleanValue() (+7 more)
+Cohesion: 0.25
+Nodes (8): 4.1 看见、注意与执行是三件事, 4.2 每个大模型自己判断，贝克汉姆只处理例外, 4.3 明确指令优先于模型, 4.4 错误静默比多一次注意力判断更严重, 4.5 训练不能成为第一版上线前置条件, 4.6 主动发现不等于公开发言, 4.7 顺序由协作协议决定，CAS 只负责兜底, 4. 设计原则
 
 ### Community 1534 - "Tiny Agents"
 Cohesion: 0.13
@@ -7208,27 +7220,27 @@ Nodes (14): 0a. Output Language Constraint, 0b. Entry State Verification (Entry 
 
 ### Community 1535 - "Torchfrtrace"
 Cohesion: 0.18
-Nodes (14): AutopilotResponse, AutopilotRunResponse, CreateAutopilotRequest, CreateAutopilotTriggerRequest, SetSigningSecretRequest, UpdateAutopilotRequest, UpdateAutopilotTriggerRequest, AutopilotRun (+6 more)
+Nodes (6): Any, Get value for key under pair_name. Returns None if not found., Store value under pair_name/key., Delete key from pair. Returns True if key existed., Get size of set under pair_name/key. Returns 0 if not found., List all keys for a pair.
 
 ### Community 1536 - "Torchrun"
-Cohesion: 0.34
-Nodes (13): commentEventCapture, resolveTestFixture, captureCommentEvents(), commentResolved(), commentResolvedAt(), Mutex, T, Time (+5 more)
+Cohesion: 0.25
+Nodes (7): 1. Configuration and Core Mathematics, 2. FSDP Actor Candidate Statistics, 3. Frozen SGLang Reference Scoring, 4. Workflow Metadata and Episode Batching, 5. Combined VIMPO Training Objective, 6. Integration, Observability, and Verification, 7. Single-Change Scope Rationale
 
 ### Community 1537 - "Ttx"
-Cohesion: 0.25
-Nodes (10): WebhookDeliveryResponse, deliveryToResponse(), Autopilot, Handler, Header, RawMessage, ResponseWriter, WebhookDelivery (+2 more)
+Cohesion: 0.31
+Nodes (4): CreateSandboxInstanceParams, UpdateSandboxInstanceMetadataParams, SandboxInstance, scanSandboxInstance()
 
 ### Community 1538 - "Tune"
 Cohesion: 0.13
 Nodes (14): 0a. Output Language Constraint, 0b. Entry State Verification (Entry Check), 1. Scale Assessment, 1b. Automatic Verification Repair and Exception Decisions, 2. Artifact Context Loading (Hash On-Demand Read), 2a. Lightweight Verification (Small Changes), 2b. Full Verification (Large Changes), 3. Record Verification Evidence (+6 more)
 
 ### Community 1539 - "Typer"
-Cohesion: 0.25
-Nodes (14): T, TestBrewUpdateConfiguredIgnoresLegacyUpstreamTap(), TestFindChecksumManifestAsset(), TestFindReleaseAsset(), TestIsNewerVersion(), TestIsReleaseVersion(), TestParseChecksumManifest(), TestReleaseAssetCandidates() (+6 more)
+Cohesion: 0.29
+Nodes (8): DesktopAppInfo, DesktopRouteErrorPage(), formatRouteErrorReport(), normalizeError(), safeJson(), closeActiveTab, openModal, reloadActiveTab
 
 ### Community 1540 - "Virtualenv"
-Cohesion: 0.23
-Nodes (11): Time, EnvCheckpoint, EnvCheckpointRepository, EnvCheckpointService, InFlightTaskResolver, ProjectSnapshotReader, ResumeAgentRunner, ResumeFromCheckpointResult (+3 more)
+Cohesion: 0.25
+Nodes (5): Test ETP constraint validation in ArchonParallelDims., Test that etp must be 1 or equal to tp., Test that when etp=1, EP borrows from dp_shard * cp * tp., Test that when etp=tp, EP borrows from dp_shard * cp only (not tp)., TestETPValidation
 
 ### Community 1541 - "Watchfiles"
 Cohesion: 0.13
@@ -7243,16 +7255,16 @@ Cohesion: 0.13
 Nodes (14): 0a. Output Language Constraint, 0b. Entry State Verification (Entry Check), 1. Scale Assessment, 1b. Automatic Verification Repair and Exception Decisions, 2. Artifact Context Loading (Hash On-Demand Read), 2a. Lightweight Verification (Small Changes), 2b. Full Verification (Large Changes), 3. Record Verification Evidence (+6 more)
 
 ### Community 1544 - "Wsdump"
-Cohesion: 0.16
-Nodes (11): SessionData, Tests for logprobs injection in ``_call_client_create`` (sub-project E, task 9)., Non-logprobs errors surface as HTTPException(500) with no retry., Reset all module-level globals before each test., Insert a live SessionData into the cache and return it., Sub-project E task 9: ``_call_client_create`` injects ``logprobs=True``., ``logprobs=True`` is forwarded to ``create_fn``., Upstream rejection of ``logprobs`` triggers exactly one retry without it. (+3 more)
+Cohesion: 0.25
+Nodes (5): Test world size calculations with ETP configurations., Test 4 GPU configuration with EP+ETP., Test 4 GPU configuration with EP only (etp=1)., Test 8 GPU configuration with EP+ETP., TestETPWorldSizeCalculation
 
 ### Community 1545 - "U7.1 Report — InteractionDAGService records segments + edges"
 Cohesion: 0.14
 Nodes (13): 0. Entry State Verification (Entry Check), 0. Output Language Constraint, 1. Final Archive Confirmation (Blocking Point), 2. Execute Archive, 3. Lifecycle Closed Loop, 4. Commit Archive Changes with Exact Paths, 5. Handle the Branch After the Archive Commit, Comet Phase 5: Archive (Archive) (+5 more)
 
 ### Community 1546 - "seqpack.py"
-Cohesion: 0.16
-Nodes (8): _OnlineAgent, Any, Internal agent that waits for external user sessions.      Registers the assigne, Wait for an external user to complete a session.          Parameters         ---, Test that _OnlineAgent.run() returns CompletedSessionInfo on success.          M, Test that _OnlineAgent.run() raises on HTTP error., TestOnlineAgentInit, TestOnlineAgentRun
+Cohesion: 0.44
+Nodes (10): New(), T, TestEventFieldsPassedThrough(), TestPanicInHandlerDoesNotBreakOthers(), TestPublishDeliversToSubscribers(), TestPublishNoSubscribersIsNoop(), TestPublishOnlyMatchingType(), TestSubscribeAllCalledAfterTypeSpecific() (+2 more)
 
 ### Community 1547 - "TestChatBridgeResolveSessionKey"
 Cohesion: 0.33
@@ -7414,6 +7426,10 @@ Nodes (13): EnvDispatch Message Channels Implementation Plan, Execution checkpoi
 Cohesion: 0.14
 Nodes (13): 0. Entry State Verification (Entry Check), 0. Output Language Constraint, 1. Final Archive Confirmation (Blocking Point), 2. Execute Archive, 3. Lifecycle Closed Loop, 4. Commit Archive Changes with Exact Paths, 5. Handle the Branch After the Archive Commit, Comet Phase 5: Archive (Archive) (+5 more)
 
+### Community 1587 - "TestVersionEndpoints"
+Cohesion: 0.03
+Nodes (50): _create_areal_client(), _create_inf_bridge(), DataProxyConfig, InfBridge, PauseState, TokenizerProxy, Create an InfBridge instance from proxy config., Create an ArealOpenAI client backed by the given InfBridge. (+42 more)
+
 ### Community 1588 - "Translate Docs EN to ZH"
 Cohesion: 0.22
 Nodes (8): Error Handling, Input, Step 1: Validate the source path, Step 2: Resolve the target path, Step 3: Choose translation mode, Translate Docs EN to ZH, Translation Rules, Workflow
@@ -7423,16 +7439,16 @@ Cohesion: 0.22
 Nodes (8): 1. `module.submodule.FunctionOrClass`, 2. ..., Affected Files, API Usage Catalog, Primary (engine layer — most likely to break), Secondary (model / infra layer), Tertiary (tests, config), Version-Guarded Code
 
 ### Community 1590 - "cispo_loss_fn"
-Cohesion: 0.44
-Nodes (8): cispo_loss_fn(), CISPO (Clipped IS-weight Policy Optimization) loss from MiniMax-M1.      PPO/GRP, _inputs(), test_cispo_closed_form_value_and_clip_mask(), test_cispo_config_validation(), test_cispo_decoupled_applies_behave_imp_weight(), test_cispo_gradient_routes_through_logprobs_only(), test_cispo_rejects_nonpositive_eps_clip_higher()
+Cohesion: 0.25
+Nodes (5): Tests for kl_k1 metric (forward KL unbiased estimator, can be negative)., kl_k1 = log(r) can be negative when proximal < old., kl_k1 with high positive value should be filtered., kl_k1 should work at sequence level with mean aggregation., TestKLK1Metric
 
 ### Community 1591 - "AReaL Training Service CLI"
 Cohesion: 0.22
 Nodes (8): AReaL Training Service CLI, Basic concepts, Driver function conventions, Examples, Exit codes, Hydra overrides, Not implemented yet, Usage
 
 ### Community 1592 - "ForegroundWatcher"
-Cohesion: 0.30
-Nodes (12): larkPostContent, larkPostSpan, flattenContent(), flattenPostContent(), flattenPostParagraph(), T, TestFlattenContent_DispatchByType(), TestFlattenPostContent_AtPrefersResolvedName() (+4 more)
+Cohesion: 0.04
+Nodes (43): _check_health(), _find_free_port(), gateway_stack(), gateway_stack_vllm(), _get_test_model_path(), _has_gpu(), model_path(), Full-stack integration test: client → Gateway → Router → Data Proxy → SGLang.  R (+35 more)
 
 ### Community 1593 - "graphify reference: extra exports and benchmark"
 Cohesion: 0.22
@@ -7491,8 +7507,8 @@ Cohesion: 0.22
 Nodes (9): 下一步, 实现, 快速开始, 架构, 自定义工作流, 记录结果, 评估, 评估指标 (+1 more)
 
 ### Community 1607 - ".ListIssueReactions"
-Cohesion: 0.33
-Nodes (5): AddIssueReactionParams, RemoveIssueReactionParams, Queries, IssueReaction, UUID
+Cohesion: 0.22
+Nodes (10): _extract_bearer_token(), SessionData, SessionStore, Extract API token from Authorization header.      Raises HTTPException(401) if m, Validate that the request carries the admin API key., Resolve session_id from the session API key in the Authorization header., Resolve a session from the bearer token.      Session key → lookup by API key., _require_admin_key() (+2 more)
 
 ### Community 1608 - "auth-setup.ja.mdx"
 Cohesion: 0.22
@@ -7571,16 +7587,16 @@ Cohesion: 0.22
 Nodes (9): Kubernetes Deployment (Alternative), Step 1 — Point hostnames at the cluster, Step 2 — Create the namespace, Step 3 — Create the `multica-secrets` Secret, Step 4 — Install the chart, Step 5 — Log In, Step 6 — Install CLI & Start Daemon, Tearing down (+1 more)
 
 ### Community 1627 - "prepareTaskCLITransport"
-Cohesion: 0.20
-Nodes (9): ACTIVITY_CHROME_EN, ACTIVITY_LABEL_EN, ACTIVITY_SUBTEXT_EN, ActivityDotTone, activityPresentation, freshnessHoldDetail(), reasonText(), ActivityRow() (+1 more)
+Cohesion: 0.27
+Nodes (5): _extract_bearer_token(), _forwarding_headers(), Extract the bearer token from the Authorization header., Select headers to forward to the backend., TestHelpers
 
 ### Community 1628 - "sanitizeCopiedCodexConfig"
-Cohesion: 0.42
-Nodes (7): sanitizeCopiedCodexConfig(), stripSkillsConfigEntries(), T, TestSanitizeCopiedCodexConfig(), TestSanitizeCopiedCodexConfigMissingFile(), TestSanitizeCopiedCodexConfigNoop(), TestStripSkillsConfigEntries()
+Cohesion: 0.22
+Nodes (10): _extract_bearer_token(), SessionData, SessionStore, Extract API token from Authorization header.      Raises HTTPException(401) if m, Validate that the request carries the admin API key., Resolve session_id from the session API key in the Authorization header., Resolve a session from the bearer token.      Session key → lookup by API key., _require_admin_key() (+2 more)
 
 ### Community 1629 - "lark_test.go"
-Cohesion: 0.27
-Nodes (11): APIClient, T, TestBeginLarkInstall_NotConfigured(), TestGetLarkInstallStatus_NotConfigured(), TestListLarkInstallations_NotConfigured_HardCodedInstallSupportedFalse(), TestListLarkInstallations_NotConfiguredReturnsEmpty(), TestListLarkInstallations_StubClientReportsInstallNotSupported(), TestRedeemLarkBindingToken_NotConfigured() (+3 more)
+Cohesion: 0.29
+Nodes (8): create_app(), FastAPI, WeightUpdateConfig, extract_bearer_token(), require_admin_key(), Configuration for the weight update service., WeightUpdateConfig, main()
 
 ### Community 1630 - "Skill-importing source map"
 Cohesion: 0.22
@@ -7747,8 +7763,8 @@ Cohesion: 0.25
 Nodes (8): Phase 0: Documentation And Product Approval, Phase 1: Infrastructure, Phase 2: L1 Daily Recorder, Phase 3: L2 Review Extractor, Phase 4: L3 Promotion Writer, Phase 5: L4 Curator, Phase 6: Manual Trigger And UI Hooks, Rollout Plan
 
 ### Community 1671 - "index.ts"
-Cohesion: 0.23
-Nodes (10): Duration, RawMessage, EnvCheckpoint, Mutex, createCheckpointCall, EnvCheckpointCreateInput, EnvCheckpointStatus, fakeCheckpointRepo (+2 more)
+Cohesion: 0.38
+Nodes (6): CreatePinRequest, PinnedItemResponse, ReorderItem, ReorderPinsRequest, PinnedItem, pinnedItemToResponse()
 
 ### Community 1672 - "tasks.md"
 Cohesion: 0.25
@@ -7767,16 +7783,16 @@ Cohesion: 0.25
 Nodes (7): Capabilities, Impact, Modified Capabilities, New Capabilities, Non-goals, What Changes, Why
 
 ### Community 1676 - "TestTrainControllerWeightManagement"
-Cohesion: 0.25
-Nodes (4): Tests for weight management operations., Test set_version() method., Test get_version() method., TestTrainControllerWeightManagement
+Cohesion: 0.24
+Nodes (8): MetricFamily, T, TestNormalizePR3LabelsCollapseUnknownValues(), TestOnboardingStartedUnknownPlatformCollapses(), GatherForTest(), BusinessMetrics, T, SumAllCounters()
 
 ### Community 1677 - "Distributed Code Rules"
 Cohesion: 0.29
 Nodes (6): Common Pitfalls, Communication Patterns, Debugging, DeviceMesh & DTensor, Distributed Code Rules, Process Group Management
 
 ### Community 1678 - "Multi-Agent DAG Components (`agents/`)"
-Cohesion: 0.29
-Nodes (7): Branching and Environment Forking, Core DAG Model, Critic and Advantage Assembly, DAG Rollout Data Flow, Multi-Agent DAG Components (`agents/`), Orchestration Helpers, Verifier, Rewards, and Harvest
+Cohesion: 0.25
+Nodes (8): Branching and Environment Forking, Core DAG Model, Critic and Advantage Assembly, DAG Rollout Data Flow, Multi-Agent DAG Components (`agents/`), Orchestration Helpers, Per-Agent External Model Runtime, Verifier, Rewards, and Harvest
 
 ### Community 1679 - "Sequence Packing Algorithms"
 Cohesion: 0.29
@@ -7835,8 +7851,8 @@ Cohesion: 0.14
 Nodes (13): 0. Entry State Verification (Entry Check), 0. Output Language Constraint, 1. Final Archive Confirmation (Blocking Point), 2. Execute Archive, 3. Lifecycle Closed Loop, 4. Commit Archive Changes with Exact Paths, 5. Handle the Branch After the Archive Commit, Comet Phase 5: Archive (Archive) (+5 more)
 
 ### Community 1693 - "pinnedItemToResponse"
-Cohesion: 0.38
-Nodes (6): CreatePinRequest, PinnedItemResponse, ReorderItem, ReorderPinsRequest, PinnedItem, pinnedItemToResponse()
+Cohesion: 0.31
+Nodes (8): HandlerFunc, hasBearerToken(), hasForwardingHeader(), isDirectLoopbackRequest(), realtimeMetricsHandler(), T, TestRealtimeMetricsHandler_NoToken_LoopbackOnly(), TestRealtimeMetricsHandler_TokenRequired()
 
 ### Community 1694 - "PriceForModelAlias"
 Cohesion: 0.14
@@ -8011,16 +8027,12 @@ Cohesion: 0.14
 Nodes (13): 0. Entry State Verification (Entry Check), 0. Output Language Constraint, 1. Final Archive Confirmation (Blocking Point), 2. Execute Archive, 3. Lifecycle Closed Loop, 4. Commit Archive Changes with Exact Paths, 5. Handle the Branch After the Archive Commit, Comet Phase 5: Archive (Archive) (+5 more)
 
 ### Community 1737 - "avatar.tsx"
-Cohesion: 0.03
-Nodes (94): FSDPEngineConfig, OptimizerConfig, Configuration for model optimization during training., Configuration for Fully Sharded Data Parallel (FSDP) training backend., Construct an FSDPEngine directly without assembling a TrainEngineConfig., create_lr_scheduler(), create_optimizer(), Optimizer (+86 more)
+Cohesion: 0.01
+Nodes (282): FSDPParallelStrategy, ParallelStrategy, Data parallelism size for expert modules in MoE models., Tensor parallelism size (abbreviated)., Data parallelism size (abbreviated)., Context parallelism size (abbreviated)., Expert parallelism size (abbreviated)., Expert tensor parallelism size (abbreviated). (+274 more)
 
 ### Community 1738 - "activity-tab.test.tsx"
 Cohesion: 0.14
 Nodes (8): Test symbolic equivalence (e.g., 1/2 vs 0.5)., Test boxed answer format., Test incorrect answer., Test GSM8K reward function with math-verify., Test empty/missing answer., Test LaTeX mathematical expression., Test exact numerical match., TestGSM8KRewardFn
-
-### Community 1739 - "ListInstallableSkills"
-Cohesion: 0.43
-Nodes (5): checkQuickCreateCliVersion(), CliVersionCheck, CliVersionState, lessThan(), parseSemver()
 
 ### Community 1740 - "proposal.md"
 Cohesion: 0.29
@@ -8091,8 +8103,8 @@ Cohesion: 0.15
 Nodes (12): 0. Entry State Verification (Entry Check), 1. Create Plan (Subagent Offload), 2. Update Plan Status and Jointly Confirm Workflow Configuration, 3. Apply the Confirmed Workflow Configuration, 3b. In-Execution Debugging (Debug Gate), 4. Spec Incremental Updates, 5. Context Management, Automatic Handoff to Next Phase (+4 more)
 
 ### Community 1757 - "test_fp8_scale_layout.py"
-Cohesion: 0.38
-Nodes (5): isSilentNoReplyOutput(), isSilentNoReplyRationalePrefix(), normalizeSilentNoReplyOutput(), T, TestIsSilentNoReplyOutput()
+Cohesion: 0.44
+Nodes (8): cispo_loss_fn(), CISPO (Clipped IS-weight Policy Optimization) loss from MiniMax-M1.      PPO/GRP, _inputs(), test_cispo_closed_form_value_and_clip_mask(), test_cispo_config_validation(), test_cispo_decoupled_applies_behave_imp_weight(), test_cispo_gradient_routes_through_logprobs_only(), test_cispo_rejects_nonpositive_eps_clip_higher()
 
 ### Community 1758 - "AReaL_v0_1.md"
 Cohesion: 0.33
@@ -8184,7 +8196,7 @@ Nodes (6): 3.14 CLI 命令行工具, Agent / Skill / Autopilot / Project / Repo,
 
 ### Community 1780 - "3.4 Agent 智能体"
 Cohesion: 0.13
-Nodes (15): 3.13 设置与个人资料, 3.1 Workspace 工作区, 3.4 Agent 智能体, 3. 功能全景（按模块）, My Account 标签, Workspace 标签, 交互, 产品里的位置 (+7 more)
+Nodes (15): 3.1 Workspace 工作区, 3.3 Project 项目, 3.6 Skill 技能, 3. 功能全景（按模块）, CLI 对应命令, 产品里的位置, 产品里的位置, 产品里的位置 (+7 more)
 
 ### Community 1781 - "Automatic Pipeline"
 Cohesion: 0.33
@@ -8243,12 +8255,12 @@ Cohesion: 0.15
 Nodes (12): Bite-Sized Task Granularity, Execution Handoff, File Structure, No Placeholders, Overview, Plan Document Header, Remember, Scope Check (+4 more)
 
 ### Community 1795 - "Task 1 Report"
-Cohesion: 0.19
-Nodes (7): ParamTransferState, CPU and device copies of a parameter and its optimizer states for one H2D/D2H cy, H2D: copy layer's optimizer states (and params/grads if on CPU) to device., Run optimizer computation on device tensors for one layer., D2H: copy updated param data + optimizer states back to CPU.          Only copie, Mark device tensors as used by each *stream* for allocator safety.          Devi, Per-layer optimizer step with async prefetch pipeline.
+Cohesion: 0.29
+Nodes (6): Capabilities, Impact, Modified Capabilities, New Capabilities, What Changes, Why
 
 ### Community 1796 - "TestForkErrorHandling"
-Cohesion: 0.15
-Nodes (7): Any, Resume generation by calling the backend and clearing pause_state., Offload model memory on the backend inference server., Reload model memory on the backend inference server., Send an :class:`HttpRequest` and return the parsed JSON body.          Parameter, Generate a response for *req* via the configured backend.          Implements th, Pause generation by setting pause_state and calling the backend.
+Cohesion: 0.40
+Nodes (4): ActiveTeamKnowledgeForExecution, Queries, Timestamptz, UUID
 
 ### Community 1797 - "_MockAiohttpResponse"
 Cohesion: 0.33
@@ -8259,16 +8271,16 @@ Cohesion: 0.29
 Nodes (11): FetchSamplesRequest, BaseModel, WorkerEpochResetRequest, WorkerLoadDatasetRequest, WorkerStateLoadRequest, WorkerStateSaveRequest, WorkerUnloadDatasetRequest, _DatasetState (+3 more)
 
 ### Community 1799 - "TestGatewayAuth"
-Cohesion: 0.33
-Nodes (6): 1. Multica 是什么, 一句话定位, 定位一句话版本, 支持的 Coding Agent, 解决的问题, 部署形态
+Cohesion: 0.38
+Nodes (9): _node(), Tests for the unified MCTSTreeStore (trajectories holds SuperNodes).  SuperNodes, Single-agent path wraps Nodes in a leaf SuperNode; backup still walks     the pa, Nodes without an episode_id are backed up once per leaf (not once per     node)., _super(), test_backup_episode_terminal_walks_across_super_boundary(), test_insert_backup_empty_episode_id_backs_up_once_per_leaf(), test_insert_super_batch_indexes_super_and_node_levels() (+1 more)
 
 ### Community 1800 - "TestGatewayPauseContinue"
-Cohesion: 0.60
-Nodes (5): is_running_for_config(), scan_once(), watch-sandboxd.sh script, start_sandboxd(), usage()
+Cohesion: 0.31
+Nodes (8): CONFIG_FINGERPRINTS, is_running_for_config(), restart_sandboxd(), scan_once(), watch-sandboxd.sh script, start_sandboxd(), stop_sandboxd(), usage()
 
 ### Community 1801 - "app.py"
-Cohesion: 0.45
-Nodes (10): issueThreadBackflowEventForTest, issueThreadSystemEventParams, assertIssueThreadBackflowEvent(), assertIssueThreadBackflowReference(), MessagePart, T, loadIssueThreadBackflowEvents(), TestIssueThreadBackflowLeavesNonMembersUntargeted() (+2 more)
+Cohesion: 0.26
+Nodes (18): issueThreadBackflowEventForTest, assertIssueChannelEvent(), assertIssueChannelEventCount(), T, TestCreateIssueSourceMessageAnchorPersistsRootAndServesDetailRef(), TestCreateIssueWithGroupChannelDoesNotInferProjectAndCanClearAnchor(), TestIssueSourceChannelAgentTaskTokenSeesOwnAnchorAndPublishesAgentActor(), TestSourceExcerptReferencePartsKeepsOnlyWholeVisibleAnchors() (+10 more)
 
 ### Community 1802 - "8. Distillation Support"
 Cohesion: 0.40
@@ -8327,8 +8339,8 @@ Cohesion: 0.40
 Nodes (4): Additional Information, Background, Checklist, Potential Solution
 
 ### Community 1816 - "agentSkillSuggestionResponse"
-Cohesion: 0.31
-Nodes (5): ActivityLabelKey, evtBase(), holdDetail(), holdStatus(), statusEvent()
+Cohesion: 0.39
+Nodes (8): _ffd_allocate(), min_abs_diff_partition(), partition_balanced(), partition_balanced_tuples(), ndarray, A greedy allocation algorithm that partitions a list of numbers     into k group, Partition an array into k subarrays with a minimum absolute difference     of su, reorder_to_balanced_batches()
 
 ### Community 1817 - "Web Interface Guidelines"
 Cohesion: 0.40
@@ -8395,20 +8407,20 @@ Cohesion: 0.40
 Nodes (5): 3.8 Chat 对话, 产品里的位置, 功能, 和 Issue 评论的区别, 对应表
 
 ### Community 1833 - "6. 跨平台差异：Web vs 桌面"
-Cohesion: 0.40
-Nodes (4): dtype, Performs a single optimization step.          Args:             closure (callabl, Convert string to corresponding torch dtype, only supports bfloat16 and float32., to_precision_dtype()
+Cohesion: 0.22
+Nodes (8): AgentFilesResponse, ChannelProjectFileContentResponse, ChannelProjectFilesResponse, ProjectChannelResponse, setChannelProjectRequest, RawMessage, ListWorkdirFilesResponsePayload, WorkdirFileNode
 
 ### Community 1834 - "Role-Aware Initialization"
 Cohesion: 0.40
 Nodes (5): Engineering Agent, Generic Agent, HR / Onboarding Agent, e.g. Wendy/Cindy, Manager Agent, Role-Aware Initialization
 
 ### Community 1835 - "Direct messaging — source map"
-Cohesion: 0.40
-Nodes (4): Direct messaging — source map, Tests, The `multica dm` command, The server endpoint
+Cohesion: 0.33
+Nodes (6): 1. Multica 是什么, 一句话定位, 定位一句话版本, 支持的 Coding Agent, 解决的问题, 部署形态
 
 ### Community 1836 - "Direct-messaging a human"
-Cohesion: 0.40
-Nodes (4): Direct-messaging a human, DMs are human-only — never DM another agent, Send a DM, When to use it — and when not
+Cohesion: 0.33
+Nodes (6): 13.3 页面结构, Agents, Attention / Collaboration, Knowledge / Policies, Overview, 模型进化页签
 
 ### Community 1837 - "Subagent Progress Checkpoint — sub-project-g-multica-interaction-dag"
 Cohesion: 0.40
@@ -8427,8 +8439,8 @@ Cohesion: 0.25
 Nodes (7): Phase 0 — 角色骨架（不改运行时行为）, Phase 1 — 自动加入 + 回填 + 授权改判, Phase 2 — 迁移主动能力到贝克汉姆, Phase 3 — Wendy 收敛为 HR, 覆盖对照, 贝克汉姆（Beckham）群管理 Agent — 实施计划, 跨阶段验证
 
 ### Community 1841 - ".__init__"
-Cohesion: 0.50
-Nodes (3): Module, Optimizer, Initialize DCPState.          Args:             model_parts: Single model or lis
+Cohesion: 0.33
+Nodes (6): 5.1 群消息处理与全员注意力轮, 5.2 协作会话与轮次协议, 5.3 全员注意力判断与受控主动贡献协议, 5.4 Attention Probe 输出协议, 5.5 上下文过滤输出协议, 5. 目标架构
 
 ### Community 1842 - "graphify reference: add a URL and watch a folder"
 Cohesion: 0.50
@@ -8503,12 +8515,12 @@ Cohesion: 0.67
 Nodes (3): API, CLI, Manual Pipeline
 
 ### Community 1863 - "store.ts"
-Cohesion: 0.25
-Nodes (7): Tests for ModelResponse.output_top_logprobs field., ModelResponse should accept output_top_logprobs as list of list of tuples., Code that doesn't use output_top_logprobs should work unchanged., ModelResponse should default output_top_logprobs to None., test_model_response_backward_compatible_without_top_logprobs(), test_model_response_default_top_logprobs_is_none(), test_model_response_top_logprobs_assignment()
+Cohesion: 0.28
+Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
 
 ### Community 1864 - "TestIsReservedContentPath"
-Cohesion: 0.60
-Nodes (5): _get_json(), _post(), _post_json(), Any, ClientSession
+Cohesion: 0.39
+Nodes (8): branch_backup(), Node, MCTS-style value backup from a branch to its fork point (checkpoint node)., _node(), Tests for MCTS branch_backup (Task 3.3).  ``branch_backup`` propagates a discoun, test_branch_backup_preserves_existing_value_via_running_mean(), test_branch_return_updates_parent_value(), test_multiple_branches_aggregate()
 
 ### Community 1865 - "task-1.3-brief.md"
 Cohesion: 0.15
@@ -8519,8 +8531,8 @@ Cohesion: 0.15
 Nodes (12): 0. Dispatch Enforcement (Critical), 1. Dispatch Prompt and Return Contract, 2. Implementer Scope Restriction, 3. TDD Hard Constraint, 4. Durable Progress Checkpoint, 5. Review Mode Behavior, 6. Task Checkoff and Verification, Before Starting (+4 more)
 
 ### Community 1876 - "task-7-brief.md"
-Cohesion: 0.18
-Nodes (13): booleanValue(), classicStateFromDocument(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger(), nullableString() (+5 more)
+Cohesion: 0.33
+Nodes (5): Comet Design Handoff, openspec/changes/add-vimpo-critic-mode/design.md, openspec/changes/add-vimpo-critic-mode/proposal.md, openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md, openspec/changes/add-vimpo-critic-mode/tasks.md
 
 ### Community 1877 - "task-8-brief.md"
 Cohesion: 0.15
@@ -8539,8 +8551,8 @@ Cohesion: 0.15
 Nodes (12): 0. Dispatch Enforcement (Critical), 1. Dispatch Prompt and Return Contract, 2. Implementer Scope Restriction, 3. TDD Hard Constraint, 4. Durable Progress Checkpoint, 5. Review Mode Behavior, 6. Task Checkoff and Verification, Before Starting (+4 more)
 
 ### Community 1882 - "task-1.2-brief.md"
-Cohesion: 0.18
-Nodes (13): booleanValue(), classicStateFromDocument(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger(), nullableString() (+5 more)
+Cohesion: 0.25
+Nodes (5): editorRef, editorState, mockBlur, mockFocus, mockSetContent
 
 ### Community 1883 - "task-1-brief.md"
 Cohesion: 0.15
@@ -8583,48 +8595,48 @@ Cohesion: 0.15
 Nodes (12): 0. Output Language Constraint, 1. Quick Open (preset open), 2. Direct Build (preset build), 3. Root Cause Elimination Check, 4. Verification (preset verify), 5. Archive (preset archive), Automatic Handoff to Next Phase, Comet Preset Path: Hotfix (+4 more)
 
 ### Community 1893 - ".test_gsm8k_summation_notation"
-Cohesion: 0.60
-Nodes (5): _get_json(), _post(), _post_json(), Any, ClientSession
+Cohesion: 0.33
+Nodes (5): Brainstorm Summary, Confirmed Technical Approach, Key Trade-offs and Risks, Spec Patches, Testing Strategy
 
 ### Community 1894 - ".test_gsm8k_complex_exponent"
-Cohesion: 0.11
-Nodes (24): fakeTypingCreds, fakeTypingQueries, TypingIndicatorManager, TypingIndicatorQueries, TypingIndicatorState, APIClient, LarkInstallation, Logger (+16 more)
+Cohesion: 0.33
+Nodes (5): Comet Design Handoff, openspec/changes/add-vimpo-critic-mode/design.md, openspec/changes/add-vimpo-critic-mode/proposal.md, openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md, openspec/changes/add-vimpo-critic-mode/tasks.md
 
 ### Community 1895 - ".test_gsm8k_power_notation"
-Cohesion: 0.02
-Nodes (106): overlayPath(), PageviewTracker(), state, NotFound(), PageviewTracker(), { state, capturePageview }, captureDownloadIntent(), captureFeedbackOpened() (+98 more)
+Cohesion: 0.01
+Nodes (246): overlayPath(), PageviewTracker(), state, metadata, metadata, DownloadClient(), VersionInfoFooter(), DownloadPage() (+238 more)
 
 ### Community 1896 - ".test_gsm8k_matrix_determinant"
-Cohesion: 0.29
-Nodes (4): clientHandles, queryState, reconnect, wsHandlers
+Cohesion: 0.22
+Nodes (4): agent, mockEvents, MockIntersectionObserver, mockPaging
 
 ### Community 1897 - ".test_gsm8k_fraction_chain"
-Cohesion: 0.29
-Nodes (5): daemonSysProcAttr(), CancelFunc, SysProcAttr, notifyShutdownContext(), tailLogFile()
+Cohesion: 0.28
+Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
 
 ### Community 1898 - ".test_gsm8k_binomial_coefficient"
 Cohesion: 0.15
 Nodes (12): 0. Dispatch Enforcement (Critical), 1. Dispatch Prompt and Return Contract, 2. Implementer Scope Restriction, 3. TDD Hard Constraint, 4. Durable Progress Checkpoint, 5. Review Mode Behavior, 6. Task Checkoff and Verification, Before Starting (+4 more)
 
 ### Community 1899 - ".test_gsm8k_greek_letters_in_formula"
-Cohesion: 0.50
-Nodes (4): channelMemberSystemEventActorRef, channelMemberSystemEventParams, channelMemberSystemEventPart, channelMemberSystemEventCanonicalContent()
+Cohesion: 0.33
+Nodes (4): Tests that verify weight values are preserved after conversion., Get path to Qwen3-0.6B dense model., Test that adapter roundtrip preserves exact weight values., TestWeightComparisonAfterConversion
 
 ### Community 1900 - ".test_geometry3k_complex_angle_formula"
 Cohesion: 0.47
 Nodes (5): buildTree(), FileTree(), FileTreeNode, getFileIcon(), TreeNodeItem()
 
 ### Community 1901 - ".test_geometry3k_pythagorean_theorem"
-Cohesion: 0.04
-Nodes (75): BatchDeleteIssuesRequest, BatchUpdateIssuesRequest, ChannelIssuesResponse, CreateIssueRequest, groupedIssueRow, GroupedIssuesResponse, issueActorFilter, IssueAssigneeGroupResponse (+67 more)
+Cohesion: 0.33
+Nodes (4): Test PP combined with EP configurations., Test PP with EP when etp=1., Test PP with EP when etp=tp., TestPPWithEP
 
 ### Community 1902 - ".test_geometry3k_area_formula_latex"
-Cohesion: 0.18
-Nodes (13): booleanValue(), classicStateFromDocument(), enumValue(), has(), migrationVersion(), "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(), nonNegativeInteger(), nullableString() (+5 more)
+Cohesion: 0.28
+Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
 
 ### Community 1903 - ".test_gsm8k_absolute_value_complex"
-Cohesion: 0.23
-Nodes (7): AgentRequest, AgentResponse, EventEmitter, The single ``/run`` endpoint relays an agent's :class:`StreamResponse`     verba, Returns a :class:`StreamResponse` from ``run`` when the turn carries a     ``cha, _StreamAgent, TestWorkerRunStream
+Cohesion: 0.39
+Nodes (3): get_py_cmd(), Any, Convert the generation hyperparameters to a dictionary of arguments for OpenAI c
 
 ### Community 1904 - ".test_gsm8k_modulo_operation"
 Cohesion: 0.17
@@ -8639,60 +8651,52 @@ Cohesion: 0.17
 Nodes (11): Common Failures, Key Patterns, Overview, Rationalization Prevention, Red Flags - STOP, The Bottom Line, The Gate Function, The Iron Law (+3 more)
 
 ### Community 1959 - "test_kk_e2e.py"
-Cohesion: 0.67
-Nodes (3): T, TestMigration186UpContainsBindingAndTriggerConstraints(), TestResolveDirSkipsNonMigrationDirectory()
+Cohesion: 0.43
+Nodes (7): T, TestMigration186UpContainsBindingAndTriggerConstraints(), TestMigration198DownReversesDerivedAgentSchema(), TestMigration198UpAddsDerivedAgentLineageAndBindingState(), TestMigration200RetiresThreadProjectionAndDraftOptions(), TestMigration201ScopesFreshnessDraftsBySourceAndFailsClosed(), TestResolveDirSkipsNonMigrationDirectory()
 
 ### Community 1960 - "TestRewardEdgeCases"
-Cohesion: 0.17
-Nodes (12): Advanced: Skills with executable code, [Analysis Title], Anti-patterns to avoid, Avoid offering too many options, Avoid Windows-style paths, Conditional workflow pattern, Examples pattern, Executive summary (+4 more)
+Cohesion: 0.15
+Nodes (13): Advanced: Skills with executable code, [Analysis Title], Build evaluations first, Conditional workflow pattern, Develop Skills iteratively with the agent, Evaluation and iteration, Examples pattern, Executive summary (+5 more)
 
 ### Community 1961 - "TestAgentWorkflowDeprecation"
-Cohesion: 0.33
-Nodes (12): computeContextHash(), exists5(), firstLines(), handoffSourceFiles2(), hashFile2(), jsonEscape(), lineCount(), writeJsonContext() (+4 more)
+Cohesion: 0.25
+Nodes (7): Tests for ModelResponse.output_top_logprobs field., ModelResponse should accept output_top_logprobs as list of list of tuples., Code that doesn't use output_top_logprobs should work unchanged., ModelResponse should default output_top_logprobs to None., test_model_response_backward_compatible_without_top_logprobs(), test_model_response_default_top_logprobs_is_none(), test_model_response_top_logprobs_assignment()
 
 ### Community 1962 - "TestForkErrorHandling"
 Cohesion: 0.17
 Nodes (11): 0. Output Language Constraint, 1. Quick Open (preset open), 2. OpenSpec Apply Build (tweak-only preset build), 3. Verification (preset verify), 4. Archive (preset archive), Automatic Handoff to Next Phase, Comet Preset Path: Tweak, Continuous Execution Mode (+3 more)
 
 ### Community 1963 - ".load_state_dict"
-Cohesion: 0.23
-Nodes (9): _extract_messages(), message_timeline(), Return the message payload for one SuperNode-like object.      Flattens ``obj.no, Derived message-level view across SuperNodes in completion order.      Concatena, Tests for the message_timeline helper (Event class removed).  After the SuperNod, Build a SuperNode-like object with the fields message_timeline reads.      ``mes, _super(), test_message_timeline_does_not_mutate_source() (+1 more)
+Cohesion: 0.25
+Nodes (4): Tests for weight management operations., Test set_version() method., Test get_version() method., TestTrainControllerWeightManagement
 
 ### Community 1964 - "._handle_chat_task"
-Cohesion: 0.04
-Nodes (52): MultiTurnChatController, Controller for multi-turn chat with reflection between turns.      Handles the c, FakeChatWorker, _make_fake_completion(), TaskStatus, Worker, Integration tests for ScaffoldingLlm with full controller pipelines.  Tests veri, 50 per-task ScaffoldingLlm instances — stress test. (+44 more)
+Cohesion: 0.40
+Nodes (3): Any, Extract mathematical expression from <calculator> tags, Execute mathematical calculation
 
 ### Community 1965 - "channel_project.go"
-Cohesion: 0.23
-Nodes (9): FakeTokenizer, main(), Test tool manager error handling with real execution, Test TIR workflow initialization., test_data_loading(), test_tir_workflow(), test_tool_manager(), test_tool_manager_error_handling() (+1 more)
+Cohesion: 0.29
+Nodes (4): Any, Create an engine instance on a remote worker.          The engine parameter is a, Call a method on an engine instance running on a worker (data plane operation)., Async version of call_engine for calling engine methods asynchronously.
 
 ### Community 1966 - "layout.tsx"
-Cohesion: 0.21
-Nodes (9): agentSkillSuggestionDecisionRequest, AgentSkillSuggestionResponse, agentSkillSuggestionResponse(), Agent, Handler, RawMessage, ResponseWriter, UUID (+1 more)
+Cohesion: 0.60
+Nodes (4): agentSkillSuggestionDecisionRequest, AgentSkillSuggestionResponse, agentSkillSuggestionResponse(), RawMessage
 
 ### Community 1967 - "4. 系统架构全景"
-Cohesion: 0.40
-Nodes (5): 4. 系统架构全景, AI / LLM 在哪里, 分层职责, 后台任务, 实时层（WebSocket）
+Cohesion: 0.43
+Nodes (3): _prepare_local_vision_inputs(), Extract pixel values and grid_thw for this DP rank's assigned images., TestPrepareLocalVisionInputs
 
 ### Community 1968 - "BackfillRegionFromLegacyOverride"
 Cohesion: 0.21
 Nodes (11): bootstrapOnboardingNoRuntimeRequest, bootstrapOnboardingNoRuntimeResponse, bootstrapOnboardingRuntimeRequest, bootstrapOnboardingRuntimeResponse, claimStarterContentStateIfUnset(), enNoRuntimeIssueDescription(), Queries, Text (+3 more)
-
-### Community 1969 - "megatron_bridge_patches.py"
-Cohesion: 0.24
-Nodes (10): CachedRuntimeReleaseSource, RuntimeReleaseSource, IsReleaseVersion(), Duration, Mutex, Time, NewCachedRuntimeReleaseSource(), releaseHasAsset() (+2 more)
 
 ### Community 1972 - ".__init__"
 Cohesion: 0.17
 Nodes (11): 0. Output Language Constraint, 1. Quick Open (preset open), 2. OpenSpec Apply Build (tweak-only preset build), 3. Verification (preset verify), 4. Archive (preset archive), Automatic Handoff to Next Phase, Comet Preset Path: Tweak, Continuous Execution Mode (+3 more)
 
 ### Community 1973 - "use-comment-trigger-preview.ts"
-Cohesion: 0.27
-Nodes (8): CommentTriggerPreviewAgent, CommentTriggerChipsProps, commentTriggerPreviewSignature(), isNoteCommentDraft(), previewCommentTriggers, useCommentTriggerPreview(), UseCommentTriggerPreviewResult, useDebouncedSignature()
-
-### Community 1974 - "field.tsx"
-Cohesion: 0.18
-Nodes (3): Field(), FieldError(), fieldVariants
+Cohesion: 0.40
+Nodes (5): 13.1 目标, 13.2 后端 API, 13.4 指标定义, 13.5 验收标准, 13. 能力包 G：Evolution Center 自动化/协作进化页（PR-5）
 
 ### Community 1975 - "NewInMemoryModelListStore"
 Cohesion: 0.30
@@ -8727,20 +8731,20 @@ Cohesion: 0.18
 Nodes (10): 1. Checks, 2. Core Rules, 3. Attribution, 4. Common Patterns, 5. Prohibitions, Ambiguous Resume Intent, Code Changes During open/design, Dirty Worktree Protocol (+2 more)
 
 ### Community 1985 - "resolveCurrentChange"
-Cohesion: 0.24
-Nodes (11): assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch(), currentChange(), currentChangeFile(), parseSelection() (+3 more)
+Cohesion: 0.12
+Nodes (19): assertOpenSpecChangeName(), changeDirectory(), clearCurrentChange(), clearSelection(), currentBranch(), currentChange(), currentChangeFile(), green2() (+11 more)
 
 ### Community 1986 - "Dirty Worktree Protocol"
 Cohesion: 0.18
 Nodes (10): 1. Checks, 2. Core Rules, 3. Attribution, 4. Common Patterns, 5. Prohibitions, Ambiguous Resume Intent, Code Changes During open/design, Dirty Worktree Protocol (+2 more)
 
 ### Community 1987 - "larkFakeServer"
-Cohesion: 0.18
-Nodes (6): larkFakeServer, Int32, ResponseWriter, ServeMux, Server, Value
+Cohesion: 0.40
+Nodes (3): T, TestUnescapeBackslashEscapes(), UnescapeBackslashEscapes()
 
 ### Community 1989 - "updateReportDaemon"
-Cohesion: 0.45
-Nodes (10): Daemon, HandlerFunc, T, TestReportUpdateResult_AbortsOnContextCancel(), TestReportUpdateResult_DoesNotRetryOn4xx(), TestReportUpdateResult_GivesUpAfterAllAttemptsFail(), TestReportUpdateResult_RetriesOn500AndEventuallySucceeds(), TestReportUpdateResult_SendsCorrectPath() (+2 more)
+Cohesion: 0.38
+Nodes (4): fakeTypingCreds, fakeTypingQueries, LarkInstallation, UUID
 
 ### Community 1990 - "Dirty Worktree Protocol"
 Cohesion: 0.18
@@ -8771,8 +8775,8 @@ Cohesion: 0.20
 Nodes (10): Avoid deeply nested references, Naming conventions, Pattern 1: High-level guide with references, Pattern 2: Domain-specific organization, Pattern 3: Conditional details, Progressive disclosure patterns, Skill structure, Structure longer reference files with table of contents (+2 more)
 
 ### Community 1997 - "TestHelpers"
-Cohesion: 0.27
-Nodes (5): _extract_bearer_token(), _forwarding_headers(), Extract the bearer token from the Authorization header., Select headers to forward to the backend., TestHelpers
+Cohesion: 0.57
+Nodes (6): T, TestExistingSkillIdentityByNameReturnsIDAndName(), TestImportSkillOnConflictRenameCreatesSuffixedSkill(), TestImportSkillOnConflictSkipReturnsStructuredResult(), TestWriteSkillImportDuplicateConflictIncludesExistingSkill(), withMockClawHubImport()
 
 ### Community 2000 - "TestChatBridgeResolveSessionKey"
 Cohesion: 0.36
@@ -8791,16 +8795,16 @@ Cohesion: 0.20
 Nodes (9): Authored Zone (what you write), Dispatch Template, Inputs, Output Requirements, Required Claim, Responsibilities, Self-Check, Status Return (+1 more)
 
 ### Community 2004 - "TestRootWardBackup"
-Cohesion: 0.42
-Nodes (4): _make_node(), Wrap a list[Node] in a single leaf SuperNode for the single-agent path., TestRootWardBackup, _wrap_leaf()
+Cohesion: 0.53
+Nodes (5): build_sglang_cmd(), main(), Send a /generate request matching the teacher distill payload format., test_teacher_generate(), wait_for_server()
 
 ### Community 2005 - "_make_fake_completion"
-Cohesion: 0.22
-Nodes (6): _make_fake_completion(), Any, Task, Create a minimal fake ``ChatCompletion`` object., after_yield should create an interaction for each ChatTask., clear() should remove all traced data.
+Cohesion: 0.15
+Nodes (12): EnvDispatch Sandbox Runtime and Derived-Agent Provisioning Implementation Plan, File Structure, Global Constraints, Self-Review Results, Task 1: Persist binding identity, derived-agent lineage, and workflow state, Task 2: Make frontend and env-dispatch share sandbox creation, Task 3: Discover the registered runtime and create an isolated derived agent, Task 4: Add backward-compatible `session_ref` training bootstrap and real-task linkage (+4 more)
 
 ### Community 2006 - "agentRadarRunToResponse"
-Cohesion: 0.27
-Nodes (8): AgentRadarActionResponse, AgentRadarRunResponse, ListAgentRadarRunsResponse, agentRadarRunToResponse(), AgentRadarAction, AgentRadarRun, Handler, ResponseWriter
+Cohesion: 0.07
+Nodes (17): AwexMegatronAdapter, AwexTrainingAdapter, ParameterMeta, RankInfo, Tensor, Awex training adapter for MegatronEngine supporting DP, TP, and PP.      PP: get, AwexTrainingAdapter, Protocol (+9 more)
 
 ### Community 2007 - "Skill Core Author Subagent"
 Cohesion: 0.20
@@ -8815,8 +8819,8 @@ Cohesion: 0.20
 Nodes (9): Authored Zone (what you write), Dispatch Template, Inputs, Output Requirements, Required Claim, Responsibilities, Self-Check, Status Return (+1 more)
 
 ### Community 2010 - "TestOnboardingStartedUnknownPlatformCollapses"
-Cohesion: 0.24
-Nodes (8): MetricFamily, T, TestNormalizePR3LabelsCollapseUnknownValues(), TestOnboardingStartedUnknownPlatformCollapses(), GatherForTest(), BusinessMetrics, T, SumAllCounters()
+Cohesion: 0.47
+Nodes (4): GetEnabledSandboxBindingParams, SandboxWorkspaceBinding, UpsertSandboxWorkspaceBindingParams, scanSandboxWorkspaceBinding()
 
 ### Community 2011 - "Skill Core Author Subagent"
 Cohesion: 0.20
@@ -8879,8 +8883,8 @@ Cohesion: 0.22
 Nodes (8): CometIntentFrame Field Reference, `context`, `evidence`, `intent`, `proposed_route`, Routing Notes, `slots`, Top-Level Fields
 
 ### Community 2026 - "discoverActiveChanges"
-Cohesion: 0.28
-Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
+Cohesion: 0.50
+Nodes (4): 3.13 设置与个人资料, My Account 标签, Workspace 标签, 产品里的位置
 
 ### Community 2027 - "Skill authoring best practices"
 Cohesion: 0.22
@@ -8923,20 +8927,20 @@ Cohesion: 0.22
 Nodes (8): CometIntentFrame Field Reference, `context`, `evidence`, `intent`, `proposed_route`, Routing Notes, `slots`, Top-Level Fields
 
 ### Community 2037 - "messageparts.go"
-Cohesion: 0.39
-Nodes (8): structuredVisibleMessage, Decode(), FallbackContent(), findEmbeddedStructuredMessageSend(), firstNonEmpty(), MessagePart, matchingJSONObjectEnd(), normalizePart()
+Cohesion: 0.50
+Nodes (4): 12.5 训练方案, 12.6 预算策略, 12.7 验收标准, 6. PR 拆分总览
 
 ### Community 2038 - "actor-avatar.test.tsx"
-Cohesion: 0.22
-Nodes (8): AgentPresenceOverlay(), HealthResult, healthSummaryMock, openFromContextMock, openFromStoreMock, openInNewTabMock, PresenceDetail, presenceDetailMock
+Cohesion: 0.08
+Nodes (29): agentHealthOptions(), AgentHealthResult, useAgentHealth(), AgentHealthEvent, AgentHealthState, AgentHealthSummary, HealthBlock(), HealthBlockView() (+21 more)
 
 ### Community 2039 - "cmd_autopilot_test.go"
-Cohesion: 0.39
-Nodes (8): Command, T, newAutopilotCreateTestCmd(), newAutopilotUpdateTestCmd(), TestResolveAgent(), TestRunAutopilotCreateSendsProjectID(), TestRunAutopilotUpdateSendsProjectIDChanges(), TestUUIDRegexp()
+Cohesion: 0.40
+Nodes (5): AgentEnvResponse, envAudit, UpdateAgentEnvRequest, mergeAgentEnv(), sortedKeys()
 
 ### Community 2040 - "advanceNextRun"
-Cohesion: 0.42
-Nodes (7): advanceNextRun(), Queries, recoverLostTriggers(), runAutopilotScheduler(), tickScheduledAutopilots(), ComputeNextRun(), Time
+Cohesion: 0.29
+Nodes (6): Capabilities, Impact, Modified Capabilities, New Capabilities, What Changes, Why
 
 ### Community 2041 - "Pause Point Author Subagent"
 Cohesion: 0.22
@@ -8955,8 +8959,8 @@ Cohesion: 0.22
 Nodes (8): CometIntentFrame Field Reference, `context`, `evidence`, `intent`, `proposed_route`, Routing Notes, `slots`, Top-Level Fields
 
 ### Community 2045 - "discoverActiveChanges"
-Cohesion: 0.28
-Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
+Cohesion: 0.50
+Nodes (4): 15. 分阶段发布, 阶段一：快速可用, 阶段三：参数自进化, 阶段二：协作经验自进化
 
 ### Community 2046 - "Pause Point Author Subagent"
 Cohesion: 0.22
@@ -8973,10 +8977,6 @@ Nodes (8): Dispatch Template, Inputs, Output Requirements, Required Claims, Resp
 ### Community 2049 - "CometIntentFrame Field Reference"
 Cohesion: 0.22
 Nodes (8): CometIntentFrame Field Reference, `context`, `evidence`, `intent`, `proposed_route`, Routing Notes, `slots`, Top-Level Fields
-
-### Community 2050 - "discoverActiveChanges"
-Cohesion: 0.28
-Nodes (9): changeSearchText(), diagnosticFromProjection(), discoverActiveChanges(), fileExists3(), hasOpenSpecChangeFiles(), isNotFoundError(), nextCommandForPhase2(), readDir() (+1 more)
 
 ### Community 2051 - "Authoring Subagents Overview"
 Cohesion: 0.25
@@ -9015,12 +9015,12 @@ Cohesion: 0.25
 Nodes (7): Any-Entry Recovery Principle, Build Phase Special Recovery, Context Compression Recovery Protocol, Design Phase Special Recovery, Recovery Steps, Recovery Without Explicit `/comet`, Verify/Archive Phase Recovery
 
 ### Community 2060 - "runUpdate"
-Cohesion: 0.32
-Nodes (6): Command, runUpdate(), BrewPackage(), IsBrewUpdateConfigured(), IsLegacyBrewPackage(), UpdateViaBrew()
+Cohesion: 0.02
+Nodes (131): ParamSpec, init_custom_process_group(), # NOTE: This code relies on vLLM private APIs: _adapter_manager, _registered_ada, _check_fp8_shard_compatibility(), _consolidate_shards_distributed(), DCPState, _get_merged_state_dict(), load_from_dcp() (+123 more)
 
 ### Community 2061 - "setupEnvDispatchChannelStoreFixture"
-Cohesion: 0.57
-Nodes (7): T, projectIDForEnvDispatchStoreFixture(), setupEnvDispatchChannelStoreFixture(), TestEnvDispatchChannelStoreClaimProvisioningIsSingleWinner(), TestEnvDispatchChannelStoreMarkDeletingBlocksProvisioning(), TestEnvDispatchChannelStoreRejectsTriggerAgentOutsideChannel(), validEnvCollaborationTrigger()
+Cohesion: 0.67
+Nodes (3): 0.1 已提交, 0.2 验证状态, 0. 实施状态更新（2026-07-19）
 
 ### Community 2062 - "Comet Any - Skill Creator"
 Cohesion: 0.25
@@ -9070,10 +9070,6 @@ Nodes (6): Archive script, Auto state update, Compatibility, Recovery, and Inter
 Cohesion: 0.29
 Nodes (7): 1. Explicit Negation in Rules, 2. Entry in Rationalization Table, 3. Red Flag Entry, 4. Update description, Plugging Each Hole, Re-verify After Refactoring, REFACTOR Phase: Close Loopholes (Stay Green)
 
-### Community 2074 - ".init_weights_update_group"
-Cohesion: 0.29
-Nodes (4): Future, Initialize the weight update process group for distributed weight updates., Update weights in the inference engine in a non-blocking manner.          Parame, Update weights in the inference engine from disk in a non-blocking manner.
-
 ### Community 2075 - "Authored Zone Quality Bar (example)"
 Cohesion: 0.29
 Nodes (6): Anti-patterns (do not write), Authored Zone Quality Bar (example), Example: a `substance` node Guidance zone (workflow-kernel), Example: an entry Decision Core (workflow-entry), substance vs delegates, What "Auto" vs "Authored" means
@@ -9087,8 +9083,8 @@ Cohesion: 0.29
 Nodes (6): Archive script, Auto state update, Compatibility, Recovery, and Internal Command Bootstrap, Public Workflow Contract, Resolve next action, Stable CLI and Internal Script Compatibility
 
 ### Community 2078 - ".setChannelAgentMuted"
-Cohesion: 0.48
-Nodes (3): Handler, ResponseWriter, UUID
+Cohesion: 0.33
+Nodes (6): 3.4 Agent 智能体, 交互, 产品里的位置, 对应表, 状态, 配置字段
 
 ### Community 2079 - "Authored Zone Quality Bar (example)"
 Cohesion: 0.29
@@ -9101,10 +9097,6 @@ Nodes (6): Built-In Comet Nodes, Bundle Authoring Reference, CLI Lifecycle, Gene
 ### Community 2081 - "Stable CLI and Internal Script Compatibility"
 Cohesion: 0.29
 Nodes (6): Archive script, Auto state update, Compatibility, Recovery, and Internal Command Bootstrap, Public Workflow Contract, Resolve next action, Stable CLI and Internal Script Compatibility
-
-### Community 2082 - "skill_import_duplicate_test.go"
-Cohesion: 0.57
-Nodes (6): T, TestExistingSkillIdentityByNameReturnsIDAndName(), TestImportSkillOnConflictRenameCreatesSuffixedSkill(), TestImportSkillOnConflictSkipReturnsStructuredResult(), TestWriteSkillImportDuplicateConflictIncludesExistingSkill(), withMockClawHubImport()
 
 ### Community 2083 - "Authored Zone Quality Bar (example)"
 Cohesion: 0.29
@@ -9180,7 +9172,7 @@ Nodes (5): `AskUserQuestion` Priority Strategy, Core Rules, Decision Point Proto
 
 ### Community 2101 - ".arun_episode"
 Cohesion: 0.33
-Nodes (4): Any, PreTrainedTokenizerFast, Tensor, Run a single search-agent episode.          Parameters         ----------
+Nodes (5): Comet Design Handoff, openspec/changes/env-dispatch-agent-runtime-config/design.md, openspec/changes/env-dispatch-agent-runtime-config/proposal.md, openspec/changes/env-dispatch-agent-runtime-config/specs/env-dispatch-agent-runtime-config/spec.md, openspec/changes/env-dispatch-agent-runtime-config/tasks.md
 
 ### Community 2102 - "Eval Evidence Reference"
 Cohesion: 0.33
@@ -9194,21 +9186,17 @@ Nodes (5): .comet.yaml Field Reference, Example, Optional Fields, Required Field
 Cohesion: 0.33
 Nodes (5): `AskUserQuestion` Priority Strategy, Core Rules, Decision Point Protocol, First Decide Whether User Input Is Actually Required, Minimum Presentation Requirements
 
-### Community 2105 - "frontmatter.ts"
-Cohesion: 0.40
-Nodes (3): ParsedFrontmatter, parseFrontmatter(), SkillFrontmatter
-
 ### Community 2106 - "capability-banner.tsx"
-Cohesion: 0.40
-Nodes (5): CapabilityBanner(), getCopy(), Reason, Resource, RESOURCE_NOUN
+Cohesion: 0.33
+Nodes (5): Brainstorm Summary, Confirmed Technical Approach, Key Trade-offs and Risks, Spec Patches, Testing Strategy
 
 ### Community 2107 - "TestTaskExecutionConfigPreservesExistingContext"
-Cohesion: 0.53
-Nodes (5): containsJSONKey(), T, TestTaskExecutionConfigHandlesNullContext(), TestTaskExecutionConfigLegacyContextFallsBack(), TestTaskExecutionConfigPreservesExistingContext()
+Cohesion: 0.33
+Nodes (5): Comet Design Handoff, openspec/changes/env-dispatch-agent-runtime-config/design.md, openspec/changes/env-dispatch-agent-runtime-config/proposal.md, openspec/changes/env-dispatch-agent-runtime-config/specs/env-dispatch-agent-runtime-config/spec.md, openspec/changes/env-dispatch-agent-runtime-config/tasks.md
 
 ### Community 2108 - "ParseSkillFrontmatter"
-Cohesion: 0.40
-Nodes (4): coerceFrontmatterValue(), ParseSkillFrontmatter(), T, TestParseSkillFrontmatter()
+Cohesion: 0.22
+Nodes (8): 1. Persistence and Identity, 2. Shared Sandbox Creation, 3. Runtime Discovery and Readiness, 4. Credentials and Training Sessions, 5. Derived Global Agent, 6. Provisioning Orchestration, 7. Cleanup, 8. Client and Verification
 
 ### Community 2109 - "Eval Evidence Reference"
 Cohesion: 0.33
@@ -9290,9 +9278,9 @@ Nodes (5): GREEN: Write Minimal Skill, Micro-Test Wording Before Full Scenarios,
 Cohesion: 0.40
 Nodes (5): Key Elements of Good Scenarios, Pressure Types, Testing Setup, VERIFY GREEN: Pressure Testing, Writing Pressure Scenarios
 
-### Community 2129 - ".arun_episode"
-Cohesion: 0.40
-Nodes (3): Any, Run a single episode of the workflow.          Note         ----         Returni, Run an agent with any SDK, e.g., OpenAI SDK.          `data` contains the input
+### Community 2129 - "TestProxyServerEndpoints"
+Cohesion: 0.33
+Nodes (4): Test proxy server HTTP endpoints directly., Test that stale sessions are cleaned up., Test SessionData class methods., TestProxyServerEndpoints
 
 ### Community 2130 - "Automatic Handoff to Next Phase Protocol"
 Cohesion: 0.40
@@ -9302,17 +9290,17 @@ Nodes (4): Automatic Handoff to Next Phase Protocol, Execution, Preset Routing, 
 Cohesion: 0.40
 Nodes (4): Core Rules, Debug Gate Protocol, Four-Stage Flow, Parallel Investigation of Multiple Failures
 
-### Community 2132 - "IsBrewInstall"
-Cohesion: 0.40
-Nodes (4): GetBrewPrefix(), IsBrewInstall(), MatchKnownBrewPrefix(), UpdateViaDownload()
+### Community 2132 - "TestGatewaySessionLifecycle"
+Cohesion: 0.33
+Nodes (4): Test full RL session lifecycle through the gateway stack., start_session → chat → set_reward(finish=True) → export_trajectories., Verify that session key routes to the same data proxy (pinned worker)., TestGatewaySessionLifecycle
 
-### Community 2133 - "大型 MoE 模型微调"
-Cohesion: 0.40
-Nodes (5): Bridge 后端选择, MoE 并行策略, 启用 Megatron 后端, 大型 MoE 模型微调, 对齐推理和训练精度
+### Community 2133 - "TestGatewayAuth"
+Cohesion: 0.33
+Nodes (4): Test authentication enforcement through the gateway., Requests without Authorization header are rejected., Non-admin key on admin-only endpoints is rejected with 403., TestGatewayAuth
 
-### Community 2134 - ".execute"
-Cohesion: 0.40
-Nodes (3): Any, Extract mathematical expression from <calculator> tags, Execute mathematical calculation
+### Community 2134 - "TestGatewayPauseContinue"
+Cohesion: 0.33
+Nodes (4): Test pause/continue generation through the gateway (targets worker by ID)., Pause → verify data proxy paused → Continue → verify resumed → chat works., Pause SGLang while /chat/completions is in-flight through gateway., TestGatewayPauseContinue
 
 ### Community 2135 - "Automatic Handoff to Next Phase Protocol"
 Cohesion: 0.40
@@ -9322,13 +9310,17 @@ Nodes (4): Automatic Handoff to Next Phase Protocol, Execution, Preset Routing, 
 Cohesion: 0.40
 Nodes (4): Core Rules, Debug Gate Protocol, Four-Stage Flow, Parallel Investigation of Multiple Failures
 
+### Community 2137 - "to_precision_dtype"
+Cohesion: 0.40
+Nodes (4): dtype, Performs a single optimization step.          Args:             closure (callabl, Convert string to corresponding torch dtype, only supports bfloat16 and float32., to_precision_dtype()
+
 ### Community 2138 - "layout.tsx"
 Cohesion: 0.40
-Nodes (3): instrumentSerif, jsonLd, notoSerifSC
+Nodes (5): pause_backend(), AsyncClient, Call SGLang POST /pause_generation to abort in-flight requests., Call SGLang POST /continue_generation to resume inference., resume_backend()
 
 ### Community 2139 - "UnescapeBackslashEscapes"
-Cohesion: 0.40
-Nodes (3): T, TestUnescapeBackslashEscapes(), UnescapeBackslashEscapes()
+Cohesion: 0.60
+Nodes (5): _get_json(), _post(), _post_json(), Any, ClientSession
 
 ### Community 2140 - "Automatic Handoff to Next Phase Protocol"
 Cohesion: 0.40
@@ -9346,13 +9338,13 @@ Nodes (4): Automatic Handoff to Next Phase Protocol, Execution, Preset Routing, 
 Cohesion: 0.40
 Nodes (4): Core Rules, Debug Gate Protocol, Four-Stage Flow, Parallel Investigation of Multiple Failures
 
-### Community 2144 - "ResumeTrigger"
+### Community 2144 - "_get_json"
 Cohesion: 0.60
-Nodes (3): fakeInFlightResolver, fakeResumeAgentRunner, ResumeTrigger
+Nodes (5): _get_json(), _post(), _post_json(), Any, ClientSession
 
-### Community 2145 - "admin_headers"
+### Community 2145 - "大型 MoE 模型微调"
 Cohesion: 0.40
-Nodes (3): admin_headers(), Admin key → standalone mode, returns valid response., Session key callers still use the session-based flow.
+Nodes (5): Bridge 后端选择, MoE 并行策略, 启用 Megatron 后端, 大型 MoE 模型微调, 对齐推理和训练精度
 
 ### Community 2146 - "codex-tools.md"
 Cohesion: 0.50
@@ -9363,8 +9355,8 @@ Cohesion: 0.50
 Nodes (3): Pi Tool Mapping, Subagents, Task lists
 
 ### Community 2148 - "Evaluation and iteration"
-Cohesion: 0.50
-Nodes (4): Build evaluations first, Develop Skills iteratively with the agent, Evaluation and iteration, Observe how agents navigate Skills
+Cohesion: 0.40
+Nodes (3): _make_fake_completion(), TaskStatus, Create a minimal fake ChatCompletion object.
 
 ### Community 2149 - "Checklist for effective Skills"
 Cohesion: 0.50
@@ -9387,72 +9379,40 @@ Cohesion: 0.50
 Nodes (4): Example: TDD Skill Bulletproofing, Initial Test (Failed), Iteration 1 - Add Counter, Iteration 2 - Add Foundational Principle
 
 ### Community 2154 - "SwanlabConfig"
-Cohesion: 0.50
-Nodes (3): Configuration for SwanLab experiment tracking and monitoring., Validate SwanLab configuration., SwanlabConfig
+Cohesion: 0.40
+Nodes (5): 6. 跨平台差异：Web vs 桌面, Web 特有, 为什么两端要做差异, 共享（绝大部分功能）, 桌面特有
 
-### Community 2155 - "TestWorkflow"
-Cohesion: 0.50
-Nodes (3): Any, Simple test workflow for testing RolloutWorkflow functionality., TestWorkflow
+### Community 2155 - "env_dispatch_clone_adapter_test.go"
+Cohesion: 0.60
+Nodes (4): T, TestEnvDispatchCloneAdapterExecFallsBackToHandlerDB(), TestEnvDispatchCloneAdapterLoadSourceAgentNotFound(), TestEnvDispatchCloneAdapterSetBindingDerivedAgentMissingBinding()
 
-### Community 2159 - "rewriteGitHubTransport"
-Cohesion: 0.50
-Nodes (3): rewriteGitHubTransport, RoundTripper, URL
+### Community 2156 - "TestGatewayVLLM"
+Cohesion: 0.40
+Nodes (3): Admin key non-streaming /chat/completions through full vLLM stack., Full RL lifecycle through vLLM gateway stack., TestGatewayVLLM
 
-### Community 2160 - "subscriberToResponse"
+### Community 2160 - "Anti-patterns to avoid"
 Cohesion: 0.67
-Nodes (3): SubscriberResponse, IssueSubscriber, subscriberToResponse()
-
-### Community 2162 - "daemon-reauth.test.ts"
-Cohesion: 0.50
-Nodes (3): daemonAPI, { mockGetState, logout }, { toastError }
-
-### Community 2163 - "3.3 Project 项目"
-Cohesion: 0.50
-Nodes (4): 3.3 Project 项目, 产品里的位置, 功能, 对应表
-
-### Community 2164 - "TestTaskWakeupURL"
-Cohesion: 0.67
-Nodes (3): T, TestTaskWakeupURL(), TestWSHeartbeatFreshnessSuppressesHTTP()
-
-### Community 2165 - "TestResolveProjectWorkdirRuntime_OfflineSharedDaemon"
-Cohesion: 0.67
-Nodes (3): T, TestResolveProjectWorkdirRuntime_OfflineSharedDaemon(), TestResolveProjectWorkdirRuntime_SharedRuntime()
-
-### Community 2166 - "TestTaskToResponseMapsArealProxyFromContext"
-Cohesion: 0.67
-Nodes (3): T, TestTaskToResponseMapsArealProxyFromContext(), TestTaskToResponseNoArealProxyForNormalTask()
-
-### Community 2167 - "radarReplayRecorder"
-Cohesion: 0.67
-Nodes (3): AgentRadarRun, Mutex, radarReplayRecorder
-
-### Community 2168 - "shouldCreateEvolutionDeliveryMatch"
-Cohesion: 0.50
-Nodes (4): shouldCreateEvolutionDeliveryMatch(), TestScoreEvolutionDeliveryTargetPrefersSubmissionMetadata(), TestShouldCreateEvolutionDeliveryMatchAllowsComplementaryMetadata(), TestShouldCreateEvolutionDeliveryMatchRejectsSingleBroadDimension()
-
-### Community 2169 - "evolution_skill_catalog_test.go"
-Cohesion: 0.67
-Nodes (3): UUID, agentSkillAssignMockDB, agentSkillBinding
+Nodes (3): Anti-patterns to avoid, Avoid offering too many options, Avoid Windows-style paths
 
 ## Knowledge Gaps
-- **10718 isolated node(s):** `crypto`, `http`, `fs`, `path`, `OPCODES` (+10713 more)
+- **11044 isolated node(s):** `crypto`, `http`, `fs`, `path`, `OPCODES` (+11039 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **181 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **184 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Context` connect `Generated Handler Queries` to `Generated Queries Issue`, `Handler Project Resource`, `Virtualenv`, `Handler Multica Server`, `Ui Multica Packages`, `setupEnvDispatchChannelStoreFixture`, `Ai Assisted Harness`, `Handler Multica Server`, `Generated Queries Webhook`, `Generated Queries Task`, `Conventions Docs Multica`, `Handler Multica Server`, `Handler Multica Server`, `.setChannelAgentMuted`, `Secretbox Multica Server`, `Multica Server Logger`, `Generated Queries Invitation`, `Handler Server Multica`, `Multica Server Jobs`, `Handler Agent Multica`, `Handler Multica Server`, `Handler Multica Server`, `Daemon Multica Server`, `Handler Multica Server`, `Cmd Multica Server`, `Handler Multica Server`, `Storage S3Storage S3`, `Handler Multica Server`, `.ListIssueReactions`, `Handler Multica Server`, `Page Multica Squads`, `Handler Multica Server`, `Lark Multica Server`, `Server Rerun Session`, `Service Multica Server`, `Agent Multica Server`, `Agent Multica Server`, `ResumeTrigger`, `Multica Cmd Server`, `Tree Treesearch Bugfixes`, `Agent Multica Server`, `Pair Registry V2`, `Service Interaction Dag`, `Daemon Workdir Files`, `Service Evolution Multica`, `.copyEnvDispatchChannel`, `Generated Queries Runtime`, `Handler Multica Server`, `Cmd Multica Attachment`, `Server Scope Authorizer`, `radarReplayRecorder`, `Agent Openclaw Multica`, `Daemon Client Multica`, `Lark Ws Multica`, `Server Multica Migrate`, `Generated Queries Sandbox`, `Handler Runtime Local`, `Server Multica Cmd`, `index.ts`, `Generated Environment Queries`, `Generated Queries Multica`, `Batch Consistency Suite`, `Service Experimental Gateway`, `Handler Multica Server`, `Lark Multica Server`, `Icepop Kpop Masking`, `Service Autopilot Multica`, `Claude Skill Rules`, `Handler Github Files`, `Handler Runtime Liveness`, `Generated Queries Autopilot`, `Daemon Multica Server`, `Handler Multica Server`, `Server Listeners Multica`, `Onboarding Multica Server`, `Multica Server Service`, `Gateway Integration Service`, `Generated Env Checkpoint`, `Lark Multica Server`, `Memorycuration Evidence Multica`, `Multica Server Agent`, `Memorycuration Shared Multica`, `Agent Multica Server`, `Handler Agent Radar`, `Jobs Agent Radar`, `Server Multica Client`, `Handler Dm Multica`, `Handler Multica Server`, `Workgraph Multica Server`, `Cmd Multica Daemon`, `Generated Queries Verification`, `Handler Onboarding Shim`, `Handler Agent Activity`, `Generated Queries Comment`, `Server Multica Cmd`, `Server Health Multica`, `Storage Localstorage Local`, `Parallel Experimental Archon`, `Server Metrics Multica`, `Megatron Lora Areal`, `Service Multica Server`, `Handler Runtime Multica`, `Service Diagnosis Multica`, `Service Review Evolution`, `Handler Mention Trigger`, `Lark Larkfakeserver Server`, `Execenv Openclaw Multica`, `Client Middleware Multica`, `Service Multica Server`, `Bus Multica Server`, `Runtime Cascade Multica`, `Server Runtime Multica`, `Lark Multica Server`, `Multica Cmd Sandboxd`, `Lark Dispatcher Multica`, `Generated Queries Notification`, `Handler Multica Server`, `Lark Hub Multica`, `Router Service Experimental`, `Generated Queries Work`, `Handler Multica Server`, `Lark Multica Server`, `Lark Server Multica`, `Lark Multica Server`, `Router Areal Inference`, `Handler Heartbeat Multica`, `Realtime Mirroredrelay Recordingmanagedrelay`, `Generated Queries Agent`, `Handler Multica Server`, `Lark Httpapiclient Client`, `.test_gsm8k_complex_exponent`, `.test_gsm8k_fraction_chain`, `Multica Server Skill`, `.test_geometry3k_pythagorean_theorem`, `Daemon Local Directory`, `Protocol Messages Multica`, `Generated Queries Agent`, `Areal Sglang Engine`, `Ui Multica Packages`, `Auth Multica Server`, `Client Cloudruntime Multica`, `Generated Queries Inbox`, `Generated Queries Github`, `Runtimecleanup Runtime System`, `Daemon Multica Server`, `Handler Multica Server`, `Metrics Business Sampler`, `Middleware Request Logger`, `D6 Segment Semantics`, `Session D7 Agent`, `Radar Context Multica`, `Service Multica Server`, `Opsx Claude Commands`, `Daemon Multica Server`, `Generated Queries Sql`, `Handler Cloud Multica`, `layout.tsx`, `Scheduler Jobs Multica`, `megatron_bridge_patches.py`, `Generated Queries Feedback`, `Handler Channel Member`, `BackfillRegionFromLegacyOverride`, `Proxy Multica Apps`, `Handler Profile Multica`, `Handler Webhook Rate`, `Server Multica Cmd`, `Service Multica Server`, `Squad Briefing Multica`, `Realtime Hub Multica`, `Realtime Shardedstreamrelay Sharded`, `Server Integration Multica`, `Issue Handler Involvesuserid`, `Multica Server Handler`, `Swe Lego Service`, `Granian`, `Generated Queries Project`, `Realtime Hub Server`, `Service Envsandboxlifecycleservice Env`, `Proton Viewer`, `Handler Squad Multica`, `Lark Binding Token`, `advanceNextRun`, `Service Env Checkpoint`, `Daemon Wakeup Multica`?**
-  _High betweenness centrality (0.198) - this node is a cross-community bridge._
-- **Why does `MockDiagnosisStores` connect `Generated Handler Queries` to `Generated Queries Project`, `Service Diagnosis Multica`, `Areal Staleness Infra`?**
-  _High betweenness centrality (0.176) - this node is a cross-community bridge._
-- **Why does `Job` connect `Areal Staleness Infra` to `Controller V2 Inference`, `Scheduler Local Areal`, `Controller Service Inference`, `Weight Update Areal`, `Controller Areal Service`, `Controller Service Inference`, `Controller Service Training`?**
-  _High betweenness centrality (0.031) - this node is a cross-community bridge._
-- **Are the 587 inferred relationships involving `uuidToString()` (e.g. with `.AcceptInvitation()` and `.accessibleAgentIDs()`) actually correct?**
-  _`uuidToString()` has 587 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 520 inferred relationships involving `parseUUID()` (e.g. with `.CopyProjectSubtree()` and `.CreateChannelMessage()`) actually correct?**
-  _`parseUUID()` has 520 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 451 inferred relationships involving `writeError()` (e.g. with `.AcceptInvitation()` and `.AckAgentInboxEvent()`) actually correct?**
-  _`writeError()` has 451 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `MockDiagnosisStores` connect `Generated Handler Queries` to `Scheduler Local Areal`, `Service Diagnosis Multica`?**
+  _High betweenness centrality (0.177) - this node is a cross-community bridge._
+- **Why does `Context` connect `Generated Handler Queries` to `Generated Queries Issue`, `Ttx`, `Handler Project Resource`, `Handler Multica Server`, `Ui Multica Packages`, `Scheduler Jobs Agent`, `Controller Update Areal`, `Handler Multica Server`, `Generated Queries Webhook`, `Generated Queries Task`, `Conventions Docs Multica`, `Handler Multica Server`, `Handler Multica Server`, `Multica Server Logger`, `Env Dispatch Squad`, `Generated Queries Invitation`, `Engine Areal Fsdp`, `Multica Server Jobs`, `Service Taskservice Multica`, `Handler Agent Multica`, `Handler Multica Server`, `Handler Multica Server`, `Daemon Multica Server`, `Handler Multica Server`, `Cmd Multica Server`, `Handler Multica Server`, `Storage S3Storage S3`, `Handler Multica Server`, `Handler Multica Server`, `Fakeclock Lark Now`, `Page Multica Squads`, `Handler Multica Server`, `Ui Radio Group`, `Lark Multica Server`, `Server Rerun Session`, `Service Multica Server`, `Agent Multica Server`, `Agent Multica Server`, `Grad Fsdp Norm`, `Multica Cmd Server`, `Tree Treesearch Bugfixes`, `Agent Multica Server`, `Service Interaction Dag`, `Service Evolution Multica`, `.copyEnvDispatchChannel`, `Generated Queries Runtime`, `Agent Codex Multica`, `.GetSandboxInstanceForWorkspace`, `Cmd Multica Attachment`, `Server Scope Authorizer`, `Allocator Settings Platform`, `Platform Numa Affinity`, `Agent Openclaw Multica`, `Daemon Client Multica`, `Lark Ws Multica`, `Server Multica Migrate`, `Generated Queries Sandbox`, `Handler Runtime Local`, `Server Multica Cmd`, `Generated Environment Queries`, `Generated Queries Multica`, `Service Experimental Gateway`, `Handler Multica Server`, `Service Evolutionmockrows Commandtag`, `Lark Multica Server`, `Service Autopilot Multica`, `Claude Skill Rules`, `Handler Github Files`, `Handler Runtime Liveness`, `Generated Queries Autopilot`, `Daemon Multica Server`, `Handler Multica Server`, `Onboarding Multica Server`, `Dispatcher Areal V2`, `Tool Call Parser`, `Multica Server Service`, `Gateway Integration Service`, `Generated Env Checkpoint`, `Lark Multica Server`, `Memorycuration Evidence Multica`, `Multica Server Agent`, `Memorycuration Shared Multica`, `Agent Multica Server`, `Github Tab Multica`, `Handler Agent Radar`, `Jobs Agent Radar`, `Tree Search Customized`, `Server Multica Client`, `Daemon Shared Skills`, `Handler Dm Multica`, `Handler Multica Server`, `Workgraph Multica Server`, `Testdispatcher Lark Dispatcher`, `Cmd Multica Daemon`, `Handler Agent Activity`, `Handler Onboarding Shim`, `Generated Queries Verification`, `Realtime Multica Server`, `Generated Queries Comment`, `Server Multica Cmd`, `Server Health Multica`, `Agent Pi Multica`, `Experimental Archon Hf`, `Parallel Experimental Archon`, `Storage Localstorage Local`, `Server Metrics Multica`, `Handler Runtime Multica`, `Service Diagnosis Multica`, `Service Review Evolution`, `Dispatcher Areal Experimental`, `Handler Mention Trigger`, `TestForkErrorHandling`, `Execenv Openclaw Multica`, `Service Multica Server`, `Client Middleware Multica`, `Bus Multica Server`, `Runtime Cascade Multica`, `Server Runtime Multica`, `Lark Multica Server`, `Multica Cmd Sandboxd`, `Lark Dispatcher Multica`, `Generated Queries Notification`, `Handler Evolution Multica`, `Lark Hub Multica`, `Ep Tp Etp`, `Experimental Archon Weight`, `Generated Queries Work`, `Unpack Vision Sp`, `Handler Multica Server`, `Multica Stickers Server`, `Env Id Proxy`, `Lark Server Multica`, `Lark Multica Server`, `Experimental Archon Pipeline`, `Router Areal Inference`, `Handler Cloud Multica`, `Handler Heartbeat Multica`, `Testregistrationclient Lark Server`, `Realtime Mirroredrelay Recordingmanagedrelay`, `Generated Queries Agent`, `Handler Multica Server`, `Lark Httpapiclient Client`, `Daemon Local Directory`, `Protocol Messages Multica`, `Generated Queries Agent`, `Shell Executor Multica`, `Realtime Hub Client`, `Runner Archon Areal`, `Areal Experimental Weight`, `Session Open Hook`, `Auth Multica Server`, `Generated Queries Inbox`, `Generated Queries Github`, `Runtimecleanup Runtime System`, `Daemon Multica Server`, `Handler Multica Server`, `Handler Multica Server`, `Metrics Business Sampler`, `Middleware Request Logger`, `Inbound Enricher Multica`, `D6 Segment Semantics`, `Session D7 Agent`, `Radar Context Multica`, `Service Multica Server`, `Opsx Claude Commands`, `Daemon Multica Server`, `Generated Queries Sql`, `Handler Cloud Multica`, `BackfillRegionFromLegacyOverride`, `Generated Queries Feedback`, `Handler Channel Member`, `Proxy Multica Apps`, `Handler Profile Multica`, `Handler Webhook Rate`, `Server Multica Cmd`, `Cmd Multica Memory`, `updateReportDaemon`, `Squad Briefing Multica`, `Realtime Hub Multica`, `Accelerate`, `Issue Handler Involvesuserid`, `Dashscope`, `Server Integration Comment`, `Multica Server Handler`, `TestOnboardingStartedUnknownPlatformCollapses`, `Swe Lego Service`, `Daemon Multica Server`, `Daemon Multica Server`, `Granian`, `Latex2Text`, `Service Envsandboxlifecycleservice Env`, `Handler Squad Multica`, `Lark Binding Token`, `Landing Multica Apps`, `Realtime Hub Server`, `Service Env Checkpoint`, `Daemon Wakeup Multica`?**
+  _High betweenness centrality (0.173) - this node is a cross-community bridge._
+- **Why does `SchedulingSpec` connect `Controller Service Inference` to `Areal Trainer Rationale`, `Controller V2 Inference`, `Cmd Multica Workspace`, `Scheduler Local Areal`, `Service Taskservice Quick`, `Areal Infra Launcher`, `Rtensor Rationale Rpc`, `.load_state_dict`, `Memorycuration Types Agenterror`, `Controller Train Areal`, `Proxy V2 Inference`, `avatar.tsx`, `Generated Queries Agent`, `Server Integration Multica`, `Controller Areal Service`, `Multica Server Storage`, `Training Proxy Service`, `Setup Multica Packages`, `Controller Service Inference`, `Handler Multica Server`?**
+  _High betweenness centrality (0.030) - this node is a cross-community bridge._
+- **Are the 617 inferred relationships involving `uuidToString()` (e.g. with `.AcceptInvitation()` and `.accessibleAgentIDs()`) actually correct?**
+  _`uuidToString()` has 617 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 561 inferred relationships involving `parseUUID()` (e.g. with `.insertMessage()` and `.CopyProjectSubtree()`) actually correct?**
+  _`parseUUID()` has 561 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 469 inferred relationships involving `writeError()` (e.g. with `.AcceptInvitation()` and `.AckAgentInboxEvent()`) actually correct?**
+  _`writeError()` has 469 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `crypto`, `http`, `fs` to the rest of the system?**
-  _10718 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _11044 weakly-connected nodes found - possible documentation gaps or missing edges._
