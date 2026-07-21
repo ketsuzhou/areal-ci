@@ -529,6 +529,42 @@ async def _poll_dag(
         await asyncio.sleep(interval)
 
 
+def _debug_external_runtime_policy(
+    agent_id: str, train_agent_id: str | None
+) -> dict[str, dict] | None:
+    """Build a secret-bearing debug runtime policy from local environment only."""
+    names = (
+        "MULTICA_EXTERNAL_BASE_URL",
+        "MULTICA_EXTERNAL_API_KEY",
+        "MULTICA_EXTERNAL_MODEL",
+    )
+    base_url, api_key, model = tuple(
+        (os.environ.get(name) or "").strip() for name in names
+    )
+    configured = (base_url, api_key, model)
+    if not any(configured):
+        return None
+    if not all(configured):
+        raise RuntimeError(
+            "MULTICA_EXTERNAL_BASE_URL, MULTICA_EXTERNAL_API_KEY, and "
+            "MULTICA_EXTERNAL_MODEL must be set together"
+        )
+    if train_agent_id:
+        raise RuntimeError(
+            "caller-provided external runtime is supported only for non-training "
+            "debug dispatch"
+        )
+    return {
+        agent_id: {
+            "runtime": {
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+            }
+        }
+    }
+
+
 async def _debug_run(args: argparse.Namespace) -> int:
     """Exercise create -> poll-dag -> list-checkpoints -> cleanup against a live MultiCA."""
     message = args.message
@@ -552,6 +588,7 @@ async def _debug_run(args: argparse.Namespace) -> int:
             pass_to_pass=[],
         )
 
+    per_agent_env = _debug_external_runtime_policy(args.agent_id, args.train_agent_id)
     client = MulticaEnvDispatchClient(
         base_url=args.base_url,
         api_key=args.api_key,
@@ -565,7 +602,8 @@ async def _debug_run(args: argparse.Namespace) -> int:
             f"dispatch -> base_url={args.base_url} mode={args.mode} "
             f"dispatch_type={dispatch_type} agent_id={args.agent_id} "
             f"train_agent_id={args.train_agent_id or '(none)'} "
-            f"workspace={args.workspace_slug or args.workspace_id or '(none)'}"
+            f"workspace={args.workspace_slug or args.workspace_id or '(none)'} "
+            f"external_runtime={'configured' if per_agent_env else '(none)'}"
         )
         handle = await client.create_env_dispatch(
             mode=args.mode,
@@ -576,6 +614,7 @@ async def _debug_run(args: argparse.Namespace) -> int:
             train_agent_id=args.train_agent_id,
             issue=issue,
             message=message,
+            per_agent_env=per_agent_env,
         )
         print(f"created handle: {handle}")
 

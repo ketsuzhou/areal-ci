@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from customized_areal.tree_search.agents import multica_auth
+from customized_areal.tree_search.agents import multica_client as multica_client_module
 from customized_areal.tree_search.agents.multica_auth import save_credentials
 from customized_areal.tree_search.agents.multica_client import (
     EnvDispatchHandle,
@@ -758,3 +759,89 @@ def test_debug_main_requires_deployment_coordinates(monkeypatch, capsys):
 
     assert exc.value.code == 2
     assert "--base-url" in capsys.readouterr().err
+
+
+def test_debug_run_passes_external_runtime_from_environment(monkeypatch, capsys):
+    sentinel = "sentinel-external-key"
+    monkeypatch.setenv("MULTICA_EXTERNAL_BASE_URL", "https://provider.invalid/api/plan")
+    monkeypatch.setenv("MULTICA_EXTERNAL_API_KEY", sentinel)
+    monkeypatch.setenv("MULTICA_EXTERNAL_MODEL", "model-a")
+    seen = {}
+
+    async def fake_create(_self, **kwargs):
+        seen["per_agent_env"] = kwargs.get("per_agent_env")
+        return EnvDispatchHandle(
+            channel_id="channel-1",
+            project_id="project-1",
+            env_id="env-1",
+            dispatch_type="message",
+        )
+
+    async def fake_poll(_client, _handle, _timeout, _interval):
+        return None
+
+    async def fake_list_checkpoints(_self, *, handle):
+        assert handle.project_id == "project-1"
+        return []
+
+    async def fake_cleanup(_self, *, handle):
+        assert handle.project_id == "project-1"
+
+    monkeypatch.setattr(MulticaEnvDispatchClient, "create_env_dispatch", fake_create)
+    monkeypatch.setattr(
+        MulticaEnvDispatchClient, "list_checkpoints", fake_list_checkpoints
+    )
+    monkeypatch.setattr(MulticaEnvDispatchClient, "cleanup_env_dispatch", fake_cleanup)
+    monkeypatch.setattr(multica_client_module, "_poll_dag", fake_poll)
+
+    args = build_debug_parser().parse_args(
+        [
+            "--base-url",
+            "http://multica.invalid",
+            "--workspace-id",
+            "workspace-1",
+            "--agent-id",
+            "agent-1",
+            "--message",
+            "hello",
+        ]
+    )
+    assert asyncio.run(multica_client_module._debug_run(args)) == 0
+    assert seen["per_agent_env"] == {
+        "agent-1": {
+            "runtime": {
+                "base_url": "https://provider.invalid/api/plan",
+                "api_key": sentinel,
+                "model": "model-a",
+            }
+        }
+    }
+    assert sentinel not in capsys.readouterr().out
+
+
+def test_debug_run_rejects_partial_external_runtime_environment(monkeypatch, capsys):
+    monkeypatch.setenv("MULTICA_EXTERNAL_BASE_URL", "https://provider.invalid/api/plan")
+    monkeypatch.delenv("MULTICA_EXTERNAL_API_KEY", raising=False)
+    monkeypatch.delenv("MULTICA_EXTERNAL_MODEL", raising=False)
+
+    class UnexpectedClient:
+        def __init__(self, **_kwargs):
+            pytest.fail("client must not be constructed for partial runtime config")
+
+    monkeypatch.setattr(
+        multica_client_module, "MulticaEnvDispatchClient", UnexpectedClient
+    )
+    args = build_debug_parser().parse_args(
+        [
+            "--base-url",
+            "http://multica.invalid",
+            "--workspace-id",
+            "workspace-1",
+            "--agent-id",
+            "agent-1",
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="must be set together"):
+        asyncio.run(multica_client_module._debug_run(args))
+    assert "provider.invalid" not in capsys.readouterr().out
