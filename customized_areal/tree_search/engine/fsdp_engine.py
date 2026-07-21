@@ -20,6 +20,12 @@ import torch.distributed as dist
 import torch.distributed.nn.functional as dist_F
 
 from areal.engine.core import reorder_and_pad_outputs
+from areal.engine.core.model import (
+    is_qwen3_5_model,
+    is_qwen3_moe_model,
+    is_qwen3_vl_model,
+    is_qwen_vl_model,
+)
 from areal.engine.fsdp_engine import FSDPEngine, FSDPTrainContext
 from areal.models.tree_attn.functional import gather_packed_tree_vocab_stats
 from areal.utils import logging
@@ -32,7 +38,11 @@ from areal.utils.data import (
 )
 
 from ..training.logprobs import gather_logprobs_entropy_multi_candidates
-from ..training.losses.vimpo import vimpo_loss_fn, vimpo_loss_terms
+from ..training.losses.vimpo import (
+    validate_vimpo_episode_consistency,
+    vimpo_loss_fn,
+    vimpo_loss_terms,
+)
 from ..training.vimpo_batching import split_episode_atomic_batches
 
 logger = logging.getLogger("MultiCandidateFSDPEngine")
@@ -961,6 +971,12 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                 "(vimpo_predict_mask is all False)"
             )
 
+        # Per-episode consistency (partial-episode turn-count completeness and
+        # centered-reward agreement). Shape-agnostic: runs on the 2D raw batch
+        # here so a partial episode or inconsistent centered reward fails BEFORE
+        # ``optimizer_zero_grad`` rather than inside the forward-backward callback.
+        validate_vimpo_episode_consistency(data, data["vimpo_predict_mask"].bool())
+
     def _prepare_vimpo_mb_list(self, input_: dict[str, Any]) -> MicroBatchList:
         """Episode-atomic split + pack/pad for VIMPO training.
 
@@ -975,6 +991,23 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             raise NotImplementedError(
                 "VIMPO training with tree training is not yet supported; "
                 "use the non-tree (padded) path."
+            )
+
+        # VL/MoE models need model-specific position_ids / attention_mask
+        # handling (``compute_3d_position_ids`` for Qwen-VL, ``attention_mask
+        # = None`` for Qwen3-MoE / Qwen3-VL / Qwen3-3.5) that this method does
+        # not implement. Fail loud instead of silently producing wrong
+        # position_ids / attention_mask.
+        model_type = self.model_config.model_type
+        if (
+            is_qwen_vl_model(model_type)
+            or is_qwen3_vl_model(model_type)
+            or is_qwen3_moe_model(model_type)
+            or is_qwen3_5_model(model_type)
+        ):
+            raise NotImplementedError(
+                "VIMPO training does not yet support VL/MoE models "
+                f"(model_type={model_type!r}); use a non-VL, non-MoE model."
             )
 
         # Add position_ids (same as _prepare_mb_list for non-VL models).

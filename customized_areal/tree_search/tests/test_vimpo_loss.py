@@ -256,11 +256,13 @@ class _RecordingEngine(MultiCandidateFSDPEngine):
         dp_size: int = 1,
         device: torch.device | None = None,
         fake_logprobs: torch.Tensor | None = None,
+        model_type: str = "qwen2",
     ) -> None:
         # NOTE: bypass FSDPEngine.__init__ entirely; set only what we need.
         self._dp_size = dp_size
         self._device = device or torch.device("cpu")
         self._fake_logprobs = fake_logprobs
+        self._model_type = model_type
         self.zero_grad_calls = 0
         self.step_calls = 0
         self.forward_backward_calls = 0
@@ -306,8 +308,10 @@ class _RecordingEngine(MultiCandidateFSDPEngine):
 
     @property
     def model_config(self) -> Any:
+        mt = self._model_type
+
         class _MC:
-            model_type = "qwen2"
+            model_type = mt
 
         return _MC()
 
@@ -367,10 +371,11 @@ def _make_recording_engine(
     *,
     dp_size: int = 1,
     fake_logprobs: torch.Tensor | None = None,
+    model_type: str = "qwen2",
 ) -> _RecordingEngine:
     """Build a ``_RecordingEngine`` bypassing ``__init__``."""
     engine = _RecordingEngine.__new__(_RecordingEngine)
-    engine.__init__(dp_size=dp_size, fake_logprobs=fake_logprobs)
+    engine.__init__(dp_size=dp_size, fake_logprobs=fake_logprobs, model_type=model_type)
     return engine
 
 
@@ -411,6 +416,77 @@ def test_train_vimpo_batch_validates_before_zero_grad(monkeypatch) -> None:
     assert engine.zero_grad_calls == 0
     assert engine.forward_backward_calls == 0
     assert engine.step_calls == 0
+
+
+def test_train_vimpo_batch_rejects_partial_episode_before_zero_grad(
+    monkeypatch,
+) -> None:
+    """A partial episode (fewer turns than ``vimpo_expected_turn_count``)
+    raises ``ValueError`` before ``optimizer_zero_grad`` is called."""
+    monkeypatch.setattr(dist, "all_reduce", lambda *a, **kw: None)
+    fake_lp = torch.tensor([-0.2, -0.4, 0.0, 0.0])
+    engine = _make_recording_engine(dp_size=1, fake_logprobs=fake_lp)
+    batch = _engine_batch()
+    # Single distinct turn (turn 1) but expected_turn_count=2 -> partial.
+    batch["vimpo_turn_index"] = torch.tensor([[1, 1, 1, 1]], dtype=torch.long)
+    batch["vimpo_expected_turn_count"] = torch.tensor([[2, 2, 2, 2]], dtype=torch.long)
+    with pytest.raises(ValueError, match="episode 0 is incomplete"):
+        engine.train_vimpo_batch(
+            batch,
+            actor_coeff=0.005,
+            value_loss_weight=1.0,
+            beta=0.5,
+            eps_clip=0.2,
+        )
+    assert engine.zero_grad_calls == 0
+    assert engine.forward_backward_calls == 0
+    assert engine.step_calls == 0
+
+
+def test_train_vimpo_batch_rejects_inconsistent_centered_reward_before_zero_grad(
+    monkeypatch,
+) -> None:
+    """Centered rewards varying within an episode raise ``ValueError``
+    before ``optimizer_zero_grad`` is called."""
+    monkeypatch.setattr(dist, "all_reduce", lambda *a, **kw: None)
+    fake_lp = torch.tensor([-0.2, -0.4, 0.0, 0.0])
+    engine = _make_recording_engine(dp_size=1, fake_logprobs=fake_lp)
+    batch = _engine_batch()
+    # Predict mask is [True, True, False, False] (positions 0 and 1 are in
+    # episode 0); make their centered rewards disagree.
+    batch["vimpo_centered_reward"] = torch.tensor(
+        [[0.5, 0.3, 0.5, 0.5]], dtype=torch.float32
+    )
+    with pytest.raises(ValueError, match="inconsistent centered rewards"):
+        engine.train_vimpo_batch(
+            batch,
+            actor_coeff=0.005,
+            value_loss_weight=1.0,
+            beta=0.5,
+            eps_clip=0.2,
+        )
+    assert engine.zero_grad_calls == 0
+    assert engine.forward_backward_calls == 0
+    assert engine.step_calls == 0
+
+
+def test_train_vimpo_batch_rejects_vl_moe_models(monkeypatch) -> None:
+    """VL/MoE model_types raise ``NotImplementedError`` before
+    ``optimizer_zero_grad`` is called."""
+    monkeypatch.setattr(dist, "all_reduce", lambda *a, **kw: None)
+    fake_lp = torch.tensor([-0.2, -0.4, 0.0, 0.0])
+    engine = _make_recording_engine(
+        dp_size=1, fake_logprobs=fake_lp, model_type="qwen3_moe"
+    )
+    with pytest.raises(NotImplementedError, match="VL/MoE"):
+        engine.train_vimpo_batch(
+            _engine_batch(),
+            actor_coeff=0.005,
+            value_loss_weight=1.0,
+            beta=0.5,
+            eps_clip=0.2,
+        )
+    assert engine.zero_grad_calls == 0
 
 
 def test_train_vimpo_batch_all_reduces_denominators(monkeypatch) -> None:

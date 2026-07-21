@@ -31,7 +31,12 @@ from dataclasses import dataclass
 
 import torch
 
-__all__ = ["VIMPOLossTerms", "vimpo_loss_terms", "vimpo_loss_fn"]
+__all__ = [
+    "VIMPOLossTerms",
+    "vimpo_loss_terms",
+    "vimpo_loss_fn",
+    "validate_vimpo_episode_consistency",
+]
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,74 @@ def _validate_constant_per_row(name: str, tensor: torch.Tensor) -> None:
     row_first = tensor[..., :1]
     if not torch.all(tensor == row_first):
         raise ValueError(f"VIMPO batch field {name!r} must be constant within each row")
+
+
+def validate_vimpo_episode_consistency(
+    data: dict[str, torch.Tensor], mask: torch.Tensor
+) -> None:
+    """Validate per-episode consistency of a VIMPO batch.
+
+    Shape-agnostic: works on the 2D raw batch ``[bs, seq_len]`` (called
+    from ``MultiCandidateFSDPEngine._validate_vimpo_batch`` before
+    ``optimizer_zero_grad``) and on the 1D packed tensors ``[total_tokens]``
+    (called from ``vimpo_loss_terms`` inside the forward-backward callback).
+    The boolean-mask operations (``mask & (episode_indices == episode)``,
+    ``masked_select``, ``torch.unique``) behave identically under both
+    shapes.
+
+    Performs ONLY the two per-episode consistency checks; it does NOT
+    compute predictions/targets (those stay in ``vimpo_loss_terms``):
+
+    1. **Turn-count completeness**: when both ``vimpo_turn_index`` and
+       ``vimpo_expected_turn_count`` are present, every episode's distinct
+       turn-index count must equal its expected turn count.
+    2. **Centered-reward agreement**: within each episode, every valid
+       position's ``vimpo_centered_reward`` must agree.
+
+    Parameters
+    ----------
+    data
+        VIMPO batch dict (must contain ``vimpo_episode_index`` and
+        ``vimpo_centered_reward``; optionally ``vimpo_turn_index`` and
+        ``vimpo_expected_turn_count``).
+    mask
+        Boolean predict mask matching the shape of
+        ``data["vimpo_episode_index"]``.
+
+    Raises
+    ------
+    ValueError
+        If an episode is incomplete or has inconsistent centered rewards.
+    """
+    episode_indices = data["vimpo_episode_index"]
+    has_turn_index = "vimpo_turn_index" in data
+    has_expected_count = "vimpo_expected_turn_count" in data
+    turn_index = data.get("vimpo_turn_index")
+    expected_count = data.get("vimpo_expected_turn_count")
+
+    for episode in torch.unique(episode_indices[mask], sorted=True):
+        episode_mask = mask & (episode_indices == episode)
+
+        # Validate complete turn count (when both fields are present).
+        if has_turn_index and has_expected_count and turn_index is not None:
+            turn_values = torch.unique(turn_index[episode_mask])
+            expected = int(expected_count[episode_mask].reshape(-1)[0].item())
+            if len(turn_values) != expected:
+                raise ValueError(
+                    f"episode {int(episode)} is incomplete: "
+                    f"expected {expected} turns, got {len(turn_values)}"
+                )
+
+        # Centered reward must be constant within the episode.
+        repeated_target = (
+            data["vimpo_centered_reward"].masked_select(episode_mask).float()
+        )
+        if not torch.allclose(
+            repeated_target, repeated_target[0].expand_as(repeated_target)
+        ):
+            raise ValueError(
+                f"episode {int(episode)} has inconsistent centered rewards"
+            )
 
 
 def vimpo_loss_terms(
@@ -189,23 +262,15 @@ def vimpo_loss_terms(
     predictions: list[torch.Tensor] = []
     targets: list[torch.Tensor] = []
     episode_indices = data["vimpo_episode_index"]
-    has_turn_index = "vimpo_turn_index" in data
-    has_expected_count = "vimpo_expected_turn_count" in data
-    turn_index = data.get("vimpo_turn_index")
-    expected_count = data.get("vimpo_expected_turn_count")
+
+    # Validate per-episode consistency (shape-agnostic; also called from
+    # ``_validate_vimpo_batch`` before ``optimizer_zero_grad`` so a partial
+    # episode or inconsistent centered reward fails before any optimizer
+    # mutation).
+    validate_vimpo_episode_consistency(data, mask)
 
     for episode in torch.unique(episode_indices[mask], sorted=True):
         episode_mask = mask & (episode_indices == episode)
-
-        # Validate complete turn count (when both fields are present).
-        if has_turn_index and has_expected_count and turn_index is not None:
-            turn_values = torch.unique(turn_index[episode_mask])
-            expected = int(expected_count[episode_mask].reshape(-1)[0].item())
-            if len(turn_values) != expected:
-                raise ValueError(
-                    f"episode {int(episode)} is incomplete: "
-                    f"expected {expected} turns, got {len(turn_values)}"
-                )
 
         # Per-episode terminal-value prediction:
         #   beta * sum(logp_theta - logp_ref - KL) over valid positions.
@@ -217,16 +282,10 @@ def vimpo_loss_terms(
         predictions.append(prediction.masked_select(episode_mask).sum())
 
         # Per-episode target: the centered reward is broadcast to all
-        # positions in the episode; they must all agree.
+        # positions in the episode; consistency validated above.
         repeated_target = (
             data["vimpo_centered_reward"].masked_select(episode_mask).float()
         )
-        if not torch.allclose(
-            repeated_target, repeated_target[0].expand_as(repeated_target)
-        ):
-            raise ValueError(
-                f"episode {int(episode)} has inconsistent centered rewards"
-            )
         targets.append(repeated_target[0].detach())
 
     # --- Validate nonzero episode count ---
