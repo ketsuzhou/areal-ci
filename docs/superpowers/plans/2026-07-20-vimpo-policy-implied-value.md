@@ -825,7 +825,7 @@ git commit -m "feat(tree-search): collect VIMPO actor candidate stats"
 - Consumes: differentiable sampled-token log-probabilities and the enriched VIMPO batch.
 - Produces: `VIMPOLossTerms`, `vimpo_loss_terms`, `vimpo_loss_fn`, and `MultiCandidateFSDPEngine.train_vimpo_batch` performing one zero-grad/backward/step.
 
-- [ ] **Step 1: Write failing loss and gradient tests**
+- [x] **Step 1: Write failing loss and gradient tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_loss.py
@@ -865,13 +865,13 @@ def test_loss_rejects_partial_episode_before_backward() -> None:
         vimpo_loss_terms(torch.zeros_like(partial["vimpo_ref_sample_logp"], requires_grad=True), partial, beta=5e-4, eps_clip=0.2, eps_clip_higher=None)
 ```
 
-- [ ] **Step 2: Run tests and verify the loss module is absent**
+- [x] **Step 2: Run tests and verify the loss module is absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_loss.py -q`
 
 Expected: FAIL during collection because `training/losses/vimpo.py` does not exist.
 
-- [ ] **Step 3: Implement numerator-returning pure loss math**
+- [x] **Step 3: Implement numerator-returning pure loss math**
 
 ```python
 @dataclass(frozen=True)
@@ -910,7 +910,7 @@ def vimpo_loss_terms(logprobs, data, *, beta, eps_clip, eps_clip_higher):
 
 Use the repository's `ppo_actor_loss_fn` clipping semantics when integrating, but retain the numerator/count contract. Validate complete turn counts, constant metadata per row, finite inputs, and nonzero token/episode counts before returning.
 
-- [ ] **Step 4: Add one-backward/two-denominator engine tests**
+- [x] **Step 4: Add one-backward/two-denominator engine tests**
 
 Create a fake subclass whose `forward_backward_batch`, `optimizer_zero_grad`, and `optimizer_step` record calls. Assert `train_vimpo_batch` calls each exactly once, all-reduces `[valid_token_count, episode_count]` over `dp_group`, scales each microbatch as:
 
@@ -923,11 +923,11 @@ loss = self.parallel_helper.dp_size * (
 
 and validates all batches/reference tensors before `optimizer_zero_grad()`.
 
-- [ ] **Step 5: Implement `train_vimpo_batch`**
+- [x] **Step 5: Implement `train_vimpo_batch`**
 
 Normalize input, call the episode-atomic splitter, pack/pad with the same helpers used by `_prepare_mb_list`, compute and all-reduce the two float64 denominators once, then use `forward_backward_batch` with a process callback that gathers only sampled-action log-probabilities and calls `vimpo_loss_terms`. Accumulate detached metric numerators; call `optimizer_step()` once. Do not call generic `train_batch`, whose single `loss_weight_fn` cannot represent both means.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_loss.py customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 

@@ -48,16 +48,16 @@
 
 ## 5. Combined VIMPO Training Objective
 
-- [ ] 5.1 Add `training/losses/vimpo.py` with episode-level terminal squared-error loss,
+- [x] 5.1 Add `training/losses/vimpo.py` with episode-level terminal squared-error loss,
   detached VIMPO advantages, PPO clipping, combined coefficient weighting, and metrics.
-- [ ] 5.2 Add a VIMPO actor update path that preserves rewards/episode metadata, recomputes
+- [x] 5.2 Add a VIMPO actor update path that preserves rewards/episode metadata, recomputes
   differentiable sampled-token policy log-probabilities, and performs one combined backward
   and optimizer step.
 - [ ] 5.3 Integrate actor candidate collection, frozen SGLang scoring, advantage construction,
   and VIMPO update ordering into `CustomizedPPOTrainer` while leaving existing modes intact.
 - [ ] 5.4 Ensure VIMPO does not require a positive PPO KL-reward coefficient, does not create a
   learned critic, and fails before optimizer mutation on missing or invalid reference data.
-- [ ] 5.5 Add loss/gradient tests for terminal residuals, episode averaging, KL/reference
+- [x] 5.5 Add loss/gradient tests for terminal residuals, episode averaging, KL/reference
   detachment, actor advantage detachment, PPO clipping, coefficient weighting, and fail-loud
   behavior.
 
