@@ -223,6 +223,20 @@ class MulticaEnvDispatchClient:
             if isinstance(rollout, dict) and rollout.get("error")
         ]
         if rollout_errors:
+            # Partial-success dispatch (group_size > 1): the server returned 201
+            # with a mix of succeeded and failed rollouts, so the successful
+            # lanes already allocated a project/channel/sandbox/agent_run
+            # server-side (best-effort dispatch, no rollback). Fail closed by
+            # reclaiming the partial dispatch before raising so the caller never
+            # observes a half-provisioned dispatch (AC-7 "while retaining
+            # cleanup"). Cleanup is best-effort: a cleanup failure must not mask
+            # the original rollout failure that has to propagate.
+            partial_handle = self._partial_cleanup_handle(data, dispatch_type)
+            if partial_handle is not None:
+                try:
+                    await self.cleanup_env_dispatch(handle=partial_handle)
+                except Exception:
+                    pass
             raise RuntimeError(
                 f"env-dispatch rollout failed: {rollout_errors[0][:1024]}"
             )
@@ -267,6 +281,31 @@ class MulticaEnvDispatchClient:
                 "env-dispatch handle missing project_id for issue dispatch"
             )
         return f"/api/v1/env-dispatch/{handle.project_id}"
+
+    def _partial_cleanup_handle(
+        self, data: dict[str, object], dispatch_type: str
+    ) -> EnvDispatchHandle | None:
+        """Build a cleanup handle from a partial-success dispatch response.
+
+        When ``create_env_dispatch`` gets a 201 with per-rollout errors, the
+        successful lanes have already been provisioned server-side. This returns
+        a handle addressing that partial dispatch so it can be reclaimed before
+        the client raises. Returns ``None`` when the response lacks the
+        identifiers needed to address the dispatch, so cleanup is skipped rather
+        than raising a confusing secondary error.
+        """
+        project_id = data.get("project_id") or ""
+        if not project_id:
+            return None
+        channel_id = data.get("channel_id") or None
+        if dispatch_type == "message" and not channel_id:
+            return None
+        return EnvDispatchHandle(
+            channel_id=channel_id,
+            project_id=project_id,
+            env_id="",
+            dispatch_type=dispatch_type,
+        )
 
     async def cleanup_env_dispatch(self, *, handle: EnvDispatchHandle) -> None:
         """DELETE the dispatch-scoped resource - cascades to issues/chat/tasks.

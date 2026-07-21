@@ -200,6 +200,51 @@ def test_create_env_dispatch_rejects_per_rollout_error():
         )
 
 
+def test_create_env_dispatch_per_rollout_error_cleans_up_partial_dispatch():
+    # group_size > 1 partial-success: one lane provisioned, another failed. The
+    # server returned 201 with a mix, so the successful lane already allocated a
+    # project/channel/sandbox/agent_run. The client must reclaim the partial
+    # dispatch (channel-scoped DELETE) BEFORE raising so it does not leak (AC-7
+    # "while retaining cleanup").
+    seen_delete_paths: list[str] = []
+
+    def handler(req):
+        if req.method == "POST":
+            return httpx.Response(
+                201,
+                json={
+                    "project_id": "p1",
+                    "channel_id": "c1",
+                    "rollouts": [
+                        {"env_id": "e_ok", "error": None},
+                        {"env_id": "e_bad", "error": "runtime readiness timeout"},
+                    ],
+                },
+            )
+        if req.method == "DELETE":
+            seen_delete_paths.append(req.url.path)
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url.path}")
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://x", transport=_transport(handler)
+    )
+
+    with pytest.raises(RuntimeError, match="runtime readiness timeout"):
+        asyncio.run(
+            client.create_env_dispatch(
+                mode="scratch",
+                dispatch_type="message",
+                agent_id="ag",
+                group_size=2,
+                message="hi",
+            )
+        )
+
+    # The partial message dispatch is reclaimed via its channel-scoped DELETE.
+    assert seen_delete_paths == ["/api/v1/env-dispatch/channels/c1"]
+
+
 def test_poll_dag_timeout_is_failure():
     class FakeClient:
         async def get_dag(self, *, handle):
