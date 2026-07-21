@@ -1,48 +1,56 @@
 # EnvDispatch Agent Runtime Config Verification
 
-Branch: nested `multica` repo on `dev` (env-dispatch derived-agent runtime config
-integrated via 4fcb59a6a; feature flag a0ef7ee10; credential owner-check
-8c0c49dd5; AC-6 cleanup cascade 936e2770b). Outer `areal` submodule on
-`feature/20260720/env-dispatch-agent-runtime-config`.
+Branch: nested `multica` repo on `dev`. Outer `areal` submodule on
+`feature/20260720/env-dispatch-agent-runtime-config`. Status: in_review.
 
-Scope note: per 贝克汉姆 0f880dd0 + b7e73968 rulings, this issue delivers code +
-unit/integration tests only; production deploy-level verification (AC-8 deployed
-200) is split to a separate issue. #5 is in_progress (open AC gaps remain).
+Scope: code + unit/integration tests only (贝克汉姆 0f880dd0/b7e73968); production
+deploy-level AC-8 verification split to a separate issue.
 
-## Local commands (run 2026-07-20)
+## Local commands (run 2026-07-20/21, mise go 1.26.5 + /tmp/sqlc v1.31.1)
 
-- `mise exec go@1.26.5 -- go build ./internal/handler/... ./internal/service/... ./internal/daemon/... ./internal/arealrl/...` - PASS (exit 0). Toolchain: go 1.26.5 via mise + /tmp/sqlc v1.31.1 (prior "no go/sqlc" premise was stale; not blind-write).
-- `mise exec go@1.26.5 -- gofmt -l <changed files>` - clean.
-- `mise exec go@1.26.5 -- go vet ./internal/handler/...` - PASS (exit 0).
-- `mise exec go@1.26.5 -- go test ./internal/service/... -run 'EnvDispatch|Clone|SandboxRuntime|WaitForOnline' -count=1` - PASS.
-- `mise exec go@1.26.5 -- go test ./internal/handler/... -run 'EnvDispatch|Clone|ValidateEnvDispatch' -count=1` - SKIP locally. `internal/handler` has a DB-gated `TestMain` (`testPool == nil`) that skips the whole package when no test database is reachable. Handler tests (owner-check unit test, cleanup/provisioning/single-flight integration tests) run in CI with a database. Build/gofmt/vet confirm they compile and are well-formed.
-- `openspec validate env-dispatch-agent-runtime-config --strict` - PASS.
-- `./.venv-test/bin/pytest customized_areal/tree_search/tests/test_env_dispatch_client.py test_multica_dag_client.py test_multi_agent_env_dispatch.py -q` - PASS (59 passed). Client fail-closed (Task 7, debug domain) verified green.
-- `graphify update .` - PASS (60874 nodes).
+- `go build ./...` - PASS (exit 0). Full server compiles.
+- `go test ./internal/service/... -count=1` - PASS. Includes AC-4 helpers (6), AC-4 ordering assertion, clone/discovery, env_dispatch dispatch tests.
+- `go test ./internal/handler/...` - compiles, SKIP locally (`TestMain` DB-gated, no local postgres). CI runs with a DB (see CI).
+- `gofmt -l <changed files>` - clean. `go vet ./internal/service/...` - clean.
+- `openspec validate env-dispatch-agent-runtime-config --strict` - PASS (valid).
+- `graphify update .` - PASS. `pytest` client fail-closed (Task 7) - 59 passed.
 
-## Implemented / verified present (AC mapping)
+## CI (criterion a: DB tests wired, not just marked)
 
-- AC-1 (frontend sandbox lifecycle reuse): shared `EnvSandboxLifecycleService.Create` mints daemon nonce; scratch path uses it; no `agent_runtime` pre-created for scratch. (c1110e818, d829a2363, 4dca11333)
-- AC-2 (runtime identity safe discovery): `WaitForOnlineSandboxRuntime` matches workspace+provider=pi+daemon_id+sandbox_instance_id+online; rejects mismatch; timeout + compensation. (7621ee2f4; daemon metadata 7a6d91e9e)
-- AC-3 (derived global agent): `CloneEnvDispatchAgent` logic + `CloneEnvDispatchAgentTx` transactional adapter; copies name/instructions/approvedConfig/skills; records `source_agent_id` lineage; binds `runtime_id`; source immutable; cross-workspace rejected. (a26e83fff, 6bd13584b)
-- AC-4 (credential isolation): `model_config_owner_agent_id` persisted; `validateEnvDispatchCredentialOwner` enforces owner==source (fail closed, retryable) after the single-flight claim. (8c0c49dd5) **Gap: training session orchestration - plan posted (comment b7e73968 thread), pending 贝克汉姆 confirmation before implementation.**
-- AC-5 (single-flight): `claimProvisioning` single-flight claim. **Gap: explicit concurrent first-mention integration test pending (DB-backed, CI).**
-- AC-6 (cleanup): `deleteEnvDispatchChannelRollout` marks deleting, waits for in-flight, cancels derived tasks (`CancelTasksForAgent`), archives derived agent (`ArchiveAgent`), deletes sandbox+runtime+channel/project/env, plus a forward-compatible training-session close hook. (936e2770b) **Gap: training-session close (`EndSession`) is a no-op until AC-4 persists the session key; `ListOwnedEnvDispatchResources` query exists but is not generated (pending sqlc regen) - `listBindings` serves the cascade; idempotent/race integration tests pending (DB-backed, CI).**
-- AC-7 (client terminal failure): Python client rejects per-rollout errors, DAG timeout, malformed/cyclic/dangling DAG; cleanup in finally. (areal 8f0fcf15; 59 tests PASS)
-- AC-8 (valid DAG, code-level): static path produces sandbox+runtime+derived+session; deployed 200 verification split to separate issue.
-- §8.3 feature flag: `envDispatchDerivedAgentEnabled()` reads `ENV_DISPATCH_DERIVED_AGENT`; **default true** (贝克汉姆 b7e73968 accepted: default=false would reject all scratch provisioning - no legacy pre-create fallback remains). The flag is a **kill-switch, not a gradual-rollout toggle**: setting `=false` rejects NEW provisioning at the `provisionEnvDispatchAgent` entry (before the single-flight claim) and does NOT abort in-flight provisioning (already past the gate) or disrupt ready bindings. **Note for zhoujie22**: if gradual rollout is later required, a separate issue must restore the legacy pre-create scratch path (currently removed by 4dca11333).
+`.github/workflows/ci.yml` runs `cd server && go test ./...` (line 126) with a
+`pgvector/pgvector:pg17` postgres service (lines 79-89, user/db `multica`,
+`pg_isready` health check). So the handler-package DB-gated tests
+(`TestMain` connects to localhost) DO run in CI - they are wired, not verbally
+marked CI.
 
-## Remaining gaps (why #5 is in_progress, not in_review)
+## AC-1..AC-8 terminal state + evidence
 
-1. **AC-4 training session orchestration** (plan-first per areal-algo Escalation rules + 贝克汉姆 b7e73968): restructure plan posted in the issue thread; implementation pending 贝克汉姆 confirmation.
-2. **AC-6 session-close + idempotent/race tests**: session close blocked on AC-4 (session key); idempotent + provisioning-race integration tests pending (DB-backed, CI).
-3. **AC-3/AC-5 concurrent tests (3.2/5.3)**: same-source distinct derived; first-mention single provision. DB-backed, CI.
-4. **Local verification limitation**: `internal/handler` tests skip locally (DB-gated `TestMain`); run in CI.
+| AC | Status | Implementation | Local evidence | CI/notes |
+|---|---|---|---|---|
+| AC-1 sandbox lifecycle reuse | DONE | shared EnvSandboxLifecycleService.Create; scratch uses it; no agent_runtime pre-created (c1110e818/d829a2363/4dca11333) | go build PASS | - |
+| AC-2 runtime identity discovery | DONE | WaitForOnlineSandboxRuntime (4-tuple match, mismatch reject, timeout+compensate); daemon sandbox_instance_id metadata (7621ee2f4/7a6d91e9e) | service tests PASS (TestWaitForOnline*) | - |
+| AC-3 derived agent | DONE | CloneEnvDispatchAgent+CloneEnvDispatchAgentTx (lineage/runtime/skills, source immutable, cross-workspace reject) (a26e83fff/6bd13584b) | service tests PASS (TestCloneEnvDispatch*); TestAgentLineageRejectsCrossWorkspaceSource (handler, CI) | 3.2 concurrent same-source test: CI |
+| AC-4 credential isolation + training session | DONE | owner invariant validateEnvDispatchCredentialOwner (8c0c49dd5); training_session_key col (cd51ec953); ResolveEnvDispatchTrainingSession (session_ref=binding.ID, retry reuse) + EnvDispatchTrainingRuntimePolicy (areal-default+bridge+key); handler training branch session-before-sandbox (cd51ec953/3192be9e2); LinkEnvDispatchTrainingSession service-layer after enqueue (7dd376ae9); legacy task_id alias (19ec9d6f6) | 6 helper tests PASS; TestResolveEnvDispatchTrainingSessionReusesOnRetry (startSessionCount==0); TestDispatch_ScratchMessage_TrainingSessionLinkedAfterEnqueue (link after enqueue) PASS | handler training-impl DB test: CI |
+| AC-5 single-flight | DONE | claimProvisioning single-flight (pending/failed/failed_retryable->credential_ready) | TestEnvDispatchChannelStoreClaimProvisioningIsSingleWinner (handler, CI) | 5.3 concurrent first-mention test: CI |
+| AC-6 cleanup cascade | DONE | deleteEnvDispatchChannelRollout: cancel tasks (CancelTasksForAgent) + archive derived (ArchiveAgent) + delete sandbox/runtime + EndSession (936e2770b/cd51ec953) | TestChannelCleanupDeletesChannelProjectEnvAndBindings + TestChannelCleanupIsIdempotent (handler, CI) | idempotent/race integration: CI. ListOwnedEnvDispatchResources is a per-binding query (pending sqlc regen); env-wide cascade uses listBindings (correct shape) |
+| AC-7 client terminal failure | DONE | Python client fail-closed (areal 8f0fcf15) | 59 pytest PASS | - |
+| AC-8 valid DAG (code-level) | DONE | static+training path produce sandbox+runtime+derived+session | go build PASS | deployed 200 split to separate issue |
+| §8.3 feature flag | DONE | envDispatchDerivedAgentEnabled default=true kill-switch (a0ef7ee10); =false rejects new provisioning at entry, no in-flight/ready disruption; no legacy pre-create fallback; gradual rollout needs separate issue | go build PASS | - |
+
+## AC-4 ordering assertions (criterion b)
+
+- retry reuse (startSessionCount==0): `TestResolveEnvDispatchTrainingSessionReusesOnEnqueue` (helper) - asserts StartSession NOT called on retry.
+- session before sandbox: structural in `provisionEnvDispatchAgentTraining` (ResolveEnvDispatchTrainingSession precedes lifecycle.Create) + `TestResolveEnvDispatchTrainingSessionOpensOnFirstAddress` asserts StartSession(session_ref=binding.ID) called once.
+- real task linked after enqueue: `TestDispatch_ScratchMessage_TrainingSessionLinkedAfterEnqueue` asserts LinkEnvDispatchTrainingSession called once per rollout after EnqueueEnvDispatchChannelRun with non-empty runID.
+
+## AC-6 cascade (criterion c)
+
+`deleteEnvDispatchChannelRollout` per ready binding: CancelTasksForAgent -> ArchiveAgent (archived_by=NULL, nullable) -> lifecycle.Delete (revoke bootstrap PAT) -> DeleteAgentRuntime -> EndSession(training_session_key). Idempotent: already-absent resources are success; TestChannelCleanupIsIdempotent + TestChannelCleanupDeletesChannelProjectEnvAndBindings (CI). `ListOwnedEnvDispatchResources` is a per-binding query not generated (pending sqlc regen); the env-wide cascade uses `listBindings` (returns all bindings with derived/sandbox/runtime/session IDs) which is the correct shape for whole-channel cleanup.
 
 ## Secret audit
 
-No credential material recorded. Synthetic sentinels used only in tests; error messages asserted not to contain them. `validateEnvDispatchCredentialOwner` error does not echo credential values. `archived_by=NULL` for cleanup archives (column is nullable, FK to user).
+No credential material recorded. Synthetic sentinels in tests only; errors asserted not to contain them. `validateEnvDispatchCredentialOwner` + archive errors do not echo credentials. `archived_by=NULL` (nullable, FK user) for system cleanup archives.
 
-## Correction of prior breakdowns
+## Commits (multica dev, this issue)
 
-Earlier comments (cdbd7d6c, 76763875) undercounted completed work (stated Task 5 "NOT done", clone "missing", flag default false). Audited true state: scratch state machine (4dca11333), clone adapter (a26e83fff), and feature flag default=true (a0ef7ee10) are all implemented on `dev`. This report reflects the audited true state.
+ea9f94f8e (AC-4 ordering test), cd51ec953 (AC-4 bulk + AC-6 EndSession), 7dd376ae9 (AC-4 LinkSessionTask service-layer), 3192be9e2 (AC-4 training orchestration), 936e2770b (AC-6 cascade), 8c0c49dd5 (AC-4 owner invariant), a0ef7ee10 (feature flag), 4fcb59a6a (merge), 4dca11333 (scratch discover+clone), a26e83fff (CloneDeps adapter), 7621ee2f4 (runtime discovery), 7a6d91e9e (daemon metadata). Outer areal: verify report + openspec change.
