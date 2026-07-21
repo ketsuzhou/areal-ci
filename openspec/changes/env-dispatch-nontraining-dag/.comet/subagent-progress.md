@@ -15,6 +15,7 @@
 |------|-------|--------------------|--------------|--------|----------|
 | 1 | done | f124119f3 (multica) | public-API contract (BREAKING required `training_mode`); security surface (request validation) | Approved, 2 Minor (no fix round) | plan 1.1-1.4 ✅, spec 1.1-1.4 ✅ |
 | 2 | done | df6c1353c (multica) | schema migration (204 env_dispatch_run); public-API (/dag readiness contract); diff >200 lines (672 chg) | Approved by coordinator, 3 Minor (no fix round) | plan 2.1-2.5 ✅, spec 2.1-2.5 ✅ |
+| 3 | done | 399171948 (multica) | schema migration (205 ALTER TABLE interaction_dag_segment — nullable AReaL columns + dual-source columns); dual-source segment persistence | Approved by coordinator, 0 Minor (no fix round) | plan 3.1-3.5 ✅, spec 3.1-3.5 ✅ |
 
 ## Findings deferred to final review (standard mode)
 
@@ -26,23 +27,23 @@
 
 ## Current task
 
-- Task 2: Durable dispatch root and readiness — COMPLETE
-- Stage: done (implementer df6c1353c; coordinator review Approved with 3 Minor, no fix round; 10/10 checkoff PASS)
-- Plan task text: "Task 2 / Step 1: Write failing persistence and readiness tests" (group Task 2, steps 1-5)
-- Mapped OpenSpec tasks: tasks.md group 2 (2.1-2.5) — all checked off
-- Brief: .superpowers/sdd/task-2-brief.md
+- Task 3: Dual-source segment persistence — COMPLETE
+- Stage: done (implementer 399171948; coordinator review Approved with 0 Minor, no fix round; 10/10 checkoff PASS)
+- Plan task text: "Task 3 / Step 1: Write failing local-segment tests" (group Task 3, steps 1-5)
+- Mapped OpenSpec tasks: tasks.md group 3 (3.1-3.5) — all checked off
+- Brief: .superpowers/sdd/task-3-brief.md
 - Repo: nested multica (multica/server/)
-- BASE (multica): f124119f3
+- BASE (multica): df6c1353c (Task 2 HEAD)
 - Review-fix round: 0 (standard: max 1)
 
 ## Next task
 
-- Task 3: Dual-source segment persistence
+- Task 4: Record every env-dispatch agent at event seams
 - Stage: pending dispatch
-- Plan task text: "Task 3 / Step 1: Write failing local-segment tests" (group Task 3, steps 1-5)
-- Mapped OpenSpec tasks: tasks.md group 3 (3.1-3.5)
-- Brief: .superpowers/sdd/task-3-brief.md
+- Plan task text: "Task 4 / Step 1: Replace the old non-trained no-op test with failing behavior tests" (group Task 4, steps 1-4)
+- Mapped OpenSpec tasks: tasks.md group 4 (4.1-4.4)
+- Brief: .superpowers/sdd/task-4-brief.md
 - Repo: nested multica (multica/server/)
-- BASE (multica): df6c1353c (Task 2 HEAD)
-- Risk signals: schema migration (205 ALTER TABLE interaction_dag_segment — nullable AReaL columns + dual-source columns); dual-source segment persistence — risk task
+- BASE (multica): 399171948 (Task 3 HEAD)
+- Risk signals: env-dispatch event seams (close/delegation hooks); AReaL-call boundary (non-training path must make zero AReaL calls); diff expected >200 lines
 - Review-fix round: 0 (standard: max 1)

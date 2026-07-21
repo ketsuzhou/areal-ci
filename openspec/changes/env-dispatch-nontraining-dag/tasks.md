@@ -35,25 +35,25 @@
 
 ## 3. Dual-source segment persistence
 
-- [ ] 3.1 Write failing local-segment tests: insert task messages at known sequence
+- [x] 3.1 Write failing local-segment tests: insert task messages at known sequence
   numbers and assert the local recorder upserts session `multica:<task-id>`,
   snapshots only the requested sequence range in order, sets
   `trajectory_source=task_messages`, sets `trainable=false`, leaves AReaL fields
   null, repeated close is idempotent, and runtime provider secrets never enter the
   serialized trajectory.
-- [ ] 3.2 Verify RED: `go test ./server/internal/service -run 'InteractionDAG.*Local'
+- [x] 3.2 Verify RED: `go test ./server/internal/service -run 'InteractionDAG.*Local'
   -count=1` fails because local segment recording does not exist.
-- [ ] 3.3 Create migration `205_interaction_dag_local_trajectory`: backfill existing
+- [x] 3.3 Create migration `205_interaction_dag_local_trajectory`: backfill existing
   rows, make `trajectory_id`/`tensor_ref` nullable, add `trajectory_source`
   (default `areal_tensor`), `trainable` (default true), and `trajectory` (default
   `[]`); add checks requiring non-null AReaL fields only for trainable tensor
   segments and null AReaL fields for task-message segments.
-- [ ] 3.4 Implement `RecordLocalSegmentForEvent` and assembly: serialize an
+- [x] 3.4 Implement `RecordLocalSegmentForEvent` and assembly: serialize an
   allowlisted message-event shape (sequence, type, tool, content, input, output)
   from persisted rows, compute start/end using existing sequence queries, atomically
   insert the segment and environment snapshot, and emit `TrajectorySource`,
   `Trainable`, and `Trajectory` from both source types (AReaL-only fields nullable).
-- [ ] 3.5 Verify GREEN: the Step 3.2 command plus
+- [x] 3.5 Verify GREEN: the Step 3.2 command plus
   `go test ./server/internal/service -run InteractionDAG -count=1` pass.
 
 ## 4. Record every env-dispatch agent at event seams

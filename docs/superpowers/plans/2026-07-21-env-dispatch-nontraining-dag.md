@@ -142,7 +142,7 @@ Run the Step 2 command; expected PASS.
 - Produces: `RecordLocalSegmentForEvent(ctx, projectID, agentRunID, issueID, closingEvent, envSnapshot) (string, error)`.
 - Produces: `AssembledSegment` fields `TrajectorySource`, `Trainable`, and `Trajectory`; AReaL-only fields are nullable.
 
-- [ ] **Task 3 / Step 1: Write failing local-segment tests**
+- [x] **Task 3 / Step 1: Write failing local-segment tests**
 
 Insert task messages at known sequence numbers and assert the local recorder
 upserts session `multica:<task-id>`, snapshots only the requested sequence
@@ -150,13 +150,13 @@ range in order, sets `trajectory_source=task_messages`, sets
 `trainable=false`, and leaves AReaL fields null. Assert repeated close is
 idempotent and runtime provider secrets never enter serialized trajectory.
 
-- [ ] **Task 3 / Step 2: Run tests and verify RED**
+- [x] **Task 3 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/service -run 'InteractionDAG.*Local' -count=1`
 
 Expected: FAIL because local segment recording does not exist.
 
-- [ ] **Task 3 / Step 3: Add the dual-source schema**
+- [x] **Task 3 / Step 3: Add the dual-source schema**
 
 Backfill existing rows, constrain the source, and enforce source-specific
 validity:
@@ -173,14 +173,14 @@ ALTER TABLE interaction_dag_segment
 Add checks requiring non-null AReaL fields only for trainable tensor segments
 and null AReaL fields for task-message segments.
 
-- [ ] **Task 3 / Step 4: Implement local snapshot recording and assembly**
+- [x] **Task 3 / Step 4: Implement local snapshot recording and assembly**
 
 Serialize an allowlisted message event shape containing sequence, type, tool,
 content, input, and output from persisted rows. Compute start/end using the
 existing sequence queries, atomically insert the segment and environment
 snapshot, and emit the three new contract fields from both source types.
 
-- [ ] **Task 3 / Step 5: Run tests and verify GREEN**
+- [x] **Task 3 / Step 5: Run tests and verify GREEN**
 
 Run the Step 2 command plus `go test ./server/internal/service -run InteractionDAG -count=1`; expected PASS.
 
