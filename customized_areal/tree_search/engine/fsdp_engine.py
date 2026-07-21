@@ -997,6 +997,57 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             stats = self._trim_vimpo_stats(stats, ctx.pad_length)
         return stats
 
+    @staticmethod
+    def _tree_seq_predict_mask(
+        seq_out_len: int,
+        seq_batch_idx: int,
+        device: torch.device,
+        *,
+        loss_mask_packed: torch.Tensor | None,
+        cu_seqlens_packed: torch.Tensor | None,
+        vimpo_pm_packed: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Build the per-sequence ``predict_mask`` for the packed-tree path.
+
+        The per-sequence output is assembled in sequence order with length
+        ``seq_len - 1``; output index ``i`` corresponds to sequence position
+        ``i`` predicting position ``i+1``. So ``predict_mask[i]`` is True only
+        where position ``i+1`` is a response (``loss_mask``) token - the same
+        response-aligned convention as the non-tree path's
+        ``_extract_vimpo_predict_mask`` (``roll(loss_mask, -1)`` + last-False).
+
+        ``loss_mask`` is packed per-sequence contiguously, and ``cu_seqlens``
+        gives each sequence's range ``[seg_start, seg_end)``. If
+        ``vimpo_predict_mask`` is provided (already shifted:
+        ``vimpo_predict_mask[p] = loss_mask[p+1]``), slice it directly;
+        otherwise derive from ``loss_mask``; otherwise fall back to all-True
+        (matching ``_extract_vimpo_predict_mask``'s missing-loss_mask fallback).
+        """
+        if seq_out_len == 0:
+            return torch.empty(0, dtype=torch.bool, device=device)
+        if vimpo_pm_packed is not None and cu_seqlens_packed is not None:
+            seg_start = int(cu_seqlens_packed[seq_batch_idx].item())
+            seg_end = int(cu_seqlens_packed[seq_batch_idx + 1].item())
+            pm = (
+                vimpo_pm_packed.squeeze()
+                if vimpo_pm_packed.dim() > 1
+                else vimpo_pm_packed
+            )
+            # vimpo_pm[p] = loss_mask[p+1]; output index i predicts seg_start+i+1
+            # so predict_mask[i] = vimpo_pm[seg_start + i], slice [seg_start, seg_end-1].
+            return pm[seg_start : seg_end - 1].bool().to(device)
+        if loss_mask_packed is not None and cu_seqlens_packed is not None:
+            seg_start = int(cu_seqlens_packed[seq_batch_idx].item())
+            seg_end = int(cu_seqlens_packed[seq_batch_idx + 1].item())
+            lm = (
+                loss_mask_packed.squeeze()
+                if loss_mask_packed.dim() > 1
+                else loss_mask_packed
+            )
+            # predict_mask[i] = loss_mask[seg_start + i + 1], slice [seg_start+1, seg_end].
+            return lm[seg_start + 1 : seg_end].bool().to(device)
+        return torch.ones(seq_out_len, dtype=torch.bool, device=device)
+
     def _vimpo_stats_from_tree_logits(
         self,
         logits: torch.Tensor,
@@ -1083,7 +1134,43 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             vocab_end_index = partition_vocab_size
 
         results: dict[int, VIMPOCandidateStats] = {}
-        for seq_id in trie.all_sequence_ids:
+        # Per-sequence predict_mask alignment with the non-tree path
+        # (``_vimpo_stats_from_flat_logits`` -> ``_extract_vimpo_predict_mask``):
+        # position ``i`` predicts position ``i+1``, and ``predict_mask[i]`` is
+        # True only where position ``i+1`` is a response (``loss_mask``) token.
+        # The tree-packed ``input_ids`` includes prompt+response (the loss path
+        # at ``_compute_tree_multi_candidate_logprobs_entropy`` derives
+        # ``prompt_len`` from ``loss_mask``, confirming prompt is packed), so
+        # the tree path must respect ``loss_mask`` to avoid marking
+        # prompt-internal positions as predict=True.
+        # ``loss_mask`` is packed per-sequence contiguously (by
+        # ``_pack_extra_data``), and ``cu_seqlens`` gives each sequence's range.
+        loss_mask_packed = ctx.mb_input.get("loss_mask")
+        cu_seqlens_packed = ctx.mb_input.get("cu_seqlens")
+        vimpo_pm_packed = ctx.mb_input.get("vimpo_predict_mask")
+        # ``build_packed_tree_batch`` does not add ``cu_seqlens`` to the tree mb
+        # (only ``_pack_extra_data`` packs per-sequence tensors). Derive it from
+        # the trie's per-sequence token counts so the ``loss_mask`` slice below
+        # is correct even when the workflow did not supply ``cu_seqlens``.
+        if (
+            cu_seqlens_packed is None
+            and (loss_mask_packed is not None or vimpo_pm_packed is not None)
+            and trie.all_sequence_ids
+        ):
+            seq_token_counts = [
+                sum(
+                    end - start + 1
+                    for start, end in trie.get_sequence_tree_indices(sid)
+                )
+                for sid in trie.all_sequence_ids
+            ]
+            cu_seqlens_packed = torch.zeros(
+                len(seq_token_counts) + 1, dtype=torch.int32, device=logits.device
+            )
+            for i, cnt in enumerate(seq_token_counts):
+                cu_seqlens_packed[i + 1] = cu_seqlens_packed[i] + cnt
+
+        for b, seq_id in enumerate(trie.all_sequence_ids):
             indices = trie.get_sequence_tree_indices(seq_id)
             if not indices:
                 results[seq_id] = VIMPOCandidateStats(
@@ -1112,7 +1199,6 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             cand_id_parts: list[torch.Tensor] = []
             cand_lp_parts: list[torch.Tensor] = []
             sampled_parts: list[torch.Tensor] = []
-            mask_parts: list[torch.Tensor] = []
 
             for i, (start, end) in enumerate(indices):
                 num_internal = end - start
@@ -1130,9 +1216,6 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                             tp_group,
                         )
                     )
-                    mask_parts.append(
-                        torch.ones(num_internal, dtype=torch.bool, device=logits.device)
-                    )
                 # Transition at position `end` predicts next range's start.
                 if i + 1 < len(indices):
                     next_start = indices[i + 1][0]
@@ -1148,14 +1231,29 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                             tp_group,
                         )
                     )
-                    mask_parts.append(
-                        torch.ones(1, dtype=torch.bool, device=logits.device)
-                    )
 
             seq_candidate_ids = torch.cat(cand_id_parts, dim=0)
             seq_candidate_logp = torch.cat(cand_lp_parts, dim=0)
             seq_sampled_logp = torch.cat(sampled_parts, dim=0)
-            seq_predict_mask = torch.cat(mask_parts, dim=0)
+
+            # Build the per-sequence predict_mask. The per-sequence output is
+            # assembled in sequence order (internal positions then transitions,
+            # across trie ranges) with length ``seq_len - 1``; output index ``i``
+            # corresponds to sequence position ``i`` predicting ``i+1``. So
+            # ``predict_mask[i] = loss_mask[seg_start + i + 1]``. If
+            # ``vimpo_predict_mask`` is provided (already shifted:
+            # ``vimpo_predict_mask[p] = loss_mask[p+1]``), slice it directly;
+            # else derive from ``loss_mask``; else fall back to all-True
+            # (matching ``_extract_vimpo_predict_mask``'s missing-loss_mask
+            # fallback).
+            seq_predict_mask = self._tree_seq_predict_mask(
+                seq_candidate_ids.shape[0],
+                b,
+                logits.device,
+                loss_mask_packed=loss_mask_packed,
+                cu_seqlens_packed=cu_seqlens_packed,
+                vimpo_pm_packed=vimpo_pm_packed,
+            )
 
             seq_candidate_ids = seq_candidate_ids.masked_fill(
                 ~seq_predict_mask.unsqueeze(-1), -1
@@ -1223,7 +1321,10 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         # 1-D fields: all_gather concatenates along dim=-1 (sequence).
         sampled_logp = self._sp_all_gather(stats.sampled_logp)
         retained_mass = self._sp_all_gather(stats.retained_mass)
-        predict_mask = self._sp_all_gather(stats.predict_mask)
+        # NCCL does not support bool for collectives; cast to int8 for the
+        # gather, then cast back to bool. See _sp_all_gather in the base class
+        # (dist.nn.functional.all_gather + torch.cat, no dtype conversion).
+        predict_mask = self._sp_all_gather(stats.predict_mask.to(torch.int8)).bool()
         # 2-D fields [S, K]: transpose to [K, S] so all_gather hits the S dim.
         candidate_ids = self._sp_all_gather(stats.candidate_ids.t()).t()
         candidate_logp = self._sp_all_gather(stats.candidate_logp.t()).t()
@@ -1282,8 +1383,12 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         # clashing with the -1 sentinel used everywhere else for masked
         # positions. Re-apply the sentinel wherever ``predict_mask`` is False
         # (covers both in-sequence masked rows and cross-sequence padding).
+        # ``predict_mask`` is [B, S] but ``candidate_ids`` is [B, S, K], so
+        # unsqueeze the mask to [B, S, 1] for broadcasting.
         predict_mask = out["predict_mask"].bool()
-        candidate_ids = out["candidate_ids"].masked_fill(~predict_mask, -1)
+        candidate_ids = out["candidate_ids"].masked_fill(
+            ~predict_mask.unsqueeze(-1), -1
+        )
         return VIMPOCandidateStats(
             sampled_logp=out["sampled_logp"],
             candidate_ids=candidate_ids,
