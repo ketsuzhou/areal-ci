@@ -285,24 +285,114 @@ is insufficient when workers do not share that filesystem.
 | -------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `create_base_env(image_ref=...)`       | `POST <MULTICA_BASE_URL>/api/v1/env`                            | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
 | `delete_env(env_id=...)`               | `DELETE <MULTICA_BASE_URL>/api/v1/env/{envID}`                  | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
-| `create_env_dispatch(...)` | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch` | Unified dispatch primitive. Returns an `EnvDispatchHandle` (`channel_id`, `project_id`, `env_id`, `dispatch_type`). For `dispatch_type="message"` the response carries a top-level `channel_id` (validated at the boundary); for `dispatch_type="issue"` `channel_id` is absent and `project_id` is the primary handle. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
+| `create_env_dispatch(...)` | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch` | Unified dispatch primitive. Returns an `EnvDispatchHandle` (`channel_id`, `project_id`, `env_id`, `dispatch_type`). For `dispatch_type="message"` the response carries a top-level `channel_id` (validated at the boundary); for `dispatch_type="issue"` `channel_id` is absent and `project_id` is the primary handle. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). Fail-closed on per-rollout failure: if any entry in `rollouts[]` carries an `error`, the client raises `RuntimeError("env-dispatch rollout failed: …")` instead of returning a half-formed handle, so a terminal provisioning failure on one lane can never train as success (ARE-5 AC-7). |
 | `get_dag(handle=...)` | message: `GET .../api/v1/env-dispatch/channels/{channelID}/dag`; issue: `GET .../api/v1/env-dispatch/{projectID}/dag` | Poll the assembled segment DAG, routed by `handle.dispatch_type`: `202` not-ready, `200` assembled DAG, `404` unknown, `403` cross-workspace. Transient `502`/`503`/`504` are re-polled. |
 | `list_checkpoints(handle=...)` | message: `GET .../api/v1/channels/{channelID}/env-checkpoints`; issue: `GET .../api/v1/projects/{projectID}/env-checkpoints` | List env checkpoints for the dispatch, routed by `handle.dispatch_type`, newest first. |
 | `cleanup_env_dispatch(handle=...)` | message: `DELETE .../api/v1/env-dispatch/channels/{channelID}`; issue: `DELETE .../api/v1/env-dispatch/{projectID}` | Serialized cascade cleanup for one dispatch: channel/project, issues, chat sessions, tasks, bindings, env, and runtime state. `404` is treated as success (idempotent). |
 
-The DAG poller re-polls transient responses up to the configured wall-clock
-deadline, then raises `DagTimeout`; `404` maps to `DagNotFound`, `403` to
-`DagForbidden`, and `401` reports the explicit login command without exposing the PAT.
+The DAG poller (`MulticaDagClient.get_dag`) is fail-closed. On `200` it parses the
+payload through `AssembledDag.from_dict`, which structurally validates the DAG -
+non-empty `segments`, `edges` is a list, `session_to_agent_run` is an object, no
+empty/duplicate `segment_id`, every edge references a known segment, no cycles, and
+every mapped agent run exists - raising `DagError` on any violation so an
+incomplete/malformed DAG can never train as a valid one (ARE-5 AC-7/AC-8). Transient
+`202`/`502`/`503`/`504` are re-polled up to the wall-clock deadline, then
+`DagTimeout` is raised; `404` maps to `DagNotFound`, `403` to `DagForbidden`, `401`
+reports the explicit login command without exposing the PAT, and any other status
+raises `DagError`. The debug helper `_poll_dag` (in `multica_client.py`) mirrors this:
+it validates the assembled DAG and raises on non-transient status or deadline instead
+of silently returning.
 
 ### Segment close (no reward) via the gateway group
 
-Closing a segment without reward (`POST /rl/close_segment`) flows through the
-db_bridge `gateway` group, not `multica_api`: the multica `arealrl` client posts
-to the db_bridge stub (MultiCA side) with the session-key
-`Authorization: Bearer <proxy_key>`, and the AReaL-side executor forwards it to
-the real AReaL gateway. The session key passes through end to end, mirroring
-`set_reward`; the channel is registered as `rl_close_segment` so the stub no
+`POST /rl/close_segment` closes a session's current segment into a ready
+trajectory **without** setting a reward. It decouples the trajectory boundary
+from reward so each communication-bounded segment is its own exportable
+trajectory; the segment's reward is assigned later (AReaL-side judge), not at
+close. This is the segment-DAG path that slices one RL session into multiple
+per-segment trajectories.
+
+Unlike the env-dispatch calls above (AReaL -> Multica), `close_segment` flows
+**Multica -> db_bridge -> AReaL**: the multica `arealrl` client posts to the
+db_bridge stub (MultiCA side) over the `gateway` group channel
+`rl_close_segment`, and the AReaL-side executor forwards it to the real AReaL
+gateway. The session key passes through end to end, mirroring `set_reward` /
+`end_session`; the channel is registered as `rl_close_segment` so the stub no
 longer 404s.
+
+| Aspect | Value                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| db_bridge channel | `rl_close_segment` (group `gateway`, `POST /rl/close_segment`, `kind=json`, `default_timeout_s=30`, `default_concurrency=4`)                       |
+| Auth   | Session key: `Authorization: Bearer <proxy_key>`. The gateway also accepts the admin key, mirroring `/rl/set_reward`.                                       |
+| Body   | None / empty `{}`. No `session_id` is sent - the endpoint resolves the session from the bearer token.                                                       |
+| Caller | Multica `arealrl.Client.CloseSegment(ctx, proxyKey)`, invoked from `InteractionDAGService.CloseSegmentForEvent`.                                            |
+
+**Gateway** (`areal/v2/inference_service/gateway/app.py`): extracts the bearer
+token and body, best-effort reads `model` from the JSON body for router
+routing, queries the router for the worker address, and forwards the request
+verbatim to `{worker_addr}/rl/close_segment`. The worker's response status,
+content, and content-type are returned unchanged.
+
+**Data proxy** (`areal/v2/inference_service/data_proxy/app.py`): resolves the
+session from the token (`401` on an invalid/expired key), calls
+`session.close_segment()` (`400` on `ValueError`), and returns a
+`CloseSegmentResponse`.
+
+**`Session.close_segment()`** (`data_proxy/session.py`): under the session lock,
+takes the active segment's `last_interaction_id` as the terminal interaction,
+mints the next `trajectory_id`, stores a `ReadyTrajectory`
+(`needs_online_callback=False`), and resets `_active_completions` to a fresh
+`InteractionCache()` so the next turn starts a new segment. It deliberately
+does **not** touch `_last_reward_interaction_id` / `_last_set_reward_time`, so
+reward-timeout finalization is unaffected. Raises `ValueError("No interactions
+in session")` when the active segment is empty.
+
+Response (`CloseSegmentResponse`):
+
+| Field               | Meaning                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `message`           | `"success"`.                                                 |
+| `interaction_count` | Number of interactions in the just-closed segment.           |
+| `session_id`        | The session the segment belonged to.                         |
+| `trajectory_id`     | The just-closed segment's trajectory id (nullable).          |
+| `trajectory_ready`  | `true` when `trajectory_id` is present.                      |
+| `ready_transition`  | `true` - close always transitions a segment to ready.        |
+
+**Multica-side contract:** the `arealrl` client treats a missing/nil
+`trajectory_id` as an error - every close must yield a trajectory to export.
+`CloseSegmentForEvent` then runs the per-segment pipeline: (a) resolve
+`agent_run_id` + `issue_id` from the session mapping, (b) `close_segment` ->
+`trajectory_id`, (c) `export_trajectories` (admin-key auth,
+`remove_session=false`) for that trajectory, (d) decode the `tensor_ref`, and
+(e) record the segment + env snapshot atomically. The session stays alive
+across per-segment exports (`remove_session=false`).
+
+The per-segment close pipeline (one iteration of `CloseSegmentForEvent`):
+
+```mermaid
+sequenceDiagram
+    participant M as Multica<br/>(InteractionDAGService / arealrl)
+    participant B as db_bridge<br/>(gateway group)
+    participant A as AReaL<br/>(gateway -> data proxy)
+
+    Note over M: segment boundary reached<br/>(communication-bounded segment)
+    M->>M: (a) resolve agent_run_id + issue_id<br/>from session mapping
+    M->>B: POST /rl/close_segment<br/>Authorization: Bearer <proxy_key><br/>body {} (no session_id)
+    B->>A: forward (rl_close_segment channel)
+    Note over A: gateway: router-resolve worker, forward<br/>data proxy: resolve session from token
+    A->>A: Session.close_segment()
+    Note over A: terminal = last_interaction_id;<br/>mint trajectory_id; store ReadyTrajectory;<br/>reset active completions;<br/>reward state untouched
+    A-->>B: CloseSegmentResponse<br/>{trajectory_id, interaction_count,<br/>ready_transition=true}
+    B-->>M: trajectory_id
+
+    M->>B: POST /export_trajectories<br/>Authorization: Bearer <admin_key><br/>{session_ids, trajectory_id,<br/>remove_session=false}
+    B->>A: forward (gateway group)
+    A-->>B: {traj: merged interactions}
+    B-->>M: raw traj JSON
+    M->>M: (d) decode tensor_ref
+    M->>M: (e) record segment + env snapshot<br/>atomically
+    Note over M: reward assigned later (AReaL-side judge);<br/>session stays alive for next segment
+```
 
 `create_env_dispatch` accepts these key fields:
 
