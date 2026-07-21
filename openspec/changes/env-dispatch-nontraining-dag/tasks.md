@@ -94,14 +94,14 @@
 
 ## 6. Cross-layer regression verification
 
-- [ ] 6.1 Run focused Go tests: `go test ./server/internal/service
+- [x] 6.1 Run focused Go tests: `go test ./server/internal/service
   ./server/internal/handler -count=1` passes.
-- [ ] 6.2 Run Go static checks: `go vet ./server/internal/service
+- [x] 6.2 Run Go static checks: `go vet ./server/internal/service
   ./server/internal/handler` exits 0.
-- [ ] 6.3 Run focused Python tests: the Task 5 Step 2 command passes.
-- [ ] 6.4 Update the repository graph: `graphify update .` completes successfully;
+- [x] 6.3 Run focused Python tests: the Task 5 Step 2 command passes.
+- [x] 6.4 Update the repository graph: `graphify update .` completes successfully;
   dirty graph outputs are retained.
-- [ ] 6.5 Review secret and AReaL-call boundaries: confirm provider API-key fixtures
+- [x] 6.5 Review secret and AReaL-call boundaries: confirm provider API-key fixtures
   occur only in request/setup fixtures, never in serialized DAG assertions, errors,
   or structured log fields, and that non-training fake AReaL client call counts
   remain zero.

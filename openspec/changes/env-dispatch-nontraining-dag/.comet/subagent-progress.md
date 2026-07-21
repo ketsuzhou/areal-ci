@@ -18,6 +18,7 @@
 | 3 | done | 399171948 (multica) | schema migration (205 ALTER TABLE interaction_dag_segment — nullable AReaL columns + dual-source columns); dual-source segment persistence | Approved by coordinator, 0 Minor (no fix round) | plan 3.1-3.5 ✅, spec 3.1-3.5 ✅ |
 | 4 | done | 83dde092f (multica) | env-dispatch event seams (close/delegation hooks); AReaL-call boundary (non-training path must make zero AReaL calls) | Approved by coordinator, 0 Minor (no fix round) | plan 4.1-4.4 ✅, spec 4.1-4.4 ✅ |
 | 5 | done | ecb24a3d (areal) | Python dataclass contract changes (nullable fields, dual-source parsing); AReaL training path (only trainable=true segments reach tensor resolution) | Approved by coordinator, 0 Minor (no fix round) | plan 5.1-5.4 ✅, spec 5.1-5.4 ✅ |
+| 6 | done | N/A (coordinator-executed verification) | cross-layer regression; secret/AReaL-call boundary review | Coordinator verified | plan 6.1-6.5 ✅, spec 6.1-6.5 ✅ |
 
 ## Findings deferred to final review (standard mode)
 

@@ -269,29 +269,29 @@ Run the Step 2 command; expected PASS.
 - Consumes: all prior tasks.
 - Produces: reproducible verification evidence.
 
-- [ ] **Task 6 / Step 1: Run focused Go tests**
+- [x] **Task 6 / Step 1: Run focused Go tests**
 
 Run: `go test ./server/internal/service ./server/internal/handler -count=1`
 
 Expected: PASS.
 
-- [ ] **Task 6 / Step 2: Run Go static checks**
+- [x] **Task 6 / Step 2: Run Go static checks**
 
 Run: `go vet ./server/internal/service ./server/internal/handler`
 
 Expected: exit 0.
 
-- [ ] **Task 6 / Step 3: Run focused Python tests**
+- [x] **Task 6 / Step 3: Run focused Python tests**
 
 Run the Task 5 Step 2 command; expected PASS.
 
-- [ ] **Task 6 / Step 4: Update the repository graph**
+- [x] **Task 6 / Step 4: Update the repository graph**
 
 Run: `graphify update .`
 
 Expected: graph update completes successfully; dirty graph outputs are retained.
 
-- [ ] **Task 6 / Step 5: Review secret and AReaL-call boundaries**
+- [x] **Task 6 / Step 5: Review secret and AReaL-call boundaries**
 
 Search changed code and test output for provider API-key fixtures and verify
 they occur only in request/setup fixtures, never serialized DAG assertions,
