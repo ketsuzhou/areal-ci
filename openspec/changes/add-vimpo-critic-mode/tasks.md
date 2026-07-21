@@ -12,14 +12,14 @@
 
 ## 2. FSDP Actor Candidate Statistics
 
-- [ ] 2.1 Add a VIMPO FSDP actor/statistics path that returns sampled log-probabilities,
+- [x] 2.1 Add a VIMPO FSDP actor/statistics path that returns sampled log-probabilities,
   global policy top-k token IDs/log-probabilities, and retained mass without exporting full
   logits.
-- [ ] 2.2 Implement tensor-parallel global top-k and full-vocabulary log-normalization using
+- [x] 2.2 Implement tensor-parallel global top-k and full-vocabulary log-normalization using
   explicit process groups and correct global vocabulary offsets.
-- [ ] 2.3 Preserve sequence-parallel, padded, and packed-tree response-position alignment by
+- [x] 2.3 Preserve sequence-parallel, padded, and packed-tree response-position alignment by
   reusing the existing multi-candidate mapping utilities.
-- [ ] 2.4 Add CPU/fake-process-group tests and hardware-gated distributed tests for actor
+- [x] 2.4 Add CPU/fake-process-group tests and hardware-gated distributed tests for actor
   candidate statistics, masks, TP selection, SP gathering, and packed-tree alignment.
 
 ## 3. Frozen SGLang Reference Scoring

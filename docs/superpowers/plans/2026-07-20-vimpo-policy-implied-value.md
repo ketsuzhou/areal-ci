@@ -724,7 +724,7 @@ git commit -m "feat(tree-search): add frozen SGLang VIMPO scorer"
 - Consumes: actor logits, next-token labels/mask, explicit TP/SP groups, and effective `top_k`.
 - Produces: `VIMPOCandidateStats` and `compute_vimpo_candidate_stats(data, top_k)` without exporting full-vocabulary logits.
 
-- [ ] **Step 1: Write failing single-rank numerical tests**
+- [x] **Step 1: Write failing single-rank numerical tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py
@@ -751,13 +751,13 @@ def test_topk_is_capped_at_vocab_and_masked_rows_are_sentinel() -> None:
     assert stats.predict_mask.tolist() == [[True, False]]
 ```
 
-- [ ] **Step 2: Run tests and verify the stats API is absent**
+- [x] **Step 2: Run tests and verify the stats API is absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py -q`
 
 Expected: FAIL during collection because `vimpo_candidate_stats_from_logits` does not exist.
 
-- [ ] **Step 3: Implement the return type and single-rank helper**
+- [x] **Step 3: Implement the return type and single-rank helper**
 
 ```python
 @dataclass(frozen=True)
@@ -780,7 +780,7 @@ def vimpo_candidate_stats_from_logits(logits, labels, predict_mask, *, top_k):
     return VIMPOCandidateStats(sampled_logp, candidate_ids, candidate_logp, retained_mass, predict_mask.bool())
 ```
 
-- [ ] **Step 4: Add fake-process-group tests for sharded normalization and global top-k**
+- [x] **Step 4: Add fake-process-group tests for sharded normalization and global top-k**
 
 In `test_vimpo_fsdp_distributed.py`, spawn two CPU `gloo` ranks with `torch.multiprocessing.spawn`. Give rank 0 vocabulary IDs `[0, 2)` and rank 1 `[2, 4)`, compare global candidate IDs/log-probabilities and sampled-token log-probability against concatenated brute force, and monkeypatch `torch.distributed.all_reduce/all_gather` wrappers to assert the configured `tp_group` is passed. Mark the true SP/packed-tree GPU cases:
 
@@ -798,11 +798,11 @@ def test_vimpo_stats_tp_sp_and_packed_tree_alignment() -> None:
 
 Define `_tp_sp_packed_tree_worker(rank: int, world_size: int)` in the same test module using the existing distributed-test setup/teardown pattern. It initializes a temporary-file `gloo` control group and NCCL model groups, constructs identical packed and non-packed token batches, invokes `compute_vimpo_candidate_stats` on both, and uses `torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)` on sampled log-probabilities, candidate log-probabilities, retained mass, and scattered candidate IDs. Do not mock FSDP or DTensor internals.
 
-- [ ] **Step 5: Implement TP/SP and packed-tree collection**
+- [x] **Step 5: Implement TP/SP and packed-tree collection**
 
 Add `MultiCandidateFSDPEngine.compute_vimpo_candidate_stats(self, data, *, top_k)` as a no-grad/eval forward. For each vocab shard, calculate global max with `all_reduce(MAX, group=tp_group)`, global shifted exponential sum with `all_reduce(SUM, group=tp_group)`, add the shard's global vocab offset to local top-k IDs, `all_gather` at most `K` candidates per rank, then select global top-k with token ID as deterministic tie-breaker. Gather sampled logits only from the owning shard. Reuse `_sp_all_gather` and `gather_packed_tree_vocab_stats`/trie mappings before returning `[B,S,...]`. Force temperature `1.0`; restore the previous train/eval mode after the snapshot.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py customized_areal/tree_search/tests/test_vimpo_fsdp_distributed.py -q`
 
