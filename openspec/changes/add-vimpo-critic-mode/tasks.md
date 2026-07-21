@@ -24,13 +24,13 @@
 
 ## 3. Frozen SGLang Reference Scoring
 
-- [ ] 3.1 Add a reference candidate-scoring interface that accepts per-position actor token
+- [x] 3.1 Add a reference candidate-scoring interface that accepts per-position actor token
   IDs and returns sampled-token plus candidate reference log-probabilities.
-- [ ] 3.2 Implement the SGLang adapter using batched prefix-state scoring and radix-cache
+- [x] 3.2 Implement the SGLang adapter using batched prefix-state scoring and radix-cache
   reuse, with bounded concurrency, timeouts, and stable response ordering.
-- [ ] 3.3 Validate initial checkpoint/tokenizer/vocabulary identity, temperature 1,
+- [x] 3.3 Validate initial checkpoint/tokenizer/vocabulary identity, temperature 1,
   reference weight immutability, output shapes, and finite log-probabilities.
-- [ ] 3.4 Add mocked SGLang contract tests for ragged per-position candidates, multi-turn
+- [x] 3.4 Add mocked SGLang contract tests for ragged per-position candidates, multi-turn
   prefixes, failures, and rejection of reference-selected top-k substitution.
 
 ## 4. Workflow Metadata and Episode Batching

@@ -602,7 +602,7 @@ git commit -m "feat(tree-search): add episode-atomic VIMPO batching"
 - Consumes: actor initial checkpoint/tokenizer identity and per-position actor candidate IDs.
 - Produces: `ReferenceIdentity`, `ReferenceScoreRequest`, `ReferenceScore`, `VIMPOReferenceScorer`, and `SGLangVIMPOReferenceScorer` with synchronous `validate_identity`, `score`, and `close` methods suitable for PPO worker RPC.
 
-- [ ] **Step 1: Write failing mocked HTTP contract tests**
+- [x] **Step 1: Write failing mocked HTTP contract tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_reference.py
@@ -645,13 +645,13 @@ def test_identity_mismatch_fails_before_scoring(field: str) -> None:
 
 In this file, `_scripted_scorer` and `_identity_scorer` are complete local fixtures backed by `httpx.MockTransport`; they must also cover HTTP 429/500 retry, HTTP 400 no-retry, timeout exhaustion, missing token ID, non-finite score, candidate chunking, endpoint identity change after reconnect, bounded worker count, and idempotent close.
 
-- [ ] **Step 2: Run tests and verify the scorer module is missing**
+- [x] **Step 2: Run tests and verify the scorer module is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_reference.py -q`
 
 Expected: FAIL during collection because `vimpo_reference.py` does not exist.
 
-- [ ] **Step 3: Implement immutable identity and request/response types**
+- [x] **Step 3: Implement immutable identity and request/response types**
 
 ```python
 @dataclass(frozen=True)
@@ -686,7 +686,7 @@ class VIMPOReferenceScorer(Protocol):
         raise NotImplementedError
 ```
 
-- [ ] **Step 4: Implement the generic SGLang adapter**
+- [x] **Step 4: Implement the generic SGLang adapter**
 
 Use a bounded `concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency)` around one shared `httpx.Client`. Sort work by `(len(prefix_ids), key)`, restore result order by the caller's keys, and send:
 
@@ -702,7 +702,7 @@ payload = {
 
 Parse `meta_info["token_ids_logprob"]` into a token-ID map; require every requested ID exactly once and finite. Chunk `token_ids_logprob` when the service reports a limit, joining chunks by ID. Retry only `httpx.TransportError`, HTTP 429, and HTTP 5xx up to `max_retries`; run identity validation again after a transport reconnect. Compare every `ReferenceIdentity` field, `temperature == 1.0`, and `quantized is False` from `/get_model_info`. Never call a weight-update endpoint.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_reference.py -q`
 
