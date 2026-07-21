@@ -58,20 +58,20 @@
 
 ## 4. Record every env-dispatch agent at event seams
 
-- [ ] 4.1 Replace the old non-trained no-op test with failing behavior tests: a
+- [x] 4.1 Replace the old non-trained no-op test with failing behavior tests: a
   non-trained issue task and channel task record local segments, a mixed
   trained/non-trained pair records both sources with an edge, ordinary non-env-
   dispatch tasks remain no-ops, and the non-training path makes zero fake AReaL
   client calls.
-- [ ] 4.2 Verify RED: `go test ./server/internal/service -run
+- [x] 4.2 Verify RED: `go test ./server/internal/service -run
   'InteractionDAG.*(NonTrain|Mixed|Channel)' -count=1` fails at the current
   `extractArealProxyConfig` early return.
-- [ ] 4.3 Implement unified project and trajectory-source routing: resolve project
+- [x] 4.3 Implement unified project and trajectory-source routing: resolve project
   from issue or chat session, gate local recording on an `env_dispatch_run` lookup,
   keep the current bridge close/export order for proxy tasks, and otherwise use
   deterministic local session/run mapping plus local segment recording. Reuse
   existing edge and one-segment guards.
-- [ ] 4.4 Verify GREEN: the Step 4.2 command and
+- [x] 4.4 Verify GREEN: the Step 4.2 command and
   `go test ./server/internal/service -count=1` pass.
 
 ## 5. Parse mixed DAGs safely in AReaL

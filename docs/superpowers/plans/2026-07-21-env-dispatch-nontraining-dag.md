@@ -198,27 +198,27 @@ Run the Step 2 command plus `go test ./server/internal/service -run InteractionD
 - Consumes: env-dispatch project membership and `RecordLocalSegmentForEvent`.
 - Produces: a unified close seam choosing AReaL only when `areal_proxy` exists; otherwise local recording for env-dispatch tasks.
 
-- [ ] **Task 4 / Step 1: Replace the old non-trained no-op test with failing behavior tests**
+- [x] **Task 4 / Step 1: Replace the old non-trained no-op test with failing behavior tests**
 
 Prove a non-trained issue task and channel task record local segments, a mixed
 trained/non-trained pair records both sources with an edge, ordinary
 non-env-dispatch tasks remain no-ops, and the non-training path makes zero fake
 AReaL client calls.
 
-- [ ] **Task 4 / Step 2: Run tests and verify RED**
+- [x] **Task 4 / Step 2: Run tests and verify RED**
 
 Run: `go test ./server/internal/service -run 'InteractionDAG.*(NonTrain|Mixed|Channel)' -count=1`
 
 Expected: FAIL at the current `extractArealProxyConfig` early return.
 
-- [ ] **Task 4 / Step 3: Implement unified project and trajectory-source routing**
+- [x] **Task 4 / Step 3: Implement unified project and trajectory-source routing**
 
 Resolve project from issue or chat session. Gate local recording on an
 `env_dispatch_run` lookup. Keep the current bridge close/export order for proxy
 tasks; use deterministic local session/run mapping and local segment recording
 otherwise. Reuse existing edge and one-segment guards.
 
-- [ ] **Task 4 / Step 4: Run tests and verify GREEN**
+- [x] **Task 4 / Step 4: Run tests and verify GREEN**
 
 Run the Step 2 command and `go test ./server/internal/service -count=1`; expected PASS.
 
