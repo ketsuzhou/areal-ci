@@ -217,15 +217,23 @@ def run_segment_dag_training_step(
         ordered, initial_value=0.0, gamma=gamma, lam=lam
     )
 
-    # Tensor lifecycle cleanup: release resolved shards, then revoke sessions.
+    # Tensor lifecycle cleanup: release resolved shards for trainable segments
+    # only, then revoke sessions that belong to trainable agent runs.
+    # Non-trainable (task_messages) segments must never reach cleanup.
+    trainable_agent_run_ids: set[str] = {
+        seg.agent_run_id for seg in dag.segments if seg.trainable
+    }
     shard_ids: list[str] = []
     for seg in dag.segments:
-        for ref in (seg.tensor_ref or {}).values():
+        if not seg.trainable or not seg.tensor_ref:
+            continue
+        for ref in seg.tensor_ref.values():
             if isinstance(ref, dict) and ref.get("shard_id"):
                 shard_ids.append(ref["shard_id"])
     resolver.clear(shard_ids)
-    for session_id in dag.session_to_agent_run:
-        session_remover.remove(session_id)
+    for session_id, agent_run_id in dag.session_to_agent_run.items():
+        if agent_run_id in trainable_agent_run_ids:
+            session_remover.remove(session_id)
 
     return advantages
 

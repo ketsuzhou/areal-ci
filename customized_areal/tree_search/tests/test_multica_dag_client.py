@@ -386,3 +386,172 @@ def test_get_dag_issue_handle_routes_project_first():
     )
     dag = client.get_dag(handle, timeout=5.0, interval=0.0)
     assert isinstance(dag, AssembledDag)
+
+
+# ── Task 5: dual-source (mixed) DAG tests ────────────────────────────
+
+
+def _mixed_dag_payload() -> dict:
+    """Mixed DAG: one areal_tensor segment + one task_messages segment."""
+    return {
+        "segments": [
+            {
+                "segment_id": "seg-areal-1",
+                "agent_run_id": "ar-1",
+                "issue_id": "i-1",
+                "trajectory_id": 42,
+                "tensor_ref": {
+                    "input_ids": {"shard_id": "sh-1", "node_addr": "http://dp"}
+                },
+                "closing_event": None,
+                "env_snapshot": {
+                    "sandbox_ids": [],
+                    "issue_snapshot_id": "i-1",
+                    "env_state": {},
+                },
+                "trajectory_source": "areal_tensor",
+                "trainable": True,
+                "trajectory": [],
+            },
+            {
+                "segment_id": "seg-local-1",
+                "agent_run_id": "ar-2",
+                "issue_id": "i-1",
+                "trajectory_id": None,
+                "tensor_ref": None,
+                "closing_event": "completion",
+                "env_snapshot": {
+                    "sandbox_ids": [],
+                    "issue_snapshot_id": "i-1",
+                    "env_state": {},
+                },
+                "trajectory_source": "task_messages",
+                "trainable": False,
+                "trajectory": [
+                    {"sequence": 1, "type": "user", "content": "hello"}
+                ],
+            },
+        ],
+        "edges": [
+            {
+                "src_segment_id": "seg-areal-1",
+                "dst_segment_id": "seg-local-1",
+                "type": "completion",
+            }
+        ],
+        "session_to_agent_run": {"s-1": "ar-1"},
+    }
+
+
+def test_mixed_dag_parses_dual_source_segments():
+    """Both areal_tensor and task_messages segments parse correctly."""
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=_mixed_dag_payload())
+        ),
+    )
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+    assert len(dag.segments) == 2
+
+    # areal_tensor segment
+    areal_seg = dag.segments[0]
+    assert areal_seg.segment_id == "seg-areal-1"
+    assert areal_seg.trajectory_source == "areal_tensor"
+    assert areal_seg.trainable is True
+    assert areal_seg.trajectory_id == 42
+    assert areal_seg.tensor_ref is not None
+    assert areal_seg.trajectory == []
+
+    # task_messages segment
+    local_seg = dag.segments[1]
+    assert local_seg.segment_id == "seg-local-1"
+    assert local_seg.trajectory_source == "task_messages"
+    assert local_seg.trainable is False
+    assert local_seg.trajectory_id is None
+    assert local_seg.tensor_ref is None
+    assert local_seg.trajectory == [
+        {"sequence": 1, "type": "user", "content": "hello"}
+    ]
+
+    # edges preserved
+    assert len(dag.edges) == 1
+    assert dag.edges[0].src_segment_id == "seg-areal-1"
+    assert dag.edges[0].dst_segment_id == "seg-local-1"
+
+
+def test_areal_tensor_segment_missing_trajectory_id_raises():
+    """areal_tensor segments require non-null trajectory_id."""
+    payload = _mixed_dag_payload()
+    payload["segments"][0]["trajectory_id"] = None
+
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=payload)
+        ),
+    )
+    with pytest.raises(DagError, match="missing trajectory_id"):
+        client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+
+def test_areal_tensor_segment_missing_tensor_ref_raises():
+    """areal_tensor segments require non-null tensor_ref."""
+    payload = _mixed_dag_payload()
+    payload["segments"][0]["tensor_ref"] = None
+
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=payload)
+        ),
+    )
+    with pytest.raises(DagError, match="missing tensor_ref"):
+        client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+
+def test_task_messages_segment_with_unexpected_ids_raises():
+    """task_messages segments must have null trajectory_id and tensor_ref."""
+    payload = _mixed_dag_payload()
+    payload["segments"][1]["trajectory_id"] = 99
+
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=payload)
+        ),
+    )
+    with pytest.raises(DagError, match="unexpected trajectory_id"):
+        client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+
+def test_task_messages_segment_with_unexpected_tensor_ref_raises():
+    """task_messages segments must have null tensor_ref."""
+    payload = _mixed_dag_payload()
+    payload["segments"][1]["tensor_ref"] = {"shard_id": "bad"}
+
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=payload)
+        ),
+    )
+    with pytest.raises(DagError, match="unexpected tensor_ref"):
+        client.get_dag("proj-1", timeout=5.0, interval=0.0)
+
+
+def test_backward_compat_segments_default_to_areal_tensor_trainable():
+    """Segments without trajectory_source/trainable default to areal_tensor/True."""
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json=_dag_payload())
+        ),
+    )
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+    for seg in dag.segments:
+        assert seg.trajectory_source == "areal_tensor"
+        assert seg.trainable is True
+        assert seg.trajectory_id is not None
+        assert seg.tensor_ref is not None

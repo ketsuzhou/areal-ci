@@ -191,7 +191,13 @@ class SuperNodeAssembler:
 
         edag = ExecutionDAG()
         for seg in dag.segments:
-            tensors = resolver.resolve(seg.tensor_ref)
+            # Only resolve tensor_refs for trainable (areal_tensor) segments.
+            # Non-trainable segments retain DAG identity and metadata but skip
+            # tensor resolution entirely.
+            if seg.trainable and seg.tensor_ref:
+                tensors = resolver.resolve(seg.tensor_ref)
+            else:
+                tensors = {}
             env = seg.env_snapshot or {}
             closing_event = (
                 EdgeType(seg.closing_event) if seg.closing_event else None
@@ -211,6 +217,9 @@ class SuperNodeAssembler:
                     "segment_id": seg.segment_id,
                     "trajectory_id": seg.trajectory_id,
                     "tensors": tensors,
+                    "trajectory_source": seg.trajectory_source,
+                    "trainable": seg.trainable,
+                    "trajectory": seg.trajectory,
                 },
             )
             edag.add_event(super_node)

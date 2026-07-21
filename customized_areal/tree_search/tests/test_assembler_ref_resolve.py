@@ -296,3 +296,108 @@ def test_assemble_from_refs_fan_in_credits_all_parents():
     assert credit["seg-child-a"] > 0.0
     assert credit["seg-child-b"] > 0.0
     assert credit["seg-child-a"] == credit["seg-child-b"] == 0.5
+
+
+# ── Task 5: dual-source (mixed) DAG assembler tests ──────────────────
+
+
+def _mixed_assembler_dag() -> AssembledDag:
+    """Mixed DAG: trainable areal_tensor + non-trainable task_messages."""
+    return AssembledDag(
+        segments=[
+            SegmentSpec(
+                segment_id="seg-areal",
+                agent_run_id="ar-train",
+                issue_id="i-1",
+                trajectory_id=42,
+                tensor_ref={"shard_id": "sh-train", "node_addr": "x"},
+                closing_event="completion",
+                env_snapshot={},
+                trajectory_source="areal_tensor",
+                trainable=True,
+                trajectory=[],
+            ),
+            SegmentSpec(
+                segment_id="seg-local",
+                agent_run_id="ar-local",
+                issue_id="i-1",
+                trajectory_id=None,
+                tensor_ref=None,
+                closing_event=None,
+                env_snapshot={},
+                trajectory_source="task_messages",
+                trainable=False,
+                trajectory=[{"sequence": 1, "type": "user", "content": "hello"}],
+            ),
+        ],
+        edges=[
+            EdgeSpec(
+                src_segment_id="seg-areal",
+                dst_segment_id="seg-local",
+                type="completion",
+            )
+        ],
+        session_to_agent_run={"s-train": "ar-train"},
+    )
+
+
+def test_mixed_dag_only_resolves_trainable_segments():
+    """FakeResolver is called only for the trainable (areal_tensor) segment."""
+    dag = _mixed_assembler_dag()
+    resolver = FakeResolver()
+    edag = SuperNodeAssembler().assemble_from_refs(dag, resolver)
+
+    # Only the trainable segment's shard was resolved
+    assert resolver.calls == ["sh-train"]
+    assert len(edag.events) == 2
+
+
+def test_non_trainable_segment_retains_dag_identity():
+    """Non-trainable segments appear in the DAG with metadata but no tensors."""
+    dag = _mixed_assembler_dag()
+    resolver = FakeResolver()
+    edag = SuperNodeAssembler().assemble_from_refs(dag, resolver)
+
+    local_node = edag.get("seg-local")
+    assert local_node is not None
+    assert local_node.metadata["segment_id"] == "seg-local"
+    assert local_node.metadata.get("trajectory_id") is None
+    assert local_node.metadata.get("trajectory_source") == "task_messages"
+    assert local_node.metadata.get("trainable") is False
+    assert local_node.metadata.get("trajectory") == [
+        {"sequence": 1, "type": "user", "content": "hello"}
+    ]
+    # No tensors were resolved for non-trainable
+    assert local_node.metadata.get("tensors") == {}
+
+
+def test_mixed_dag_preserves_all_edges_including_non_trainable():
+    """Edges between trainable and non-trainable segments survive assembly."""
+    dag = _mixed_assembler_dag()
+    resolver = FakeResolver()
+    edag = SuperNodeAssembler().assemble_from_refs(dag, resolver)
+
+    assert len(edag.edges) == 1
+    assert edag.edges[0].src == "seg-areal"
+    assert edag.edges[0].dst == "seg-local"
+    assert edag.edges[0].type.value == "completion"
+
+    # Both segments have correct topological order
+    areal_node = edag.get("seg-areal")
+    local_node = edag.get("seg-local")
+    assert areal_node.completion_index == 0
+    assert local_node.completion_index == 1
+
+
+def test_mixed_dag_edge_tuples_preserved():
+    """incoming/outgoing_edges tuples include non-trainable segments."""
+    dag = _mixed_assembler_dag()
+    resolver = FakeResolver()
+    edag = SuperNodeAssembler().assemble_from_refs(dag, resolver)
+
+    areal_node = edag.get("seg-areal")
+    local_node = edag.get("seg-local")
+    assert areal_node.outgoing_edges == (("seg-local", EdgeType.COMPLETION),)
+    assert areal_node.incoming_edges == ()
+    assert local_node.incoming_edges == (("seg-areal", EdgeType.COMPLETION),)
+    assert local_node.outgoing_edges == ()

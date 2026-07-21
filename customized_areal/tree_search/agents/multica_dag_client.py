@@ -52,15 +52,23 @@ class SegmentSpec:
     indices or message text. No judge scores live here.
 
     tensor_ref is a field->shard map: {"input_ids": {"shard_id": str, "node_addr": str}, ...}.
+
+    Dual-source segments: ``trajectory_source`` distinguishes between AReaL
+    tensors (``areal_tensor``, trainable) and local Multica task messages
+    (``task_messages``, non-trainable). Only ``trainable=true`` segments reach
+    tensor resolution and shard cleanup.
     """
 
     segment_id: str
     agent_run_id: str
     issue_id: str
-    trajectory_id: int
-    tensor_ref: dict[str, Any]
-    closing_event: str | None
-    env_snapshot: dict[str, Any]
+    trajectory_id: int | None = None
+    tensor_ref: dict[str, Any] | None = None
+    closing_event: str | None = None
+    env_snapshot: dict[str, Any] = field(default_factory=dict)
+    trajectory_source: str = "areal_tensor"
+    trainable: bool = True
+    trajectory: list = field(default_factory=list)
 
 
 @dataclass
@@ -128,6 +136,31 @@ class AssembledDag:
             ]
         except (TypeError, ValueError) as exc:
             raise DagError(f"invalid assembled DAG record: {exc}") from exc
+
+        # ── Dual-source validation ──────────────────────────────────
+        for segment in segments:
+            if segment.trajectory_source == "areal_tensor":
+                if segment.trajectory_id is None:
+                    raise DagError(
+                        f"areal_tensor segment {segment.segment_id!r} "
+                        f"missing trajectory_id"
+                    )
+                if not segment.tensor_ref:
+                    raise DagError(
+                        f"areal_tensor segment {segment.segment_id!r} "
+                        f"missing tensor_ref"
+                    )
+            elif segment.trajectory_source == "task_messages":
+                if segment.trajectory_id is not None:
+                    raise DagError(
+                        f"task_messages segment {segment.segment_id!r} "
+                        f"has unexpected trajectory_id"
+                    )
+                if segment.tensor_ref is not None:
+                    raise DagError(
+                        f"task_messages segment {segment.segment_id!r} "
+                        f"has unexpected tensor_ref"
+                    )
 
         segment_ids = [segment.segment_id for segment in segments]
         if any(not segment_id for segment_id in segment_ids):

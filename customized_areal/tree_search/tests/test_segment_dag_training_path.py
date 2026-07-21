@@ -17,7 +17,10 @@ import orjson
 import pytest
 
 from customized_areal.tree_search.agents.execution_dag import DAGError
-from customized_areal.tree_search.agents.multica_dag_client import MulticaDagClient
+from customized_areal.tree_search.agents.multica_dag_client import (
+    DagError,
+    MulticaDagClient,
+)
 from customized_areal.tree_search.agents.segment_dag_trainer import (
     DataProxySessionRemover,
     DataProxyTensorResolver,
@@ -138,7 +141,9 @@ def test_run_segment_dag_training_step_cycle_propagates_without_cleanup():
 
     # A failed step propagates the error WITHOUT releasing shards/sessions
     # (cleanup is success-path only in change 1; the caller handles retry).
-    with pytest.raises(DAGError):
+    # Cycle is detected by AssembledDag.from_dict (DagError) before the
+    # assembler or tensor resolution is ever reached.
+    with pytest.raises(DagError):
         run_segment_dag_training_step(
             client=client,
             resolver=resolver,
@@ -239,3 +244,111 @@ def test_data_proxy_session_remover_calls_export_remove_session():
     assert len(seen) == 1
     assert seen[0]["session_ids"] == ["sess-7"]
     assert seen[0]["remove_session"] is True
+
+
+# ── Task 5: dual-source (mixed) DAG training path tests ──────────────
+
+
+def _mixed_training_dag_json() -> dict:
+    """Mixed DAG JSON: one areal_tensor + one task_messages segment."""
+    return {
+        "segments": [
+            {
+                "segment_id": "s-train",
+                "agent_run_id": "ar-train",
+                "issue_id": "issue-1",
+                "trajectory_id": 42,
+                "tensor_ref": {
+                    "input_ids": {"shard_id": "shard-train", "node_addr": "node-a"}
+                },
+                "closing_event": None,
+                "env_snapshot": {},
+                "trajectory_source": "areal_tensor",
+                "trainable": True,
+                "trajectory": [],
+            },
+            {
+                "segment_id": "s-local",
+                "agent_run_id": "ar-local",
+                "issue_id": "issue-1",
+                "trajectory_id": None,
+                "tensor_ref": None,
+                "closing_event": "completion",
+                "env_snapshot": {},
+                "trajectory_source": "task_messages",
+                "trainable": False,
+                "trajectory": [
+                    {"sequence": 1, "type": "user", "content": "hello"}
+                ],
+            },
+        ],
+        "edges": [
+            {
+                "src_segment_id": "s-train",
+                "dst_segment_id": "s-local",
+                "type": "completion",
+            }
+        ],
+        "session_to_agent_run": {"sess-train": "ar-train"},
+    }
+
+
+def test_mixed_dag_cleanup_only_targets_trainable_segments():
+    """Only trainable segments' shards are cleared; only trainable sessions removed."""
+    dag_json = _mixed_training_dag_json()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=dag_json)
+
+    client = _dag_client(handler)
+    resolver = _FakeResolver()
+    remover = _FakeSessionRemover()
+
+    advantages = run_segment_dag_training_step(
+        client=client,
+        resolver=resolver,
+        session_remover=remover,
+        project_id="proj-1",
+    )
+
+    # Both segments appear in advantages (non-trainable has zero reward -> zero advantage)
+    assert set(advantages.advantages) == {"s-train", "s-local"}
+
+    # Only trainable segment's shard was resolved
+    assert resolver.calls == ["shard-train"]
+
+    # Only trainable segment's shards are cleared
+    assert resolver.cleared == [["shard-train"]]
+
+    # Only the trainable agent_run's session is removed
+    assert remover.removed == ["sess-train"]
+
+
+def test_mixed_dag_non_trainable_never_reaches_cleanup():
+    """Non-trainable segments are never passed to cleanup (clear/remove)."""
+    dag_json = _mixed_training_dag_json()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=dag_json)
+
+    client = _dag_client(handler)
+    resolver = _FakeResolver()
+    remover = _FakeSessionRemover()
+
+    run_segment_dag_training_step(
+        client=client,
+        resolver=resolver,
+        session_remover=remover,
+        project_id="proj-1",
+    )
+
+    # Verify non-trainable shard/session identifiers never appeared in cleanup
+    all_cleared_shards = {sid for batch in resolver.cleared for sid in batch}
+    assert "shard-train" in all_cleared_shards
+    # No shard from the local segment was cleared (it has no tensor_ref at all)
+    assert len(all_cleared_shards) == 1
+
+    # The local agent_run's session was not removed
+    assert "ar-local" not in remover.removed
+    # Only the trainable session was cleaned up
+    assert remover.removed == ["sess-train"]
