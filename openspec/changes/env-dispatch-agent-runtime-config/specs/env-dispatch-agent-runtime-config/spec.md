@@ -1,132 +1,160 @@
 ## ADDED Requirements
 
-### Requirement: Per-agent external runtime request contract
+### Requirement: Env-dispatch uses the frontend sandbox lifecycle
 
-For scratch `dispatch_type=message`, `POST /api/v1/env-dispatch` SHALL accept an
-optional `runtime` object within each `per_agent_env.<agent_id>` entry. The
-object SHALL contain `base_url`, `api_key`, and `model`, and SHALL apply only to
-the agent identified by that map key. A complete runtime object SHALL be a valid
-per-agent scratch policy without `template` or `base_env_id` and SHALL resolve
-to template `default`.
+Frontend sandbox creation and env-dispatch provisioning SHALL call the same sandbox
+creation service and SHALL produce the same canonical instance metadata, daemon
+bootstrap environment, runtime object, and sandbox job payload.
 
-#### Scenario: A valid external runtime is accepted
+#### Scenario: Static source agent starts a frontend-equivalent sandbox
 
-- **WHEN** a non-training agent's scratch per-agent environment entry contains a
-  complete runtime object
-- **THEN** env-dispatch accepts the request and associates that runtime policy
-  only with the identified agent, using template `default` when neither an
-  explicit template nor base environment is present
+- **WHEN** a non-training source agent is first addressed with a valid external runtime
+- **THEN** env-dispatch creates its sandbox through the shared frontend service with the
+  source binding's exact base URL, API key, and model
 
-#### Scenario: Different squad agents use different runtime policies
+#### Scenario: Runtime rows are not pre-created
 
-- **WHEN** two non-training squad members have different runtime objects
-- **THEN** each member's sandbox is provisioned with its own configured base URL,
-  API key, and model without inheriting the other member's values
+- **WHEN** provisioning begins
+- **THEN** no `agent_runtime` row is inserted until the sandbox daemon registers itself
 
-### Requirement: External runtime validation is atomic
+### Requirement: Runtime identity is discovered safely
 
-When a runtime object is present, the system MUST require non-empty
-`base_url`, `api_key`, and `model` values after trimming whitespace, and
-`base_url` MUST be an absolute HTTP(S) URL. Invalid runtime configuration SHALL
-fail before any rollout resource is created.
+The system SHALL resolve a sandbox runtime only when workspace, provider, daemon ID, and
+sandbox instance ID match and the provider reports online. It MUST NOT bind by runtime
+display name.
 
-#### Scenario: A partial runtime object is rejected without side effects
+#### Scenario: Matching online Pi runtime becomes ready
 
-- **WHEN** a per-agent runtime object omits or empties any required field
-- **THEN** the request fails with a validation error and creates no env, project,
-  channel, binding, runtime, sandbox, or agent task
+- **WHEN** the sandbox daemon registers an online Pi runtime with the binding's daemon
+  ID and sandbox instance ID
+- **THEN** provisioning records that runtime ID and advances to derived-agent creation
 
-#### Scenario: An invalid base URL is rejected without side effects
+#### Scenario: Runtime identity mismatch fails closed
 
-- **WHEN** a per-agent runtime object contains a relative or non-HTTP(S) base URL
-- **THEN** the request fails with a validation error before rollout creation
+- **WHEN** a runtime name matches but daemon ID or sandbox instance ID differs
+- **THEN** the runtime is rejected and no agent or task is bound to it
 
-#### Scenario: Caller runtime is rejected for a training target
+#### Scenario: Runtime readiness times out
 
-- **WHEN** a runtime object is supplied for the agent identified by
-  `train_agent_id`
-- **THEN** the request fails with a validation error and does not substitute the
-  caller's external model for the future AReaL training proxy flow
+- **WHEN** the sandbox is running but no matching Pi runtime becomes online before the
+  configured deadline
+- **THEN** the rollout fails with a sanitized retryable error and compensates owned
+  resources instead of leaving the DAG indefinitely in progress
 
-#### Scenario: Caller runtime is rejected for branch
+### Requirement: Addressed source agent produces a derived global agent
 
-- **WHEN** a branch message dispatch supplies a per-agent runtime object
-- **THEN** the request fails before rollout creation because branch inherits the
-  source binding runtime policy and runtime override is out of scope
+The system SHALL create a new global agent derived from each addressed source agent,
+copy approved executable configuration and skills, record `source_agent_id`, and bind
+the derived agent permanently to the discovered runtime for the dispatch lifetime.
 
-### Requirement: Runtime policy survives lazy provisioning
+#### Scenario: Derived agent records lineage and runtime
 
-The system SHALL persist each validated runtime policy with the agent's
-env-dispatch sandbox binding and SHALL use that policy whenever the binding is
-provisioned. The initial leader and a pending peer's first directed mention
-SHALL use the same provisioning path and sandbox runtime payload contract.
+- **WHEN** runtime readiness succeeds
+- **THEN** one derived agent is created with the source agent's approved configuration,
+  the source-agent lineage, and the discovered runtime ID while the source agent remains
+  unchanged
 
-#### Scenario: Initial leader sandbox receives external model configuration
+#### Scenario: Channel execution uses the derived agent
 
-- **WHEN** a scratch message dispatch provisions its leader during initial
-  dispatch
-- **THEN** the sandbox create payload contains that leader's exact validated
-  `base_url`, `api_key`, and `model`, and the resulting task uses the binding
-  runtime
+- **WHEN** the derived agent transaction commits
+- **THEN** the env-dispatch channel routes the original address to the derived agent and
+  the task explicitly uses the derived agent and binding runtime
 
-#### Scenario: First mention provisions a pending peer with stored configuration
+#### Scenario: Concurrent dispatches share a source safely
 
-- **WHEN** a pending peer is first directly mentioned after the original HTTP
-  request has completed
-- **THEN** exactly one sandbox is created with the peer's stored runtime policy,
-  the peer task uses the binding runtime, and the shared default runtime is not
-  used
+- **WHEN** two dispatches concurrently address the same source agent
+- **THEN** each dispatch creates its own sandbox, runtime, and derived agent without
+  changing the source agent's global runtime
 
-#### Scenario: Concurrent first mentions provision once
+### Requirement: Credentials are isolated by source binding
 
-- **WHEN** concurrent directed mentions target the same pending agent
-- **THEN** the existing single-flight binding claim creates one sandbox, runtime,
-  and channel-agent session using one canonical runtime policy
+Each binding SHALL record its source agent as the model-configuration owner. A model
+credential or training session MUST NOT be used when its owner does not equal the
+binding source agent.
 
-#### Scenario: Branch clone preserves configured runtime policy
+#### Scenario: Static squad credentials do not cross
 
-- **WHEN** a branch lazily clones an agent sandbox from a copied source binding
-  that has a configured external runtime policy
-- **THEN** the clone create payload carries the inherited binding runtime policy,
-  with the branch source selected by top-level `env_id`
+- **WHEN** two source agents have distinct external runtime objects
+- **THEN** each derived sandbox receives only its source binding's credential and model
 
-### Requirement: External runtime credentials are not publicly disclosed
+#### Scenario: Training target opens one session before sandbox creation
 
-The system MUST treat the supplied API key as write-only at the env-dispatch API
-boundary. It MUST NOT include the key in success responses, binding status
-responses, validation errors, task errors, or structured logs.
+- **WHEN** the training source agent is first addressed
+- **THEN** env-dispatch calls `start_session(session_ref, env_id)` once with the
+  persistent source binding ID and configures the sandbox with the returned key, model
+  `areal-default`, and configured bridge URL without creating or reserving a task
 
-#### Scenario: Successful dispatch does not echo the API key
+#### Scenario: Training retry reuses session identity
 
-- **WHEN** env-dispatch succeeds with an external runtime configuration
-- **THEN** no response field contains the supplied API key
+- **WHEN** provisioning retries after `start_session` succeeded
+- **THEN** it reuses the recorded session ID, key, and session reference without opening
+  another session
 
-#### Scenario: Failed provisioning does not echo the API key
+#### Scenario: Real task is linked after session bootstrap
 
-- **WHEN** sandbox or task provisioning fails after the runtime policy is stored
-- **THEN** the client-visible error and structured server logs omit the supplied
-  API key
+- **WHEN** the training derived agent becomes ready
+- **THEN** env-dispatch inserts a normal task and records its real ID against the
+  existing session so DAG assembly maps the session to the actual derived-agent run
 
-### Requirement: Omitted runtime configuration remains backward compatible
+#### Scenario: Existing task-based session clients remain compatible
 
-The system SHALL preserve existing env-dispatch request and provisioning behavior
-when a per-agent runtime object is omitted.
+- **WHEN** an existing client calls `start_session` with `task_id`
+- **THEN** the bridge uses that value as the session reference without requiring the
+  client to migrate immediately
 
-#### Scenario: Existing caller omits runtime
+### Requirement: First-address provisioning is single-flight
 
-- **WHEN** an existing caller sends a valid per-agent environment spec without a
-  runtime object
-- **THEN** request validation, sandbox policy resolution, and response structure
-  behave as before this change
+The scratch leader's initial message and a peer's first directed mention SHALL use one
+binding state machine. Concurrent addresses of the same source binding SHALL create at
+most one credential/session, sandbox, runtime association, derived agent, and task.
 
-### Requirement: Configured non-training agent can reply
+#### Scenario: Concurrent mentions provision once
 
-A non-training env-dispatch agent whose external runtime is valid and reachable
-SHALL be able to process the dispatched channel task using the configured model.
+- **WHEN** two directed mentions concurrently target one pending source binding
+- **THEN** one claimant provisions and both callers observe the same ready or failed
+  result
 
-#### Scenario: Deployed agent responds through the external model
+### Requirement: Derived dispatch cleanup is complete and idempotent
 
-- **WHEN** a deployed message dispatch addresses a non-training agent with valid
-  rotated external provider credentials and the sandbox daemon becomes ready
-- **THEN** the agent posts a response in the env-dispatch channel and the channel
-  DAG remains valid
+Deleting env-dispatch resources SHALL cancel derived-agent tasks, archive the derived
+agent, delete its sandbox and registered runtime, revoke bootstrap/model credentials,
+close any training session, and preserve the source agent.
+
+#### Scenario: Successful dispatch cleanup
+
+- **WHEN** a ready derived dispatch is deleted
+- **THEN** every derived resource is removed or archived exactly once and the source
+  agent and its original runtime remain usable
+
+#### Scenario: Partial provisioning cleanup
+
+- **WHEN** deletion races any intermediate provisioning state
+- **THEN** cleanup reaches a terminal deleted state without leaking a session, sandbox,
+  runtime, derived agent, or credential
+
+### Requirement: Client reports terminal failures
+
+The standalone Python client SHALL fail on per-rollout errors, runtime-readiness
+failure, DAG timeout, and structurally invalid DAG responses.
+
+#### Scenario: DAG timeout is not success
+
+- **WHEN** DAG polling reaches its deadline without a valid assembled DAG
+- **THEN** the client returns a non-zero result after cleanup
+
+### Requirement: Derived agent produces a valid DAG
+
+A configured non-training or training derived agent SHALL be able to reply in its
+env-dispatch channel and produce a structurally valid assembled DAG.
+
+#### Scenario: Deployed static model replies
+
+- **WHEN** a source agent is addressed with a valid rotated external credential
+- **THEN** its derived agent replies through the online sandbox runtime and the DAG
+  endpoint returns a valid `200` payload
+
+#### Scenario: Deployed training model replies
+
+- **WHEN** a training source agent obtains a valid AReaL session
+- **THEN** its derived agent replies through `areal-default`, and the DAG maps the
+  session ID to the reserved derived-agent run ID

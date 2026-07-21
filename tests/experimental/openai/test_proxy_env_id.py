@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 import pytest
+from pydantic import ValidationError
 
 from areal.experimental.openai.proxy import proxy_rollout_server as srv
 from areal.experimental.openai.proxy.server import (
@@ -50,6 +51,26 @@ def _admin_headers():
 
 
 class TestStartSessionRequestModel:
+    def test_start_session_accepts_session_ref_without_task_id(self):
+        req = StartSessionRequest(session_ref="binding-123", env_id="env_abc")
+
+        assert req.canonical_session_ref == "binding-123"
+        assert req.task_id is None
+
+    def test_start_session_keeps_legacy_task_id_compatible(self):
+        req = StartSessionRequest(task_id="task-legacy")
+
+        assert req.canonical_session_ref == "task-legacy"
+        assert req.session_ref is None
+
+    @pytest.mark.parametrize(
+        "payload",
+        [{}, {"session_ref": "binding-123", "task_id": "task-legacy"}],
+    )
+    def test_start_session_rejects_missing_or_conflicting_reference(self, payload):
+        with pytest.raises(ValidationError, match="exactly one"):
+            StartSessionRequest(**payload)
+
     def test_start_session_accepts_env_id(self):
         """StartSessionRequest accepts and stores env_id parameter."""
         req = StartSessionRequest(task_id="t1", env_id="env_abc")
@@ -88,6 +109,21 @@ class TestSessionDataEnvId:
 
 
 class TestStartSessionEndpointEnvId:
+    @pytest.mark.asyncio
+    async def test_start_session_uses_session_ref_as_session_namespace(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(srv, "_capacity", 1)
+        async with _client() as client:
+            resp = await client.post(
+                "/rl/start_session",
+                headers=_admin_headers(),
+                json={"session_ref": "binding-123", "env_id": "env_abc"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "binding-123-0"
+
     @pytest.mark.asyncio
     async def test_start_session_passes_env_id_to_session_data(self, monkeypatch):
         """start_session endpoint passes env_id from request to SessionData."""

@@ -1,50 +1,61 @@
 ## Why
 
-`POST /api/v1/env-dispatch` can select a per-agent sandbox template, but it
-cannot carry the external model configuration that the frontend sandbox flow
-already uses. As a result, an isolated non-training agent runtime starts without
-`base_url`, `api_key`, or `model` and cannot answer the initial dispatch or a
-later directed mention.
+The first external-runtime implementation successfully propagates model configuration,
+but deployed env-dispatch sandboxes can still register Pi as offline while the frontend
+sandbox flow produces an online runtime. Env-dispatch also binds the source agent
+directly to a pre-created runtime, which cannot safely support concurrent isolated
+dispatches or per-agent training sessions.
+
+Env-dispatch must use the proven frontend sandbox lifecycle, discover the runtime only
+after daemon registration, and create a derived global agent for each source-agent
+sandbox pair.
 
 ## What Changes
 
-- Extend each `per_agent_env.<agent_id>` entry with an optional `runtime` object
-  containing `base_url`, `api_key`, and `model`.
-- Validate the external runtime configuration as one complete, non-empty set and
-  reject its use for the current `train_agent_id` until the training-session
-  path is implemented.
-- Persist the per-agent runtime configuration with the env-agent sandbox binding
-  so leader provisioning and lazy first-mention peer provisioning use the same
-  policy.
-- Pass the runtime configuration into sandbox-instance create and clone payloads
-  without returning or logging the API key.
-- Preserve existing behavior when `runtime` is omitted.
+- Replace the parallel env-dispatch sandbox-create path with the shared frontend sandbox
+  creation service.
+- Stop pre-creating `agent_runtime` rows; correlate and discover the daemon-registered
+  runtime by daemon ID plus sandbox instance ID.
+- On first address, resolve the source agent's external model credential or open its
+  AReaL training session before sandbox creation.
+- Open training `start_session` with the persistent source binding ID as `session_ref`,
+  then link the normally inserted real task to that session after the derived agent is
+  ready.
+- Clone the addressed source agent into a new global derived agent permanently bound to
+  the sandbox runtime, with queryable `source_agent_id` lineage.
+- Store source/derived agent, sandbox, runtime, session reference, and credential-owner
+  identities on the env-agent binding with single-flight provisioning.
+- Route channel execution through the derived agent without changing the source agent's
+  global runtime or other memberships.
+- Archive derived agents and delete their sandbox/runtime/session during env-dispatch
+  cleanup.
+- Treat rollout errors, runtime-readiness timeouts, DAG timeouts, and invalid DAGs as
+  client failures.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `env-dispatch-agent-runtime-config`: Per-agent external model configuration for
-  env-dispatch sandbox provisioning, including validation, lazy provisioning,
-  compatibility, and secret non-disclosure requirements.
+- `env-dispatch-derived-agent-runtime`: frontend-equivalent sandbox provisioning,
+  runtime discovery, derived-agent lineage, and per-agent credential/session isolation.
 
 ### Modified Capabilities
 
-<!-- None. The related message-channel and sandbox-lifecycle changes have not
-     been synced into the repository's main specs, so this change defines a
-     focused capability without depending on active change-local specs. -->
+- `env-dispatch-agent-runtime-config`: caller-provided static runtime configuration is
+  consumed by derived-agent provisioning rather than a pre-created runtime.
+- `env-dispatch-training`: the training target obtains a unique `start_session`
+  credential before sandbox creation through a backward-compatible `session_ref` API,
+  links the real task after enqueue, and uses `areal-default` through the configured
+  bridge URL.
+- `env-dispatch-cleanup`: derived global agents and their owned runtime resources are
+  included in idempotent cascade cleanup.
 
 ## Impact
 
-- Public API: additive `per_agent_env.<agent_id>.runtime` request object on
-  `POST /api/v1/env-dispatch`; response schemas remain unchanged.
-- `multica/server`: env-dispatch request mapping and validation, per-agent binding
-  policy persistence, and sandbox create/clone provisioning.
-- Tests: handler parsing/validation, service policy propagation, first-mention
-  single-flight provisioning, and API-key non-disclosure.
-- `customized_areal/tree_search`: the existing generic `per_agent_env` request
-  serialization can carry the nested object; only focused compatibility tests or
-  examples are expected unless implementation reveals a client gap.
-- No new dependency or database migration is expected.
-- Training-agent `start_session` integration is explicitly deferred to a
-  separate change.
+- Database migrations for agent lineage and expanded env-agent binding state.
+- Shared sandbox creation code used by frontend and env-dispatch.
+- Env-dispatch provisioning, training-session, channel membership, task enqueue, and
+  cleanup paths.
+- Agent response DTOs may gain non-secret lineage fields.
+- Python debug/client failure handling and deployed DAG verification.
+- No new dependency. Provider, session, and bootstrap secrets remain write-only.

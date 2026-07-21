@@ -35,7 +35,20 @@ def _dag_payload() -> dict:
                     "issue_snapshot_id": "i-1",
                     "env_state": {},
                 },
-            }
+            },
+            {
+                "segment_id": "seg-2",
+                "agent_run_id": "ar-2",
+                "issue_id": "i-2",
+                "trajectory_id": 1,
+                "tensor_ref": {"shard_id": "sh-2", "node_addr": "http://dp"},
+                "closing_event": None,
+                "env_snapshot": {
+                    "sandbox_ids": [],
+                    "issue_snapshot_id": "i-2",
+                    "env_state": {},
+                },
+            },
         ],
         "edges": [
             {"src_segment_id": "seg-1", "dst_segment_id": "seg-2", "type": "delegation"}
@@ -102,6 +115,57 @@ def test_get_dag_other_status_raises_dag_error():
     with pytest.raises(DagError) as exc_info:
         client.get_dag("proj-1", timeout=1.0, interval=0.0)
     assert "500" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"segments": [], "edges": [], "session_to_agent_run": {}}, "segment"),
+        (
+            {
+                "segments": _dag_payload()["segments"],
+                "edges": [
+                    {
+                        "src_segment_id": "seg-1",
+                        "dst_segment_id": "missing",
+                        "type": "delegation",
+                    }
+                ],
+                "session_to_agent_run": {},
+            },
+            "unknown destination",
+        ),
+        (
+            {
+                "segments": _dag_payload()["segments"],
+                "edges": [
+                    {
+                        "src_segment_id": "seg-1",
+                        "dst_segment_id": "seg-2",
+                        "type": "delegation",
+                    },
+                    {
+                        "src_segment_id": "seg-2",
+                        "dst_segment_id": "seg-1",
+                        "type": "delegation",
+                    },
+                ],
+                "session_to_agent_run": {},
+            },
+            "cycle",
+        ),
+    ],
+)
+def test_get_dag_rejects_invalid_structure(payload, message):
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=payload)
+        ),
+    )
+
+    with pytest.raises(DagError, match=message):
+        client.get_dag("proj-1", timeout=1.0, interval=0.0)
 
 
 def test_get_dag_transport_error_drops_request_and_pat():

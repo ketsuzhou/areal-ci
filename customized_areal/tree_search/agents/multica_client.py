@@ -247,6 +247,30 @@ class MulticaEnvDispatchClient:
         if resp.status_code != 201:
             raise RuntimeError(self._failure_message("create_env_dispatch", resp))
         data = resp.json()
+        rollouts = data.get("rollouts") or []
+        rollout_errors = [
+            str(rollout.get("error"))
+            for rollout in rollouts
+            if isinstance(rollout, dict) and rollout.get("error")
+        ]
+        if rollout_errors:
+            # Partial-success dispatch (group_size > 1): the server returned 201
+            # with a mix of succeeded and failed rollouts, so the successful
+            # lanes already allocated a project/channel/sandbox/agent_run
+            # server-side (best-effort dispatch, no rollback). Fail closed by
+            # reclaiming the partial dispatch before raising so the caller never
+            # observes a half-provisioned dispatch (AC-7 "while retaining
+            # cleanup"). Cleanup is best-effort: a cleanup failure must not mask
+            # the original rollout failure that has to propagate.
+            partial_handle = self._partial_cleanup_handle(data, dispatch_type)
+            if partial_handle is not None:
+                try:
+                    await self.cleanup_env_dispatch(handle=partial_handle)
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"env-dispatch rollout failed: {rollout_errors[0][:1024]}"
+            )
         project_id = data.get("project_id") or ""
         if not project_id:
             raise RuntimeError(
@@ -259,7 +283,6 @@ class MulticaEnvDispatchClient:
                 "message dispatch response missing channel_id"
             )
         env_id = ""
-        rollouts = data.get("rollouts") or []
         if rollouts:
             env_id = rollouts[0].get("env_id") or ""
         return EnvDispatchHandle(
@@ -289,6 +312,31 @@ class MulticaEnvDispatchClient:
                 "env-dispatch handle missing project_id for issue dispatch"
             )
         return f"/api/v1/env-dispatch/{handle.project_id}"
+
+    def _partial_cleanup_handle(
+        self, data: dict[str, object], dispatch_type: str
+    ) -> EnvDispatchHandle | None:
+        """Build a cleanup handle from a partial-success dispatch response.
+
+        When ``create_env_dispatch`` gets a 201 with per-rollout errors, the
+        successful lanes have already been provisioned server-side. This returns
+        a handle addressing that partial dispatch so it can be reclaimed before
+        the client raises. Returns ``None`` when the response lacks the
+        identifiers needed to address the dispatch, so cleanup is skipped rather
+        than raising a confusing secondary error.
+        """
+        project_id = data.get("project_id") or ""
+        if not project_id:
+            return None
+        channel_id = data.get("channel_id") or None
+        if dispatch_type == "message" and not channel_id:
+            return None
+        return EnvDispatchHandle(
+            channel_id=channel_id,
+            project_id=project_id,
+            env_id="",
+            dispatch_type=dispatch_type,
+        )
 
     async def cleanup_env_dispatch(self, *, handle: EnvDispatchHandle) -> None:
         """DELETE the dispatch-scoped resource - cascades to issues/chat/tasks.
@@ -460,14 +508,24 @@ async def _poll_dag(
         resp = await client.get_dag(handle=handle)
         print(f"dag -> status={resp.status_code} body={resp.text[:2048]}")
         if resp.status_code == 200:
+            from customized_areal.tree_search.agents.multica_dag_client import (
+                AssembledDag,
+                DagError,
+            )
+
+            try:
+                AssembledDag.from_dict(resp.json())
+            except (DagError, TypeError, ValueError) as exc:
+                raise RuntimeError(f"invalid assembled DAG: {exc}") from exc
             print("dag assembled")
             return
         if resp.status_code not in (202, 502, 503, 504):
-            print(f"dag poll stopped: terminal status {resp.status_code}")
-            return
+            raise RuntimeError(
+                f"DAG polling failed: status={resp.status_code} "
+                f"body={client._safe_response_body(resp)}"
+            )
         if time.monotonic() >= deadline:
-            print(f"dag poll timed out after {timeout}s")
-            return
+            raise TimeoutError(f"DAG readiness timeout after {timeout}s")
         await asyncio.sleep(interval)
 
 

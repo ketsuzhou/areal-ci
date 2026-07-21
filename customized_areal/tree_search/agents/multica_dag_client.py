@@ -108,11 +108,76 @@ class AssembledDag:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AssembledDag:
+        if not isinstance(d, dict):
+            raise DagError("assembled DAG payload must be an object")
+        raw_segments = d.get("segments")
+        raw_edges = d.get("edges")
+        session_to_agent_run = d.get("session_to_agent_run")
+        if not isinstance(raw_segments, list) or not raw_segments:
+            raise DagError("assembled DAG must contain at least one segment")
+        if not isinstance(raw_edges, list):
+            raise DagError("assembled DAG edges must be a list")
+        if not isinstance(session_to_agent_run, dict):
+            raise DagError("assembled DAG session_to_agent_run must be an object")
+
+        try:
+            segments = [SegmentSpec(**segment) for segment in raw_segments]
+            edges = [EdgeSpec(**edge) for edge in raw_edges]
+            step_rewards = [
+                StepReward(**reward) for reward in d.get("step_rewards", [])
+            ]
+        except (TypeError, ValueError) as exc:
+            raise DagError(f"invalid assembled DAG record: {exc}") from exc
+
+        segment_ids = [segment.segment_id for segment in segments]
+        if any(not segment_id for segment_id in segment_ids):
+            raise DagError("assembled DAG contains an empty segment_id")
+        if len(set(segment_ids)) != len(segment_ids):
+            raise DagError("assembled DAG contains duplicate segment_id values")
+
+        known_segments = set(segment_ids)
+        adjacency = {segment_id: [] for segment_id in segment_ids}
+        indegree = {segment_id: 0 for segment_id in segment_ids}
+        for edge in edges:
+            if edge.src_segment_id not in known_segments:
+                raise DagError(
+                    f"assembled DAG edge has unknown source {edge.src_segment_id!r}"
+                )
+            if edge.dst_segment_id not in known_segments:
+                raise DagError(
+                    f"assembled DAG edge has unknown destination {edge.dst_segment_id!r}"
+                )
+            adjacency[edge.src_segment_id].append(edge.dst_segment_id)
+            indegree[edge.dst_segment_id] += 1
+
+        ready = [segment_id for segment_id, degree in indegree.items() if degree == 0]
+        visited = 0
+        while ready:
+            segment_id = ready.pop()
+            visited += 1
+            for child_id in adjacency[segment_id]:
+                indegree[child_id] -= 1
+                if indegree[child_id] == 0:
+                    ready.append(child_id)
+        if visited != len(segment_ids):
+            raise DagError("assembled DAG contains a cycle")
+
+        known_agent_runs = {segment.agent_run_id for segment in segments}
+        unknown_agent_runs = {
+            agent_run_id
+            for agent_run_id in session_to_agent_run.values()
+            if agent_run_id not in known_agent_runs
+        }
+        if unknown_agent_runs:
+            raise DagError(
+                "assembled DAG session mapping references an unknown agent run"
+            )
+
         return cls(
-            segments=[SegmentSpec(**s) for s in d.get("segments", [])],
-            edges=[EdgeSpec(**e) for e in d.get("edges", [])],
-            session_to_agent_run=d.get("session_to_agent_run", {}),
-            step_rewards=[StepReward(**sr) for sr in d.get("step_rewards", [])],
+            segments=segments,
+            edges=edges,
+            session_to_agent_run=session_to_agent_run,
+            step_rewards=step_rewards,
             score_max=d.get("score_max", 0),
         )
 

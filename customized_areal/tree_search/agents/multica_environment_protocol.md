@@ -48,194 +48,137 @@ small protocols only; it does not import a sandbox-vendor SDK.
 - Cleanup flows through Multica env-dispatch; `404` means the resource is already gone
   and is treated as success.
 
-### Per-Agent Ephemeral Sandbox Pipeline (Phase 1–5)
+### Per-Agent Ephemeral Sandbox Pipeline (ARE-5 derived-agent provisioning)
 
-This is the end-to-end flow for a single-agent daemon-enabled scratch dispatch:
-AReaL calls `POST /api/v1/env-dispatch`, Multica pre-creates an offline agent
-runtime R′, boots a Cube sandbox with an in-sandbox daemon, the daemon registers
-and adopts R′, the task is routed to R′, the daemon claims and executes it, and
-the sandbox is reclaimed on terminal.
+This is the end-to-end flow for a `mode="scratch"`, `dispatch_type="message"`
+dispatch - the path `MultiAgentEnvDispatchWorkflow` uses. ARE-5
+(`env-dispatch-agent-runtime-config`) replaced the old "pre-create an offline
+`agent_runtime` R′ and let the daemon adopt it" model with frontend-parity
+provisioning: no runtime row is pre-created, the shared sandbox-creation service
+boots a Cube with a daemon, the server **discovers** the runtime the daemon
+registers, **clones a derived global agent** bound to that runtime, and only then
+enqueues the task. The `daemon_id` is now a correlation nonce, not a
+pre-created-row reference.
+
+> **Scope.** This no-pre-create flow is the scratch+message path only. The legacy
+> `PrecreateAgentRuntime` flow is **still used** for `dispatch_type="issue"`
+> (SWE-Lego, trained/instance-backed) and for `mode="branch"` message dispatch
+> with a source sandbox (`provisionEnvDispatchAgentBranch`); ARE-5 rewired only
+> scratch+message. The feature flag `envDispatchDerivedAgentEnabled` (default
+> `true`) gates new derived provisioning at entry; `=false` rejects new
+> provisioning without disrupting in-flight/ready bindings, and there is **no**
+> legacy pre-create fallback for scratch+message.
 
 ```mermaid
 sequenceDiagram
     autonumber
 
-    participant A as 🟦 AReaL<br/>(MulticaEnvDispatchClient)
+    participant A as 🟦 AReaL<br/>(MultiAgentEnvDispatchWorkflow)
     participant H as 🟩 Multica Handler<br/>(EnvDispatch)
     participant S as 🟩 EnvDispatchService<br/>(Dispatch)
-    participant DB as 🟨 Postgres<br/>(sqlc Queries)
+    participant DB as 🟨 Postgres
     participant LC as 🟩 EnvSandboxLifecycle<br/>Service
     participant SD as 🟥 Sandboxd / Cube
     participant D as 🟪 In-Sandbox Daemon
+    participant PR as 🟩 Channel Provisioner<br/>(provisionEnvDispatchAgent)
+    participant G as 🟧 db_bridge<br/>(start_session)
     participant TS as 🟩 TaskService
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 1: Request ingress & validation
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(230, 245, 255)
-        Note over A,H: Phase 1 — Request ingress & validation
-        A->>H: POST /api/v1/env-dispatch<br/>Authorization: Bearer <PAT><br/>mode=scratch, agent_id, group_size=N,<br/>domain=self_play, message, train_agent_id
-        H->>H: requireUserID(w, r) → userID
-        H->>H: ctxWorkspaceID(r.Context()) → workspaceID
-        H->>H: json.Decode → EnvDispatchRequest<br/>UUID-shape validate: env_id, agent_id, …
+        Note over A,S: Phase 1 - Request ingress & validation
+        A->>H: POST /api/v1/env-dispatch<br/>Authorization: Bearer <PAT><br/>mode=scratch, dispatch_type=message,<br/>agent_id, group_size, message, train_agent_id
         H->>S: Dispatch(EnvDispatchInput)
+        S->>S: validate - mode, dispatch_type, group_size,<br/>domain<->dispatch_type, train_agent_id
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 2: Service validation & base env resolution
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(255, 245, 230)
-        Note over S,DB: Phase 2 — Validate & resolve/create base env
-        S->>S: validate(in) — mode, dispatch_type, group_size,<br/>agent_id/squad_id, train_agent_id,<br/>domain↔dispatch_type, issue/message
-        S->>S: validatePerAgentEnvSpecsDB — agent membership,<br/>template/base_env_id authorization
-        S->>DB: GetDefaultSelfPlayEnv(workspaceID)
-        alt no default configured
-            S->>LC: CreateSandboxInstance(template, DaemonEnabled=false)
-            LC->>DB: InsertSandboxInstance → ref
-            LC->>SD: EnqueueSandboxJob("create") + Notify
-            S->>DB: CreateEnv(sandboxIDs=[ref.InstanceID], mode=base)
-            S->>DB: SetDefaultSelfPlayEnv (conditional, first-writer-wins)
-        end
-        S->>DB: GetEnv(envID, workspaceID) → sourceEnv
-        S->>S: Mode↔env-kind cross-check<br/>(scratch→base, branch→state)
+        Note over S,DB: Phase 2 - Resolve base env, create project + channel + bindings
+        S->>DB: GetEnv(base_env_id) -> sourceEnv (scratch expects a base env)
+        S->>DB: CreateEnv(parentEnvID=sourceEnv, mode=scratch)
+        S->>DB: CreateProject(envID)
+        S->>DB: CreateEnvDispatchChannel -> channelID
+        Note over DB: insert environment_agent_sandbox binding per roster agent:<br/>{env_id, channel_id, source_agent_id,<br/> model_config_owner_agent_id=source_agent_id, status=pending}
+        Note over S: peers stay pending; the scratch leader's first dispatch<br/>counts as its first directed address (provisioned next)
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 3: Per-rollout reset (concurrent resetOne × group_size)
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(230, 255, 230)
-        Note over S,LC: Phase 3 — resetOne (concurrent, semaphore-gated)
-        par concurrent resetOne per rollout lane
-            S->>S: createSandboxInstanceRefs(in, sourceEnv)
+        Note over S,PR: Phase 3 - provisionEnvDispatchAgent (leader, single-flight)
+        S->>PR: ProvisionEnvDispatchAgent(leader binding)
+        PR->>PR: envDispatchDerivedAgentEnabled gate (default true)
+        PR->>PR: claimProvisioning - single-flight winner<br/>(pending|failed_retryable -> credential_ready);<br/>concurrent mentions observe the winner and wait
+        PR->>PR: validateEnvDispatchCredentialOwner<br/>(model_config_owner_agent_id == source_agent_id;<br/>mismatch -> fail closed -> failed_retryable)
 
-            %% 3a: Pre-create R′
-            rect rgb(255, 255, 220)
-                Note over S,DB: 3a — PrecreateAgentRuntime (offline R′)
-                S->>DB: GetAgentInWorkspace(agentID) → provider
-                S->>S: daemonID = uuid.NewString()
-                S->>DB: PrecreateAgentRuntime(<br/>  workspaceID, daemonID, provider, ownerID<br/>) → runtimeID (R′), status=offline
-            end
-
-            %% 3b: Sandbox lifecycle create
-            rect rgb(255, 240, 240)
-                Note over S,SD: 3b — EnvSandboxLifecycle.Create
-                S->>LC: CreateSandboxInstance(<br/>  template, DaemonEnabled=true,<br/>  RuntimeEnv={MULTICA_DAEMON_ID: daemonID}<br/>)
-                LC->>DB: InsertSandboxInstance → ref
-                LC->>DB: MintSandboxRuntimeEnv →<br/>  SERVER_URL, PAT token,<br/>  WORKSPACE_ID, DAEMON_ENABLED=1,<br/>  PROFILE=instance-{uuid}
-                LC->>LC: overlay caller RuntimeEnv<br/>  (MULTICA_DAEMON_ID wins over minted keys)
-                LC->>SD: EnqueueSandboxJob("create", payload)<br/>  payload: template, limits, runtime,<br/>  runtime_env (with daemon bootstrap)
-                LC->>SD: NotifySandboxJobAvailable(nodeID, jobID)
-            end
-
-            %% 3c: Env + project creation
-            rect rgb(240, 240, 255)
-                Note over S,DB: 3c — Env row + Project
-                S->>DB: CreateEnv(workspaceID, [ref.InstanceID],<br/>  parentEnvID=sourceEnv.ID, mode=scratch)
-                S->>DB: CreateProject(workspaceID, name, envID)
-            end
+        alt training target (train_agent_id set)
+            PR->>G: ResolveEnvDispatchTrainingSession<br/>(session_ref = binding.ID, env_id)
+            Note over PR,G: session_ref is the persistent env-agent binding ID,<br/>not a task id. Retry reuses the recorded session (Opened=false);<br/>first address opens it (Opened=true).
+            G-->>PR: session_id + session_key (model=areal-default)
+            PR->>DB: setTrainingSession(binding, session_id, key)
+            PR->>PR: EnvDispatchTrainingRuntimePolicy<br/>(base_url=bridge_url, api_key=session_key, model=areal-default)
+        else non-training source agent
+            Note over PR: caller-supplied per-source runtime policy<br/>{base_url, api_key, model}; squad members never<br/>inherit another member's policy
         end
-        S-->>S: WaitGroup.Wait — all resets complete<br/>(all-or-nothing: any failure → rollback all)
+
+        PR->>LC: CreateSandboxInstance(template, DaemonEnabled=true)
+        Note over LC: daemon_id = fresh correlation nonce (NO pre-created row);<br/>mint bootstrap PAT + runtime_env (SERVER_URL, PAT,<br/>WORKSPACE_ID, DAEMON_ENABLED=1, PROFILE)
+        LC->>SD: EnqueueSandboxJob("create", payload with instance_id)
+        SD-->>LC: sandbox_instance_id (running)
+
+        PR->>PR: WaitForOnlineSandboxRuntime<br/>(workspace, provider=pi, daemon_id,<br/> sandbox_instance_id, status=online)
+        Note over PR: identity mismatch -> fail closed; timeout -> readiness failure<br/>(no fallback to a shared / source runtime)
+
+        PR->>PR: CloneEnvDispatchAgentTx (single tx): copy approved fields<br/>(instructions, skills, model, custom_env, mcp_config, ...);<br/>record source_agent_id; bind runtime_id; source agent immutable
+        PR->>DB: replace source -> derived member in dispatch channel only
+        PR->>PR: markReady (binding status=ready)
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 4: Cube boot & daemon registration
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(255, 230, 255)
-        Note over SD,D: Phase 4 — Cube boot & daemon registration
-        SD->>SD: Pull image, create Cube container
-        SD->>D: Inject runtime_env:<br/>  MULTICA_DAEMON_ID=<daemonID><br/>  SERVER_URL, PAT, WORKSPACE_ID,<br/>  DAEMON_ENABLED=1, PROFILE
-        D->>D: Probe installed agent CLIs<br/>  (detectAgentVersion × each agent)
-        D->>H: POST /api/daemon/register<br/>  {workspace_id, daemon_id,<br/>   runtimes: [{type, version, status}],<br/>   device_name, cli_version}
-        H->>DB: UpsertAgentRuntime(<br/>  workspaceID, daemonID, provider,<br/>  status=online, …<br/>) ON CONFLICT (workspace_id, daemon_id, provider)<br/>→ adopts pre-created R′ offline→online
-        H-->>D: 200 {runtimes: [{id: R′, …}], daemon_token}
-        D->>D: Cache daemon_token for workspace<br/>Store runtime_id=R′ in runtime map
+        Note over SD,D: Phase 4 - Cube boot & daemon registration
+        SD->>D: Inject runtime_env (MULTICA_DAEMON_ID, PAT, ...)
+        D->>H: POST /api/daemon/register<br/>{daemon_id, runtimes:[{type,version,status}],<br/> sandbox_instance_id metadata}
+        H->>DB: UpsertAgentRuntime(workspace, daemon_id, provider=pi,<br/>status=online, metadata.sandbox_instance_id)
+        H-->>D: 200 {runtimes:[{id, ...}], daemon_token}
+        Note over PR: WaitForOnlineSandboxRuntime resolves this row by the<br/>4-tuple (daemon_id + sandbox_instance_id + provider + online)
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 5: Task dispatch (concurrent dispatchOne)
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(230, 255, 255)
-        Note over S,TS: Phase 5 — dispatchOne (concurrent per rollout)
-        par concurrent dispatchOne per rollout lane
-            S->>S: rolloutRuntimeID(in, r) → R′
-            S->>S: rolloutSandboxInstanceID(in, r) → instanceID
-
-            alt dispatch_type = issue (swe_lego)
-                S->>DB: CreateIssue(projectID, title, description,<br/>  acceptance_criteria, fail_to_pass, pass_to_pass)
-            else dispatch_type = message (self_play)
-                S->>DB: CreateChatSession(projectID, agentID)
-                S->>DB: CreateChatMessage(sessionID, "user", content)
-            end
-
-            S->>DB: EnqueueAgentRun(<br/>  workspaceID, agentID,<br/>  issueID|chatSessionID,<br/>  runtimeID=R′,<br/>  sandboxInstanceID=instanceID<br/>)
-            Note over DB: mergeEphemeralSandboxContext:<br/>  context.ephemeral_sandbox =<br/>  {sandbox_instance_id: instanceID}
-            Note over DB: maybeOpenTrainingSession:<br/>  task_id + train_agent_id →<br/>  training session with areal_proxy
-
-            S->>DB: SaveTrainingDispatch(projectID,<br/>  trainAgentID, criticAgentID, defaultReward)
-        end
-        S-->>S: best-effort: ≥1 dispatched → 201; all failed → 500
-        S-->>H: EnvDispatchResult {projectID, rollouts[]}
-        H-->>A: 201 {project_id, rollouts[{env_id, project_id,<br/>  issue_id, chat_session_id, agent_run_id}]}
+        Note over S,TS: Phase 5 - dispatchScratchChannelMessage
+        S->>DB: CreateChannelMessage(channelID, "user", content)
+        S->>TS: EnqueueEnvDispatchChannelRun(derived_agent_id, runtime_id)
+        Note over S: r.AgentRunID = real task id
+        S->>S: LinkEnvDispatchTrainingSession (best-effort, AFTER enqueue)<br/>dagSvc.LinkSessionTask: session_id -> real task_id for DAG
+        S-->>H: EnvDispatchResult {channelID, rollouts[]}
+        H-->>A: 201 {project_id, channel_id,<br/> rollouts[{env_id, project_id, chat_session_id, agent_run_id,<br/>  agent_sandboxes:[{status, sandbox_instance_id, runtime_id}], error?}]}
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 6: Daemon poller → claim → execute
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(240, 255, 240)
-        Note over D,TS: Phase 6 — Daemon poller claim & execute
+        Note over D,TS: Phase 6 - Daemon poller claim & execute (derived agent's runtime)
         loop runRuntimePoller per runtime
-            D->>D: Acquire task slot (semaphore)
-            D->>D: drainInboxTask(runtimeID) — WS-pushed tasks
-            alt no inbox task
-                D->>H: POST /api/daemon/runtimes/{R′}/claim
-                H->>TS: ClaimTaskForRuntime(ctx, R′)
-                TS->>DB: claim next queued task for R′<br/>  (UPDATE … SET status='dispatched'<br/>   WHERE runtime_id=R′ AND status='queued'<br/>   ORDER BY priority, created_at LIMIT 1)
-                TS-->>H: task | nil
-                H-->>D: {task: {id, agent_id, context,<br/>  agent: {name, instructions, skills,<br/>    custom_env, custom_args, mcp_config}}}
-            end
+            D->>H: POST /api/daemon/runtimes/{runtimeID}/claim
+            H->>TS: ClaimTaskForRuntime(ctx, runtimeID)
+            H-->>D: {task:{id, agent_id=derived_agent_id, context,<br/> areal_proxy / ephemeral_sandbox, runtime policy}}
             alt task claimed
-                D->>D: Parse task context → areal_proxy,<br/>  ephemeral_sandbox, squad_id
-                D->>D: Launch agent pi process inside Cube<br/>  with provider=areal, api_key from context
-                Note over D: Agent executes: model inference<br/>via db_bridge, tool calls, etc.
-                D->>H: POST /api/daemon/runtimes/{R′}/tasks/{id}/start
-                D->>H: Stream messages, tool calls,<br/>  usage via WebSocket
+                D->>D: launch pi process, provider=areal,<br/>api_key = session_key (training) or caller key
+                D->>H: stream messages / tool calls / usage
             else no task
-                D->>D: Sleep poll interval + jitter
+                D->>D: sleep poll interval + jitter
             end
         end
     end
 
-    %% ═══════════════════════════════════════════════════════════════════
-    %% PHASE 7: Terminal — complete / fail / cancel
-    %% ═══════════════════════════════════════════════════════════════════
     rect rgb(255, 240, 230)
-        Note over D,SD: Phase 7 — Terminal cleanup
-        D->>H: Task terminal: complete | fail | cancel
-        H->>TS: RouteTerminalTrainingTask(task)
-
-        rect rgb(255, 220, 220)
-            Note over TS,SD: 7a — Ephemeral sandbox reclamation
-            TS->>TS: extractEphemeralSandbox(task.Context)
-            alt marker found (ephemeral rollout)
-                TS->>DB: HasOtherActiveTaskForRuntime(R′)<br/>  exclude=this task
-                alt no sibling/retry task on R′
-                    TS->>DB: SetAgentRuntimeOffline(R′)
-                    TS->>LC: DeleteSandboxInstance(workspaceID, instanceID)
-                    LC->>SD: EnqueueSandboxJob("delete") + Notify
-                    SD->>SD: Stop Cube, delete sandbox
-                else sibling still active
-                    Note over TS: Skip — sibling task still on R′
-                end
-            else no marker
-                Note over TS: Not an ephemeral rollout — skip
-            end
+        Note over A,SD: Phase 7 - Terminal cleanup (AC-6 cascade)
+        A->>H: DELETE /api/v1/env-dispatch/channels/{channelID}
+        H->>S: deleteEnvDispatchChannelRollout
+        S->>S: markDeleting; waitForEnvDispatchProvisioning; listBindings
+        loop per ready binding
+            S->>TS: CancelTasksForAgent(derived_agent_id)
+            S->>DB: ArchiveAgent(derived_agent_id, archived_by=NULL)
+            S->>LC: lifecycle.Delete (stop sandbox, revoke bootstrap PAT)
+            S->>DB: DeleteAgentRuntime
+            S->>G: EndSession(training_session_key)  (if present)
         end
-
-        rect rgb(220, 240, 255)
-            Note over TS: 7b — Training session close
-            TS->>TS: maybeDiagnoseProject (Pi agent, soft-fail)
-            TS->>TS: maybeCloseTrainingSession →<br/>  db_bridge.set_reward + end_session
-        end
+        S->>DB: delete channel, project, environment_agent_sandbox, env
+        Note over S: idempotent - already-absent resources are success;<br/>source agent + its other-channel memberships untouched
     end
 ```
 
@@ -243,20 +186,45 @@ sequenceDiagram
 
 | Row | Created by | Status transitions | Reclaimed by |
 |-----|-----------|-------------------|--------------|
-| `agent_runtime` (R′) | `PrecreateAgentRuntime` | `offline` → `online` (UpsertAgentRuntime on daemon register) → `offline` (terminal cleanup) | `SetAgentRuntimeOffline` + 7d GC |
-| `sandbox_instance` | `InsertSandboxInstance` | `pending` → `creating` → `running` | `DeleteSandboxInstance` → sandboxd delete job |
-| `agent_task_queue` | `EnqueueAgentRun` (CreateAgentTask / CreateChatTask) | `queued` → `dispatched` → `running` → `completed`/`failed`/`cancelled` | Terminal: `RouteTerminalTrainingTask` → `maybeCleanupEphemeralSandbox` |
-| `environment` | `CreateEnv` | static (`mode=scratch`) | `DeleteEnv` on rollback or project cleanup |
-| `training_dispatch` | `SaveTrainingDispatch` | static | Cascades with project deletion |
+| `environment_agent_sandbox` binding | `CreateEnvDispatchChannel` (`insertBinding`, status=pending) | `pending` → `credential_ready` (claimProvisioning) → `ready` (markReady); `→ failed_retryable` (markFailed); `→ deleting → deleted` | `deleteEnvDispatchChannelRollout` (AC-6) |
+| `sandbox_instance` | `EnvSandboxLifecycleService.Create` | `pending` → `creating` → `running` | `lifecycle.Delete` (revoke bootstrap PAT) |
+| `agent_runtime` | daemon `UpsertAgentRuntime` on register (online; **not** pre-created) | `online` (registered) | `DeleteAgentRuntime` (AC-6) |
+| derived `agent` | `CloneEnvDispatchAgentTx` (lineage `source_agent_id`, bound `runtime_id`) | static; source agent immutable | `ArchiveAgent` (AC-6; `archived_by=NULL`) |
+| `agent_task_queue` | `EnqueueEnvDispatchChannelRun` | `queued` → `dispatched` → `running` → terminal | `CancelTasksForAgent` (AC-6) |
+| training session | `ResolveEnvDispatchTrainingSession` → `db_bridge.start_session(session_ref=binding.ID)` | opened once; reused on retry | `EndSession(training_session_key)` (AC-6) |
+| `environment` / `project` / `channel` | `CreateEnv` / `CreateProject` / `CreateEnvDispatchChannel` | static | `deleteEnvDispatchChannelRollout` cascade |
 
-**Retry-safety guard:** `maybeCleanupEphemeralSandbox` queries
-`HasOtherActiveTaskForRuntime(R′)` excluding the current task before reclaiming.
-A retry child that inherited `runtime_id=R′` via `CreateRetryTask` keeps the
-sandbox alive; only the last terminal task on R′ triggers cleanup.
+**Provisioning state machine (actual):** the binding moves `pending` ->
+`credential_ready` (single-flight `claimProvisioning`) -> `ready` (`markReady`),
+or `-> failed_retryable` (`markFailed`). The finer states `sandbox_creating` /
+`runtime_waiting` / `agent_creating` are defined in the schema and accepted as
+in-flight by `routeEnvDispatchChannelAgent` (concurrent mentions wait on them)
+and by the `markReady` / `markFailed` / `markDeleting` WHERE clauses, but the
+current provisioner does not write them - it does all the work (sandbox create
+-> runtime discovery -> derived-agent clone) between `credential_ready` and
+`ready`. A retry re-claims from `failed_retryable` back to `credential_ready`.
 
-**Offline-runtime sweeper backstop:** If the daemon never registers (Cube boot
-failure), the `runtime_sweeper` fails tasks whose runtime has been `offline` for
-\>5 min (`offlineRuntimeQueuedTTLSeconds=300`) with `failure_reason=runtime_offline`.
+**Single-flight + lazy peers:** only the first directed mention of a source
+agent claims provisioning; concurrent mentions observe the winner and wait for
+the same terminal result. The scratch leader's initial dispatch is its first
+address. Peer (non-trigger) agents stay `pending` and are materialized lazily
+only when the collaboration actually mentions them (same state machine).
+
+**Credential isolation invariant:** before sandbox creation the server verifies
+`binding.source_agent_id == model_config_owner_agent_id` (and, for training,
+`== start_session source`); before enqueue it verifies
+`binding.runtime_id == derived_agent.runtime_id` and
+`runtime.sandbox_instance_id == binding.sandbox_instance_id`. Any mismatch fails
+closed with compensation (delete partial sandbox, revoke PAT, close session) -
+no fallback to a shared or source-agent runtime.
+
+**Offline-runtime sweeper backstop:** the `runtime_sweeper`
+(`cmd/server/runtime_sweeper.go`, `offlineRuntimeQueuedTTLSeconds=300`) still
+fails queued tasks whose runtime has been `offline` >5 min
+(`failure_reason=runtime_offline`). On the scratch+message path there is no
+pre-created offline runtime, so this primarily backstops the legacy issue/branch
+pre-create flows; its in-code comment still references the old pre-create model
+and is stale.
 
 ## AReaL → Multica API Surface
 
@@ -285,24 +253,114 @@ is insufficient when workers do not share that filesystem.
 | -------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `create_base_env(image_ref=...)`       | `POST <MULTICA_BASE_URL>/api/v1/env`                            | Boot a reusable base environment from an image reference; returns `env_id`.                                                                                         |
 | `delete_env(env_id=...)`               | `DELETE <MULTICA_BASE_URL>/api/v1/env/{envID}`                  | Delete a base environment; `404` is treated as already-cleaned-up.                                                                                                  |
-| `create_env_dispatch(...)` | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch` | Unified dispatch primitive. Returns an `EnvDispatchHandle` (`channel_id`, `project_id`, `env_id`, `dispatch_type`). For `dispatch_type="message"` the response carries a top-level `channel_id` (validated at the boundary); for `dispatch_type="issue"` `channel_id` is absent and `project_id` is the primary handle. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). |
+| `create_env_dispatch(...)` | `POST <MULTICA_BASE_URL>/api/v1/env-dispatch` | Unified dispatch primitive. Returns an `EnvDispatchHandle` (`channel_id`, `project_id`, `env_id`, `dispatch_type`). For `dispatch_type="message"` the response carries a top-level `channel_id` (validated at the boundary); for `dispatch_type="issue"` `channel_id` is absent and `project_id` is the primary handle. Covers fresh rollouts (`mode="scratch"`), branches (`mode="branch"`), and resume (`mode="resume"`, normalized to `branch` server-side). Fail-closed on per-rollout failure: if any entry in `rollouts[]` carries an `error`, the client raises `RuntimeError("env-dispatch rollout failed: …")` instead of returning a half-formed handle, so a terminal provisioning failure on one lane can never train as success (ARE-5 AC-7). |
 | `get_dag(handle=...)` | message: `GET .../api/v1/env-dispatch/channels/{channelID}/dag`; issue: `GET .../api/v1/env-dispatch/{projectID}/dag` | Poll the assembled segment DAG, routed by `handle.dispatch_type`: `202` not-ready, `200` assembled DAG, `404` unknown, `403` cross-workspace. Transient `502`/`503`/`504` are re-polled. |
 | `list_checkpoints(handle=...)` | message: `GET .../api/v1/channels/{channelID}/env-checkpoints`; issue: `GET .../api/v1/projects/{projectID}/env-checkpoints` | List env checkpoints for the dispatch, routed by `handle.dispatch_type`, newest first. |
 | `cleanup_env_dispatch(handle=...)` | message: `DELETE .../api/v1/env-dispatch/channels/{channelID}`; issue: `DELETE .../api/v1/env-dispatch/{projectID}` | Serialized cascade cleanup for one dispatch: channel/project, issues, chat sessions, tasks, bindings, env, and runtime state. `404` is treated as success (idempotent). |
 
-The DAG poller re-polls transient responses up to the configured wall-clock
-deadline, then raises `DagTimeout`; `404` maps to `DagNotFound`, `403` to
-`DagForbidden`, and `401` reports the explicit login command without exposing the PAT.
+The DAG poller (`MulticaDagClient.get_dag`) is fail-closed. On `200` it parses the
+payload through `AssembledDag.from_dict`, which structurally validates the DAG -
+non-empty `segments`, `edges` is a list, `session_to_agent_run` is an object, no
+empty/duplicate `segment_id`, every edge references a known segment, no cycles, and
+every mapped agent run exists - raising `DagError` on any violation so an
+incomplete/malformed DAG can never train as a valid one (ARE-5 AC-7/AC-8). Transient
+`202`/`502`/`503`/`504` are re-polled up to the wall-clock deadline, then
+`DagTimeout` is raised; `404` maps to `DagNotFound`, `403` to `DagForbidden`, `401`
+reports the explicit login command without exposing the PAT, and any other status
+raises `DagError`. The debug helper `_poll_dag` (in `multica_client.py`) mirrors this:
+it validates the assembled DAG and raises on non-transient status or deadline instead
+of silently returning.
 
 ### Segment close (no reward) via the gateway group
 
-Closing a segment without reward (`POST /rl/close_segment`) flows through the
-db_bridge `gateway` group, not `multica_api`: the multica `arealrl` client posts
-to the db_bridge stub (MultiCA side) with the session-key
-`Authorization: Bearer <proxy_key>`, and the AReaL-side executor forwards it to
-the real AReaL gateway. The session key passes through end to end, mirroring
-`set_reward`; the channel is registered as `rl_close_segment` so the stub no
+`POST /rl/close_segment` closes a session's current segment into a ready
+trajectory **without** setting a reward. It decouples the trajectory boundary
+from reward so each communication-bounded segment is its own exportable
+trajectory; the segment's reward is assigned later (AReaL-side judge), not at
+close. This is the segment-DAG path that slices one RL session into multiple
+per-segment trajectories.
+
+Unlike the env-dispatch calls above (AReaL -> Multica), `close_segment` flows
+**Multica -> db_bridge -> AReaL**: the multica `arealrl` client posts to the
+db_bridge stub (MultiCA side) over the `gateway` group channel
+`rl_close_segment`, and the AReaL-side executor forwards it to the real AReaL
+gateway. The session key passes through end to end, mirroring `set_reward` /
+`end_session`; the channel is registered as `rl_close_segment` so the stub no
 longer 404s.
+
+| Aspect | Value                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| db_bridge channel | `rl_close_segment` (group `gateway`, `POST /rl/close_segment`, `kind=json`, `default_timeout_s=30`, `default_concurrency=4`)                       |
+| Auth   | Session key: `Authorization: Bearer <proxy_key>`. The gateway also accepts the admin key, mirroring `/rl/set_reward`.                                       |
+| Body   | None / empty `{}`. No `session_id` is sent - the endpoint resolves the session from the bearer token.                                                       |
+| Caller | Multica `arealrl.Client.CloseSegment(ctx, proxyKey)`, invoked from `InteractionDAGService.CloseSegmentForEvent`.                                            |
+
+**Gateway** (`areal/v2/inference_service/gateway/app.py`): extracts the bearer
+token and body, best-effort reads `model` from the JSON body for router
+routing, queries the router for the worker address, and forwards the request
+verbatim to `{worker_addr}/rl/close_segment`. The worker's response status,
+content, and content-type are returned unchanged.
+
+**Data proxy** (`areal/v2/inference_service/data_proxy/app.py`): resolves the
+session from the token (`401` on an invalid/expired key), calls
+`session.close_segment()` (`400` on `ValueError`), and returns a
+`CloseSegmentResponse`.
+
+**`Session.close_segment()`** (`data_proxy/session.py`): under the session lock,
+takes the active segment's `last_interaction_id` as the terminal interaction,
+mints the next `trajectory_id`, stores a `ReadyTrajectory`
+(`needs_online_callback=False`), and resets `_active_completions` to a fresh
+`InteractionCache()` so the next turn starts a new segment. It deliberately
+does **not** touch `_last_reward_interaction_id` / `_last_set_reward_time`, so
+reward-timeout finalization is unaffected. Raises `ValueError("No interactions
+in session")` when the active segment is empty.
+
+Response (`CloseSegmentResponse`):
+
+| Field               | Meaning                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `message`           | `"success"`.                                                 |
+| `interaction_count` | Number of interactions in the just-closed segment.           |
+| `session_id`        | The session the segment belonged to.                         |
+| `trajectory_id`     | The just-closed segment's trajectory id (nullable).          |
+| `trajectory_ready`  | `true` when `trajectory_id` is present.                      |
+| `ready_transition`  | `true` - close always transitions a segment to ready.        |
+
+**Multica-side contract:** the `arealrl` client treats a missing/nil
+`trajectory_id` as an error - every close must yield a trajectory to export.
+`CloseSegmentForEvent` then runs the per-segment pipeline: (a) resolve
+`agent_run_id` + `issue_id` from the session mapping, (b) `close_segment` ->
+`trajectory_id`, (c) `export_trajectories` (admin-key auth,
+`remove_session=false`) for that trajectory, (d) decode the `tensor_ref`, and
+(e) record the segment + env snapshot atomically. The session stays alive
+across per-segment exports (`remove_session=false`).
+
+The per-segment close pipeline (one iteration of `CloseSegmentForEvent`):
+
+```mermaid
+sequenceDiagram
+    participant M as Multica<br/>(InteractionDAGService / arealrl)
+    participant B as db_bridge<br/>(gateway group)
+    participant A as AReaL<br/>(gateway -> data proxy)
+
+    Note over M: segment boundary reached<br/>(communication-bounded segment)
+    M->>M: (a) resolve agent_run_id + issue_id<br/>from session mapping
+    M->>B: POST /rl/close_segment<br/>Authorization: Bearer <proxy_key><br/>body {} (no session_id)
+    B->>A: forward (rl_close_segment channel)
+    Note over A: gateway: router-resolve worker, forward<br/>data proxy: resolve session from token
+    A->>A: Session.close_segment()
+    Note over A: terminal = last_interaction_id;<br/>mint trajectory_id; store ReadyTrajectory;<br/>reset active completions;<br/>reward state untouched
+    A-->>B: CloseSegmentResponse<br/>{trajectory_id, interaction_count,<br/>ready_transition=true}
+    B-->>M: trajectory_id
+
+    M->>B: POST /export_trajectories<br/>Authorization: Bearer <admin_key><br/>{session_ids, trajectory_id,<br/>remove_session=false}
+    B->>A: forward (gateway group)
+    A-->>B: {traj: merged interactions}
+    B-->>M: raw traj JSON
+    M->>M: (d) decode tensor_ref
+    M->>M: (e) record segment + env snapshot<br/>atomically
+    Note over M: reward assigned later (AReaL-side judge);<br/>session stays alive for next segment
+```
 
 `create_env_dispatch` accepts these key fields:
 
@@ -348,7 +406,7 @@ sequenceDiagram
     M->>S: fork/allocate per-lane sandboxes
     S-->>M: sandbox_ids
     loop each rollout lane
-        M->>G: start_session(agent_run_id, issue_id)
+        M->>G: start_session(session_ref=binding.ID, env_id)
         G->>A: forward
         A-->>G: session_id + api_key (provider=areal)
         G-->>M: session_id + api_key (provider=areal)
@@ -369,24 +427,34 @@ sequenceDiagram
     M->>S: delete lane sandboxes and runtime resources
 ```
 
-The AReaL orchestration helpers are:
+The AReaL orchestrator is `MultiAgentEnvDispatchWorkflow` (a `RolloutWorkflow`,
+in `agents/multi_agent_workflow.py`). One `arun_episode` = one Multica task = N
+agents = N sessions, assembled into a single `AssembledDag`:
 
-- `run_swe_lego_issue`: dispatches a SWE-Lego issue (`mode="scratch"`,
-  `domain="swe_lego"`, `dispatch_type="issue"`), consumes the `session_id` Multica
-  obtained from db_bridge for each rollout, drives per-lane branching via the injected
-  `_BranchDriver`, hands the terminal `env_id` off to Multica's verifier agent (rewards
-  flow Multica → db_bridge → AReaL), and always cleans up each `project_id`.
-- `run_self_play`: same lifecycle, but dispatches a `SelfPlayQuery.content` as a chat
-  message with `domain=self_play`, `dispatch_type="message"`, and `issue_id=""` on the
-  RL session start.
+- dispatch via `MulticaEnvDispatchClient.create_env_dispatch(mode="scratch",
+  dispatch_type="message", ...)`, then poll `MulticaDagClient.get_dag(handle)`
+  until the DAG is assembled (`DagTimeout` rejects the episode; other fetch
+  errors propagate);
+- assemble via `SuperNodeAssembler.assemble_from_refs(dag, resolver)` into an
+  `ExecutionDag`, then clean up every session in `dag.session_to_agent_run`
+  (`DataProxySessionRemover.remove` -> `POST /export_trajectories` with
+  `remove_session=true`).
 
-Both runners iterate `setup.rollouts` (not a single rollout), read the `session_id`
-Multica produced for each rollout via the `_RlSession` seam, then call
-`branch_driver.drive_lane(agent_run_id=..., sandbox_id=r.env_id, session_id=sid)` per
-lane. The `sandbox_id` parameter carries the **source `env_id`** for the lane; the
-driver returns the **terminal child `env_id`** after any internal branching. The
-terminal `env_id` is then handed to Multica's verifier agent, which writes rewards and
-ends/exports the session via db_bridge.
+AReaL **never calls `start_session`** on this path - Multica owns
+`/rl/start_session(group_size=N)`, the `session_to_agent_run` binding, and the
+per-agent credentials. The diagnosis agent's per-turn `step_rewards` (with
+`score_max`) arrive inside the assembled DAG, not via a separate `set_reward`
+call; AReaL normalizes them into per-segment `SuperNode.process_reward`.
+`SuperNodeAssembler` stamps the `session_id` on every `SuperNode`, and
+`ExecutionDAG.session_map()` exposes `{super_node_id: session_id}`.
+
+> The older `run_swe_lego_issue` / `run_self_play` runners and the
+> `_BranchDriver` / `EnvDispatchBranchDriver.drive_lane` branching seam
+> referenced by earlier revisions of this doc have been removed. Branch execution
+> via `mode="branch"` env-dispatch is not yet wired into the live workflow (the
+> `BRANCH` edge type exists in `ExecutionDag`, but no driver calls
+> `create_env_dispatch(mode="branch")`); see "Branch / Resume Lifecycle" for the
+> intended protocol.
 
 ## RL Session Start and End
 
@@ -562,7 +630,7 @@ cleanup:
 
 | Failure point                                                            | Rollback action                                                                                                          |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `create_env_dispatch(mode="scratch", ...)` fails                         | Nothing was allocated; raise. The runner's `try/finally` is empty.                                                       |
+| `create_env_dispatch(mode="scratch", ...)` fails                         | Fail closed. A non-2xx response means nothing was allocated; raise. A `201` carrying a per-rollout `error` (`group_size > 1` partial success) means the successful lanes were already allocated server-side (best-effort `dispatchOne`, no rollback); the client reclaims the partial dispatch via the channel/project-scoped `DELETE` (best-effort - cleanup failures are swallowed so they cannot mask the rollout failure) before raising, so no half-provisioned dispatch leaks.                                                       |
 | RL session start, branch drive, or verifier fails after scratch dispatch | The runner's `finally` block issues `DELETE /api/v1/env-dispatch/{projectID}` per rollout.                               |
 | `set_reward` fails before export                                         | Legacy writer leaves the session open (no `end_session`); the caller retries. The cleanup still runs in `finally`.       |
 | `export_trajectories` fails during harvest                               | The session is left un-exported; the failure is logged. Reward was already written. The cleanup still runs in `finally`. |
