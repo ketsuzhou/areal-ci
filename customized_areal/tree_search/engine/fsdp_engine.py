@@ -3,22 +3,233 @@
 This module provides MultiCandidateFSDPEngine which extends the standard FSDPEngine
 to support gathering logprobs for multiple candidate tokens per position using
 `_gather_logprobs_entropy_multi_candidates`.
+
+It also exposes the VIMPO actor-side candidate statistics helpers
+(``VIMPOCandidateStats``, ``vimpo_candidate_stats_from_logits``) and the
+vocab-parallel collection path used by ``MultiCandidateFSDPEngine.compute_vimpo_candidate_stats``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.distributed as dist
+import torch.distributed.nn.functional as dist_F
 
-from areal.engine.fsdp_engine import FSDPEngine
+from areal.engine.core import reorder_and_pad_outputs
+from areal.engine.fsdp_engine import FSDPEngine, FSDPTrainContext
 from areal.models.tree_attn.functional import gather_packed_tree_vocab_stats
 from areal.utils import logging
+from areal.utils.data import pack_tensor_dict
 
 from ..training.logprobs import gather_logprobs_entropy_multi_candidates
 
 logger = logging.getLogger("MultiCandidateFSDPEngine")
+
+
+# =============================================================================
+# VIMPO actor candidate statistics
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class VIMPOCandidateStats:
+    """Per-position actor candidate statistics for VIMPO.
+
+    Carries the actor's top-k candidate token log-probabilities and the
+    sampled token's log-prob, *without* exporting full-vocabulary logits.
+    A later task (T7) converts ``candidate_ids`` into
+    ``ReferenceScoreRequest.candidate_token_ids`` and feeds
+    ``sampled_logp``/``candidate_logp`` to the frozen reference scorer.
+
+    All tensors are dense and shaped ``[B, S, ...]``:
+
+    - ``sampled_logp``: ``[B, S]`` float - log p(sampled_token | prefix).
+    - ``candidate_ids``: ``[B, S, K]`` int - global token IDs of the actor's
+      top-k candidates. Masked positions are filled with ``-1``.
+    - ``candidate_logp``: ``[B, S, K]`` float - log p(candidate | prefix)
+      under the actor. Masked positions are ``0``.
+    - ``retained_mass``: ``[B, S]`` float - ``sum(exp(candidate_logp))``
+      for diagnostics; the missing mass lives outside the top-k.
+    - ``predict_mask``: ``[B, S]`` bool - True where the position predicts a
+      next token; False on prompt/pad/terminal positions.
+    """
+
+    sampled_logp: torch.Tensor
+    candidate_ids: torch.Tensor
+    candidate_logp: torch.Tensor
+    retained_mass: torch.Tensor
+    predict_mask: torch.Tensor
+
+
+def vimpo_candidate_stats_from_logits(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    predict_mask: torch.Tensor,
+    *,
+    top_k: int,
+) -> VIMPOCandidateStats:
+    """Single-rank VIMPO candidate statistics from full-vocabulary logits.
+
+    Computes log-softmax over the full vocabulary, takes the actor top-k
+    per position, and gathers the sampled token's log-prob. Masked rows
+    are sentinelled (``candidate_ids = -1``, log-probs zeroed).
+
+    Parameters
+    ----------
+    logits : torch.Tensor
+        Full-vocabulary logits of shape ``[B, S, V]`` (or ``[S, V]``).
+    labels : torch.Tensor
+        Sampled next-token IDs of shape ``[B, S]`` (or ``[S]``).
+    predict_mask : torch.Tensor
+        Bool tensor of shape ``[B, S]`` (or ``[S]``); True where a next
+        token is predicted.
+    top_k : int
+        Number of candidate tokens to retain per position.
+    """
+    effective_k = min(top_k, logits.shape[-1])
+    logp = logits.float().log_softmax(-1)
+    candidate_logp, candidate_ids = torch.topk(logp, effective_k, dim=-1)
+    sampled_logp = logp.gather(-1, labels.long().unsqueeze(-1)).squeeze(-1)
+    candidate_ids = candidate_ids.masked_fill(~predict_mask.unsqueeze(-1), -1)
+    candidate_logp = candidate_logp.masked_fill(~predict_mask.unsqueeze(-1), 0)
+    sampled_logp = sampled_logp.masked_fill(~predict_mask, 0)
+    retained_mass = candidate_logp.exp().sum(-1).masked_fill(~predict_mask, 0)
+    return VIMPOCandidateStats(
+        sampled_logp, candidate_ids, candidate_logp, retained_mass, predict_mask.bool()
+    )
+
+
+def _vocab_parallel_vimpo_candidate_stats(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    predict_mask: torch.Tensor,
+    *,
+    top_k: int,
+    tp_group: dist.ProcessGroup | None,
+) -> VIMPOCandidateStats:
+    """Vocab-parallel VIMPO candidate stats from TP-sharded logits.
+
+    Each TP rank holds ``logits[..., :V/tp]`` for its vocab shard. The global
+    log-softmax normalizer is built with ``all_reduce(MAX, group=tp_group)``
+    (numerical stability) followed by ``all_reduce(SUM, group=tp_group)`` of
+    the shifted exponentials. Each rank then takes its local top-k, offsets
+    the local IDs by ``tp_rank * (V/tp)`` to make them global, and
+    ``all_gather``-s at most ``K`` candidates per rank. The global top-k is
+    selected with token ID as the deterministic tie-breaker (smaller ID wins
+    on equal log-prob). The sampled token's log-prob is gathered only from
+    the owning shard (others contribute 0) and ``all_reduce(SUM)``-ed.
+
+    When ``tp_group`` is ``None`` or of size 1, falls back to the single-rank
+    :func:`vimpo_candidate_stats_from_logits`.
+    """
+    if tp_group is None or dist.get_world_size(tp_group) <= 1:
+        return vimpo_candidate_stats_from_logits(
+            logits, labels, predict_mask, top_k=top_k
+        )
+
+    # Squeeze a leading batch dim of 1 so the rest operates on 2D [S, V/tp].
+    squeeze_batch = False
+    if logits.ndim == 3 and logits.shape[0] == 1:
+        logits = logits.squeeze(0)
+        squeeze_batch = True
+    if labels.ndim == 2 and labels.shape[0] == 1:
+        labels = labels.squeeze(0)
+    if predict_mask.ndim == 2 and predict_mask.shape[0] == 1:
+        predict_mask = predict_mask.squeeze(0)
+
+    if logits.ndim != 2:
+        raise ValueError(
+            "vocab-parallel VIMPO stats expects 2D sharded logits "
+            "[S, V/tp] (or [1, S, V/tp]); got "
+            f"{tuple(logits.shape)}"
+        )
+
+    tp_rank = dist.get_rank(tp_group)
+    tp_size = dist.get_world_size(tp_group)
+    partition_vocab_size = logits.size(-1)
+    vocab_start_index = tp_rank * partition_vocab_size
+    vocab_end_index = vocab_start_index + partition_vocab_size
+    global_vocab_size = partition_vocab_size * tp_size
+
+    effective_k = min(top_k, global_vocab_size)
+    local_k = min(top_k, partition_vocab_size)
+
+    logits = logits.float()
+    labels = labels.long()
+    predict_mask = predict_mask.bool()
+
+    # --- Global log-softmax via all_reduce(MAX) + all_reduce(SUM) ---
+    logits_max = logits.max(dim=-1, keepdim=True).values  # [S, 1]
+    dist.all_reduce(logits_max, op=dist.ReduceOp.MAX, group=tp_group)
+
+    shifted = logits - logits_max
+    exp_shifted = shifted.exp()
+    sum_exp = exp_shifted.sum(dim=-1, keepdim=True)  # [S, 1]
+    dist.all_reduce(sum_exp, op=dist.ReduceOp.SUM, group=tp_group)
+
+    log_sum_exp = sum_exp.log()
+    log_probs = shifted - log_sum_exp  # [S, V/tp] - globally correct log-softmax
+
+    # --- Local top-k + vocab offset ---
+    local_candidate_logp, local_candidate_ids = torch.topk(
+        log_probs, local_k, dim=-1
+    )  # [S, local_k]
+    local_candidate_ids = local_candidate_ids + vocab_start_index  # global IDs
+
+    # --- all_gather at most K candidates per rank ---
+    gathered_logp = dist_F.all_gather(
+        local_candidate_logp.contiguous(), group=tp_group
+    )  # list of [S, local_k]
+    gathered_ids = dist_F.all_gather(
+        local_candidate_ids.contiguous(), group=tp_group
+    )  # list of [S, local_k]
+    global_candidate_logp = torch.cat(gathered_logp, dim=-1)  # [S, tp * local_k]
+    global_candidate_ids = torch.cat(gathered_ids, dim=-1)  # [S, tp * local_k]
+
+    # --- Global top-k with token ID as deterministic tie-breaker ---
+    # Primary: log-prob descending. Tie-breaker: smaller token ID wins.
+    # Two stable sorts achieve a lexicographic (logp desc, id asc) ordering.
+    id_sort = torch.argsort(global_candidate_ids, dim=-1, stable=True)
+    sorted_ids = global_candidate_ids.gather(-1, id_sort)
+    sorted_logp = global_candidate_logp.gather(-1, id_sort)
+    # Stable sort by -logp asc == logp desc; ties keep the prior id-asc order.
+    neg_logp_sort = torch.argsort(-sorted_logp, dim=-1, stable=True)
+    final_ids = sorted_ids.gather(-1, neg_logp_sort)[..., :effective_k]  # [S, K]
+    final_logp = sorted_logp.gather(-1, neg_logp_sort)[..., :effective_k]  # [S, K]
+
+    # --- Sampled token log-prob: only the owning shard contributes ---
+    labels_out_of_shard = (labels < vocab_start_index) | (labels >= vocab_end_index)
+    masked_labels = labels.clone() - vocab_start_index
+    masked_labels[labels_out_of_shard] = 0
+    sampled_logp = log_probs.gather(-1, masked_labels.unsqueeze(-1)).squeeze(-1)  # [S]
+    sampled_logp = sampled_logp.masked_fill(labels_out_of_shard, 0.0)
+    dist.all_reduce(sampled_logp, op=dist.ReduceOp.SUM, group=tp_group)
+
+    # --- Apply predict_mask (sentinel -1 on candidate_ids, 0 on log-probs) ---
+    pm = predict_mask
+    final_ids = final_ids.masked_fill(~pm.unsqueeze(-1), -1)
+    final_logp = final_logp.masked_fill(~pm.unsqueeze(-1), 0.0)
+    sampled_logp = sampled_logp.masked_fill(~pm, 0.0)
+    retained_mass = final_logp.exp().sum(-1).masked_fill(~pm, 0.0)
+
+    if squeeze_batch:
+        final_ids = final_ids.unsqueeze(0)
+        final_logp = final_logp.unsqueeze(0)
+        sampled_logp = sampled_logp.unsqueeze(0)
+        retained_mass = retained_mass.unsqueeze(0)
+        pm = pm.unsqueeze(0)
+
+    return VIMPOCandidateStats(
+        sampled_logp=sampled_logp,
+        candidate_ids=final_ids,
+        candidate_logp=final_logp,
+        retained_mass=retained_mass,
+        predict_mask=pm,
+    )
 
 
 class MultiCandidateFSDPEngine(FSDPEngine):
@@ -646,3 +857,490 @@ class MultiCandidateFSDPEngine(FSDPEngine):
 
         loss_scale = local_weight / total_loss_weight * loss_multiplier
         return loss * loss_scale
+
+    # ------------------------------------------------------------------
+    # VIMPO actor candidate statistics
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def compute_vimpo_candidate_stats(
+        self,
+        data: list[dict[str, Any]] | dict[str, Any],
+        *,
+        top_k: int,
+    ) -> VIMPOCandidateStats:
+        """Snapshot VIMPO actor candidate statistics via a no-grad eval forward.
+
+        Forces temperature ``1.0`` for the snapshot and restores the prior
+        train/eval mode afterwards. Reuses the engine's existing
+        ``forward_backward_batch`` machinery to produce per-micro-batch
+        logits, then for each vocab shard:
+
+        1. Builds the global log-softmax normalizer via
+           ``all_reduce(MAX, group=tp_group)`` and
+           ``all_reduce(SUM, group=tp_group)``.
+        2. Takes the local top-k, offsets IDs by the shard's global vocab
+           offset, and ``all_gather``-s at most ``K`` candidates per rank.
+        3. Selects the global top-k with token ID as the deterministic
+           tie-breaker (smaller ID wins on equal log-prob).
+        4. Gathers the sampled token's log-prob only from the owning
+           shard (others zero) and ``all_reduce(SUM)``-s it.
+
+        ``_sp_all_gather`` is reused for Ulysses SP collection, and
+        ``gather_packed_tree_vocab_stats``/trie mappings are reused for
+        packed-tree position unpacking. Returns a ``VIMPOCandidateStats``
+        with all fields shaped ``[B, S, ...]``.
+        """
+        self._ensure_ready()
+
+        prev_temperature = self.config.temperature
+        prev_training = self.model.training if self.model is not None else False
+        self.config.temperature = 1.0
+        if self.model is not None:
+            self.model.eval()
+        try:
+            return self._compute_vimpo_candidate_stats_impl(data, top_k=top_k)
+        finally:
+            self.config.temperature = prev_temperature
+            if self.model is not None:
+                self.model.train(prev_training)
+
+    def _compute_vimpo_candidate_stats_impl(
+        self,
+        data: list[dict[str, Any]] | dict[str, Any],
+        *,
+        top_k: int,
+    ) -> VIMPOCandidateStats:
+        input_batched, _ = self._normalize_batch_input(data)
+        cu_seqlens = pack_tensor_dict(input_batched)["cu_seqlens"]
+        output_seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).cpu().numpy().tolist()
+        batch_size = len(output_seqlens)
+
+        mb_list = self._prepare_mb_list(input_batched).to(self.device)
+
+        tp_group = (
+            self.parallel_helper.tp_group if self.parallel_helper.tp_size > 1 else None
+        )
+
+        mb_stats: list[VIMPOCandidateStats | dict[int, VIMPOCandidateStats]] = []
+
+        def process_output(logits: torch.Tensor, ctx_dict: dict[str, Any]) -> None:
+            ctx = FSDPTrainContext(**ctx_dict)
+            stats = self._vimpo_stats_from_ctx(
+                logits, ctx, top_k=top_k, tp_group=tp_group
+            )
+            mb_stats.append(stats)
+            return None
+
+        self.forward_backward_batch(mb_list, process_output, forward_only=True)
+
+        if self.enable_tree_training:
+            return self._merge_tree_vimpo_stats(mb_stats, batch_size, top_k=top_k)
+        return self._reorder_vimpo_stats(mb_stats, output_seqlens, mb_list)
+
+    def _vimpo_stats_from_ctx(
+        self,
+        logits: torch.Tensor,
+        ctx: FSDPTrainContext,
+        *,
+        top_k: int,
+        tp_group: dist.ProcessGroup | None,
+    ) -> VIMPOCandidateStats | dict[int, VIMPOCandidateStats]:
+        """Compute VIMPO stats for one micro-batch.
+
+        Returns either a flat ``VIMPOCandidateStats`` (non-tree path) whose
+        leading dim is the packed sequence length, or a ``dict[int, VIMPOCandidateStats]``
+        keyed by sequence id (tree path) for later merging.
+        """
+        if self.enable_tree_training and ctx.trie_node is not None:
+            return self._vimpo_stats_from_tree_logits(
+                logits, ctx, top_k=top_k, tp_group=tp_group
+            )
+        return self._vimpo_stats_from_flat_logits(
+            logits, ctx, top_k=top_k, tp_group=tp_group
+        )
+
+    def _vimpo_stats_from_flat_logits(
+        self,
+        logits: torch.Tensor,
+        ctx: FSDPTrainContext,
+        *,
+        top_k: int,
+        tp_group: dist.ProcessGroup | None,
+    ) -> VIMPOCandidateStats:
+        """Non-tree path: vocab-parallel stats from [S, V/tp] logits."""
+        # Squeeze batch dim of 1 so the helper operates on 2D [S, V/tp].
+        if logits.ndim == 3 and logits.shape[0] == 1:
+            logits = logits.squeeze(0)
+
+        model_inputs = ctx.model_inputs
+        labels = model_inputs.get(
+            "rolled_input_ids",
+            torch.roll(model_inputs["input_ids"], shifts=-1, dims=-1),
+        )
+        if labels.ndim == 2 and labels.shape[0] == 1:
+            labels = labels.squeeze(0)
+
+        predict_mask = self._extract_vimpo_predict_mask(ctx, labels.shape[-1])
+        if predict_mask.ndim == 2 and predict_mask.shape[0] == 1:
+            predict_mask = predict_mask.squeeze(0)
+
+        stats = _vocab_parallel_vimpo_candidate_stats(
+            logits, labels, predict_mask, top_k=top_k, tp_group=tp_group
+        )
+
+        # Ulysses SP: gather along the sequence dimension.
+        if self.parallel_helper.sp_size > 1:
+            stats = self._sp_gather_vimpo_stats(stats, ctx.ulysses_pad_size)
+
+        if ctx.pad_length > 0:
+            stats = self._trim_vimpo_stats(stats, ctx.pad_length)
+        return stats
+
+    def _vimpo_stats_from_tree_logits(
+        self,
+        logits: torch.Tensor,
+        ctx: FSDPTrainContext,
+        *,
+        top_k: int,
+        tp_group: dist.ProcessGroup | None,
+    ) -> dict[int, VIMPOCandidateStats]:
+        """Packed-tree path: unpack per-sequence stats via trie mappings.
+
+        Computes the vocab-parallel global log-softmax once for all packed
+        positions, then uses ``trie.get_sequence_tree_indices`` to slice
+        per-sequence candidate IDs/log-probs. The sampled token log-prob
+        is gathered per-sequence because the next-token label diverges at
+        trie branch points. Reuses ``gather_packed_tree_vocab_stats``
+        internally for consistency with the loss path's position mapping.
+        """
+        trie = ctx.trie_node
+        if trie is None or not trie.all_sequence_ids:
+            return {}
+
+        tree_input_ids = ctx.mb_input.get("input_ids")
+        if tree_input_ids is None:
+            return {}
+        tree_input_ids = (
+            tree_input_ids.squeeze(0) if tree_input_ids.dim() > 1 else tree_input_ids
+        )
+
+        # Squeeze batch dim of 1.
+        if logits.ndim == 3 and logits.shape[0] == 1:
+            logits = logits.squeeze(0)
+        if logits.ndim != 2:
+            raise ValueError(
+                "vimpo tree stats expects 2D logits [T, V/tp]; got "
+                f"{tuple(logits.shape)}"
+            )
+
+        # Sanity-reuse gather_packed_tree_vocab_stats so the same position
+        # mapping as the loss path is exercised; the returned min/max are
+        # not consumed for top-k but validate the trie <-> logits alignment.
+        _vocab_min, _vocab_max = gather_packed_tree_vocab_stats(logits, trie)
+
+        # Global log-softmax across vocab shards (all_reduce MAX + SUM).
+        if tp_group is not None and dist.get_world_size(tp_group) > 1:
+            tp_rank = dist.get_rank(tp_group)
+            partition_vocab_size = logits.size(-1)
+            vocab_start_index = tp_rank * partition_vocab_size
+            vocab_end_index = vocab_start_index + partition_vocab_size
+
+            logits_max = logits.max(dim=-1, keepdim=True).values
+            dist.all_reduce(logits_max, op=dist.ReduceOp.MAX, group=tp_group)
+            shifted = logits.float() - logits_max
+            sum_exp = shifted.exp().sum(dim=-1, keepdim=True)
+            dist.all_reduce(sum_exp, op=dist.ReduceOp.SUM, group=tp_group)
+            log_probs = shifted - sum_exp.log()  # [T, V/tp]
+
+            # Global top-k across shards via all_gather + deterministic tie-break.
+            effective_k = min(
+                top_k, partition_vocab_size * dist.get_world_size(tp_group)
+            )
+            local_k = min(top_k, partition_vocab_size)
+            local_lp, local_ids = torch.topk(log_probs, local_k, dim=-1)
+            local_ids = local_ids + vocab_start_index
+            gathered_lp = torch.cat(
+                dist_F.all_gather(local_lp.contiguous(), group=tp_group), dim=-1
+            )
+            gathered_ids = torch.cat(
+                dist_F.all_gather(local_ids.contiguous(), group=tp_group), dim=-1
+            )
+            id_sort = torch.argsort(gathered_ids, dim=-1, stable=True)
+            s_ids = gathered_ids.gather(-1, id_sort)
+            s_lp = gathered_lp.gather(-1, id_sort)
+            final_sort = torch.argsort(-s_lp, dim=-1, stable=True)
+            tree_candidate_ids = s_ids.gather(-1, final_sort)[..., :effective_k]
+            tree_candidate_logp = s_lp.gather(-1, final_sort)[..., :effective_k]
+        else:
+            log_probs = logits.float().log_softmax(-1)
+            effective_k = min(top_k, logits.shape[-1])
+            tree_candidate_logp, tree_candidate_ids = torch.topk(
+                log_probs, effective_k, dim=-1
+            )
+            vocab_start_index = 0
+            partition_vocab_size = logits.size(-1)
+            vocab_end_index = partition_vocab_size
+
+        results: dict[int, VIMPOCandidateStats] = {}
+        for seq_id in trie.all_sequence_ids:
+            indices = trie.get_sequence_tree_indices(seq_id)
+            if not indices:
+                results[seq_id] = VIMPOCandidateStats(
+                    sampled_logp=torch.empty(
+                        0, device=logits.device, dtype=torch.float
+                    ),
+                    candidate_ids=torch.empty(
+                        0,
+                        tree_candidate_ids.shape[-1],
+                        dtype=tree_candidate_ids.dtype,
+                        device=logits.device,
+                    ),
+                    candidate_logp=torch.empty(
+                        0,
+                        tree_candidate_ids.shape[-1],
+                        dtype=torch.float,
+                        device=logits.device,
+                    ),
+                    retained_mass=torch.empty(
+                        0, device=logits.device, dtype=torch.float
+                    ),
+                    predict_mask=torch.empty(0, dtype=torch.bool, device=logits.device),
+                )
+                continue
+
+            cand_id_parts: list[torch.Tensor] = []
+            cand_lp_parts: list[torch.Tensor] = []
+            sampled_parts: list[torch.Tensor] = []
+            mask_parts: list[torch.Tensor] = []
+
+            for i, (start, end) in enumerate(indices):
+                num_internal = end - start
+                # Internal positions [start, end-1] predict [start+1, end].
+                if num_internal > 0:
+                    cand_id_parts.append(tree_candidate_ids[start:end])
+                    cand_lp_parts.append(tree_candidate_logp[start:end])
+                    internal_labels = tree_input_ids[start + 1 : end + 1].long()
+                    sampled_parts.append(
+                        self._gather_sampled_logp(
+                            log_probs,
+                            internal_labels,
+                            vocab_start_index,
+                            vocab_end_index,
+                            tp_group,
+                        )
+                    )
+                    mask_parts.append(
+                        torch.ones(num_internal, dtype=torch.bool, device=logits.device)
+                    )
+                # Transition at position `end` predicts next range's start.
+                if i + 1 < len(indices):
+                    next_start = indices[i + 1][0]
+                    cand_id_parts.append(tree_candidate_ids[end : end + 1])
+                    cand_lp_parts.append(tree_candidate_logp[end : end + 1])
+                    trans_label = tree_input_ids[next_start : next_start + 1].long()
+                    sampled_parts.append(
+                        self._gather_sampled_logp(
+                            log_probs,
+                            trans_label,
+                            vocab_start_index,
+                            vocab_end_index,
+                            tp_group,
+                        )
+                    )
+                    mask_parts.append(
+                        torch.ones(1, dtype=torch.bool, device=logits.device)
+                    )
+
+            seq_candidate_ids = torch.cat(cand_id_parts, dim=0)
+            seq_candidate_logp = torch.cat(cand_lp_parts, dim=0)
+            seq_sampled_logp = torch.cat(sampled_parts, dim=0)
+            seq_predict_mask = torch.cat(mask_parts, dim=0)
+
+            seq_candidate_ids = seq_candidate_ids.masked_fill(
+                ~seq_predict_mask.unsqueeze(-1), -1
+            )
+            seq_candidate_logp = seq_candidate_logp.masked_fill(
+                ~seq_predict_mask.unsqueeze(-1), 0.0
+            )
+            seq_sampled_logp = seq_sampled_logp.masked_fill(~seq_predict_mask, 0.0)
+            seq_retained_mass = (
+                seq_candidate_logp.exp().sum(-1).masked_fill(~seq_predict_mask, 0.0)
+            )
+
+            results[seq_id] = VIMPOCandidateStats(
+                sampled_logp=seq_sampled_logp,
+                candidate_ids=seq_candidate_ids,
+                candidate_logp=seq_candidate_logp,
+                retained_mass=seq_retained_mass,
+                predict_mask=seq_predict_mask,
+            )
+
+        return results
+
+    @staticmethod
+    def _gather_sampled_logp(
+        log_probs: torch.Tensor,
+        labels: torch.Tensor,
+        vocab_start_index: int,
+        vocab_end_index: int,
+        tp_group: dist.ProcessGroup | None,
+    ) -> torch.Tensor:
+        """Gather sampled-token log-prob from the owning shard only."""
+        if tp_group is None or dist.get_world_size(tp_group) <= 1:
+            return log_probs.gather(-1, labels.long().unsqueeze(-1)).squeeze(-1)
+        labels = labels.long()
+        out_of_shard = (labels < vocab_start_index) | (labels >= vocab_end_index)
+        masked = labels.clone() - vocab_start_index
+        masked[out_of_shard] = 0
+        lp = log_probs.gather(-1, masked.unsqueeze(-1)).squeeze(-1)
+        lp = lp.masked_fill(out_of_shard, 0.0)
+        dist.all_reduce(lp, op=dist.ReduceOp.SUM, group=tp_group)
+        return lp
+
+    def _extract_vimpo_predict_mask(
+        self, ctx: FSDPTrainContext, seq_len: int
+    ) -> torch.Tensor:
+        """Read ``vimpo_predict_mask`` from the batch, or derive it from loss_mask."""
+        pm = ctx.mb_input.get("vimpo_predict_mask")
+        if pm is not None:
+            return pm
+        loss_mask = ctx.mb_input.get("loss_mask")
+        if loss_mask is None:
+            return torch.ones(
+                seq_len, dtype=torch.bool, device=ctx.model_inputs["input_ids"].device
+            )
+        pm = torch.roll(loss_mask.bool(), shifts=-1, dims=-1)
+        pm[..., -1] = False
+        return pm
+
+    def _sp_gather_vimpo_stats(
+        self, stats: VIMPOCandidateStats, ulysses_pad_size: int
+    ) -> VIMPOCandidateStats:
+        """Gather VIMPO stats along the sequence dim (Ulysses SP)."""
+        if self.parallel_helper.sp_size <= 1:
+            return stats
+        # 1-D fields: all_gather concatenates along dim=-1 (sequence).
+        sampled_logp = self._sp_all_gather(stats.sampled_logp)
+        retained_mass = self._sp_all_gather(stats.retained_mass)
+        predict_mask = self._sp_all_gather(stats.predict_mask)
+        # 2-D fields [S, K]: transpose to [K, S] so all_gather hits the S dim.
+        candidate_ids = self._sp_all_gather(stats.candidate_ids.t()).t()
+        candidate_logp = self._sp_all_gather(stats.candidate_logp.t()).t()
+        if ulysses_pad_size > 0:
+            sampled_logp = sampled_logp[:-ulysses_pad_size]
+            retained_mass = retained_mass[:-ulysses_pad_size]
+            predict_mask = predict_mask[:-ulysses_pad_size]
+            candidate_ids = candidate_ids[:-ulysses_pad_size]
+            candidate_logp = candidate_logp[:-ulysses_pad_size]
+        return VIMPOCandidateStats(
+            sampled_logp=sampled_logp,
+            candidate_ids=candidate_ids,
+            candidate_logp=candidate_logp,
+            retained_mass=retained_mass,
+            predict_mask=predict_mask,
+        )
+
+    @staticmethod
+    def _trim_vimpo_stats(
+        stats: VIMPOCandidateStats, pad_length: int
+    ) -> VIMPOCandidateStats:
+        """Drop ``pad_length`` trailing positions from every field."""
+        if pad_length <= 0:
+            return stats
+        return VIMPOCandidateStats(
+            sampled_logp=stats.sampled_logp[:-pad_length],
+            candidate_ids=stats.candidate_ids[:-pad_length],
+            candidate_logp=stats.candidate_logp[:-pad_length],
+            retained_mass=stats.retained_mass[:-pad_length],
+            predict_mask=stats.predict_mask[:-pad_length],
+        )
+
+    def _reorder_vimpo_stats(
+        self,
+        mb_stats: list[VIMPOCandidateStats],
+        output_seqlens: list[int],
+        mb_list: Any,
+    ) -> VIMPOCandidateStats:
+        """Aggregate non-tree per-micro-batch stats to [B, S, ...]."""
+        # Apply the same aggregate/unpack/reorder/pad path as forward_batch
+        # to each field independently.
+        fields = [
+            "sampled_logp",
+            "candidate_ids",
+            "candidate_logp",
+            "retained_mass",
+            "predict_mask",
+        ]
+        out: dict[str, torch.Tensor] = {}
+        for f in fields:
+            per_mb = [getattr(s, f) for s in mb_stats]
+            out[f] = reorder_and_pad_outputs(per_mb, output_seqlens, mb_list)
+        # ``reorder_and_pad_outputs`` pads every field with 0 via
+        # ``pad_and_stack_tensors_along_first_dim`` (F.pad value=0.0). For
+        # ``candidate_ids`` that would leave token id 0 at pad positions,
+        # clashing with the -1 sentinel used everywhere else for masked
+        # positions. Re-apply the sentinel wherever ``predict_mask`` is False
+        # (covers both in-sequence masked rows and cross-sequence padding).
+        predict_mask = out["predict_mask"].bool()
+        candidate_ids = out["candidate_ids"].masked_fill(~predict_mask, -1)
+        return VIMPOCandidateStats(
+            sampled_logp=out["sampled_logp"],
+            candidate_ids=candidate_ids,
+            candidate_logp=out["candidate_logp"],
+            retained_mass=out["retained_mass"],
+            predict_mask=predict_mask,
+        )
+
+    def _merge_tree_vimpo_stats(
+        self,
+        mb_stats: list[VIMPOCandidateStats | dict[int, VIMPOCandidateStats]],
+        batch_size: int,
+        *,
+        top_k: int,
+    ) -> VIMPOCandidateStats:
+        """Aggregate tree per-sequence stats to [B, S, K]."""
+        # Flatten all per-sequence dicts across micro-batches.
+        combined: dict[int, VIMPOCandidateStats] = {}
+        for entry in mb_stats:
+            if isinstance(entry, VIMPOCandidateStats):
+                # Non-tree fallback (trie was None); already [B, S, ...].
+                return entry
+            for seq_id, stats in entry.items():
+                if seq_id in combined:
+                    raise ValueError(
+                        f"Duplicate sequence_id {seq_id} across microbatches"
+                    )
+                combined[seq_id] = stats
+
+        if not combined:
+            raise ValueError("No VIMPO stats produced from any packed-tree sequence")
+
+        max_seq_len = max(s.sampled_logp.shape[0] for s in combined.values())
+        k = next(iter(combined.values())).candidate_ids.shape[-1]
+        device = next(iter(combined.values())).sampled_logp.device
+        b = batch_size
+
+        def _pad_1d(
+            field: str, dtype: torch.dtype, fill: float | int | bool
+        ) -> torch.Tensor:
+            out = torch.full((b, max_seq_len), fill, dtype=dtype, device=device)
+            for seq_id, stats in combined.items():
+                t = getattr(stats, field)
+                out[seq_id, : t.shape[0]] = t
+            return out
+
+        def _pad_2d(field: str, dtype: torch.dtype, fill: float | int) -> torch.Tensor:
+            out = torch.full((b, max_seq_len, k), fill, dtype=dtype, device=device)
+            for seq_id, stats in combined.items():
+                t = getattr(stats, field)
+                out[seq_id, : t.shape[0]] = t
+            return out
+
+        return VIMPOCandidateStats(
+            sampled_logp=_pad_1d("sampled_logp", torch.float, 0.0),
+            candidate_ids=_pad_2d("candidate_ids", torch.long, -1),
+            candidate_logp=_pad_2d("candidate_logp", torch.float, 0.0),
+            retained_mass=_pad_1d("retained_mass", torch.float, 0.0),
+            predict_mask=_pad_1d("predict_mask", torch.bool, False).bool(),
+        )
