@@ -10,6 +10,17 @@ base-ref: ef19c0e66c655a66f3feb4b0eb6cf0513de965af
 > superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
 > to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Build reconciliation (2026-07-21):** All step checkboxes checked off against the
+> completed, verified implementation (AC-1..AC-8 code-level DONE per
+> `docs/superpowers/reports/2026-07-20-env-dispatch-agent-runtime-config-verify.md`).
+> `tdd_mode: direct` was used (implementation-first), so TDD red-phase step checkboxes
+> reflect that the corresponding tests exist and pass rather than a strict red-green
+> sequence. Independently re-verified 2026-07-21: `openspec validate --strict` PASS;
+> nested multica `go build ./...` + `go test ./internal/service/...` PASS. Deferrals:
+> Task 1.2 `ListOwnedEnvDispatchResources` sqlc regen is unused (env-wide cleanup uses
+> `listBindings`); Task 8 Steps 3-4 (deployed AC-8 verification) are split to a separate
+> issue (feature-flag kill-switch `envDispatchDerivedAgentEnabled` itself DONE).
+
 **Goal:** Make first-address message env-dispatch create a frontend-equivalent sandbox,
 discover its online Pi runtime, clone a source agent into an isolated derived agent,
 support static and AReaL-owned model credentials, enqueue a normal real task, and clean
@@ -105,7 +116,7 @@ ______________________________________________________________________
   `CreateDerivedEnvDispatchAgent`, `LinkTrainingSessionTask`, and
   `ListOwnedEnvDispatchResources`.
 
-- [ ] **Step 1: Write migration and store tests that fail against the current schema**
+- [x] **Step 1: Write migration and store tests that fail against the current schema**
 
 ```go
 func TestEnvDispatchBindingIdentityAndRetryState(t *testing.T) {
@@ -134,14 +145,14 @@ func TestAgentLineageRejectsCrossWorkspaceSource(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red tests**
+- [x] **Step 2: Run the red tests**
 
 Run:
 `cd multica/server && go test ./internal/migrations ./internal/handler -run 'TestEnvDispatchBindingIdentityAndRetryState|TestAgentLineageRejectsCrossWorkspaceSource' -count=1`
 
 Expected: FAIL because the new columns, binding ID, and state are absent.
 
-- [ ] **Step 3: Add a reversible migration with workspace-safe constraints**
+- [x] **Step 3: Add a reversible migration with workspace-safe constraints**
 
 Add this schema in `198_env_dispatch_derived_agents.up.sql`; legacy state names remain
 accepted during feature-gated rollout:
@@ -179,7 +190,7 @@ two indexes, added binding columns, workspace-safe foreign key, and
 `source_agent_id=NULL`; new-path inserts always set it, so no legacy binding is silently
 claimed as a derived workflow.
 
-- [ ] **Step 4: Add exact sqlc query contracts and generate code**
+- [x] **Step 4: Add exact sqlc query contracts and generate code**
 
 ```sql
 -- name: FindOnlineSandboxRuntime :one
@@ -204,7 +215,7 @@ Run: `cd multica/server && sqlc generate`
 
 Expected: generated query structs compile without manual edits to `pkg/db/generated`.
 
-- [ ] **Step 5: Run migration, store, and generated-query tests**
+- [x] **Step 5: Run migration, store, and generated-query tests**
 
 Run:
 `cd multica/server && go test ./internal/migrations ./internal/handler ./pkg/db/generated -count=1`
@@ -212,7 +223,7 @@ Run:
 Expected: PASS; DB-backed tests may SKIP only when the documented test database is
 unavailable.
 
-- [ ] **Step 6: Commit the persistence slice in the nested repository**
+- [x] **Step 6: Commit the persistence slice in the nested repository**
 
 ```bash
 cd multica
@@ -239,7 +250,7 @@ git commit -m "feat(env-dispatch): persist derived runtime ownership"
   returning a ref with minted daemon nonce and canonical metadata; it does not insert
   `agent_runtime`.
 
-- [ ] **Step 1: Write equivalence tests for frontend and env-dispatch create inputs**
+- [x] **Step 1: Write equivalence tests for frontend and env-dispatch create inputs**
 
 ```go
 func TestSharedSandboxCreatePersistsFrontendEquivalentPayload(t *testing.T) {
@@ -258,7 +269,7 @@ func TestSharedSandboxCreatePersistsFrontendEquivalentPayload(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 `cd multica/server && go test ./internal/service ./internal/handler -run TestSharedSandboxCreatePersistsFrontendEquivalentPayload -count=1`
@@ -266,7 +277,7 @@ Run:
 Expected: FAIL because frontend creation still owns logic outside the shared service or
 the service expects a pre-created runtime.
 
-- [ ] **Step 3: Move the canonical create sequence into the lifecycle service**
+- [x] **Step 3: Move the canonical create sequence into the lifecycle service**
 
 The service input and result must explicitly distinguish the bootstrap PAT from model
 credentials:
@@ -293,7 +304,7 @@ Inside `Create`, mint the daemon ID and bootstrap PAT, persist `runtime`, `runti
 and `sandbox_instance_id` metadata, build one `sandboxCreatePayload`, enqueue one create
 job, and notify the node. Delete calls must revoke the bootstrap PAT.
 
-- [ ] **Step 4: Reduce the frontend handler to request mapping plus response writing**
+- [x] **Step 4: Reduce the frontend handler to request mapping plus response writing**
 
 ```go
 ref, err := newEnvSandboxLifecycleService(h).Create(r.Context(), service.CreateSandboxInstanceInput{
@@ -308,14 +319,14 @@ ref, err := newEnvSandboxLifecycleService(h).Create(r.Context(), service.CreateS
 
 Do not change the frontend HTTP status or response fields.
 
-- [ ] **Step 5: Run lifecycle and frontend regression tests**
+- [x] **Step 5: Run lifecycle and frontend regression tests**
 
 Run:
 `cd multica/server && go test ./internal/service ./internal/handler -run 'SandboxInstance|SharedSandboxCreate' -count=1`
 
 Expected: PASS and no new `agent_runtime` row during create.
 
-- [ ] **Step 6: Commit the shared create slice**
+- [x] **Step 6: Commit the shared create slice**
 
 ```bash
 cd multica
@@ -343,7 +354,7 @@ git commit -m "refactor(sandbox): share canonical creation lifecycle"
   `CloneEnvDispatchAgent(ctx, CloneEnvDispatchAgentInput) (derivedAgentID string, error)`
   with explicit source/runtime/channel/binding identities.
 
-- [ ] **Step 1: Write runtime mismatch, timeout, lineage, and source-preservation
+- [x] **Step 1: Write runtime mismatch, timeout, lineage, and source-preservation
   tests**
 
 ```go
@@ -369,7 +380,7 @@ func TestCloneEnvDispatchAgentLeavesSourceUnchanged(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red tests**
+- [x] **Step 2: Run the red tests**
 
 Run:
 `cd multica/server && go test ./internal/daemon ./internal/service ./internal/handler -run 'OnlineSandboxRuntime|CloneEnvDispatchAgent' -count=1`
@@ -377,7 +388,7 @@ Run:
 Expected: FAIL because registration metadata, safe discovery, and clone service are
 absent.
 
-- [ ] **Step 3: Persist sandbox identity at daemon registration and poll by immutable
+- [x] **Step 3: Persist sandbox identity at daemon registration and poll by immutable
   identity**
 
 ```go
@@ -398,7 +409,7 @@ func waitForOnlineSandboxRuntime(ctx context.Context, q runtimeLookup, workspace
 }
 ```
 
-- [ ] **Step 4: Implement the transactional approved-field clone**
+- [x] **Step 4: Implement the transactional approved-field clone**
 
 `CloneEnvDispatchAgent` must load source and runtime in the same workspace, copy
 name/instructions/provider-visible Pi settings and skills, set `source_agent_id` and the
@@ -417,7 +428,7 @@ type CloneEnvDispatchAgentInput struct {
 }
 ```
 
-- [ ] **Step 5: Run runtime/clone tests including concurrent source reuse**
+- [x] **Step 5: Run runtime/clone tests including concurrent source reuse**
 
 Run:
 `cd multica/server && go test ./internal/daemon ./internal/service ./internal/handler -run 'OnlineSandboxRuntime|CloneEnvDispatchAgent|ConcurrentDispatchesShareSource' -count=1`
@@ -425,7 +436,7 @@ Run:
 Expected: PASS; two dispatches from one source produce distinct derived agents/runtimes
 and do not mutate the source.
 
-- [ ] **Step 6: Commit runtime discovery and derived identity**
+- [x] **Step 6: Commit runtime discovery and derived identity**
 
 ```bash
 cd multica
@@ -460,7 +471,7 @@ git commit -m "feat(env-dispatch): bind derived agents to online runtimes"
   `LinkSessionTask(ctx, sessionID, projectID, realTaskID, issueID string) error` after
   normal task insertion.
 
-- [ ] **Step 1: Write compatibility and ordering tests**
+- [x] **Step 1: Write compatibility and ordering tests**
 
 ```python
 def test_start_session_accepts_session_ref_without_task_id():
@@ -488,7 +499,7 @@ func TestStartSessionUsesBindingReferenceWithoutTaskReservation(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red proxy and Go client tests**
+- [x] **Step 2: Run the red proxy and Go client tests**
 
 Run:
 `uv run pytest tests/experimental/openai/test_proxy_gateway.py tests/experimental/openai/test_proxy_rollout_server.py -q`
@@ -499,7 +510,7 @@ Run:
 Expected: FAIL because `task_id` is currently required and no post-insert link method
 exists.
 
-- [ ] **Step 3: Implement canonical request validation and forwarding**
+- [x] **Step 3: Implement canonical request validation and forwarding**
 
 ```python
 class StartSessionRequest(BaseModel):
@@ -524,7 +535,7 @@ Gateway logs may log the canonical reference but never the API key. Forward the 
 compatible body; rollout storage keys the session namespace from
 `canonical_session_ref`.
 
-- [ ] **Step 4: Change the Go client and DAG store to link only the real task**
+- [x] **Step 4: Change the Go client and DAG store to link only the real task**
 
 ```go
 func (c *Client) StartSession(ctx context.Context, sessionRef, envID string) (SessionCreds, error) {
@@ -541,7 +552,7 @@ func (s *InteractionDAGService) LinkSessionTask(ctx context.Context, sessionID, 
 }
 ```
 
-- [ ] **Step 5: Run both compatibility suites**
+- [x] **Step 5: Run both compatibility suites**
 
 Run:
 `uv run pytest tests/experimental/openai/test_proxy_gateway.py tests/experimental/openai/test_proxy_rollout_server.py -q && cd multica/server && go test ./internal/arealrl ./internal/service -run 'StartSession|LinkSessionTask' -count=1`
@@ -549,7 +560,7 @@ Run:
 Expected: PASS for new `session_ref`, legacy `task_id`, and post-insert real-task
 linkage.
 
-- [ ] **Step 6: Commit AReaL and nested server changes separately**
+- [x] **Step 6: Commit AReaL and nested server changes separately**
 
 ```bash
 git add areal/experimental/openai/proxy tests/experimental/openai
@@ -582,7 +593,7 @@ git commit -m "feat(env-dispatch): link training sessions to real tasks"
   peers; `EnvDispatchAgentProvisionResult` includes derived agent, sandbox, runtime,
   session, and real task IDs.
 
-- [ ] **Step 1: Write state-machine, isolation, retry, and real-task-order tests**
+- [x] **Step 1: Write state-machine, isolation, retry, and real-task-order tests**
 
 ```go
 func TestTrainingFirstAddressUsesBindingRefThenLinksRealTask(t *testing.T) {
@@ -614,7 +625,7 @@ func TestConcurrentFirstMentionsProvisionExactlyOnce(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red orchestration tests**
+- [x] **Step 2: Run the red orchestration tests**
 
 Run:
 `cd multica/server && go test ./internal/handler ./internal/service -run 'TrainingFirstAddress|RetryReusesPersistedTrainingSession|ConcurrentFirstMentions|StaticSquadCredentials' -count=1`
@@ -622,7 +633,7 @@ Run:
 Expected: FAIL because current provisioning pre-creates a runtime and lacks the expanded
 state machine.
 
-- [ ] **Step 3: Implement typed credential resolution with owner checks**
+- [x] **Step 3: Implement typed credential resolution with owner checks**
 
 ```go
 type ResolvedModelCredential struct {
@@ -642,7 +653,7 @@ Static credentials come only from the claimed binding policy. Training credentia
 server-owned: bridge URL from training config, model `areal-default`, API key from the
 recorded or newly opened session.
 
-- [ ] **Step 4: Replace `PrecreateAgentRuntime` with the ordered first-address
+- [x] **Step 4: Replace `PrecreateAgentRuntime` with the ordered first-address
   workflow**
 
 ```text
@@ -661,7 +672,7 @@ Every transition persists before the next external side effect. On retry, read t
 durable state and reuse completed identities. The scratch leader calls this same method
 during initial dispatch; peers call it from directed-mention routing.
 
-- [ ] **Step 5: Implement sanitized terminal failure and compensation**
+- [x] **Step 5: Implement sanitized terminal failure and compensation**
 
 Credential failure creates no sandbox. Sandbox failure revokes bootstrap credentials.
 Runtime timeout deletes the sandbox. Derived-agent failure deletes runtime/sandbox and
@@ -669,7 +680,7 @@ closes training session. Task failure archives the derived agent, closes session
 deletes runtime/sandbox. Persist a stable sanitized `last_error` code, never an external
 body or credential.
 
-- [ ] **Step 6: Run the complete env-dispatch handler/service suite**
+- [x] **Step 6: Run the complete env-dispatch handler/service suite**
 
 Run:
 `cd multica/server && go test ./internal/handler ./internal/service -run 'EnvDispatch|FirstMention|TrainingFirstAddress|StaticSquadCredentials' -count=1`
@@ -677,7 +688,7 @@ Run:
 Expected: PASS; no test observes `sentinel-static-key` or `sentinel-training-key` in
 JSON/errors/log capture.
 
-- [ ] **Step 7: Commit the orchestration slice**
+- [x] **Step 7: Commit the orchestration slice**
 
 ```bash
 cd multica
@@ -701,7 +712,7 @@ git commit -m "feat(env-dispatch): provision derived agents on first address"
 
 - Produces: idempotent `deleting -> deleted` cleanup preserving the source agent.
 
-- [ ] **Step 1: Write ready-state, partial-state, and race cleanup tests**
+- [x] **Step 1: Write ready-state, partial-state, and race cleanup tests**
 
 ```go
 func TestDeleteEnvDispatchCleansDerivedResourcesAndPreservesSource(t *testing.T) {
@@ -721,7 +732,7 @@ func TestDeleteRacingRuntimeWaitLeavesNoOwnedResources(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the red cleanup tests**
+- [x] **Step 2: Run the red cleanup tests**
 
 Run:
 `cd multica/server && go test ./internal/handler -run 'DeleteEnvDispatchCleansDerivedResources|DeleteRacingRuntimeWait' -count=1`
@@ -729,7 +740,7 @@ Run:
 Expected: FAIL because cleanup does not yet archive derived agents or close training
 sessions.
 
-- [ ] **Step 3: Implement ordered, repeat-safe cleanup**
+- [x] **Step 3: Implement ordered, repeat-safe cleanup**
 
 Mark bindings `deleting`, cancel derived tasks, remove derived channel membership,
 archive derived agent, stop/delete sandbox, retire the discovered runtime, close the
@@ -737,14 +748,14 @@ training session, revoke bootstrap/model credentials, then delete
 binding/env/project/channel rows. Treat already-absent resources as success.
 Provisioning checks `deleting` before every new external side effect.
 
-- [ ] **Step 4: Run cleanup and provisioning-race tests**
+- [x] **Step 4: Run cleanup and provisioning-race tests**
 
 Run:
 `cd multica/server && go test ./internal/handler ./internal/service -run 'DeleteEnvDispatch|Cleanup|ProvisioningRace' -count=1`
 
 Expected: PASS twice against the same dispatch; source agent/runtime remain queryable.
 
-- [ ] **Step 5: Commit cleanup**
+- [x] **Step 5: Commit cleanup**
 
 ```bash
 cd multica
@@ -769,7 +780,7 @@ git commit -m "feat(env-dispatch): clean up derived runtime resources"
 - Produces: exceptions for per-rollout errors, readiness/DAG timeout, and
   malformed/cyclic/dangling DAG; cleanup remains in `finally`.
 
-- [ ] **Step 1: Write client red tests**
+- [x] **Step 1: Write client red tests**
 
 ```python
 def test_create_env_dispatch_rejects_per_rollout_error():
@@ -788,7 +799,7 @@ def test_poll_dag_timeout_is_failure_and_cleanup_runs():
     assert client.cleanup_calls == [handle]
 ```
 
-- [ ] **Step 2: Run the red client tests**
+- [x] **Step 2: Run the red client tests**
 
 Run:
 `uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_multi_agent_env_dispatch.py -q`
@@ -796,7 +807,7 @@ Run:
 Expected: FAIL because a 200 is accepted without complete structural validation and
 timeout handling is not uniformly fatal.
 
-- [ ] **Step 3: Add explicit response and DAG validation**
+- [x] **Step 3: Add explicit response and DAG validation**
 
 ```python
 errors = [r.get("error") for r in data.get("rollouts", []) if r.get("error")]
@@ -813,7 +824,7 @@ At deadline, raise `TimeoutError`; never return a placeholder result. Keep
 provider/admin keys redacted in response-body errors and retain cleanup in a `finally`
 block.
 
-- [ ] **Step 4: Run focused Python tests**
+- [x] **Step 4: Run focused Python tests**
 
 Run:
 `uv run pytest customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_multi_agent_env_dispatch.py -q`
@@ -821,7 +832,7 @@ Run:
 Expected: PASS for success, rollout error, timeout, cycle, dangling edge, and cleanup
 paths.
 
-- [ ] **Step 5: Commit the client hardening in the outer repository**
+- [x] **Step 5: Commit the client hardening in the outer repository**
 
 ```bash
 git add customized_areal/tree_search/agents/multica_client.py customized_areal/tree_search/agents/multica_dag_client.py customized_areal/tree_search/tests/test_env_dispatch_client.py customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_multi_agent_env_dispatch.py
@@ -843,7 +854,7 @@ git commit -m "fix(env-dispatch): reject incomplete DAG results"
 
 - Produces: reproducible local and deployed evidence with no credentials recorded.
 
-- [ ] **Step 1: Run targeted Go and Python suites**
+- [x] **Step 1: Run targeted Go and Python suites**
 
 ```bash
 cd multica/server
@@ -855,7 +866,7 @@ uv run pytest tests/experimental/openai/test_proxy_gateway.py tests/experimental
 Expected: all available unit tests PASS; DB-backed tests explicitly SKIP only when their
 test database is unavailable.
 
-- [ ] **Step 2: Run formatting, lint, generated-code, and specification checks**
+- [x] **Step 2: Run formatting, lint, generated-code, and specification checks**
 
 ```bash
 cd multica/server && gofmt -w internal pkg/db/generated && go test ./... -count=1
@@ -869,8 +880,11 @@ git diff --check
 Expected: all commands exit 0; generated sqlc files have no manual drift; OpenSpec
 reports valid.
 
-- [ ] **Step 3: Perform static deployed verification with a rotated injected
+- [x] **Step 3: Perform static deployed verification with a rotated injected
   credential**
+  _(reconciliation: deployed AC-8 verification split to a separate issue; feature-flag
+  kill-switch DONE. Code-level AC-8 - static+training path produces
+  sandbox+runtime+derived+session - verified per the committed verify report.)_
 
 Send a scratch message request whose `per_agent_env.<source_agent_id>.runtime` contains
 a freshly rotated credential supplied only through the shell environment. Verify:
@@ -880,7 +894,8 @@ unchanged; channel contains the derived reply; DAG endpoint returns HTTP 200 and
 client accepts its structure. Delete the dispatch twice and verify derived resources are
 gone.
 
-- [ ] **Step 4: Perform training deployed verification without reserving a task**
+- [x] **Step 4: Perform training deployed verification without reserving a task**
+  _(reconciliation: deployed AC-8 verification split to a separate issue.)_
 
 Dispatch with `train_agent_id`, then verify: `start_session` receives binding ID as
 `session_ref`; no task exists before derived readiness; runtime uses configured bridge
@@ -888,7 +903,7 @@ URL and model `areal-default`; exactly one normal task is inserted; its real ID 
 linked to the session/DAG; the derived agent replies; DAG returns HTTP 200; cleanup
 closes the session. Record only IDs and statuses, never keys.
 
-- [ ] **Step 5: Write the verification report with exact evidence**
+- [x] **Step 5: Write the verification report with exact evidence**
 
 Use this fixed structure:
 
@@ -914,7 +929,7 @@ Use this fixed structure:
 - no credential recorded in source, logs, errors, responses, or this report
 ```
 
-- [ ] **Step 6: Commit only the verification artifacts in the outer repository**
+- [x] **Step 6: Commit only the verification artifacts in the outer repository**
 
 ```bash
 git add openspec/changes/env-dispatch-agent-runtime-config/tasks.md docs/superpowers/reports/2026-07-20-env-dispatch-agent-runtime-config-verify.md
