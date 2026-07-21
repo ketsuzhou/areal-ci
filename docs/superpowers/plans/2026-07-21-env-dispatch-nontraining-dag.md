@@ -236,27 +236,27 @@ Run the Step 2 command and `go test ./server/internal/service -count=1`; expecte
 - Consumes: server `SegmentSpec` dual-source JSON.
 - Produces: nullable tensor fields and explicit local trajectory fields; only `trainable=true` segments reach tensor resolution and shard cleanup.
 
-- [ ] **Task 5 / Step 1: Write failing Python contract and resolver tests**
+- [x] **Task 5 / Step 1: Write failing Python contract and resolver tests**
 
 Build a mixed DAG containing one `areal_tensor` and one `task_messages`
 segment. Assert strict parsing succeeds, topology retains both segments, only
 the trainable tensor ref is resolved, and cleanup never receives the local
 segment.
 
-- [ ] **Task 5 / Step 2: Run tests and verify RED**
+- [x] **Task 5 / Step 2: Run tests and verify RED**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_multica_dag_client.py customized_areal/tree_search/tests/test_assembler_ref_resolve.py customized_areal/tree_search/tests/test_segment_dag_training_path.py -q`
 
 Expected: FAIL because current dataclasses require tensor fields and the assembler resolves every segment.
 
-- [ ] **Task 5 / Step 3: Implement the Python dual-source contract**
+- [x] **Task 5 / Step 3: Implement the Python dual-source contract**
 
 Add typed defaults for `trajectory_source`, `trainable`, and `trajectory`; make
 `trajectory_id`/`tensor_ref` optional. Validate trainable segments strictly and
 skip resolution/cleanup for non-trainable segments while retaining their DAG
 identity and metadata.
 
-- [ ] **Task 5 / Step 4: Run tests and verify GREEN**
+- [x] **Task 5 / Step 4: Run tests and verify GREEN**
 
 Run the Step 2 command; expected PASS.
 

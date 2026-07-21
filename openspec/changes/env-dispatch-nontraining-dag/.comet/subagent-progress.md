@@ -17,6 +17,7 @@
 | 2 | done | df6c1353c (multica) | schema migration (204 env_dispatch_run); public-API (/dag readiness contract); diff >200 lines (672 chg) | Approved by coordinator, 3 Minor (no fix round) | plan 2.1-2.5 ✅, spec 2.1-2.5 ✅ |
 | 3 | done | 399171948 (multica) | schema migration (205 ALTER TABLE interaction_dag_segment — nullable AReaL columns + dual-source columns); dual-source segment persistence | Approved by coordinator, 0 Minor (no fix round) | plan 3.1-3.5 ✅, spec 3.1-3.5 ✅ |
 | 4 | done | 83dde092f (multica) | env-dispatch event seams (close/delegation hooks); AReaL-call boundary (non-training path must make zero AReaL calls) | Approved by coordinator, 0 Minor (no fix round) | plan 4.1-4.4 ✅, spec 4.1-4.4 ✅ |
+| 5 | done | ecb24a3d (areal) | Python dataclass contract changes (nullable fields, dual-source parsing); AReaL training path (only trainable=true segments reach tensor resolution) | Approved by coordinator, 0 Minor (no fix round) | plan 5.1-5.4 ✅, spec 5.1-5.4 ✅ |
 
 ## Findings deferred to final review (standard mode)
 
@@ -28,23 +29,22 @@
 
 ## Current task
 
-- Task 4: Record every env-dispatch agent at event seams — COMPLETE
-- Stage: done (implementer 83dde092f; coordinator review Approved with 0 Minor, no fix round; 8/8 checkoff PASS)
-- Plan task text: "Task 4 / Step 1: Replace the old non-trained no-op test with failing behavior tests" (group Task 4, steps 1-4)
-- Mapped OpenSpec tasks: tasks.md group 4 (4.1-4.4) — all checked off
-- Brief: .superpowers/sdd/task-4-brief.md
-- Repo: nested multica (multica/server/)
-- BASE (multica): 399171948 (Task 3 HEAD)
+- Task 5: Parse mixed DAGs safely in AReaL — COMPLETE
+- Stage: done (implementer ecb24a3d; coordinator review Approved with 0 Minor, no fix round; 8/8 checkoff PASS)
+- Plan task text: "Task 5 / Step 1: Write failing Python contract and resolver tests" (group Task 5, steps 1-4)
+- Mapped OpenSpec tasks: tasks.md group 5 (5.1-5.4) — all checked off
+- Brief: .superpowers/sdd/task-5-brief.md
+- Repo: outer areal (customized_areal/tree_search/agents/)
+- BASE (outer areal): b6b91e79 (Task 4 checkoff)
+- Language: Python 3.12, pytest, dataclasses
 - Review-fix round: 0 (standard: max 1)
 
 ## Next task
 
-- Task 5: Parse mixed DAGs safely in AReaL
+- Task 6: Cross-layer regression verification
 - Stage: pending dispatch
-- Plan task text: "Task 5 / Step 1: Write failing Python contract and resolver tests" (group Task 5, steps 1-4)
-- Mapped OpenSpec tasks: tasks.md group 5 (5.1-5.4)
-- Brief: .superpowers/sdd/task-5-brief.md
-- Repo: outer areal (customized_areal/tree_search/agents/)
-- BASE (outer areal): current HEAD (81277f68)
-- Language: Python 3.12, pytest, dataclasses
-- Risk signals: Python dataclass contract changes (nullable fields, dual-source parsing); AReaL training path (only trainable=true segments reach tensor resolution)
+- Plan task text: "Task 6 / Step 1: Run focused Go tests" (group Task 6, steps 1-5)
+- Mapped OpenSpec tasks: tasks.md group 6 (6.1-6.5)
+- Brief: .superpowers/sdd/task-6-brief.md
+- Repo: both (multica Go + areal Python)
+- Risk signals: cross-layer integration; secret/AReaL-call boundary review

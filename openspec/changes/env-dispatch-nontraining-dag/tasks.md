@@ -76,21 +76,21 @@
 
 ## 5. Parse mixed DAGs safely in AReaL
 
-- [ ] 5.1 Write failing Python contract and resolver tests: build a mixed DAG with
+- [x] 5.1 Write failing Python contract and resolver tests: build a mixed DAG with
   one `areal_tensor` and one `task_messages` segment; assert strict parsing
   succeeds, topology retains both segments, only the trainable tensor ref is
   resolved, and cleanup never receives the local segment.
-- [ ] 5.2 Verify RED: `uv run pytest customized_areal/tree_search/tests/test_multica_dag_client.py
+- [x] 5.2 Verify RED: `uv run pytest customized_areal/tree_search/tests/test_multica_dag_client.py
   customized_areal/tree_search/tests/test_assembler_ref_resolve.py
   customized_areal/tree_search/tests/test_segment_dag_training_path.py -q` fails
   because current dataclasses require tensor fields and the assembler resolves every
   segment.
-- [ ] 5.3 Implement the Python dual-source contract: add typed defaults for
+- [x] 5.3 Implement the Python dual-source contract: add typed defaults for
   `trajectory_source`, `trainable`, and `trajectory`; make `trajectory_id`/
   `tensor_ref` optional; validate trainable segments strictly and skip
   resolution/cleanup for non-trainable segments while retaining their DAG identity
   and metadata.
-- [ ] 5.4 Verify GREEN: the Step 5.2 command passes.
+- [x] 5.4 Verify GREEN: the Step 5.2 command passes.
 
 ## 6. Cross-layer regression verification
 
