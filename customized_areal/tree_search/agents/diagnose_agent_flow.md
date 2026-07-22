@@ -120,3 +120,88 @@ SuperNode.process_reward = mean(segment step scores) / score_max
 - `/dag` 边界与 `score_max`：`multica/server/internal/handler/env_dispatch.go`
 - AReaL DAG 客户端：`customized_areal/tree_search/agents/multica_dag_client.py`
 - AReaL reward 聚合：`customized_areal/tree_search/agents/supernode_assembler.py`
+
+## On-Demand Diagnosis Flow (Tasks 1-8)
+
+The on-demand diagnosis agent replaces the one-shot JSON prompt with a persistent Pi RPC session and per-segment message paging. Rewards are persisted incrementally through a scoped loopback API rather than returned in a single JSON batch.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as TaskService
+    participant R as DiagnosisRunner
+    participant S as DiagnosisStateStore
+    participant TS as DiagnosisToolServer
+    participant P as Persistent Pi RPC Session
+    participant X as Trusted Diagnosis Extension
+    participant D as DAG / DB
+
+    T->>R: 根训练任务终态
+    R->>S: 创建或恢复 diagnosis run
+    S-->>R: topology + task context + progress
+    R->>TS: 启动 loopback 工具服务器
+    R->>P: 启动 Pi RPC session（仅拓扑 + 规则，无消息正文）
+    R->>P: SetAutoCompaction(false)
+    
+    loop 直到所有 segments 完成
+        R->>P: 开始一个 segment turn
+        P->>X: multica_get_segment_messages(segment_id, cursor)
+        X->>TS: POST /v1/get-segment-messages
+        TS->>D: 分页读取消息
+        D-->>TS: messages + next_cursor
+        TS-->>X: page response
+        X-->>P: 受限消息页
+        P->>X: multica_record_step_rewards(segment_id, rewards)
+        X->>TS: POST /v1/record-step-rewards
+        TS->>D: upsert (segment_id, seq)
+        D-->>TS: persisted + missing
+        TS-->>X: 写入确认
+        X-->>P: persisted_seqs
+        P->>X: multica_finish_segment(segment_id)
+        X->>TS: POST /v1/finish-segment
+        TS->>D: 校验覆盖率并保存 checkpoint
+        D-->>TS: completed / incomplete
+        TS-->>X: segment completed
+        X-->>P: segment completed
+        P-->>R: turn 完成
+        R->>P: Compact(diagnosis instructions)
+        P-->>R: compacted summary
+        R->>S: 校验并持久化 compaction checkpoint
+    end
+    
+    R->>X: multica_complete_diagnosis()
+    X->>TS: POST /v1/complete-diagnosis
+    TS->>D: 验证全 DAG 覆盖
+    D-->>TS: completed
+    TS-->>X: completed
+    R-->>T: diagnosis completed
+```
+
+### Key Changes from One-Shot Flow
+
+| Aspect | One-Shot (Legacy) | On-Demand (New) |
+|--------|------------------|-----------------|
+| Pi session | 每次诊断新建 | 持久复用 |
+| Initial prompt | 包含所有消息正文 | 仅拓扑 + 规则 |
+| Message reading | 一次性 JSON payload | 分页 + opaque cursor |
+| Reward persistence | 诊断完成后批量写入 | 每页增量写入 |
+| Compaction | 无 | 每 segment 后强制压缩 |
+| Tool access | `--no-tools` | `--no-tools` + 5 个诊断工具 |
+| Credentials | N/A | Loopback HTTP + bearer token |
+| Recovery | 无 | 从 DB checkpoint 恢复 |
+| Segment limit | 10 (硬截断) | 无限制 |
+
+### Configuration (On-Demand)
+
+| Env Variable | Default | Description |
+|-------------|---------|-------------|
+| `DIAGNOSIS_AGENT_ON_DEMAND_ENABLED` | `false` | Enable on-demand flow |
+| `DIAGNOSIS_AGENT_PAGE_TURN_LIMIT` | `20` | Max turns per message page |
+| `DIAGNOSIS_AGENT_PAGE_BYTE_LIMIT` | `24576` | Max bytes per message page |
+| `DIAGNOSIS_AGENT_HARD_CONTEXT_PERCENT` | `80` | Emergency compaction threshold |
+| `DIAGNOSIS_AGENT_MAX_REFETCHES_PER_SEGMENT` | `2` | Max repair turns per segment |
+| `DIAGNOSIS_AGENT_MAX_RUN_TIMEOUT_SECONDS` | `0` | Run timeout (0 = unset) |
+
+### Tool Isolation
+
+Pi launches with `--no-tools` (disabling all ordinary tools, extensions, skills, and prompt templates) plus exactly one explicit `--extension` pointing to a Multica-generated trusted TypeScript file. The extension registers only five tools that call the loopback HTTP server; no generic HTTP, filesystem, or shell access is exposed. The capability token is read from `MULTICA_DIAGNOSIS_CAPABILITY_TOKEN` at runtime and never appears in argv, prompts, or logs.
