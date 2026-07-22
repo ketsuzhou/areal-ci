@@ -17,15 +17,11 @@
 - `test_critic_smoke::test_end_to_end_pipeline` + ~9 test_critic/test_assembler: Python 3.12/uvloop `asyncio.get_event_loop()` deprecation. Present at base 19c4aaf7.
 
 ## Current task
-- Plan task: Task 7 - Dedicated VIMPO FSDP Actor and Trainer Wiring
-- OpenSpec items: 5.3, 5.4, 6.1
-- Stage: RE-REVIEW dispatched (bg, round 1/1) 2026-07-22. Fix agent DONE_WITH_CONCERNS, fix commit 20587220 (5 files incl. scorer-side revision-wildcard fix in vimpo_reference.py; tests 42 passed/1 GPU skip/0 failed, ruff clean; muon regression test added). Fix concern recorded for final review: stock SGLang /get_model_info also omits vocab_size/tokenizer_vocab_size/special-token IDs -> same identity-mismatch class; broader design decision (shim vs relaxed validation), deferred. Review package: .superpowers/sdd/review-d72f39d1..20587220.diff.
-- Impl BASE: 85f2adb6 (T6 checkoff HEAD; code base = c968f0b2 fix HEAD)
-- Brief: `.superpowers/sdd/task-7-brief.md` | Report: `.superpowers/sdd/task-7-report.md`
-- Modifies `training/actor.py` (`VIMPOFSDPPPOActor`: compute_advantages, ppo_update, destroy), `training/trainer.py` (`_create_train_engine` VIMPO branch: backend==fsdp gate, copy vimpo_* config, select dedicated actor, no distill/critic patches), `engine/__init__.py` + `__init__.py` (lazy exports); creates `tests/test_vimpo_actor.py` + `tests/test_vimpo_trainer.py`.
-- Consumes T1-T6: `MultiCandidateFSDPEngine`, `PPOActor`/`PPOActorConfig`, `VIMPOReferenceScorer`/`SGLangVIMPOReferenceScorer`/`ReferenceScoreRequest` (T4), `VIMPOAdvantageComputer` (T1), `compute_vimpo_candidate_stats` (T5), `split_episode_atomic_batches` (T3), `train_vimpo_batch` (T6), `AdvantageMode`, `CustomizedPPOTrainer`.
-- Risk: integration of all prior contracts; must preserve existing distillation/Muon/clip-cov/critic patch behavior; VIMPO uses kl_ctl=0 + ref=None. Integration task -> sonnet implementer + standard review.
-- NOTE: brief uses `uv run pytest` in cmd text - use `.venv-test/bin/pytest` (NO uv run).
+- Plan task: Task 8 - Metrics, CPU End-to-End Smoke Test, and Documentation
+- OpenSpec items: 6.2, 6.3, 6.4
+- Stage: RE-REVIEW dispatched (bg, round 1/1) 2026-07-22. Fix agent DONE, fix commit f02c0483 (7 files; F1 dp_size multiplier matching existing loss_multiplier convention + pinning test; F2 fake aligned; F3 scorer retry_count + test; F4 README note; F5 quantile guard + test; 52 passed required suite, 100 passed/2 skips glob, ruff clean). Review package: .superpowers/sdd/review-3e8ef242..f02c0483.diff.
+- Brief: `.superpowers/sdd/task-8-brief.md` | Report: `.superpowers/sdd/task-8-report.md`
+- Deferred to final review (from T7): Minors #4/#5 (weak trainer tests); IMPORTANT-but-deferrable: stock SGLang /get_model_info omits vocab_size/tokenizer_vocab_size/special-token IDs (same identity-mismatch class as the fixed revision defect; scorer also POSTs /get_model_info which stock exposes as GET) - needs design decision or e2e validation, tracked for final review + T9/T10.
 
 ## Completed tasks
 - T1 (config + advantage math): complete. Impl 19c4aaf7..244e2e8a + checkoff 97c1d962. Review approved, 1 Minor. OpenSpec 1.1-1.4.
@@ -34,3 +30,4 @@
 - T4 (frozen SGLang scorer): complete. Impl 4810d861..b1b4136e + checkoff 89a609b1. Review approved, 5 Minor (deferred). OpenSpec 3.1-3.4.
 - T5 (FSDP actor candidate stats): complete. Impl 89a609b1..0542ac30 + fix 0542ac30..8d353c1a + checkoff 575faf51. Re-review Approved (0 Critical/Important, 3 Minor deferred). OpenSpec 2.1-2.4.
 - T6 (combined VIMPO loss + two-denominator backward): complete. Impl 575faf51..0c7cad7b + fix 0c7cad7b..c968f0b2 + checkoff 85f2adb6. Re-review Approved (0 Critical/Important, 5+1 Minor deferred). 20 passed/1 pre-existing warning, ruff green. OpenSpec 5.1, 5.2, 5.5.
+- T7 (dedicated VIMPO actor + trainer wiring): complete. Impl 85f2adb6..d72f39d1 + fix d72f39d1..20587220 + checkoff 5e96c384. Re-review Approved (1 IMPORTANT fixed: Muon attrs; revision-wildcard scorer fix; Minors #2/#3/#6 fixed, #4/#5 deferred). 42 passed/1 GPU skip, ruff green. OpenSpec 5.3, 5.4, 6.1.

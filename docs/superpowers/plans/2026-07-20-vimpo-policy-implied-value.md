@@ -1067,7 +1067,7 @@ git commit -m "feat(tree-search): integrate VIMPO FSDP actor training"
 - Consumes: complete VIMPO training pipeline.
 - Produces: required `stats_tracker` metrics, an offline CPU smoke test, and an explicit hardware/service integration gate.
 
-- [ ] **Step 1: Write the failing CPU smoke test**
+- [x] **Step 1: Write the failing CPU smoke test**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_smoke.py
@@ -1086,7 +1086,7 @@ def test_vimpo_cpu_pipeline_changes_actor_only() -> None:
     assert all(torch.isfinite(torch.tensor(value)) for value in actor.last_vimpo_metrics.values())
 ```
 
-- [ ] **Step 2: Add and assert observability**
+- [x] **Step 2: Add and assert observability**
 
 Use `stats_tracker.denominator` for valid tokens and complete episodes, `stats_tracker.stat` for candidate KL, retained-mass mean/min/quantiles, raw/normalized advantages, terminal prediction/target/residual/RMSE, and `stats_tracker.scalar` for component/combined losses, reference latency/retries, effective top-k, exact-KL flag, and snapshot policy version. Exact names:
 
@@ -1111,7 +1111,7 @@ vimpo/snapshot_policy_version
 
 Do not call `.item()` or `.tolist()` on hot-path GPU tensors; feed tensors directly to the stats tracker. `vimpo/exact_kl` is one only when effective `K == vocab_size`.
 
-- [ ] **Step 3: Add the hardware-gated integration test**
+- [x] **Step 3: Add the hardware-gated integration test**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_fsdp_sglang_integration.py
@@ -1135,7 +1135,7 @@ def test_one_vimpo_step_keeps_initial_sglang_reference_frozen() -> None:
 
 The helper uses the repository's torchrun test harness, the same tokenizer/checkpoint for actor initialization and SGLang, and reads identity twice; it never launches or updates the reference service.
 
-- [ ] **Step 4: Document configuration and deployment**
+- [x] **Step 4: Document configuration and deployment**
 
 Add a VIMPO section to `customized_areal/tree_search/README.md` with this runnable configuration fragment:
 
@@ -1159,13 +1159,13 @@ tree_search:
 
 State that the URL must serve the unmodified initial actor checkpoint with identical tokenizer/special IDs, temperature-one full-normalized token-ID log-probabilities, no quantization in paper-faithful mode, and no weight updates. Explain that `top_k < vocab_size` is truncated candidate KL, retained mass diagnoses approximation quality, `top_k == vocab_size` is exact but expensive, the actor backend must be FSDP, `actor.kl_ctl` may be zero, and no `ref` FSDP allocation should be configured.
 
-- [ ] **Step 5: Run smoke, integration gate, and focused suite**
+- [x] **Step 5: Run smoke, integration gate, and focused suite**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_*.py -q`
 
 Expected: all CPU/mocked tests PASS; GPU/SGLang tests either PASS or SKIP with their explicit environment reason.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add customized_areal/tree_search/training/actor.py customized_areal/tree_search/engine/fsdp_engine.py customized_areal/tree_search/README.md customized_areal/tree_search/tests/test_vimpo_smoke.py customized_areal/tree_search/tests/test_vimpo_fsdp_sglang_integration.py

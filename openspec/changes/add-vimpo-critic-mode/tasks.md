@@ -65,11 +65,11 @@
 
 - [x] 6.1 Emit distributed VIMPO metrics for candidate KL, retained mass, terminal prediction,
   target/residual/RMSE, raw/normalized advantages, component losses, and combined loss.
-- [ ] 6.2 Add a CPU smoke test covering Config -> workflow metadata -> actor/reference stats ->
+- [x] 6.2 Add a CPU smoke test covering Config -> workflow metadata -> actor/reference stats ->
   advantage -> combined loss with fake FSDP/SGLang components.
-- [ ] 6.3 Add a hardware-gated FSDP actor plus frozen SGLang reference one-step integration test
+- [x] 6.3 Add a hardware-gated FSDP actor plus frozen SGLang reference one-step integration test
   and document the explicit skip reason when required GPUs/services are unavailable.
-- [ ] 6.4 Document VIMPO configuration, the fixed-reference requirement, top-k truncation
+- [x] 6.4 Document VIMPO configuration, the fixed-reference requirement, top-k truncation
   semantics, retained-mass guidance, and FSDP/SGLang deployment expectations.
 - [ ] 6.5 Run targeted unit tests, relevant customized tree-search suites, Ruff/pre-commit, and
   `graphify update .`; record any hardware-gated or environment-dependent skips.
