@@ -1922,3 +1922,7 @@ VIMPO emits distributed metrics via `stats_tracker`:
 - `vimpo/reference_latency_ms`, `vimpo/reference_retries`, `vimpo/effective_top_k`,
   `vimpo/exact_kl`, `vimpo/snapshot_policy_version` — reference-service and
   snapshot scalars.
+
+Note: `vimpo/terminal_rmse` and the retained-mass `p10/p50/p90` quantiles are
+computed per rank and then averaged across ranks, so they approximate (rather
+than exactly equal) the globally pooled RMSE/quantiles.

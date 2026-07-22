@@ -1214,8 +1214,14 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             total_value = torch.stack([m[1] for m in metric_numerators]).sum().item()
             global_tokens = global_valid_tokens.item()
             global_eps = global_episodes.item()
-            ppo_actor_loss = actor_coeff * total_ppo / global_tokens
-            value_loss = value_loss_weight * total_value / global_eps
+            # The numerators are LOCAL (this rank's micro-batches) while the
+            # denominators are all-reduced, so local/global = true/dp_size.
+            # Multiply by dp_size to report the true global-mean components
+            # (same dp_size compensation ``vimpo_loss_fn`` applies for FSDP
+            # gradient averaging; no extra collective needed).
+            dp_size = self.parallel_helper.dp_size
+            ppo_actor_loss = dp_size * actor_coeff * total_ppo / global_tokens
+            value_loss = dp_size * value_loss_weight * total_value / global_eps
             stats["vimpo/ppo_actor_loss"] = ppo_actor_loss
             stats["vimpo/value_loss"] = value_loss
             stats["vimpo/combined_loss"] = ppo_actor_loss + value_loss

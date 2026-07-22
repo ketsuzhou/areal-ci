@@ -39,6 +39,9 @@ from .vimpo_reference import (
 
 logger = logging.getLogger("OnPolicyDistill")
 
+# torch.quantile errors on inputs larger than 2**24 elements.
+_QUANTILE_INPUT_LIMIT = 2**24
+
 
 def _patch_clip_cov_from_actor_config(config: Any) -> None:
     from customized_areal.clip_cov import (
@@ -532,6 +535,11 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # Retained-mass quantiles diagnose top-k truncation quality (a low p10
         # means many positions omit substantial KL tail mass).
         valid_mass = batch["vimpo_retained_mass"].float()[mask]
+        if valid_mass.numel() > _QUANTILE_INPUT_LIMIT:
+            # torch.quantile errors on >2**24 elements; subsample
+            # deterministically (uniform stride) to stay under the ceiling.
+            stride = -(-valid_mass.numel() // _QUANTILE_INPUT_LIMIT)
+            valid_mass = valid_mass[::stride]
         if valid_mass.numel() > 0:
             quantiles = torch.quantile(
                 valid_mass,

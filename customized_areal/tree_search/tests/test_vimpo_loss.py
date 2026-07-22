@@ -592,3 +592,77 @@ def test_train_vimpo_batch_scales_per_formula(monkeypatch) -> None:
     torch.testing.assert_close(
         actual_loss, expected_loss.detach(), rtol=1e-5, atol=1e-6
     )
+
+
+def test_train_vimpo_batch_reports_dp_scaled_loss_scalars(monkeypatch) -> None:
+    """The returned ``vimpo/*_loss`` scalars are true global-mean components.
+
+    The aggregation divides LOCAL numerators by ALL-REDUCED denominators, so
+    the raw quotient reads ``true_loss / dp_size``; the engine must multiply
+    by ``dp_size`` (matching ``vimpo_loss_fn``'s gradient compensation)."""
+    monkeypatch.setattr(dist, "all_reduce", lambda *a, **kw: None)
+
+    fake_lp = torch.tensor([-0.2, -0.4, 0.0, 0.0])
+    actor_coeff = 0.005
+    value_loss_weight = 1.0
+    kwargs = dict(
+        actor_coeff=actor_coeff,
+        value_loss_weight=value_loss_weight,
+        beta=0.5,
+        eps_clip=0.2,
+    )
+
+    stats_dp1 = _make_recording_engine(
+        dp_size=1, fake_logprobs=fake_lp
+    ).train_vimpo_batch(_engine_batch(), **kwargs)
+    stats_dp2 = _make_recording_engine(
+        dp_size=2, fake_logprobs=fake_lp
+    ).train_vimpo_batch(_engine_batch(), **kwargs)
+
+    # The dp_size factor is applied: dp_size=2 doubles every reported scalar.
+    for key in ("vimpo/ppo_actor_loss", "vimpo/value_loss", "vimpo/combined_loss"):
+        assert stats_dp2[key] == pytest.approx(2.0 * stats_dp1[key], rel=1e-6)
+
+    # Exact check against independently computed numerators (all_reduce is a
+    # no-op here, so the global denominators equal this rank's local counts).
+    batch = _engine_batch()
+    packed = pack_tensor_dict(
+        {
+            **batch,
+            "position_ids": torch.arange(4).unsqueeze(0).expand(1, -1),
+        }
+    )
+    data_1d: dict[str, torch.Tensor] = {}
+    for key in (
+        "vimpo_predict_mask",
+        "vimpo_episode_index",
+        "vimpo_centered_reward",
+        "vimpo_ref_sample_logp",
+        "vimpo_candidate_kl",
+        "logprobs",
+        "prox_logp",
+        "advantages",
+    ):
+        t = packed[key]
+        if t.ndim >= 1 and t.shape[0] == 1:
+            t = t.squeeze(0)
+        data_1d[key] = t
+
+    terms = vimpo_loss_terms(
+        fake_lp, data_1d, beta=0.5, eps_clip=0.2, eps_clip_higher=None
+    )
+    dp_size = 2
+    expected_ppo = (
+        dp_size * actor_coeff * float(terms.ppo_sum) / float(terms.valid_token_count)
+    )
+    expected_value = (
+        dp_size
+        * value_loss_weight
+        * float(terms.value_sum)
+        / float(terms.episode_count)
+    )
+    assert stats_dp2["vimpo/ppo_actor_loss"] == pytest.approx(expected_ppo, rel=1e-6)
+    assert stats_dp2["vimpo/value_loss"] == pytest.approx(expected_value, rel=1e-6)
+    assert stats_dp2["vimpo/combined_loss"] == pytest.approx(
+        expected_ppo + expected_value, rel=1e-6
+    )

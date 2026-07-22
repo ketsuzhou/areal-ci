@@ -230,10 +230,10 @@ def _fake_vimpo_actor_with_engine() -> VIMPOFSDPPPOActor:
         actor.train_vimpo_batch_calls += 1
         return {
             "update_successful": 1.0,
-            "vimpo_ppo_sum": 0.0,
-            "vimpo_value_sum": 0.0,
-            "vimpo_valid_tokens": 2.0,
-            "vimpo_episode_count": 1.0,
+            "vimpo/ppo_actor_loss": 0.0,
+            "vimpo/value_loss": 0.0,
+            "vimpo/combined_loss": 0.0,
+            "vimpo/terminal_rmse": 0.0,
         }
 
     def _record_batch(*args: Any, **kwargs: Any) -> dict[str, float]:
@@ -298,3 +298,24 @@ def test_destroy_closes_reference_scorer(monkeypatch) -> None:
     monkeypatch.setattr(MultiCandidateFSDPEngine, "destroy", lambda self: None)
     actor.destroy()
     assert closed == [True]
+
+
+def test_retained_mass_quantiles_subsample_over_quantile_limit(monkeypatch) -> None:
+    """Valid-token counts above the torch.quantile ceiling (2**24) are
+    subsampled deterministically (uniform stride) instead of erroring."""
+    import customized_areal.tree_search.training.actor as actor_module
+
+    # Shrink the ceiling so the 2-valid-token fake batch trips the guard.
+    monkeypatch.setattr(actor_module, "_QUANTILE_INPUT_LIMIT", 1)
+    seen_numel: list[int] = []
+    real_quantile = torch.quantile
+
+    def _spy_quantile(values: torch.Tensor, q: torch.Tensor, **kwargs: Any):
+        seen_numel.append(values.numel())
+        return real_quantile(values, q, **kwargs)
+
+    monkeypatch.setattr(torch, "quantile", _spy_quantile)
+    actor = _fake_vimpo_actor([])
+    actor.compute_advantages([_vimpo_rollout_batch()])
+    # 2 valid tokens with ceiling 1 -> stride-2 subsample of 1 element.
+    assert seen_numel == [1]

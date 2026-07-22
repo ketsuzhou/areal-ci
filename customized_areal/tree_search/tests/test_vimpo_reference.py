@@ -279,6 +279,39 @@ def test_retry_on_500_then_succeeds() -> None:
     assert calls["n"] == 2
 
 
+def test_retry_count_tracks_retries() -> None:
+    """``retry_count`` counts each actual retry (HTTP 429 + transport error)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/get_model_info":
+            return httpx.Response(200, json=_IDENTITY_INFO)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429)
+        if calls["n"] == 2:
+            raise httpx.ConnectError("connection reset")
+        payload = json.loads(request.content)
+        token_ids = payload["token_ids_logprob"]
+        return httpx.Response(
+            200,
+            json={
+                "meta_info": {
+                    "token_ids_logprob": [[-float(t), t, str(t)] for t in token_ids]
+                }
+            },
+        )
+
+    scorer = _scripted_scorer({}, max_retries=3, handler=handler)
+    scorer.validate_identity(_REF)
+    assert scorer.retry_count == 0
+    result = scorer.score([ReferenceScoreRequest((0, 0), [1], 2, [3])])
+    assert result[0].sampled_logp == -2.0
+    assert result[0].candidate_logp == [-3.0]
+    assert calls["n"] == 3
+    assert scorer.retry_count == 2
+
+
 def test_no_retry_on_400_raises() -> None:
     """HTTP 400 (non-chunking) is not retried; raises immediately."""
     calls = {"n": 0}

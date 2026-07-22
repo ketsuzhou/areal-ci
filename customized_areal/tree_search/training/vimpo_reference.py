@@ -114,6 +114,8 @@ class SGLangVIMPOReferenceScorer:
     wrapped by a ``ThreadPoolExecutor(max_workers=max_concurrency)``. Retries
     only ``httpx.TransportError``, HTTP 429, and HTTP 5xx up to ``max_retries``.
     After a transport reconnect, identity is re-validated before scoring resumes.
+    The cumulative retry count is exposed as the ``retry_count`` attribute (read
+    by the actor's ``vimpo/reference_retries`` metric).
     """
 
     def __init__(
@@ -139,6 +141,8 @@ class SGLangVIMPOReferenceScorer:
         self._expected_identity: ReferenceIdentity | None = None
         self._needs_revalidate = False
         self._revalidate_lock = threading.Lock()
+        self.retry_count = 0
+        self._retry_count_lock = threading.Lock()
         self._closed = False
 
     # -- Identity validation ---------------------------------------------
@@ -242,6 +246,11 @@ class SGLangVIMPOReferenceScorer:
             deduped.append(request.sampled_token_id)
         return deduped
 
+    def _record_retry(self) -> None:
+        """Increment the retry counter (thread-safe; read as ``retry_count``)."""
+        with self._retry_count_lock:
+            self.retry_count += 1
+
     def _post_with_retry(
         self, request: ReferenceScoreRequest, token_ids: list[int]
     ) -> dict[int, float]:
@@ -261,6 +270,7 @@ class SGLangVIMPOReferenceScorer:
                 response = self._client.post(f"{self._base_url}/generate", json=payload)
             except httpx.TransportError:
                 if attempt < self._max_retries:
+                    self._record_retry()
                     with self._revalidate_lock:
                         self._needs_revalidate = True
                     continue
@@ -281,6 +291,7 @@ class SGLangVIMPOReferenceScorer:
 
             if response.status_code in _RETRYABLE_STATUS:
                 if attempt < self._max_retries:
+                    self._record_retry()
                     continue
                 response.raise_for_status()
 
