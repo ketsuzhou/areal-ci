@@ -1,2 +1,0 @@
-# Exclude the River2.0 sub-project from graphify builds (user request: all except River2.0)
-River2.0/

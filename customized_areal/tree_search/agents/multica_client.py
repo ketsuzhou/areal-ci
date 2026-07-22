@@ -183,6 +183,7 @@ class MulticaEnvDispatchClient:
         issue: SweLegoIssue | None = None,
         message: str | None = None,
         per_agent_env: dict[str, dict] | None = None,
+        training_mode: bool = False,
     ) -> EnvDispatchHandle:
         """POST /api/v1/env-dispatch — unified dispatch (spec §6.3).
 
@@ -211,6 +212,7 @@ class MulticaEnvDispatchClient:
             "mode": mode,
             "dispatch_type": dispatch_type,
             "group_size": group_size,
+            "training_mode": training_mode,
         }
         if env_id:
             payload["env_id"] = env_id
@@ -615,6 +617,7 @@ async def _debug_run(args: argparse.Namespace) -> int:
             issue=issue,
             message=message,
             per_agent_env=per_agent_env,
+            training_mode=args.training_mode,
         )
         print(f"created handle: {handle}")
 
@@ -669,6 +672,12 @@ def build_debug_parser() -> argparse.ArgumentParser:
         "--workspace-id",
         default=os.environ.get("MULTICA_WORKSPACE_ID"),
         help="workspace UUID (defaults to MULTICA_WORKSPACE_ID); alternative to --workspace-slug",
+    )
+    parser.add_argument(
+        "--training-mode",
+        action="store_true",
+        default=False,
+        help="training_mode payload field (default: false; set to enable training)",
     )
     parser.add_argument(
         "--mode",
