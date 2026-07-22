@@ -1842,3 +1842,83 @@ The judge reuses the `diagnose_*` endpoint/credentials (`diagnose_base_url`,
 With the generative critic enabled, the dense rewards flow into GAE and the critic
 regression target automatically; pure TD targets (`critic_mc_weight=0`) consume the
 dense per-turn reward directly.
+
+## VIMPO (Frozen-Reference Candidate KL, Critic-Free)
+
+When `tree_search.advantage_mode=vimpo`, the actor is trained with **VIMPO**
+(Variational Implicit Multi-turn Policy Optimization): a critic-free objective whose
+per-position TD signal is the policy-implied terminal value
+`beta * (log pi(y|x) - log pi_ref(y|x) - KL_topK(pi || pi_ref))`, where `pi_ref` is a
+**frozen copy of the actor's initial checkpoint** served by a dedicated SGLang service.
+There is no learned critic, no FSDP reference engine, and no PPO KL-reward coefficient
+requirement (`actor.kl_ctl` may be zero).
+
+### Runnable configuration fragment
+
+```yaml
+tree_search:
+  advantage_mode: vimpo
+  loss_mode: grpo
+  vimpo_beta: 0.0005
+  vimpo_actor_coeff: 0.005
+  vimpo_value_loss_weight: 1.0
+  vimpo_gamma: 1.0
+  vimpo_lambda: 1.0
+  vimpo_top_k: 128
+  vimpo_whiten_advantages: true
+  vimpo_detach_kl: true
+  vimpo_ref_base_url: http://vimpo-reference:30000
+  vimpo_ref_timeout: 300.0
+  vimpo_ref_max_concurrency: 8
+  vimpo_ref_max_retries: 3
+```
+
+### Frozen-reference deployment requirements
+
+The service at `vimpo_ref_base_url` **must**:
+
+- serve the **unmodified initial actor checkpoint** (`pi_ref = pi_0`) with the
+  **identical tokenizer and special-token IDs** as the actor (model path, vocabulary
+  sizes, and BOS/EOS/PAD IDs are validated against `/get_model_info` before every
+  scoring round; any mismatch fails the step before the optimizer is touched),
+- return **temperature-one, full-softmax-normalized token-ID log-probabilities**
+  (`temperature: 1.0`, `token_ids_logprob`) for the actor's per-position top-k
+  candidate sets,
+- run **without quantization** in paper-faithful mode, and
+- **never receive weight updates** — it is a fixed deployment for the entire run.
+
+### Top-k truncation semantics
+
+- `vimpo_top_k < vocab_size` computes a **truncated candidate KL**: the forward KL is
+  summed only over the actor's top-k candidate set (no renormalization). The missing
+  tail mass is an approximation gap — watch the `vimpo/retained_mass` metrics
+  (mean/min and p10/p50/p90 quantiles); a low retained mass means the truncated KL
+  materially underestimates the true KL and `vimpo_top_k` should be raised.
+- `vimpo_top_k == vocab_size` recovers the **exact** full-vocabulary KL
+  (`vimpo/exact_kl` is reported as 1) but is expensive: every valid position is scored
+  over the whole vocabulary.
+
+### Backend and allocation constraints
+
+- The actor backend **must be FSDP** (`fsdp:*`); other backends are rejected before
+  actor creation.
+- `actor.kl_ctl` **may be zero** — VIMPO does not need a positive PPO KL-reward
+  coefficient, and the trainer forces `kl_ctl=0` in VIMPO mode.
+- **No `ref` FSDP allocation should be configured** — the frozen reference lives in
+  the external SGLang service, not in the training cluster's allocation.
+
+### Observability
+
+VIMPO emits distributed metrics via `stats_tracker`:
+
+- `vimpo/candidate_kl`, `vimpo/retained_mass` (+ `p10/p50/p90` quantiles),
+  `vimpo/raw_advantage`, `vimpo/normalized_advantage` — per-position distributions
+  over the `vimpo/valid_tokens` denominator.
+- `vimpo/terminal_prediction`, `vimpo/terminal_target`, `vimpo/terminal_residual` —
+  per-episode distributions over the `vimpo/complete_episodes` denominator;
+  `vimpo/terminal_rmse` is the scalar RMSE of the terminal value regression.
+- `vimpo/ppo_actor_loss`, `vimpo/value_loss`, `vimpo/combined_loss` — component and
+  combined losses from the single two-denominator backward.
+- `vimpo/reference_latency_ms`, `vimpo/reference_retries`, `vimpo/effective_top_k`,
+  `vimpo/exact_kl`, `vimpo/snapshot_policy_version` — reference-service and
+  snapshot scalars.

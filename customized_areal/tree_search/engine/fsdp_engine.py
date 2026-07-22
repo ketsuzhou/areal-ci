@@ -28,7 +28,7 @@ from areal.engine.core.model import (
 )
 from areal.engine.fsdp_engine import FSDPEngine, FSDPTrainContext
 from areal.models.tree_attn.functional import gather_packed_tree_vocab_stats
-from areal.utils import logging
+from areal.utils import logging, stats_tracker
 from areal.utils.data import (
     MicroBatchList,
     amend_position_ids,
@@ -1105,6 +1105,16 @@ class MultiCandidateFSDPEngine(FSDPEngine):
             PPO clip ratio bound.
         eps_clip_higher
             Decoupled upper clip bound; ``None`` falls back to ``eps_clip``.
+
+        Returns
+        -------
+        dict[str, float]
+            Optimizer stats plus ``num_micro_batches`` and the observability
+            scalars ``vimpo/ppo_actor_loss``, ``vimpo/value_loss``,
+            ``vimpo/combined_loss``, and ``vimpo/terminal_rmse``. Per-episode
+            terminal prediction/target/residual distributions are emitted
+            directly via ``stats_tracker`` against the
+            ``vimpo/complete_episodes`` denominator.
         """
         self._ensure_ready()
 
@@ -1174,6 +1184,9 @@ class MultiCandidateFSDPEngine(FSDPEngine):
                     terms.value_sum.detach(),
                     terms.valid_token_count.detach(),
                     terms.episode_count.detach(),
+                    terms.terminal_prediction.detach(),
+                    terms.terminal_target.detach(),
+                    terms.terminal_residual.detach(),
                 )
             )
 
@@ -1193,14 +1206,43 @@ class MultiCandidateFSDPEngine(FSDPEngine):
         stats = self.optimizer_step()
         stats["num_micro_batches"] = len(mb_list.mbs)
 
-        # Aggregate detached metric numerators for logging.
+        # Aggregate detached metric numerators into component/combined losses
+        # (returned for the caller to log via stats_tracker.scalar) and emit
+        # per-episode terminal distributions (OpenSpec 6.2).
         if metric_numerators:
             total_ppo = torch.stack([m[0] for m in metric_numerators]).sum().item()
             total_value = torch.stack([m[1] for m in metric_numerators]).sum().item()
-            stats["vimpo_ppo_sum"] = total_ppo
-            stats["vimpo_value_sum"] = total_value
-            stats["vimpo_valid_tokens"] = global_valid_tokens.item()
-            stats["vimpo_episode_count"] = global_episodes.item()
+            global_tokens = global_valid_tokens.item()
+            global_eps = global_episodes.item()
+            ppo_actor_loss = actor_coeff * total_ppo / global_tokens
+            value_loss = value_loss_weight * total_value / global_eps
+            stats["vimpo/ppo_actor_loss"] = ppo_actor_loss
+            stats["vimpo/value_loss"] = value_loss
+            stats["vimpo/combined_loss"] = ppo_actor_loss + value_loss
+
+            terminal_prediction = torch.cat([m[4] for m in metric_numerators]).float()
+            terminal_target = torch.cat([m[5] for m in metric_numerators]).float()
+            terminal_residual = torch.cat([m[6] for m in metric_numerators]).float()
+            stats_tracker.denominator(
+                **{
+                    "vimpo/complete_episodes": torch.ones(
+                        terminal_prediction.numel(),
+                        dtype=torch.bool,
+                        device=terminal_prediction.device,
+                    )
+                }
+            )
+            stats_tracker.stat(
+                denominator="vimpo/complete_episodes",
+                **{
+                    "vimpo/terminal_prediction": terminal_prediction,
+                    "vimpo/terminal_target": terminal_target,
+                    "vimpo/terminal_residual": terminal_residual,
+                },
+            )
+            stats["vimpo/terminal_rmse"] = float(
+                terminal_residual.square().mean().sqrt()
+            )
 
         return stats
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import time
 from typing import Any
 
 import torch
@@ -273,6 +274,11 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
             whiten=config.vimpo_whiten_advantages,
             dp_group=self.dp_group,
         )
+        # Scalar VIMPO metrics from the most recent compute_advantages /
+        # ppo_update cycle (component/combined losses, reference latency and
+        # retries, effective top-k, exact-KL flag, snapshot policy version,
+        # terminal RMSE). Keys match the stats_tracker metric names.
+        self.last_vimpo_metrics: dict[str, float] = {}
         logger.info(
             "VIMPOFSDPPPOActor initialized (top_k=%d, beta=%g, ref=%s)",
             config.vimpo_top_k,
@@ -382,12 +388,55 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         )
         # Step 3: build reference score requests and score (MP head only).
         scores: list[ReferenceScore] | None = None
+        latency_ms: float | None = None
         if self._is_reference_scoring_head():
             requests = self._build_reference_requests(data, stats)
+            start = time.perf_counter()
             scores = self.reference_scorer.score(requests)
+            latency_ms = (time.perf_counter() - start) * 1e3
+        # Observability (OpenSpec 6.2): snapshot/reference scalars.
+        self._record_snapshot_scalars(stats, latency_ms)
         # Step 4: assemble reference logps + centered reward + advantage.
         enriched = self._assemble_vimpo_batch(data, stats, scores)
         return enriched
+
+    def _record_snapshot_scalars(
+        self, stats: VIMPOCandidateStats, latency_ms: float | None
+    ) -> None:
+        """Emit snapshot/reference scalar metrics and stash them for inspection.
+
+        ``vimpo/exact_kl`` is 1 only when the effective ``K`` equals the model
+        vocabulary size (untruncated candidate KL); when the vocabulary size is
+        unknown the flag stays 0. Reference latency/retry scalars are emitted
+        only on the reference-scoring head (``latency_ms is None`` elsewhere).
+        """
+        effective_k = int(stats.candidate_ids.shape[-1])
+        model_config = getattr(self, "model_config", None)
+        vocab_size = (
+            int(getattr(model_config, "vocab_size", 0) or 0)
+            if model_config is not None
+            else 0
+        )
+        # ``get_version`` reads ``self._version``, which only exists after
+        # engine initialization - fall back to 0 for uninitialized doubles.
+        version = self.get_version() if hasattr(self, "_version") else 0
+        scalars: dict[str, float] = {
+            "vimpo/effective_top_k": float(effective_k),
+            "vimpo/exact_kl": (
+                1.0 if vocab_size > 0 and effective_k == vocab_size else 0.0
+            ),
+            "vimpo/snapshot_policy_version": float(version),
+        }
+        if latency_ms is not None:
+            scalars["vimpo/reference_latency_ms"] = float(latency_ms)
+            scalars["vimpo/reference_retries"] = float(
+                getattr(self.reference_scorer, "retry_count", 0) or 0
+            )
+        stats_tracker.scalar(**scalars)
+        self.last_vimpo_metrics = {
+            **getattr(self, "last_vimpo_metrics", {}),
+            **scalars,
+        }
 
     def _build_reference_requests(
         self,
@@ -461,16 +510,71 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         )
         # Invoke the advantage computer (writes vimpo_candidate_kl,
         # vimpo_retained_mass, advantages).
+        raw_advantages = self._raw_vimpo_advantages(batch)
         batch = self.vimpo_advantage.compute(batch)
         batch["advantages"] = batch["advantages"].detach()
-        # OpenSpec 6.1: surface candidate KL / retained-mass numerators.
-        stats_tracker.denominator(vimpo_valid_tokens=predict_mask.bool())
+        if raw_advantages is None:
+            raw_advantages = batch["advantages"]
+        # Observability (OpenSpec 6.2): per-position distributions over valid
+        # tokens. Tensors are fed directly to the tracker (no .item()/.tolist()
+        # on hot-path GPU tensors).
+        mask = predict_mask.bool()
+        stats_tracker.denominator(**{"vimpo/valid_tokens": mask})
         stats_tracker.stat(
-            vimpo_candidate_kl=batch["vimpo_candidate_kl"].float(),
-            vimpo_retained_mass=batch["vimpo_retained_mass"].float(),
-            denominator="vimpo_valid_tokens",
+            denominator="vimpo/valid_tokens",
+            **{
+                "vimpo/candidate_kl": batch["vimpo_candidate_kl"].float(),
+                "vimpo/retained_mass": batch["vimpo_retained_mass"].float(),
+                "vimpo/raw_advantage": raw_advantages.float(),
+                "vimpo/normalized_advantage": batch["advantages"].float(),
+            },
         )
+        # Retained-mass quantiles diagnose top-k truncation quality (a low p10
+        # means many positions omit substantial KL tail mass).
+        valid_mass = batch["vimpo_retained_mass"].float()[mask]
+        if valid_mass.numel() > 0:
+            quantiles = torch.quantile(
+                valid_mass,
+                torch.tensor([0.1, 0.5, 0.9], device=valid_mass.device),
+            )
+            stats_tracker.scalar(
+                **{
+                    "vimpo/retained_mass/p10": quantiles[0],
+                    "vimpo/retained_mass/p50": quantiles[1],
+                    "vimpo/retained_mass/p90": quantiles[2],
+                }
+            )
         return batch
+
+    def _raw_vimpo_advantages(self, batch: dict[str, Any]) -> torch.Tensor | None:
+        """Pre-whitening advantages for observability.
+
+        Returns ``None`` when whitening is disabled (the final advantages
+        already ARE the raw ones). Otherwise recomputes advantages with an
+        identical non-whitening computer - pure tensor ops, no model forward -
+        so both raw and normalized distributions can be logged.
+        """
+        if not getattr(self.vimpo_advantage, "whiten", False):
+            return None
+        keys = (
+            "vimpo_predict_mask",
+            "vimpo_sample_logp",
+            "vimpo_ref_sample_logp",
+            "vimpo_candidate_logp",
+            "vimpo_ref_candidate_logp",
+            "vimpo_episode_index",
+            "vimpo_turn_index",
+            "vimpo_candidate_ids",
+        )
+        computer = VIMPOAdvantageComputer(
+            beta=self.vimpo_advantage.beta,
+            gamma=self.vimpo_advantage.gamma,
+            lam=self.vimpo_advantage.lam,
+            whiten=False,
+            dp_group=None,
+        )
+        sub_batch = {key: batch[key] for key in keys if key in batch}
+        return computer.compute(sub_batch)["advantages"]
 
     @staticmethod
     def _fill_reference_logps(
@@ -528,18 +632,14 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     def _vimpo_update(self, data: dict[str, Any], meta: Any = None) -> None:
         # Step 1: validate every required key BEFORE any optimizer mutation.
         self._validate_vimpo_batch(data)
-        # Step 2: log token/episode denominators (OpenSpec 6.1). Only n_seqs is
-        # registered here: the [B, S] vimpo_valid_tokens denominator is already
-        # registered by _assemble_vimpo_batch (double registration would
-        # double-count the exported SUM).
+        # Step 2: log batch shape info. Denominators are registered elsewhere:
+        # ``vimpo/valid_tokens`` ([B, S]) by ``_assemble_vimpo_batch`` and
+        # ``vimpo/complete_episodes`` by ``train_vimpo_batch`` - double
+        # registration would double-count the exported SUM.
         mask = data["vimpo_predict_mask"].bool()
         episode_index = data["vimpo_episode_index"]
         n_valid_tokens = int(mask.sum().item())
         n_episodes = int(torch.unique(episode_index[mask]).numel())
-        batch_size = data["attention_mask"].shape[0]
-        stats_tracker.denominator(
-            n_seqs=torch.ones(batch_size, dtype=torch.bool, device=data["attention_mask"].device),
-        )
         logger.info(
             "VIMPO ppo_update: %d valid tokens, %d episodes, %d PPO minibatches",
             n_valid_tokens,
@@ -552,6 +652,13 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # Step 4: call train_vimpo_batch once per complete PPO minibatch (one
         # combined backward with two distributed denominators; never train_batch).
         eps_clip_higher = getattr(self.config, "eps_clip_higher", None)
+        loss_keys = (
+            "vimpo/ppo_actor_loss",
+            "vimpo/value_loss",
+            "vimpo/combined_loss",
+            "vimpo/terminal_rmse",
+        )
+        collected: dict[str, list[float]] = {}
         for mb in mb_list.mbs:
             train_stat = self.train_vimpo_batch(
                 mb,
@@ -562,6 +669,14 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
                 eps_clip_higher=eps_clip_higher,
             )
             stats_tracker.scalar(**train_stat)
+            for key in loss_keys:
+                if key in train_stat:
+                    collected.setdefault(key, []).append(float(train_stat[key]))
+        averaged = {key: sum(values) / len(values) for key, values in collected.items()}
+        self.last_vimpo_metrics = {
+            **getattr(self, "last_vimpo_metrics", {}),
+            **averaged,
+        }
 
 
 class MuonVIMPOFSDPPPOActor:
