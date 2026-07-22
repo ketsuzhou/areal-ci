@@ -24,6 +24,7 @@ from .grpo import (
     _compute_position_level_grpo_loss,
     _resolve_proximal_logp,
 )
+from .vimpo import VIMPOLossTerms, vimpo_loss_fn, vimpo_loss_terms
 
 __all__ = [
     "grpo_distill_loss_fn",
@@ -44,4 +45,7 @@ __all__ = [
     "_compute_teacher_kl_loss",
     "_resolve_proximal_logp",
     "_select_chosen_logprobs",
+    "VIMPOLossTerms",
+    "vimpo_loss_fn",
+    "vimpo_loss_terms",
 ]

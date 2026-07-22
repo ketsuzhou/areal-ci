@@ -484,7 +484,10 @@ def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
 
 
 def _nodes_to_batched_tensor_dict(
-    nodes: list[Node], max_tokens: int = 0, loss_mode: str | None = None
+    nodes: list[Node],
+    max_tokens: int = 0,
+    loss_mode: str | None = None,
+    advantage_mode: str | None = None,
 ) -> dict[str, Any] | None:
     """Convert list[Node] to a batched tensor dict with metadata.
 
@@ -494,6 +497,10 @@ def _nodes_to_batched_tensor_dict(
 
     If max_tokens > 0, each node's sequence is truncated to max_tokens
     from the beginning before conversion.
+
+    ``advantage_mode`` is forwarded to ``_node_to_tensor_dict`` so the VIMPO
+    branch can emit its episode-identity / centered-target metadata tensors;
+    pass ``"vimpo"`` only from the VIMPO branch of ``_finalize_episode``.
 
     Returns None if nodes is empty.
     """
@@ -511,10 +518,60 @@ def _nodes_to_batched_tensor_dict(
             node_id=node.node_id,
             max_tokens=max_tokens,
             loss_mode=loss_mode,
+            advantage_mode=advantage_mode,
         )
         for node in nodes
     ]
     return concat_padded_tensors(tensor_dicts)
+
+
+def annotate_vimpo_episode_metadata(nodes: list[Node]) -> None:
+    """Stamp VIMPO episode identity + centered terminal-reward onto nodes.
+
+    Groups nodes by ``query_id`` then ``episode_id`` (falling back to
+    ``node_id`` when ``episode_id`` is empty). Within a query, the per-episode
+    outcome reward is mean-subtracted across that query's distinct episodes to
+    form ``vimpo_centered_reward`` (the policy-implied terminal-value target).
+    ``vimpo_query_index`` orders the query within the batch (queries are
+    sorted for determinism) and ``vimpo_episode_index`` is a globally-unique,
+    monotonically increasing episode counter over distinct episodes -- not
+    turns -- so every turn of one episode shares one index.
+
+    Called only from the VIMPO branch of ``_finalize_episode`` (VIMPO is
+    critic-free and skips the Node advantage computers). Raises ``ValueError``
+    on a missing ``query_id``/``episode_id``, a duplicate ``turn_idx`` within
+    an episode, or an inconsistent ``outcome_reward`` across one episode's
+    turns.
+    """
+    grouped: dict[str, dict[str, list[Node]]] = {}
+    for node in nodes:
+        if not node.query_id:
+            raise ValueError("VIMPO requires a non-empty query_id")
+        episode_id = node.episode_id or node.node_id
+        if not episode_id:
+            raise ValueError("VIMPO requires a non-empty episode_id or node_id")
+        grouped.setdefault(node.query_id, {}).setdefault(episode_id, []).append(node)
+    episode_counter = 0
+    for query_index, query_id in enumerate(sorted(grouped)):
+        episodes = grouped[query_id]
+        rewards: dict[str, float] = {}
+        for episode_id, episode_nodes in episodes.items():
+            turns = [node.turn_idx for node in episode_nodes]
+            if len(turns) != len(set(turns)):
+                raise ValueError(f"duplicate turn_idx in episode {episode_id!r}")
+            values = {float(node.outcome_reward) for node in episode_nodes}
+            if len(values) != 1:
+                raise ValueError(
+                    f"inconsistent outcome_reward in episode {episode_id!r}"
+                )
+            rewards[episode_id] = values.pop()
+        mean_reward = sum(rewards.values()) / len(rewards)
+        for episode_id in sorted(episodes):
+            for node in episodes[episode_id]:
+                node.vimpo_query_index = query_index
+                node.vimpo_episode_index = episode_counter
+                node.vimpo_centered_reward = rewards[episode_id] - mean_reward
+            episode_counter += 1
 
 
 def _supernodes_to_batched_tensor_dict(
@@ -1825,7 +1882,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 # back up its returns into the latest-only stats (record_latest)
                 # so V_latest can be computed new-only.
                 fresh_vids = [
-                    n.version_id for n in fresh_nodes if getattr(n, "version_id", -1) >= 0
+                    n.version_id
+                    for n in fresh_nodes
+                    if getattr(n, "version_id", -1) >= 0
                 ]
                 if fresh_vids:
                     self.tree_store.set_latest_version(max(fresh_vids))
@@ -1859,8 +1918,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 )
                 return None
 
+            # VIMPO is critic-free: it skips the generative-critic value
+            # annotation, skips every Node advantage computer (its
+            # VIMPOAdvantageComputer runs later on the batched dict), and never
+            # attaches critic_train_data. It only stamps episode identity +
+            # centered terminal-reward targets here so tensorization can emit
+            # the vimpo_* metadata keys.
+            is_vimpo = self.advantage_mode == AdvantageMode.VIMPO
+
             # Compute generative-critic state values v_phi(s_t) before advantages.
-            if self.enable_generative_critic:
+            if not is_vimpo and self.enable_generative_critic:
                 await self._annotate_critic_values(engine, all_nodes)
 
             # Compute tree advantages
@@ -1872,12 +1939,15 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 self.hybrid_gae_advantage_computer.compute(all_nodes)
             elif self.advantage_mode == AdvantageMode.VERSIONED_BACKUP:
                 self.versioned_backup_advantage_computer.compute(all_nodes)
+            elif is_vimpo:
+                annotate_vimpo_episode_metadata(all_nodes)
 
             # Convert to batched tensor dict
             result_dict = _nodes_to_batched_tensor_dict(
                 all_nodes,
                 max_tokens=self.max_tokens,
                 loss_mode=self.loss_mode.value,
+                advantage_mode=self.advantage_mode.value if is_vimpo else None,
             )
 
             if not result_dict:
@@ -1886,7 +1956,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             # Attach critic regression data (Python object, popped in _ppo_update
             # before tensor ops -- mirrors position_rewards). Enables the shared
             # model's combined soft-regression critic step.
-            if self.enable_generative_critic:
+            if not is_vimpo and self.enable_generative_critic:
                 self._attach_critic_train_data(result_dict, all_nodes)
 
             # Mark nodes as trained only after the batch is materialized.

@@ -23,6 +23,7 @@ import torch.distributed as dist
 
 from customized_areal.clip_cov import ClipCovConfig
 from customized_areal.tree_search.config import (
+    AdvantageMode,
     Config,
     LossMode,
 )
@@ -34,6 +35,7 @@ from areal.utils.environ import is_single_controller
 from areal.utils.saver import Saver
 
 from .actor import (
+    VIMPO_ACTOR_CONFIG_FIELDS,
     ClipCovFSDPPPOActor,
     ClipCovMegatronPPOActor,
     MuonFSDPPPOActor,
@@ -125,6 +127,58 @@ class CustomizedPPOTrainer(PPOTrainer):
                 steps_per_epoch=steps_per_epoch,
             )
         return super()._create_dataloader(dataset, dataset_config, rank, world_size)
+
+    def _create_vimpo_train_engine(self, actor_config, alloc):
+        """Construct the dedicated VIMPO FSDP actor.
+
+        VIMPO runs critic-free (no learned critic, no generic reference engine):
+        ``actor.kl_ctl`` is forced to 0 so the base ``PPOTrainer`` never creates
+        ``self.ref``, and no critic allocation is configured. The distillation
+        and combined-critic monkey patches are NOT installed (VIMPO uses
+        ``loss_mode=GRPO`` and ``enable_generative_critic=False``, both enforced
+        by ``Config.__post_init__``).
+        """
+        if alloc.backend != "fsdp":
+            raise ValueError(
+                f"VIMPO requires FSDP actor backend, got: {alloc.backend!r}. "
+                "Set the actor allocation backend to 'fsdp' for "
+                "advantage_mode=vimpo."
+            )
+        # Copy every vimpo_* setting onto actor_config so the actor can build
+        # its reference scorer and advantage computer from the actor config.
+        for field in VIMPO_ACTOR_CONFIG_FIELDS:
+            setattr(actor_config, field, getattr(self.tree_search_config, field))
+        # VIMPO must NOT require a positive PPO KL-reward coefficient: force
+        # kl_ctl=0 so the base trainer creates no generic reference engine.
+        setattr(actor_config, "kl_ctl", 0.0)
+        # Select the dedicated VIMPO actor (Muon-wrapped only if requested).
+        from customized_areal.tree_search.engine import VIMPOFSDPPPOActor
+
+        if self.tree_search_config.use_muon_optimizer:
+            from customized_areal.tree_search.training.actor import (
+                MuonVIMPOFSDPPPOActor,
+            )
+
+            # Copy muon_* attrs onto actor_config: MuonVIMPOFSDPPPOActor.__new__
+            # reads them via _patch_muon_from_actor_config (optimizer.type was
+            # already set by the init-time _patch_muon_optimizer).
+            self._set_muon_actor_attrs(actor_config)
+            actor_cls = MuonVIMPOFSDPPPOActor
+        else:
+            actor_cls = VIMPOFSDPPPOActor
+        if is_single_controller():
+            actor = actor_cls.as_controller(actor_config, self.scheduler)
+        else:
+            actor = actor_cls(config=actor_config)
+        actor.create_process_group(parallel_strategy=alloc.parallel)
+        logger.info(
+            "Created %s (top_k=%d, beta=%g, ref=%s)",
+            actor_cls.__name__,
+            self.tree_search_config.vimpo_top_k,
+            self.tree_search_config.vimpo_beta,
+            self.tree_search_config.vimpo_ref_base_url,
+        )
+        return actor
 
     def _get_clip_cov_config(self) -> ClipCovConfig:
         return ClipCovConfig(
@@ -249,6 +303,12 @@ class CustomizedPPOTrainer(PPOTrainer):
 
     def _create_train_engine(self, actor_config, alloc):
         """Override to use MultiCandidateFSDPPPOActor when distill loss is enabled."""
+        # VIMPO: dedicated FSDP actor with frozen reference scoring. Must run
+        # BEFORE the distillation/Muon/clip-cov branches and must NOT install
+        # any combined-critic or distill monkey patch (VIMPO is critic-free and
+        # runs with loss_mode=GRPO, so train() installs neither patch).
+        if self.tree_search_config.advantage_mode is AdvantageMode.VIMPO:
+            return self._create_vimpo_train_engine(actor_config, alloc)
         if self.tree_search_config.use_muon_optimizer:
             if alloc.backend != "fsdp":
                 raise ValueError(

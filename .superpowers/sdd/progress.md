@@ -726,3 +726,26 @@ Execution: subagent-driven-development (areal worktree isolation).
 Resume (2026-07-13): blocker cleared; Tasks 1-9 COMPLETE at unit level (multica dev: a6a2ce86e, 1d434a246, cb8cc01f2..2fad5d51e, e7c38ff26, 11d07dbc0, 5ed9f358a, afbb5e601, 34526d9a4; areal worktree: 7bbb7d52 + merge e07517ca + f85cbf11 + 26037ab2 - 0 behind master). BUILD COMPLETE: all 9 plan tasks implemented + unit-verified; design.md D4/D5 + spec + tasks.md finalized. DEFERRED to a GPU hardware verify run: Task 9 7.1-7.3 (live integration/E2E - need trained rollout + multica + areal + GPU per CLAUDE.md) + 4.4 (strict /dag 202-during-diagnosis, needs in-progress flag) + Task 4 RTT-level ordering test. Deferred gaps: README stale judge docs (cleanup), strict 4.4, Task 4 test-strengthening. [Diagnose placeholder-prompt gap CLOSED by 5ed9f358a; D4 reconciled Task 7 (aggregate to SuperNode.process_reward); flat judge removed Task 8; score_max served in /dag Task 7 Go half.] NEXT: comet-archive (sync delta spec to main) - or hold for the GPU hardware E2E run (7.1/7.2) first.
 
 Resume (2026-07-14): COMET VERIFY COMPLETE + MERGED TO MASTER. Build->verify transition: deferred 5 hardware tasks (4.4, 7.1-7.4) as [~] (not [x]); configured build_command (dual-repo compile: go build multica + python compileall areal); restored gitignored design-handoff .json. Verify (full mode): 0 CRITICAL, 7/7 spec requirements implemented (symbols confirmed both repos), 12 scenarios have test coverage, both repos compile clean. 1 WARNING (OpenSpec design.md D5/D7 + Q1-Q4 drift vs the per-segment aggregation adopted in build) - RESOLVED per user Option A: appended "Implementation Divergence" section to openspec design.md (Q1-Q4 resolutions; defers to spec.md L68 + superpowers D4). Verify report: docs/superpowers/reports/2026-07-10-multica-pi-diagnosis-agent-verify.md. Branch handling (user: "Merge to master locally"): merged diagnosis branch into local master via temp worktree (single merge commit da7a5b5b; 1 conflict in test_multica_dag_client.py resolved by keeping both env-dispatch bridge-routing tests + diagnosis step_rewards tests; 19 merged tests pass). Master NOT pushed (local only). Main checkout's WIP (fix/v2-segment-dag-path-hardening) untouched. Diagnosis worktree branch kept intact (ac17e31e) for the deferred hardware run. Guard transitions: build->verify (74e07bf0), verify->archive (ac17e31e; verify_result=pass, branch_status=handled, verified_at=2026-07-14). Master .comet.yaml now at phase: archive. STILL DEFERRED to a GPU hardware run: 7.1 integration, 7.2 E2E (the change's core end-to-end reward delivery - NOT yet validated), 7.3 sanity (needs re-scoping - judge baseline removed Task 8), 7.4 commit, 4.4 strict /dag 202-during-diagnosis, Task 4 RTT-level ordering test. NEXT: comet-archive (sync delta spec to main spec) - or hold for the hardware E2E run first; user's call.
+
+# SDD progress - add-vimpo-critic-mode
+
+Plan: docs/superpowers/plans/2026-07-20-vimpo-policy-implied-value.md
+Spec: docs/superpowers/specs/2026-07-20-vimpo-policy-implied-value-design.md
+Worktree: .claude/worktrees/add-vimpo-critic-mode | branch worktree-add-vimpo-critic-mode
+Env: /workspaces/leagent/backend/areal/.venv-test (pytest/ruff/pre-commit; NO `uv run`; customized_areal imports from worktree cwd). Python 3.12.
+Plan->OpenSpec: T1->1.1-1.4 | T2->4.1-4.3 | T3->4.4,4.5 | T4->3.1-3.4 | T5->2.1-2.4 | T6->5.1,5.2,5.5 | T7->5.3,5.4,6.1 | T8->6.2-6.4 | T9->6.5,7.1
+Authoritative per-task detail: openspec/changes/add-vimpo-critic-mode/.comet/subagent-progress.md
+
+## Tasks
+- [x] T1 (config + advantage math): complete (19c4aaf7..244e2e8a + checkoff 97c1d962), review clean, 1 Minor
+- [x] T2 (workflow metadata + centered targets): complete (97c1d962..8c9dcc19 + checkoff c5d19d32), review clean, 1 Minor
+- [x] T3 (episode-atomic batching): complete (c5d19d32..b7af2d70 + checkoff 4810d861), review clean, 1 Minor
+- [x] T4 (frozen SGLang scorer): complete (4810d861..b1b4136e + checkoff 89a609b1), review clean, 5 Minor deferred
+- [x] T5 (FSDP actor candidate stats): complete (impl 89a609b1..0542ac30 + fix 0542ac30..8d353c1a + checkoff 575faf51), re-review Approved, 3 Minor deferred. OpenSpec 2.1-2.4.
+- [x] T6 (combined VIMPO loss + two-denom backward): complete (impl 575faf51..0c7cad7b + fix 0c7cad7b..c968f0b2 + checkoff 85f2adb6), re-review Approved, 5+1 Minor deferred
+- [x] T7 (dedicated VIMPO actor + trainer wiring): complete (impl 85f2adb6..d72f39d1 + fix d72f39d1..20587220 + checkoff 5e96c384), re-review Approved, Minors #4/#5 deferred
+- [x] T8 (metrics, CPU smoke, docs): complete (impl 5e96c384..3e8ef242 + fix 3e8ef242..f02c0483 + checkoff fbb0f522), re-review Approved
+- [ ] T9 (full regression, graph, comet evidence): IMPLEMENTER DISPATCHED, BASE fbb0f522. Brief at .superpowers/sdd/task-9-brief.md
+
+## Pre-existing test failures (NOT VIMPO regressions; base 19c4aaf7)
+- test_critic_smoke::test_end_to_end_pipeline + ~9 test_critic/test_assembler: Python 3.12/uvloop asyncio.get_event_loop() deprecation. Verify T7 Step 6 (test_critic_update, test_trainer_integration_critic_gae) and T9 Step 1 distinguish these from VIMPO regressions.

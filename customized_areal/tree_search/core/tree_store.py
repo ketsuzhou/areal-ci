@@ -141,6 +141,18 @@ class Node:
     topk_logp: list[list[float]] | None = None
     teacher_logp: list[list[float]] | None = None
     guidance: dict[int, str] | None = None  # turn_idx → guidance text for leaf nodes
+    # VIMPO (critic-free, policy-implied terminal value) episode metadata.
+    # Populated by ``annotate_vimpo_episode_metadata`` only when
+    # ``advantage_mode == VIMPO``. ``vimpo_query_index`` orders a node's query
+    # within the batch (queries are sorted), ``vimpo_episode_index`` is a
+    # globally-unique episode counter (distinct episodes, not turns), and
+    # ``vimpo_centered_reward`` is the episode outcome mean-subtracted over
+    # the query's episodes (the per-episode terminal-value target). The
+    # ``-1`` / ``0.0`` defaults denote "unannotated"; VIMPO tensorization
+    # emits them only when ``advantage_mode == "vimpo"``.
+    vimpo_query_index: int = -1
+    vimpo_episode_index: int = -1
+    vimpo_centered_reward: float = 0.0
 
 
 def _find_turn_boundaries(
@@ -217,12 +229,22 @@ def _node_to_tensor_dict(
     node_id: str,
     max_tokens: int = 0,
     loss_mode: str | None = None,
+    advantage_mode: str | None = None,
 ) -> dict[str, Any]:
     """Convert a single Node to a tensor dict with shape [1, seq_len].
 
     If max_tokens > 0, the sequence is truncated to the last max_tokens
     tokens before conversion (full-sequence fields sliced, response-aligned
     fields trimmed to remaining output positions).
+
+    When ``advantage_mode == "vimpo"`` (the caller is the VIMPO branch of
+    ``_finalize_episode``), emits the episode-identity and centered-target
+    metadata tensors that ``VIMPOAdvantageComputer.compute`` consumes later
+    on the batched dict: ``vimpo_predict_mask`` (next-token predict mask,
+    ``loss_mask`` shifted left by one with the final position cleared),
+    ``vimpo_query_index``, ``vimpo_episode_index``, ``vimpo_turn_index``,
+    and ``vimpo_centered_reward`` (each broadcast to the full sequence
+    length). Non-VIMPO modes never emit these keys.
     """
     torch = _lazy_torch()
 
@@ -303,6 +325,25 @@ def _node_to_tensor_dict(
             if node.advantages.dim() == 1
             else node.advantages
         )
+
+    # VIMPO metadata: episode identity + centered terminal-reward target.
+    # Emitted ONLY when advantage_mode == "vimpo"; the predict mask shifts
+    # loss_mask left by one so each position predicts the next token, and the
+    # last position is cleared (no next token to predict). The scalar fields
+    # are broadcast to the full sequence length so concat_padded_tensors can
+    # align them across the batch.
+    if advantage_mode == "vimpo":
+        seq_len = traj["input_ids"].shape[1]
+        predict_mask = torch.roll(traj["loss_mask"].bool(), shifts=-1, dims=-1)
+        predict_mask[:, -1] = False
+        traj["vimpo_predict_mask"] = predict_mask
+        for key, value, dtype in (
+            ("vimpo_query_index", node.vimpo_query_index, torch.int64),
+            ("vimpo_episode_index", node.vimpo_episode_index, torch.int64),
+            ("vimpo_turn_index", node.turn_idx, torch.int64),
+            ("vimpo_centered_reward", node.vimpo_centered_reward, torch.float32),
+        ):
+            traj[key] = torch.full((1, seq_len), value, dtype=dtype)
     return traj
 
 

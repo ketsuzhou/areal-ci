@@ -6,50 +6,83 @@ base-ref: c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8
 
 # VIMPO Policy-Implied Value Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or superpowers:executing-plans
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `VIMPO` advantage mode that trains one FSDP actor with the paper's policy-implied terminal value objective while scoring a frozen initial-policy reference through SGLang with configurable actor-selected top-k candidate KL.
+**Goal:** Add a `VIMPO` advantage mode that trains one FSDP actor with the paper's
+policy-implied terminal value objective while scoring a frozen initial-policy reference
+through SGLang with configurable actor-selected top-k candidate KL.
 
-**Architecture:** The rollout workflow emits episode identity and centered terminal targets but no learned-critic values. A dedicated FSDP PPO actor snapshots sampled-token and actor-selected candidate probabilities, obtains matching full-softmax reference scores from a frozen SGLang service, computes detached reverse-lambda advantages, and performs one combined PPO/value backward pass over episode-atomic microbatches.
+**Architecture:** The rollout workflow emits episode identity and centered terminal
+targets but no learned-critic values. A dedicated FSDP PPO actor snapshots sampled-token
+and actor-selected candidate probabilities, obtains matching full-softmax reference
+scores from a frozen SGLang service, computes detached reverse-lambda advantages, and
+performs one combined PPO/value backward pass over episode-atomic microbatches.
 
-**Tech Stack:** Python 3.12, PyTorch/FSDP2, `torch.distributed`, AReaL PPO and tree-search APIs, SGLang native HTTP API, `httpx`, pytest.
+**Tech Stack:** Python 3.12, PyTorch/FSDP2, `torch.distributed`, AReaL PPO and
+tree-search APIs, SGLang native HTTP API, `httpx`, pytest.
 
 ## Global Constraints
 
-- The fixed reference is the actor's initial checkpoint `pi_ref = pi_0`; it is never updated or checkpointed by this trainer.
-- Only the FSDP actor backend is supported in version 1; Megatron, Archon, and learned/generative critic paths fail validation.
-- `vimpo_top_k` is configurable and uses actor-selected candidates with full-vocabulary softmax normalization; candidates are never renormalized.
-- Candidate KL is exact only when effective `k == vocab_size`; all smaller values are reported as truncated candidate KL with retained mass.
-- Reference tensors, candidate KL, old/proximal log-probabilities, terminal targets, and advantages are detached.
-- Multi-turn episodes are indivisible at outer PPO-minibatch and inner FSDP-microbatch boundaries.
-- PPO token means and terminal episode means use separate distributed denominators in one backward/optimizer step.
-- VIMPO does not require `actor.kl_ctl > 0`, does not create an FSDP reference, and does not attach `critic_train_data`.
-- Do not modify `areal/api/cli_args.py`, add dependencies, or change launcher/scheduler allocation logic.
-- Preserve all existing TREE, GAE, HYBRID_GAE, VERSIONED_BACKUP, distillation, clip-cov, Muon, and generative-critic behavior.
+- The fixed reference is the actor's initial checkpoint `pi_ref = pi_0`; it is never
+  updated or checkpointed by this trainer.
+- Only the FSDP actor backend is supported in version 1; Megatron, Archon, and
+  learned/generative critic paths fail validation.
+- `vimpo_top_k` is configurable and uses actor-selected candidates with full-vocabulary
+  softmax normalization; candidates are never renormalized.
+- Candidate KL is exact only when effective `k == vocab_size`; all smaller values are
+  reported as truncated candidate KL with retained mass.
+- Reference tensors, candidate KL, old/proximal log-probabilities, terminal targets, and
+  advantages are detached.
+- Multi-turn episodes are indivisible at outer PPO-minibatch and inner FSDP-microbatch
+  boundaries.
+- PPO token means and terminal episode means use separate distributed denominators in
+  one backward/optimizer step.
+- VIMPO does not require `actor.kl_ctl > 0`, does not create an FSDP reference, and does
+  not attach `critic_train_data`.
+- Do not modify `areal/api/cli_args.py`, add dependencies, or change launcher/scheduler
+  allocation logic.
+- Preserve all existing TREE, GAE, HYBRID_GAE, VERSIONED_BACKUP, distillation, clip-cov,
+  Muon, and generative-critic behavior.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-- Modify `customized_areal/tree_search/config.py`: enum, VIMPO defaults, and mode-specific validation.
-- Modify `customized_areal/tree_search/core/advantage.py`: candidate KL, episode reverse-lambda scan, distributed masked whitening, and `VIMPOAdvantageComputer`.
-- Modify `customized_areal/tree_search/core/tree_store.py`: stable VIMPO fields on `Node` and sequence-shaped tensorization.
-- Modify `customized_areal/tree_search/core/customized_grouped_workflow.py`: query-local centered reward metadata and VIMPO dispatch that bypasses critic paths.
-- Modify `customized_areal/tree_search/engine/fsdp_engine.py`: no-grad actor candidate statistics and the VIMPO two-denominator training primitive.
-- Modify `customized_areal/tree_search/engine/__init__.py`: lazy export for the VIMPO actor.
-- Create `customized_areal/tree_search/training/vimpo_reference.py`: frozen SGLang identity and candidate-score adapter.
-- Create `customized_areal/tree_search/training/vimpo_batching.py`: episode-atomic padded batch allocator.
-- Create `customized_areal/tree_search/training/losses/vimpo.py`: pure PPO and terminal-value numerators plus metrics.
+- Modify `customized_areal/tree_search/config.py`: enum, VIMPO defaults, and
+  mode-specific validation.
+- Modify `customized_areal/tree_search/core/advantage.py`: candidate KL, episode
+  reverse-lambda scan, distributed masked whitening, and `VIMPOAdvantageComputer`.
+- Modify `customized_areal/tree_search/core/tree_store.py`: stable VIMPO fields on
+  `Node` and sequence-shaped tensorization.
+- Modify `customized_areal/tree_search/core/customized_grouped_workflow.py`: query-local
+  centered reward metadata and VIMPO dispatch that bypasses critic paths.
+- Modify `customized_areal/tree_search/engine/fsdp_engine.py`: no-grad actor candidate
+  statistics and the VIMPO two-denominator training primitive.
+- Modify `customized_areal/tree_search/engine/__init__.py`: lazy export for the VIMPO
+  actor.
+- Create `customized_areal/tree_search/training/vimpo_reference.py`: frozen SGLang
+  identity and candidate-score adapter.
+- Create `customized_areal/tree_search/training/vimpo_batching.py`: episode-atomic
+  padded batch allocator.
+- Create `customized_areal/tree_search/training/losses/vimpo.py`: pure PPO and
+  terminal-value numerators plus metrics.
 - Modify `customized_areal/tree_search/training/losses/__init__.py`: VIMPO loss exports.
-- Modify `customized_areal/tree_search/training/actor.py`: `VIMPOFSDPPPOActor` orchestration and lifecycle.
-- Modify `customized_areal/tree_search/training/trainer.py`: VIMPO engine selection and actor-config propagation.
+- Modify `customized_areal/tree_search/training/actor.py`: `VIMPOFSDPPPOActor`
+  orchestration and lifecycle.
+- Modify `customized_areal/tree_search/training/trainer.py`: VIMPO engine selection and
+  actor-config propagation.
 - Modify `customized_areal/tree_search/__init__.py`: lazy public exports.
-- Modify `customized_areal/tree_search/README.md`: configuration and deployment contract.
-- Create focused tests under `customized_areal/tree_search/tests/`, plus one hardware-gated integration test.
+- Modify `customized_areal/tree_search/README.md`: configuration and deployment
+  contract.
+- Create focused tests under `customized_areal/tree_search/tests/`, plus one
+  hardware-gated integration test.
 
 ### Task 1: Configuration Contract and Pure VIMPO Mathematics
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/config.py`
 - Modify: `customized_areal/tree_search/core/advantage.py`
 - Modify: `customized_areal/tree_search/__init__.py`
@@ -57,10 +90,15 @@ base-ref: c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8
 - Create: `customized_areal/tree_search/tests/test_vimpo_advantage.py`
 
 **Interfaces:**
-- Consumes: existing `Config`, `AdvantageMode`, and explicit actor data-parallel process groups.
-- Produces: `AdvantageMode.VIMPO`; the exact config fields in the design; `candidate_forward_kl`, `masked_episode_reverse_lambda`, `masked_distributed_whiten`, and `VIMPOAdvantageComputer.compute`.
 
-- [ ] **Step 1: Write failing configuration tests**
+- Consumes: existing `Config`, `AdvantageMode`, and explicit actor data-parallel process
+  groups.
+
+- Produces: `AdvantageMode.VIMPO`; the exact config fields in the design;
+  `candidate_forward_kl`, `masked_episode_reverse_lambda`, `masked_distributed_whiten`,
+  and `VIMPOAdvantageComputer.compute`.
+
+- [x] **Step 1: Write failing configuration tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_config.py
@@ -113,13 +151,14 @@ def test_non_vimpo_mode_does_not_require_reference_url() -> None:
     assert Config().advantage_mode is AdvantageMode.TREE
 ```
 
-- [ ] **Step 2: Run configuration tests and verify the new enum/fields are absent**
+- [x] **Step 2: Run configuration tests and verify the new enum/fields are absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_config.py -q`
 
-Expected: FAIL during collection or construction because `AdvantageMode.VIMPO` and the `vimpo_*` fields do not exist.
+Expected: FAIL during collection or construction because `AdvantageMode.VIMPO` and the
+`vimpo_*` fields do not exist.
 
-- [ ] **Step 3: Add the enum, fields, and mode-gated validation**
+- [x] **Step 3: Add the enum, fields, and mode-gated validation**
 
 ```python
 # customized_areal/tree_search/config.py
@@ -180,7 +219,7 @@ if self.advantage_mode is AdvantageMode.VIMPO:
         raise ValueError("VIMPO is incompatible with use_clip_cov")
 ```
 
-- [ ] **Step 4: Write failing pure-math and gradient-isolation tests**
+- [x] **Step 4: Write failing pure-math and gradient-isolation tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_advantage.py
@@ -251,13 +290,13 @@ def test_vimpo_computer_detaches_kl_reference_and_advantage() -> None:
     assert out["advantages"].requires_grad is False
 ```
 
-- [ ] **Step 5: Run the math tests and verify imports fail**
+- [x] **Step 5: Run the math tests and verify imports fail**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_advantage.py -q`
 
 Expected: FAIL during collection because the VIMPO helpers do not exist.
 
-- [ ] **Step 6: Implement the pure tensor helpers and computer**
+- [x] **Step 6: Implement the pure tensor helpers and computer**
 
 ```python
 # customized_areal/tree_search/core/advantage.py
@@ -345,11 +384,14 @@ class VIMPOAdvantageComputer:
         return batch
 ```
 
-Also reject duplicate valid candidate IDs in `VIMPOAdvantageComputer.compute`, export the class lazily from `customized_areal/tree_search/__init__.py`, and keep all reductions in float32 except whitening sufficient statistics.
+Also reject duplicate valid candidate IDs in `VIMPOAdvantageComputer.compute`, export
+the class lazily from `customized_areal/tree_search/__init__.py`, and keep all
+reductions in float32 except whitening sufficient statistics.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_config.py customized_areal/tree_search/tests/test_vimpo_advantage.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_config.py customized_areal/tree_search/tests/test_vimpo_advantage.py -q`
 
 Expected: PASS.
 
@@ -361,15 +403,21 @@ git commit -m "feat(tree-search): add VIMPO config and advantage math"
 ### Task 2: Workflow Episode Metadata and Centered Targets
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/core/tree_store.py`
 - Modify: `customized_areal/tree_search/core/customized_grouped_workflow.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_workflow.py`
 
 **Interfaces:**
-- Consumes: `Node.query_id`, `Node.episode_id`, `Node.turn_idx`, `Node.outcome_reward`, and `AdvantageMode.VIMPO`.
-- Produces: `annotate_vimpo_episode_metadata(nodes: list[Node]) -> None` and tensor keys `vimpo_query_index`, `vimpo_episode_index`, `vimpo_turn_index`, `vimpo_centered_reward`, `vimpo_predict_mask`.
 
-- [ ] **Step 1: Write failing metadata and dispatch tests**
+- Consumes: `Node.query_id`, `Node.episode_id`, `Node.turn_idx`, `Node.outcome_reward`,
+  and `AdvantageMode.VIMPO`.
+
+- Produces: `annotate_vimpo_episode_metadata(nodes: list[Node]) -> None` and tensor keys
+  `vimpo_query_index`, `vimpo_episode_index`, `vimpo_turn_index`,
+  `vimpo_centered_reward`, `vimpo_predict_mask`.
+
+- [x] **Step 1: Write failing metadata and dispatch tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_workflow.py
@@ -414,13 +462,14 @@ def test_metadata_rejects_duplicate_turn_and_inconsistent_reward() -> None:
         annotate_vimpo_episode_metadata([_node("q", "a", 1, 1), _node("q", "a", 2, 0)])
 ```
 
-- [ ] **Step 2: Run tests and verify the metadata helper is missing**
+- [x] **Step 2: Run tests and verify the metadata helper is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_workflow.py -q`
 
-Expected: FAIL during collection because `annotate_vimpo_episode_metadata` does not exist.
+Expected: FAIL during collection because `annotate_vimpo_episode_metadata` does not
+exist.
 
-- [ ] **Step 3: Add stable Node fields and query-local annotation**
+- [x] **Step 3: Add stable Node fields and query-local annotation**
 
 ```python
 # Add to Node in customized_areal/tree_search/core/tree_store.py
@@ -459,7 +508,10 @@ def annotate_vimpo_episode_metadata(nodes: list[Node]) -> None:
             episode_counter += 1
 ```
 
-Extend `_node_to_tensor_dict(node, query_id, node_id, max_tokens=0, loss_mode=None, advantage_mode=None)` and `_nodes_to_batched_tensor_dict` so VIMPO emits sequence-shaped metadata. Build the canonical mask exactly as:
+Extend
+`_node_to_tensor_dict(node, query_id, node_id, max_tokens=0, loss_mode=None, advantage_mode=None)`
+and `_nodes_to_batched_tensor_dict` so VIMPO emits sequence-shaped metadata. Build the
+canonical mask exactly as:
 
 ```python
 predict_mask = torch.roll(traj["loss_mask"].bool(), shifts=-1, dims=-1)
@@ -474,15 +526,18 @@ for key, value, dtype in (
     traj[key] = torch.full((1, seq_len), value, dtype=dtype)
 ```
 
-In `_finalize_episode`, call `annotate_vimpo_episode_metadata(all_nodes)` only for VIMPO, skip every Node advantage computer, skip `_annotate_critic_values`, pass `advantage_mode` to tensorization, and never attach `critic_train_data`.
+In `_finalize_episode`, call `annotate_vimpo_episode_metadata(all_nodes)` only for
+VIMPO, skip every Node advantage computer, skip `_annotate_critic_values`, pass
+`advantage_mode` to tensorization, and never attach `critic_train_data`.
 
-- [ ] **Step 4: Run focused and regression workflow tests**
+- [x] **Step 4: Run focused and regression workflow tests**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_workflow.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_gae_advantage.py customized_areal/tree_search/tests/test_critic_smoke.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_workflow.py customized_areal/tree_search/tests/test_tree_store_loo.py customized_areal/tree_search/tests/test_gae_advantage.py customized_areal/tree_search/tests/test_critic_smoke.py -q`
 
 Expected: PASS; existing modes retain their original tensor keys and critic dispatch.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add customized_areal/tree_search/core/tree_store.py customized_areal/tree_search/core/customized_grouped_workflow.py customized_areal/tree_search/tests/test_vimpo_workflow.py
@@ -492,14 +547,20 @@ git commit -m "feat(tree-search): preserve VIMPO episode targets"
 ### Task 3: Episode-Atomic PPO and FSDP Microbatch Allocation
 
 **Files:**
+
 - Create: `customized_areal/tree_search/training/vimpo_batching.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_batching.py`
 
 **Interfaces:**
-- Consumes: padded tensor dictionaries, `MicroBatchSpec`, and repeated `vimpo_episode_index`.
-- Produces: `split_episode_atomic_batches(data, mb_spec, episode_key="vimpo_episode_index") -> MicroBatchList` with complete episodes in every `mb`.
 
-- [ ] **Step 1: Write failing allocator tests**
+- Consumes: padded tensor dictionaries, `MicroBatchSpec`, and repeated
+  `vimpo_episode_index`.
+
+- Produces:
+  `split_episode_atomic_batches(data, mb_spec, episode_key="vimpo_episode_index") -> MicroBatchList`
+  with complete episodes in every `mb`.
+
+- [x] **Step 1: Write failing allocator tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_batching.py
@@ -531,13 +592,13 @@ def test_allocator_rejects_episode_larger_than_token_limit() -> None:
         split_episode_atomic_batches(_batch(), MicroBatchSpec(n_mbs=2, max_tokens_per_mb=6))
 ```
 
-- [ ] **Step 2: Run tests and verify the module is missing**
+- [x] **Step 2: Run tests and verify the module is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 
 Expected: FAIL during collection because `vimpo_batching.py` does not exist.
 
-- [ ] **Step 3: Implement deterministic episode grouping and balancing**
+- [x] **Step 3: Implement deterministic episode grouping and balancing**
 
 Implement the allocator with this exact public contract and ordering:
 
@@ -579,9 +640,10 @@ def split_episode_atomic_batches(
     return MicroBatchList(data=data, mb_spec=mb_spec, mbs=mbs, group_lens=loads[:len(groups)], forward_indices=forward_indices, backward_indices=backward_indices)
 ```
 
-Before returning, reject empty input and enforce contiguous one-based turn rows per episode. Preserve non-row tensor/list metadata exactly as the generic splitter does.
+Before returning, reject empty input and enforce contiguous one-based turn rows per
+episode. Preserve non-row tensor/list metadata exactly as the generic splitter does.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 
@@ -595,14 +657,20 @@ git commit -m "feat(tree-search): add episode-atomic VIMPO batching"
 ### Task 4: Frozen SGLang Reference Candidate Scorer
 
 **Files:**
+
 - Create: `customized_areal/tree_search/training/vimpo_reference.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_reference.py`
 
 **Interfaces:**
-- Consumes: actor initial checkpoint/tokenizer identity and per-position actor candidate IDs.
-- Produces: `ReferenceIdentity`, `ReferenceScoreRequest`, `ReferenceScore`, `VIMPOReferenceScorer`, and `SGLangVIMPOReferenceScorer` with synchronous `validate_identity`, `score`, and `close` methods suitable for PPO worker RPC.
 
-- [ ] **Step 1: Write failing mocked HTTP contract tests**
+- Consumes: actor initial checkpoint/tokenizer identity and per-position actor candidate
+  IDs.
+
+- Produces: `ReferenceIdentity`, `ReferenceScoreRequest`, `ReferenceScore`,
+  `VIMPOReferenceScorer`, and `SGLangVIMPOReferenceScorer` with synchronous
+  `validate_identity`, `score`, and `close` methods suitable for PPO worker RPC.
+
+- [x] **Step 1: Write failing mocked HTTP contract tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_reference.py
@@ -643,15 +711,18 @@ def test_identity_mismatch_fails_before_scoring(field: str) -> None:
         scorer.validate_identity(ReferenceIdentity("/models/init", "main", 8, 8, 1, 2, 2))
 ```
 
-In this file, `_scripted_scorer` and `_identity_scorer` are complete local fixtures backed by `httpx.MockTransport`; they must also cover HTTP 429/500 retry, HTTP 400 no-retry, timeout exhaustion, missing token ID, non-finite score, candidate chunking, endpoint identity change after reconnect, bounded worker count, and idempotent close.
+In this file, `_scripted_scorer` and `_identity_scorer` are complete local fixtures
+backed by `httpx.MockTransport`; they must also cover HTTP 429/500 retry, HTTP 400
+no-retry, timeout exhaustion, missing token ID, non-finite score, candidate chunking,
+endpoint identity change after reconnect, bounded worker count, and idempotent close.
 
-- [ ] **Step 2: Run tests and verify the scorer module is missing**
+- [x] **Step 2: Run tests and verify the scorer module is missing**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_reference.py -q`
 
 Expected: FAIL during collection because `vimpo_reference.py` does not exist.
 
-- [ ] **Step 3: Implement immutable identity and request/response types**
+- [x] **Step 3: Implement immutable identity and request/response types**
 
 ```python
 @dataclass(frozen=True)
@@ -686,9 +757,11 @@ class VIMPOReferenceScorer(Protocol):
         raise NotImplementedError
 ```
 
-- [ ] **Step 4: Implement the generic SGLang adapter**
+- [x] **Step 4: Implement the generic SGLang adapter**
 
-Use a bounded `concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency)` around one shared `httpx.Client`. Sort work by `(len(prefix_ids), key)`, restore result order by the caller's keys, and send:
+Use a bounded `concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency)`
+around one shared `httpx.Client`. Sort work by `(len(prefix_ids), key)`, restore result
+order by the caller's keys, and send:
 
 ```python
 payload = {
@@ -700,9 +773,14 @@ payload = {
 }
 ```
 
-Parse `meta_info["token_ids_logprob"]` into a token-ID map; require every requested ID exactly once and finite. Chunk `token_ids_logprob` when the service reports a limit, joining chunks by ID. Retry only `httpx.TransportError`, HTTP 429, and HTTP 5xx up to `max_retries`; run identity validation again after a transport reconnect. Compare every `ReferenceIdentity` field, `temperature == 1.0`, and `quantized is False` from `/get_model_info`. Never call a weight-update endpoint.
+Parse `meta_info["token_ids_logprob"]` into a token-ID map; require every requested ID
+exactly once and finite. Chunk `token_ids_logprob` when the service reports a limit,
+joining chunks by ID. Retry only `httpx.TransportError`, HTTP 429, and HTTP 5xx up to
+`max_retries`; run identity validation again after a transport reconnect. Compare every
+`ReferenceIdentity` field, `temperature == 1.0`, and `quantized is False` from
+`/get_model_info`. Never call a weight-update endpoint.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_reference.py -q`
 
@@ -716,15 +794,20 @@ git commit -m "feat(tree-search): add frozen SGLang VIMPO scorer"
 ### Task 5: FSDP Actor Candidate Statistics
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/engine/fsdp_engine.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_fsdp_distributed.py`
 
 **Interfaces:**
-- Consumes: actor logits, next-token labels/mask, explicit TP/SP groups, and effective `top_k`.
-- Produces: `VIMPOCandidateStats` and `compute_vimpo_candidate_stats(data, top_k)` without exporting full-vocabulary logits.
 
-- [ ] **Step 1: Write failing single-rank numerical tests**
+- Consumes: actor logits, next-token labels/mask, explicit TP/SP groups, and effective
+  `top_k`.
+
+- Produces: `VIMPOCandidateStats` and `compute_vimpo_candidate_stats(data, top_k)`
+  without exporting full-vocabulary logits.
+
+- [x] **Step 1: Write failing single-rank numerical tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py
@@ -751,13 +834,14 @@ def test_topk_is_capped_at_vocab_and_masked_rows_are_sentinel() -> None:
     assert stats.predict_mask.tolist() == [[True, False]]
 ```
 
-- [ ] **Step 2: Run tests and verify the stats API is absent**
+- [x] **Step 2: Run tests and verify the stats API is absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py -q`
 
-Expected: FAIL during collection because `vimpo_candidate_stats_from_logits` does not exist.
+Expected: FAIL during collection because `vimpo_candidate_stats_from_logits` does not
+exist.
 
-- [ ] **Step 3: Implement the return type and single-rank helper**
+- [x] **Step 3: Implement the return type and single-rank helper**
 
 ```python
 @dataclass(frozen=True)
@@ -780,9 +864,15 @@ def vimpo_candidate_stats_from_logits(logits, labels, predict_mask, *, top_k):
     return VIMPOCandidateStats(sampled_logp, candidate_ids, candidate_logp, retained_mass, predict_mask.bool())
 ```
 
-- [ ] **Step 4: Add fake-process-group tests for sharded normalization and global top-k**
+- [x] **Step 4: Add fake-process-group tests for sharded normalization and global
+  top-k**
 
-In `test_vimpo_fsdp_distributed.py`, spawn two CPU `gloo` ranks with `torch.multiprocessing.spawn`. Give rank 0 vocabulary IDs `[0, 2)` and rank 1 `[2, 4)`, compare global candidate IDs/log-probabilities and sampled-token log-probability against concatenated brute force, and monkeypatch `torch.distributed.all_reduce/all_gather` wrappers to assert the configured `tp_group` is passed. Mark the true SP/packed-tree GPU cases:
+In `test_vimpo_fsdp_distributed.py`, spawn two CPU `gloo` ranks with
+`torch.multiprocessing.spawn`. Give rank 0 vocabulary IDs `[0, 2)` and rank 1 `[2, 4)`,
+compare global candidate IDs/log-probabilities and sampled-token log-probability against
+concatenated brute force, and monkeypatch `torch.distributed.all_reduce/all_gather`
+wrappers to assert the configured `tp_group` is passed. Mark the true SP/packed-tree GPU
+cases:
 
 ```python
 @pytest.mark.slow
@@ -796,17 +886,33 @@ def test_vimpo_stats_tp_sp_and_packed_tree_alignment() -> None:
     )
 ```
 
-Define `_tp_sp_packed_tree_worker(rank: int, world_size: int)` in the same test module using the existing distributed-test setup/teardown pattern. It initializes a temporary-file `gloo` control group and NCCL model groups, constructs identical packed and non-packed token batches, invokes `compute_vimpo_candidate_stats` on both, and uses `torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)` on sampled log-probabilities, candidate log-probabilities, retained mass, and scattered candidate IDs. Do not mock FSDP or DTensor internals.
+Define `_tp_sp_packed_tree_worker(rank: int, world_size: int)` in the same test module
+using the existing distributed-test setup/teardown pattern. It initializes a
+temporary-file `gloo` control group and NCCL model groups, constructs identical packed
+and non-packed token batches, invokes `compute_vimpo_candidate_stats` on both, and uses
+`torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)` on sampled
+log-probabilities, candidate log-probabilities, retained mass, and scattered candidate
+IDs. Do not mock FSDP or DTensor internals.
 
-- [ ] **Step 5: Implement TP/SP and packed-tree collection**
+- [x] **Step 5: Implement TP/SP and packed-tree collection**
 
-Add `MultiCandidateFSDPEngine.compute_vimpo_candidate_stats(self, data, *, top_k)` as a no-grad/eval forward. For each vocab shard, calculate global max with `all_reduce(MAX, group=tp_group)`, global shifted exponential sum with `all_reduce(SUM, group=tp_group)`, add the shard's global vocab offset to local top-k IDs, `all_gather` at most `K` candidates per rank, then select global top-k with token ID as deterministic tie-breaker. Gather sampled logits only from the owning shard. Reuse `_sp_all_gather` and `gather_packed_tree_vocab_stats`/trie mappings before returning `[B,S,...]`. Force temperature `1.0`; restore the previous train/eval mode after the snapshot.
+Add `MultiCandidateFSDPEngine.compute_vimpo_candidate_stats(self, data, *, top_k)` as a
+no-grad/eval forward. For each vocab shard, calculate global max with
+`all_reduce(MAX, group=tp_group)`, global shifted exponential sum with
+`all_reduce(SUM, group=tp_group)`, add the shard's global vocab offset to local top-k
+IDs, `all_gather` at most `K` candidates per rank, then select global top-k with token
+ID as deterministic tie-breaker. Gather sampled logits only from the owning shard. Reuse
+`_sp_all_gather` and `gather_packed_tree_vocab_stats`/trie mappings before returning
+`[B,S,...]`. Force temperature `1.0`; restore the previous train/eval mode after the
+snapshot.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py customized_areal/tree_search/tests/test_vimpo_fsdp_distributed.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py customized_areal/tree_search/tests/test_vimpo_fsdp_distributed.py -q`
 
-Expected: CPU tests PASS; hardware test SKIP with the explicit CUDA reason when fewer than two GPUs are present.
+Expected: CPU tests PASS; hardware test SKIP with the explicit CUDA reason when fewer
+than two GPUs are present.
 
 ```bash
 git add customized_areal/tree_search/engine/fsdp_engine.py customized_areal/tree_search/tests/test_vimpo_fsdp_stats.py customized_areal/tree_search/tests/test_vimpo_fsdp_distributed.py
@@ -816,16 +922,20 @@ git commit -m "feat(tree-search): collect VIMPO actor candidate stats"
 ### Task 6: Combined Episode-Level VIMPO Loss and Two-Denominator Backward
 
 **Files:**
+
 - Create: `customized_areal/tree_search/training/losses/vimpo.py`
 - Modify: `customized_areal/tree_search/training/losses/__init__.py`
 - Modify: `customized_areal/tree_search/engine/fsdp_engine.py`
 - Create: `customized_areal/tree_search/tests/test_vimpo_loss.py`
 
 **Interfaces:**
-- Consumes: differentiable sampled-token log-probabilities and the enriched VIMPO batch.
-- Produces: `VIMPOLossTerms`, `vimpo_loss_terms`, `vimpo_loss_fn`, and `MultiCandidateFSDPEngine.train_vimpo_batch` performing one zero-grad/backward/step.
 
-- [ ] **Step 1: Write failing loss and gradient tests**
+- Consumes: differentiable sampled-token log-probabilities and the enriched VIMPO batch.
+
+- Produces: `VIMPOLossTerms`, `vimpo_loss_terms`, `vimpo_loss_fn`, and
+  `MultiCandidateFSDPEngine.train_vimpo_batch` performing one zero-grad/backward/step.
+
+- [x] **Step 1: Write failing loss and gradient tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_loss.py
@@ -865,13 +975,13 @@ def test_loss_rejects_partial_episode_before_backward() -> None:
         vimpo_loss_terms(torch.zeros_like(partial["vimpo_ref_sample_logp"], requires_grad=True), partial, beta=5e-4, eps_clip=0.2, eps_clip_higher=None)
 ```
 
-- [ ] **Step 2: Run tests and verify the loss module is absent**
+- [x] **Step 2: Run tests and verify the loss module is absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_loss.py -q`
 
 Expected: FAIL during collection because `training/losses/vimpo.py` does not exist.
 
-- [ ] **Step 3: Implement numerator-returning pure loss math**
+- [x] **Step 3: Implement numerator-returning pure loss math**
 
 ```python
 @dataclass(frozen=True)
@@ -908,11 +1018,16 @@ def vimpo_loss_terms(logprobs, data, *, beta, eps_clip, eps_clip_higher):
     return VIMPOLossTerms(ppo_sum, 0.5 * residual.square().sum(), mask.sum(), torch.tensor(len(predictions), device=logprobs.device), prediction_tensor, target_tensor, residual)
 ```
 
-Use the repository's `ppo_actor_loss_fn` clipping semantics when integrating, but retain the numerator/count contract. Validate complete turn counts, constant metadata per row, finite inputs, and nonzero token/episode counts before returning.
+Use the repository's `ppo_actor_loss_fn` clipping semantics when integrating, but retain
+the numerator/count contract. Validate complete turn counts, constant metadata per row,
+finite inputs, and nonzero token/episode counts before returning.
 
-- [ ] **Step 4: Add one-backward/two-denominator engine tests**
+- [x] **Step 4: Add one-backward/two-denominator engine tests**
 
-Create a fake subclass whose `forward_backward_batch`, `optimizer_zero_grad`, and `optimizer_step` record calls. Assert `train_vimpo_batch` calls each exactly once, all-reduces `[valid_token_count, episode_count]` over `dp_group`, scales each microbatch as:
+Create a fake subclass whose `forward_backward_batch`, `optimizer_zero_grad`, and
+`optimizer_step` record calls. Assert `train_vimpo_batch` calls each exactly once,
+all-reduces `[valid_token_count, episode_count]` over `dp_group`, scales each microbatch
+as:
 
 ```python
 loss = self.parallel_helper.dp_size * (
@@ -923,13 +1038,19 @@ loss = self.parallel_helper.dp_size * (
 
 and validates all batches/reference tensors before `optimizer_zero_grad()`.
 
-- [ ] **Step 5: Implement `train_vimpo_batch`**
+- [x] **Step 5: Implement `train_vimpo_batch`**
 
-Normalize input, call the episode-atomic splitter, pack/pad with the same helpers used by `_prepare_mb_list`, compute and all-reduce the two float64 denominators once, then use `forward_backward_batch` with a process callback that gathers only sampled-action log-probabilities and calls `vimpo_loss_terms`. Accumulate detached metric numerators; call `optimizer_step()` once. Do not call generic `train_batch`, whose single `loss_weight_fn` cannot represent both means.
+Normalize input, call the episode-atomic splitter, pack/pad with the same helpers used
+by `_prepare_mb_list`, compute and all-reduce the two float64 denominators once, then
+use `forward_backward_batch` with a process callback that gathers only sampled-action
+log-probabilities and calls `vimpo_loss_terms`. Accumulate detached metric numerators;
+call `optimizer_step()` once. Do not call generic `train_batch`, whose single
+`loss_weight_fn` cannot represent both means.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_loss.py customized_areal/tree_search/tests/test_vimpo_batching.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_loss.py customized_areal/tree_search/tests/test_vimpo_batching.py -q`
 
 Expected: PASS.
 
@@ -941,6 +1062,7 @@ git commit -m "feat(tree-search): add combined VIMPO actor loss"
 ### Task 7: Dedicated VIMPO FSDP Actor and Trainer Wiring
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/training/actor.py`
 - Modify: `customized_areal/tree_search/training/trainer.py`
 - Modify: `customized_areal/tree_search/engine/__init__.py`
@@ -949,10 +1071,14 @@ git commit -m "feat(tree-search): add combined VIMPO actor loss"
 - Create: `customized_areal/tree_search/tests/test_vimpo_trainer.py`
 
 **Interfaces:**
-- Consumes: Tasks 1–6 contracts and dynamic actor config attributes copied by `CustomizedPPOTrainer`.
-- Produces: `VIMPOFSDPPPOActor.compute_advantages`, `.ppo_update`, `.destroy`, controller construction, and VIMPO-only trainer selection.
 
-- [ ] **Step 1: Write failing actor orchestration tests with fake scorer/engine**
+- Consumes: Tasks 1–6 contracts and dynamic actor config attributes copied by
+  `CustomizedPPOTrainer`.
+
+- Produces: `VIMPOFSDPPPOActor.compute_advantages`, `.ppo_update`, `.destroy`,
+  controller construction, and VIMPO-only trainer selection.
+
+- [x] **Step 1: Write failing actor orchestration tests with fake scorer/engine**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_actor.py
@@ -980,7 +1106,7 @@ def test_ppo_update_uses_one_combined_train_call() -> None:
     assert engine.train_batch_calls == 0
 ```
 
-- [ ] **Step 2: Write failing trainer selection tests**
+- [x] **Step 2: Write failing trainer selection tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_trainer.py
@@ -1000,13 +1126,14 @@ def test_vimpo_rejects_non_fsdp_before_actor_creation() -> None:
         trainer._create_train_engine(_actor_config(backend="megatron:d1"), _allocation("megatron"))
 ```
 
-- [ ] **Step 3: Run tests and verify the dedicated actor is absent**
+- [x] **Step 3: Run tests and verify the dedicated actor is absent**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py -q`
 
 Expected: FAIL because `VIMPOFSDPPPOActor` is not defined or selected.
 
-- [ ] **Step 4: Implement the dedicated actor without a global monkey patch**
+- [x] **Step 4: Implement the dedicated actor without a global monkey patch**
 
 ```python
 class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
@@ -1033,21 +1160,37 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         super().destroy()
 ```
 
-`_compute_vimpo_advantages` validates identity, calls `compute_vimpo_candidate_stats`, builds one `ReferenceScoreRequest` per valid `(row, prediction_position)` using `input_ids[row, :position+1]`, scores only on the model-parallel head, aligns results by key, broadcasts tensors over `mp_group`, and invokes `VIMPOAdvantageComputer`. Record snapshot version before scoring. `_vimpo_update` validates every required key, logs token/episode denominators, outer-splits with `split_episode_atomic_batches`, and calls `train_vimpo_batch` once per complete PPO minibatch.
+`_compute_vimpo_advantages` validates identity, calls `compute_vimpo_candidate_stats`,
+builds one `ReferenceScoreRequest` per valid `(row, prediction_position)` using
+`input_ids[row, :position+1]`, scores only on the model-parallel head, aligns results by
+key, broadcasts tensors over `mp_group`, and invokes `VIMPOAdvantageComputer`. Record
+snapshot version before scoring. `_vimpo_update` validates every required key, logs
+token/episode denominators, outer-splits with `split_episode_atomic_batches`, and calls
+`train_vimpo_batch` once per complete PPO minibatch.
 
-- [ ] **Step 5: Wire trainer selection and lifecycle**
+- [x] **Step 5: Wire trainer selection and lifecycle**
 
-Import `AdvantageMode` in `training/trainer.py`. At the start of `_create_train_engine`, before distillation/Muon/clip-cov branches, validate `alloc.backend == "fsdp"`, copy every `vimpo_*` setting plus expected actor/tokenizer identity to `actor_config`, select `VIMPOFSDPPPOActor` (or a Muon wrapper that only patches optimizer construction), create its process group, and return it. Do not install the distillation or combined-critic monkey patches. Add lazy exports in both `engine/__init__.py` and the package root.
+Import `AdvantageMode` in `training/trainer.py`. At the start of `_create_train_engine`,
+before distillation/Muon/clip-cov branches, validate `alloc.backend == "fsdp"`, copy
+every `vimpo_*` setting plus expected actor/tokenizer identity to `actor_config`, select
+`VIMPOFSDPPPOActor` (or a Muon wrapper that only patches optimizer construction), create
+its process group, and return it. Do not install the distillation or combined-critic
+monkey patches. Add lazy exports in both `engine/__init__.py` and the package root.
 
-Because base `PPOTrainer` creates `self.ref` only when `config.actor.kl_ctl > 0 and config.ref is not None`, document and test that a VIMPO run uses `actor.kl_ctl = 0` and `config.ref = None`. Assert `trainer.ref is None` and `trainer.critic is None` in a constructor-level fake test.
+Because base `PPOTrainer` creates `self.ref` only when
+`config.actor.kl_ctl > 0 and config.ref is not None`, document and test that a VIMPO run
+uses `actor.kl_ctl = 0` and `config.ref = None`. Assert `trainer.ref is None` and
+`trainer.critic is None` in a constructor-level fake test.
 
-- [ ] **Step 6: Run actor/trainer tests and existing patch regressions**
+- [x] **Step 6: Run actor/trainer tests and existing patch regressions**
 
-Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py customized_areal/tree_search/tests/test_critic_update.py customized_areal/tree_search/tests/test_trainer_integration_critic_gae.py -q`
+Run:
+`uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py customized_areal/tree_search/tests/test_critic_update.py customized_areal/tree_search/tests/test_trainer_integration_critic_gae.py -q`
 
-Expected: PASS; VIMPO uses no generic reference/critic engine and existing critic patches still install/restore normally.
+Expected: PASS; VIMPO uses no generic reference/critic engine and existing critic
+patches still install/restore normally.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add customized_areal/tree_search/training/actor.py customized_areal/tree_search/training/trainer.py customized_areal/tree_search/engine/__init__.py customized_areal/tree_search/__init__.py customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py
@@ -1057,6 +1200,7 @@ git commit -m "feat(tree-search): integrate VIMPO FSDP actor training"
 ### Task 8: Metrics, CPU End-to-End Smoke Test, and Documentation
 
 **Files:**
+
 - Modify: `customized_areal/tree_search/training/actor.py`
 - Modify: `customized_areal/tree_search/engine/fsdp_engine.py`
 - Modify: `customized_areal/tree_search/README.md`
@@ -1064,10 +1208,13 @@ git commit -m "feat(tree-search): integrate VIMPO FSDP actor training"
 - Create: `customized_areal/tree_search/tests/test_vimpo_fsdp_sglang_integration.py`
 
 **Interfaces:**
-- Consumes: complete VIMPO training pipeline.
-- Produces: required `stats_tracker` metrics, an offline CPU smoke test, and an explicit hardware/service integration gate.
 
-- [ ] **Step 1: Write the failing CPU smoke test**
+- Consumes: complete VIMPO training pipeline.
+
+- Produces: required `stats_tracker` metrics, an offline CPU smoke test, and an explicit
+  hardware/service integration gate.
+
+- [x] **Step 1: Write the failing CPU smoke test**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_smoke.py
@@ -1086,9 +1233,13 @@ def test_vimpo_cpu_pipeline_changes_actor_only() -> None:
     assert all(torch.isfinite(torch.tensor(value)) for value in actor.last_vimpo_metrics.values())
 ```
 
-- [ ] **Step 2: Add and assert observability**
+- [x] **Step 2: Add and assert observability**
 
-Use `stats_tracker.denominator` for valid tokens and complete episodes, `stats_tracker.stat` for candidate KL, retained-mass mean/min/quantiles, raw/normalized advantages, terminal prediction/target/residual/RMSE, and `stats_tracker.scalar` for component/combined losses, reference latency/retries, effective top-k, exact-KL flag, and snapshot policy version. Exact names:
+Use `stats_tracker.denominator` for valid tokens and complete episodes,
+`stats_tracker.stat` for candidate KL, retained-mass mean/min/quantiles, raw/normalized
+advantages, terminal prediction/target/residual/RMSE, and `stats_tracker.scalar` for
+component/combined losses, reference latency/retries, effective top-k, exact-KL flag,
+and snapshot policy version. Exact names:
 
 ```text
 vimpo/candidate_kl
@@ -1109,9 +1260,10 @@ vimpo/exact_kl
 vimpo/snapshot_policy_version
 ```
 
-Do not call `.item()` or `.tolist()` on hot-path GPU tensors; feed tensors directly to the stats tracker. `vimpo/exact_kl` is one only when effective `K == vocab_size`.
+Do not call `.item()` or `.tolist()` on hot-path GPU tensors; feed tensors directly to
+the stats tracker. `vimpo/exact_kl` is one only when effective `K == vocab_size`.
 
-- [ ] **Step 3: Add the hardware-gated integration test**
+- [x] **Step 3: Add the hardware-gated integration test**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_fsdp_sglang_integration.py
@@ -1133,11 +1285,14 @@ def test_one_vimpo_step_keeps_initial_sglang_reference_frozen() -> None:
     assert all(torch.isfinite(torch.tensor(value)) for value in result.metrics.values())
 ```
 
-The helper uses the repository's torchrun test harness, the same tokenizer/checkpoint for actor initialization and SGLang, and reads identity twice; it never launches or updates the reference service.
+The helper uses the repository's torchrun test harness, the same tokenizer/checkpoint
+for actor initialization and SGLang, and reads identity twice; it never launches or
+updates the reference service.
 
-- [ ] **Step 4: Document configuration and deployment**
+- [x] **Step 4: Document configuration and deployment**
 
-Add a VIMPO section to `customized_areal/tree_search/README.md` with this runnable configuration fragment:
+Add a VIMPO section to `customized_areal/tree_search/README.md` with this runnable
+configuration fragment:
 
 ```yaml
 tree_search:
@@ -1157,15 +1312,21 @@ tree_search:
   vimpo_ref_max_retries: 3
 ```
 
-State that the URL must serve the unmodified initial actor checkpoint with identical tokenizer/special IDs, temperature-one full-normalized token-ID log-probabilities, no quantization in paper-faithful mode, and no weight updates. Explain that `top_k < vocab_size` is truncated candidate KL, retained mass diagnoses approximation quality, `top_k == vocab_size` is exact but expensive, the actor backend must be FSDP, `actor.kl_ctl` may be zero, and no `ref` FSDP allocation should be configured.
+State that the URL must serve the unmodified initial actor checkpoint with identical
+tokenizer/special IDs, temperature-one full-normalized token-ID log-probabilities, no
+quantization in paper-faithful mode, and no weight updates. Explain that
+`top_k < vocab_size` is truncated candidate KL, retained mass diagnoses approximation
+quality, `top_k == vocab_size` is exact but expensive, the actor backend must be FSDP,
+`actor.kl_ctl` may be zero, and no `ref` FSDP allocation should be configured.
 
-- [ ] **Step 5: Run smoke, integration gate, and focused suite**
+- [x] **Step 5: Run smoke, integration gate, and focused suite**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_*.py -q`
 
-Expected: all CPU/mocked tests PASS; GPU/SGLang tests either PASS or SKIP with their explicit environment reason.
+Expected: all CPU/mocked tests PASS; GPU/SGLang tests either PASS or SKIP with their
+explicit environment reason.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add customized_areal/tree_search/training/actor.py customized_areal/tree_search/engine/fsdp_engine.py customized_areal/tree_search/README.md customized_areal/tree_search/tests/test_vimpo_smoke.py customized_areal/tree_search/tests/test_vimpo_fsdp_sglang_integration.py
@@ -1175,20 +1336,24 @@ git commit -m "test(tree-search): cover VIMPO end-to-end training"
 ### Task 9: Full Regression, Graph Refresh, and Comet Evidence
 
 **Files:**
+
 - Modify: `openspec/changes/add-vimpo-critic-mode/tasks.md`
 - Generated/modified: `graphify-out/**`
 
 **Interfaces:**
-- Consumes: the complete implementation and OpenSpec task checklist.
-- Produces: verified repository state, refreshed graph, and checked task evidence without broadening scope.
 
-- [ ] **Step 1: Run the complete targeted tree-search suite**
+- Consumes: the complete implementation and OpenSpec task checklist.
+
+- Produces: verified repository state, refreshed graph, and checked task evidence
+  without broadening scope.
+
+- [x] **Step 1: Run the complete targeted tree-search suite**
 
 Run: `uv run pytest customized_areal/tree_search/tests -q`
 
 Expected: PASS, with only pre-existing or explicit hardware/service skips.
 
-- [ ] **Step 2: Run static checks on all touched Python files**
+- [x] **Step 2: Run static checks on all touched Python files**
 
 Run: `uv run ruff check customized_areal/tree_search`
 
@@ -1198,13 +1363,14 @@ Run: `uv run ruff format --check customized_areal/tree_search`
 
 Expected: no files require reformatting.
 
-- [ ] **Step 3: Run repository pre-commit hooks**
+- [x] **Step 3: Run repository pre-commit hooks**
 
 Run: `source .venv/bin/activate && pre-commit run --all-files`
 
-Expected: every hook passes. If hooks format files, review the diff, rerun the targeted tests, and rerun pre-commit until it exits zero; do not skip hooks.
+Expected: every hook passes. If hooks format files, review the diff, rerun the targeted
+tests, and rerun pre-commit until it exits zero; do not skip hooks.
 
-- [ ] **Step 4: Refresh and inspect graph relationships**
+- [x] **Step 4: Refresh and inspect graph relationships**
 
 Run: `graphify update .`
 
@@ -1214,19 +1380,25 @@ Run: `graphify path VIMPOFSDPPPOActor vimpo_loss_fn`
 
 Expected: the graph shows the actor update path reaching the combined VIMPO loss.
 
-- [ ] **Step 5: Validate OpenSpec and mark completed tasks**
+- [x] **Step 5: Validate OpenSpec and mark completed tasks**
 
-Run: `openspec validate add-vimpo-critic-mode --type change --strict --json --no-interactive`
+Run:
+`openspec validate add-vimpo-critic-mode --type change --strict --json --no-interactive`
 
 Expected: JSON reports one passed change and zero failures.
 
-After matching each checkbox to test evidence, change the corresponding entries in `openspec/changes/add-vimpo-critic-mode/tasks.md` from `- [ ]` to `- [x]`. Keep item 7.1 checked only after confirming the native ragged SGLang endpoint and non-FSDP backends remain follow-up scope.
+After matching each checkbox to test evidence, change the corresponding entries in
+`openspec/changes/add-vimpo-critic-mode/tasks.md` from `- [ ]` to `- [x]`. Keep item 7.1
+checked only after confirming the native ragged SGLang endpoint and non-FSDP backends
+remain follow-up scope.
 
-- [ ] **Step 6: Review the final diff and commit verification artifacts**
+- [x] **Step 6: Review the final diff and commit verification artifacts**
 
-Run: `git status --short && git diff --check && git diff --stat c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8`
+Run:
+`git status --short && git diff --check && git diff --stat c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8`
 
-Expected: no whitespace errors; only VIMPO/OpenSpec/docs/graph changes plus known pre-existing user changes appear.
+Expected: no whitespace errors; only VIMPO/OpenSpec/docs/graph changes plus known
+pre-existing user changes appear.
 
 ```bash
 git add openspec/changes/add-vimpo-critic-mode/tasks.md graphify-out

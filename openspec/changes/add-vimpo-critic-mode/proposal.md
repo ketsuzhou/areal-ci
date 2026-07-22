@@ -2,10 +2,10 @@
 
 The tree-search trainer currently offers group-relative and learned generative-critic
 advantages, but it cannot reproduce VIMPO's critic-free token-level credit assignment or
-its policy-implied terminal value objective. Adding VIMPO provides dense credit assignment
-without training a separate value network, while allowing the frozen initial reference
-policy to run as an inference-only SGLang service instead of consuming FSDP training
-memory.
+its policy-implied terminal value objective. Adding VIMPO provides dense credit
+assignment without training a separate value network, while allowing the frozen initial
+reference policy to run as an inference-only SGLang service instead of consuming FSDP
+training memory.
 
 ## What Changes
 
@@ -13,13 +13,13 @@ memory.
   generative critic or standalone PPO critic.
 - Add validated VIMPO settings for the paper coefficients, GAE-style accumulation, and a
   configurable candidate vocabulary size `k`.
-- Compute the actor-selected top-k candidate approximation to
-  `KL(policy || reference)` using full-vocabulary-normalized probabilities. Report retained
-  policy mass and identify the result as exact KL only when `k` equals the vocabulary size.
-- Serve the frozen initial policy through SGLang and add candidate scoring for the actor's
-  per-position token IDs.
-- Compute detached VIMPO advantages in `core/advantage.py`, and train the FSDP actor with
-  one combined terminal value-consistency and PPO actor objective.
+- Compute the actor-selected top-k candidate approximation to `KL(policy || reference)`
+  using full-vocabulary-normalized probabilities. Report retained policy mass and
+  identify the result as exact KL only when `k` equals the vocabulary size.
+- Serve the frozen initial policy through SGLang and add candidate scoring for the
+  actor's per-position token IDs.
+- Compute detached VIMPO advantages in `core/advantage.py`, and train the FSDP actor
+  with one combined terminal value-consistency and PPO actor objective.
 - Preserve complete multi-turn episode aggregation through batching and add numerical,
   gradient, integration, and compatibility tests.
 
@@ -27,9 +27,9 @@ memory.
 
 ### New Capabilities
 
-- `vimpo-policy-implied-value`: Critic-free VIMPO configuration, SGLang reference scoring,
-  top-k candidate KL estimation, token-level advantage computation, and combined FSDP
-  actor/value training.
+- `vimpo-policy-implied-value`: Critic-free VIMPO configuration, SGLang reference
+  scoring, top-k candidate KL estimation, token-level advantage computation, and
+  combined FSDP actor/value training.
 
 ### Modified Capabilities
 
