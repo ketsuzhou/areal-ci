@@ -17,14 +17,24 @@ import functools
 from typing import Any
 
 import torch
+import torch.distributed as dist
 
 from areal.api import Scheduler
 from areal.api.cli_args import MicroBatchSpec, PPOActorConfig
 from areal.trainer.ppo.actor import PPOActor
 from areal.utils import logging, stats_tracker
-from areal.utils.data import split_padded_tensor_dict_into_mb_list
+from areal.utils.data import batched_call, split_padded_tensor_dict_into_mb_list
 
-from ..engine.fsdp_engine import MultiCandidateFSDPEngine
+from ..core.advantage import VIMPOAdvantageComputer
+from ..engine.fsdp_engine import MultiCandidateFSDPEngine, VIMPOCandidateStats
+from .vimpo_batching import split_episode_atomic_batches
+from .vimpo_reference import (
+    ReferenceIdentity,
+    ReferenceScore,
+    ReferenceScoreRequest,
+    SGLangVIMPOReferenceScorer,
+    VIMPOReferenceScorer,
+)
 
 logger = logging.getLogger("OnPolicyDistill")
 
@@ -193,6 +203,387 @@ class MultiCandidateFSDPPPOActor(MultiCandidateFSDPEngine):
             train_engine=cls,
             config=config,
             scheduler=scheduler,
+        )
+
+
+# VIMPO actor config fields that CustomizedPPOTrainer copies from the tree-search
+# Config onto the PPOActorConfig before constructing the dedicated VIMPO actor.
+VIMPO_ACTOR_CONFIG_FIELDS = (
+    "vimpo_beta",
+    "vimpo_actor_coeff",
+    "vimpo_value_loss_weight",
+    "vimpo_gamma",
+    "vimpo_lambda",
+    "vimpo_top_k",
+    "vimpo_whiten_advantages",
+    "vimpo_detach_kl",
+    "vimpo_ref_base_url",
+    "vimpo_ref_timeout",
+    "vimpo_ref_max_concurrency",
+    "vimpo_ref_max_retries",
+)
+
+
+class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
+    """Dedicated VIMPO FSDP actor with frozen-reference candidate scoring.
+
+    Extends ``MultiCandidateFSDPEngine`` (like ``MultiCandidateFSDPPPOActor``)
+    and owns two VIMPO-specific dependencies:
+
+    - a **frozen SGLang reference scorer** (``pi_ref = pi_0``, the actor's
+      initial checkpoint, never weight-updated), and
+    - a :class:`VIMPOAdvantageComputer` (critic-free, policy-implied terminal
+      value).
+
+    ``compute_advantages`` orchestrates, in order: validate frozen-reference
+    identity -> snapshot the actor's top-k candidates -> score them against the
+    frozen reference -> compute detached advantages. Reference scoring happens
+    BEFORE any optimizer mutation (OpenSpec 5.4): a reference failure in
+    ``compute_advantages`` propagates before ``ppo_update`` is ever called.
+
+    ``ppo_update`` validates every required key, episode-atomically splits the
+    batch, and calls :meth:`train_vimpo_batch` once per complete PPO minibatch
+    (one combined backward with two distributed denominators; never the generic
+    ``train_batch``).
+
+    VIMPO runs with ``actor.kl_ctl = 0`` and ``config.ref = None``: no learned
+    critic and no generic reference engine are created by the base trainer.
+    """
+
+    def __init__(
+        self,
+        config: PPOActorConfig,
+        scorer: VIMPOReferenceScorer | None = None,
+    ) -> None:
+        super().__init__(config)
+        self.actor = PPOActor(config, self)
+        self.reference_scorer: VIMPOReferenceScorer = (
+            scorer
+            or SGLangVIMPOReferenceScorer(
+                config.vimpo_ref_base_url,
+                timeout=config.vimpo_ref_timeout,
+                max_concurrency=config.vimpo_ref_max_concurrency,
+                max_retries=config.vimpo_ref_max_retries,
+            )
+        )
+        self.vimpo_advantage = VIMPOAdvantageComputer(
+            beta=config.vimpo_beta,
+            gamma=config.vimpo_gamma,
+            lam=config.vimpo_lambda,
+            whiten=config.vimpo_whiten_advantages,
+            dp_group=self.dp_group,
+        )
+        logger.info(
+            "VIMPOFSDPPPOActor initialized (top_k=%d, beta=%g, ref=%s)",
+            config.vimpo_top_k,
+            config.vimpo_beta,
+            config.vimpo_ref_base_url,
+        )
+
+    # -- PPO-facing surface (compute_logp delegates; the rest is VIMPO-specific) --
+
+    @torch.no_grad()
+    def compute_logp(self, *args: Any, **kwargs: Any) -> list[torch.Tensor] | None:
+        return self.actor.compute_logp(*args, **kwargs)
+
+    @torch.no_grad()
+    def compute_advantages(
+        self, data: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        return batched_call(self._compute_vimpo_advantages, data, pass_meta=True)
+
+    def ppo_update(self, data: list[dict[str, Any]]) -> None:
+        batched_call(self._vimpo_update, data, unpack=False)
+
+    def destroy(self) -> None:
+        try:
+            self.reference_scorer.close()
+        except Exception as e:  # pragma: no cover - best-effort cleanup
+            logger.warning("VIMPO reference scorer close failed (ignored): %s", e)
+        super().destroy()
+
+    @classmethod
+    def as_controller(cls, config: PPOActorConfig, scheduler: Scheduler):
+        from areal.trainer.ppo.actor import (
+            PPOActorController,
+            PPOActorControllerV2,
+        )
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(
+            train_engine=cls, config=config, scheduler=scheduler
+        )
+
+    # -- VIMPO advantage orchestration --------------------------------
+
+    def _expected_reference_identity(self) -> ReferenceIdentity:
+        """Build the frozen-reference identity from the actor's own checkpoint.
+
+        The reference policy is ``pi_ref = pi_0`` (the actor's initial
+        checkpoint), so the expected identity is the actor's own model/tokenizer
+        identity. ``validate_identity`` compares every field against the SGLang
+        ``/get_model_info`` response before any scoring begins.
+        """
+        cached = getattr(self, "_vimpo_expected_identity", None)
+        if cached is not None:
+            return cached
+        path = getattr(self.config, "path", "")
+        model_config = getattr(self, "model_config", None)
+        vocab_size = 0
+        bos = eos = pad = None
+        if model_config is not None:
+            vocab_size = int(getattr(model_config, "vocab_size", 0) or 0)
+            bos = getattr(model_config, "bos_token_id", None)
+            eos = getattr(model_config, "eos_token_id", None)
+            pad = getattr(model_config, "pad_token_id", None)
+        tokenizer_vocab_size = vocab_size
+        tok = getattr(self, "tokenizer", None)
+        if tok is not None:
+            tokenizer_vocab_size = int(
+                getattr(tok, "vocab_size", vocab_size) or vocab_size
+            )
+            pad = pad if pad is not None else getattr(tok, "pad_token_id", None)
+            bos = bos if bos is not None else getattr(tok, "bos_token_id", None)
+            eos = eos if eos is not None else getattr(tok, "eos_token_id", None)
+        return ReferenceIdentity(
+            model_path=path,
+            revision="",
+            vocab_size=vocab_size,
+            tokenizer_vocab_size=tokenizer_vocab_size,
+            bos_token_id=bos,
+            eos_token_id=eos,
+            pad_token_id=pad,
+        )
+
+    def _is_reference_scoring_head(self) -> bool:
+        """Only the model-parallel head builds requests and scores (one HTTP
+        client); other ranks receive reference tensors via broadcast."""
+        if not dist.is_initialized():
+            return True
+        return self.is_data_parallel_head()
+
+    def _compute_vimpo_advantages(
+        self, data: dict[str, Any], meta: Any = None
+    ) -> dict[str, Any]:
+        # Step 1: validate frozen-reference identity (MP head only).
+        if self._is_reference_scoring_head():
+            self.reference_scorer.validate_identity(
+                self._expected_reference_identity()
+            )
+        # Step 2: snapshot the actor's top-k candidates (all ranks; eval forward).
+        stats = self.compute_vimpo_candidate_stats(
+            data, top_k=self.config.vimpo_top_k
+        )
+        # Step 3: build reference score requests and score (MP head only).
+        scores: list[ReferenceScore] | None = None
+        if self._is_reference_scoring_head():
+            requests = self._build_reference_requests(data, stats)
+            scores = self.reference_scorer.score(requests)
+        # Step 4: assemble reference logps + centered reward + advantage.
+        enriched = self._assemble_vimpo_batch(data, stats, scores)
+        return enriched
+
+    def _build_reference_requests(
+        self,
+        data: dict[str, Any],
+        stats: VIMPOCandidateStats,
+    ) -> list[ReferenceScoreRequest]:
+        """Build one ``ReferenceScoreRequest`` per valid ``(row, position)``."""
+        input_ids = data["input_ids"]
+        predict_mask = stats.predict_mask
+        candidate_ids = stats.candidate_ids
+        batch_size, seq_len = predict_mask.shape
+        # Convert to CPU lists once (avoid per-position GPU sync).
+        input_ids_cpu = input_ids.tolist()
+        mask_cpu = predict_mask.tolist()
+        cand_ids_cpu = candidate_ids.tolist()
+        requests: list[ReferenceScoreRequest] = []
+        for row in range(batch_size):
+            for pos in range(seq_len):
+                if not mask_cpu[row][pos]:
+                    continue
+                if pos + 1 >= len(input_ids_cpu[row]):
+                    continue
+                prefix = input_ids_cpu[row][: pos + 1]
+                sampled = input_ids_cpu[row][pos + 1]
+                cands = [c for c in cand_ids_cpu[row][pos] if c >= 0]
+                if not cands:
+                    continue
+                requests.append(
+                    ReferenceScoreRequest(
+                        key=(row, pos),
+                        prefix_ids=prefix,
+                        sampled_token_id=sampled,
+                        candidate_token_ids=cands,
+                    )
+                )
+        return requests
+
+    def _assemble_vimpo_batch(
+        self,
+        data: dict[str, Any],
+        stats: VIMPOCandidateStats,
+        scores: list[ReferenceScore] | None,
+    ) -> dict[str, Any]:
+        """Fill reference logps from scores, broadcast, and compute advantages."""
+        predict_mask = stats.predict_mask
+        ref_sample_logp = torch.zeros_like(stats.sampled_logp)
+        ref_candidate_logp = torch.zeros_like(stats.candidate_logp)
+        if scores is not None:
+            self._fill_reference_logps(
+                ref_sample_logp, ref_candidate_logp, stats, scores
+            )
+        # Broadcast reference tensors from the MP head to all ranks.
+        self._broadcast_vimpo_reference_tensors(ref_sample_logp, ref_candidate_logp)
+        # Build the advantage batch.
+        batch: dict[str, Any] = dict(data)
+        batch["vimpo_predict_mask"] = predict_mask
+        batch["vimpo_sample_logp"] = stats.sampled_logp
+        batch["vimpo_candidate_logp"] = stats.candidate_logp
+        batch["vimpo_candidate_ids"] = stats.candidate_ids
+        batch["vimpo_ref_sample_logp"] = ref_sample_logp
+        batch["vimpo_ref_candidate_logp"] = ref_candidate_logp
+        for key in (
+            "vimpo_episode_index",
+            "vimpo_turn_index",
+            "vimpo_expected_turn_count",
+        ):
+            if key in data:
+                batch[key] = data[key]
+        batch["vimpo_centered_reward"] = self._compute_centered_reward(
+            data, predict_mask
+        )
+        # Invoke the advantage computer (writes vimpo_candidate_kl,
+        # vimpo_retained_mass, advantages).
+        batch = self.vimpo_advantage.compute(batch)
+        batch["advantages"] = batch["advantages"].detach()
+        # OpenSpec 6.1: surface candidate KL / retained-mass numerators.
+        stats_tracker.denominator(vimpo_valid_tokens=predict_mask.bool())
+        stats_tracker.stat(
+            vimpo_candidate_kl=batch["vimpo_candidate_kl"].float(),
+            vimpo_retained_mass=batch["vimpo_retained_mass"].float(),
+            denominator="vimpo_valid_tokens",
+        )
+        return batch
+
+    @staticmethod
+    def _fill_reference_logps(
+        ref_sample_logp: torch.Tensor,
+        ref_candidate_logp: torch.Tensor,
+        stats: VIMPOCandidateStats,
+        scores: list[ReferenceScore],
+    ) -> None:
+        """Align ``ReferenceScore`` results by key into dense [B, S, ...] tensors."""
+        candidate_ids = stats.candidate_ids
+        k_dim = candidate_ids.shape[-1]
+        cand_ids_cpu = candidate_ids.tolist()
+        score_by_key = {score.key: score for score in scores}
+        for key, score in score_by_key.items():
+            row, pos = key
+            ref_sample_logp[row, pos] = float(score.sampled_logp)
+            for k in range(k_dim):
+                tid = cand_ids_cpu[row][pos][k]
+                if tid >= 0:
+                    ref_candidate_logp[row, pos, k] = float(score.candidate_logp[k])
+
+    def _broadcast_vimpo_reference_tensors(self, *tensors: torch.Tensor) -> None:
+        """Broadcast reference tensors from the model-parallel head to all ranks."""
+        if not dist.is_initialized() or self.mp_group is None:
+            return
+        mp_head = dist.get_process_group_ranks(self.mp_group)[0]
+        for tensor in tensors:
+            dist.broadcast(tensor, src=mp_head, group=self.mp_group)
+
+    def _compute_centered_reward(
+        self,
+        data: dict[str, Any],
+        predict_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Center the terminal task reward by the batch-mean baseline.
+
+        VIMPO's terminal reward is shared across all positions of an episode.
+        The centered reward (``reward - mean(reward over the group)``) is the
+        task-reward component of the terminal value target, broadcast to every
+        position's ``[B, S]`` shape.
+        """
+        rewards = data.get("rewards")
+        if rewards is None:
+            return torch.zeros(
+                predict_mask.shape, dtype=torch.float32, device=predict_mask.device
+            )
+        rewards = rewards.float()
+        centered = rewards - rewards.mean()
+        if centered.ndim == 1:
+            return centered.unsqueeze(-1).expand(*predict_mask.shape)
+        return centered.expand(*predict_mask.shape)
+
+    # -- VIMPO update orchestration -----------------------------------
+
+    def _vimpo_update(self, data: dict[str, Any], meta: Any = None) -> None:
+        # Step 1: validate every required key BEFORE any optimizer mutation.
+        self._validate_vimpo_batch(data)
+        # Step 2: log token/episode denominators (OpenSpec 6.1).
+        mask = data["vimpo_predict_mask"].bool()
+        episode_index = data["vimpo_episode_index"]
+        n_valid_tokens = int(mask.sum().item())
+        n_episodes = int(torch.unique(episode_index[mask]).numel())
+        batch_size = data["attention_mask"].shape[0]
+        stats_tracker.denominator(
+            n_seqs=torch.ones(batch_size, dtype=torch.bool, device=data["attention_mask"].device),
+            vimpo_valid_tokens=mask.any(dim=-1),
+        )
+        logger.info(
+            "VIMPO ppo_update: %d valid tokens, %d episodes, %d PPO minibatches",
+            n_valid_tokens,
+            n_episodes,
+            self.config.ppo_n_minibatches,
+        )
+        # Step 3: episode-atomic outer split into PPO minibatches.
+        mb_spec = MicroBatchSpec(n_mbs=self.config.ppo_n_minibatches)
+        mb_list = split_episode_atomic_batches(data, mb_spec)
+        # Step 4: call train_vimpo_batch once per complete PPO minibatch (one
+        # combined backward with two distributed denominators; never train_batch).
+        eps_clip_higher = getattr(self.config, "eps_clip_higher", None)
+        for mb in mb_list.mbs:
+            train_stat = self.train_vimpo_batch(
+                mb,
+                actor_coeff=self.config.vimpo_actor_coeff,
+                value_loss_weight=self.config.vimpo_value_loss_weight,
+                beta=self.config.vimpo_beta,
+                eps_clip=self.config.eps_clip,
+                eps_clip_higher=eps_clip_higher,
+            )
+            stats_tracker.scalar(**train_stat)
+
+
+class MuonVIMPOFSDPPPOActor:
+    """VIMPO FSDP actor wrapper with Muon optimizer patching.
+
+    Patches optimizer construction before worker init (same pattern as
+    ``MuonMultiCandidateFSDPPPOActor``), then delegates to
+    :class:`VIMPOFSDPPPOActor`. VIMPO's loss/advantage path is untouched.
+    """
+
+    def __new__(cls, config: PPOActorConfig, scorer: VIMPOReferenceScorer | None = None):
+        from customized_areal.tree_search.engine import VIMPOFSDPPPOActor
+
+        _patch_muon_from_actor_config(config)
+        return VIMPOFSDPPPOActor(config, scorer=scorer)
+
+    @classmethod
+    def as_controller(cls, config: PPOActorConfig, scheduler: Scheduler):
+        from areal.trainer.ppo.actor import (
+            PPOActorController,
+            PPOActorControllerV2,
+        )
+
+        controller_cls = (
+            PPOActorControllerV2 if config._version == "v2" else PPOActorController
+        )
+        return controller_cls(
+            train_engine=cls, config=config, scheduler=scheduler
         )
 
 

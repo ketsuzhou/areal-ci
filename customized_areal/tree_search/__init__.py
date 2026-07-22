@@ -22,6 +22,7 @@ __all__ = [
     "InteractionWithTokenLevelReward",
     "LossMode",
     "MCTSTreeStore",
+    "MuonVIMPOFSDPPPOActor",
     "Node",
     "PositionRewardInfo",
     "TreeSearchGroupedRolloutWorkflow",
@@ -31,6 +32,7 @@ __all__ = [
     "HybridGAEAdvantageComputer",
     "VersionedBackupAdvantageComputer",
     "VIMPOAdvantageComputer",
+    "VIMPOFSDPPPOActor",
     "Config",
     "CacheMode",
     "TreeCheckpointManager",
@@ -102,6 +104,14 @@ def __getattr__(name):
         from .engine import MultiCandidateFSDPPPOActor
 
         return MultiCandidateFSDPPPOActor
+    if name == "VIMPOFSDPPPOActor":
+        from .engine import VIMPOFSDPPPOActor
+
+        return VIMPOFSDPPPOActor
+    if name == "MuonVIMPOFSDPPPOActor":
+        from .engine import MuonVIMPOFSDPPPOActor
+
+        return MuonVIMPOFSDPPPOActor
     if name == "CustomizedPPOTrainer":
         from .training.trainer import CustomizedPPOTrainer
 
