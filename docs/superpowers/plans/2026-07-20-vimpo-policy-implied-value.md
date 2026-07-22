@@ -1347,13 +1347,13 @@ git commit -m "test(tree-search): cover VIMPO end-to-end training"
 - Produces: verified repository state, refreshed graph, and checked task evidence
   without broadening scope.
 
-- [ ] **Step 1: Run the complete targeted tree-search suite**
+- [x] **Step 1: Run the complete targeted tree-search suite**
 
 Run: `uv run pytest customized_areal/tree_search/tests -q`
 
 Expected: PASS, with only pre-existing or explicit hardware/service skips.
 
-- [ ] **Step 2: Run static checks on all touched Python files**
+- [x] **Step 2: Run static checks on all touched Python files**
 
 Run: `uv run ruff check customized_areal/tree_search`
 
@@ -1363,14 +1363,14 @@ Run: `uv run ruff format --check customized_areal/tree_search`
 
 Expected: no files require reformatting.
 
-- [ ] **Step 3: Run repository pre-commit hooks**
+- [x] **Step 3: Run repository pre-commit hooks**
 
 Run: `source .venv/bin/activate && pre-commit run --all-files`
 
 Expected: every hook passes. If hooks format files, review the diff, rerun the targeted
 tests, and rerun pre-commit until it exits zero; do not skip hooks.
 
-- [ ] **Step 4: Refresh and inspect graph relationships**
+- [x] **Step 4: Refresh and inspect graph relationships**
 
 Run: `graphify update .`
 
@@ -1380,7 +1380,7 @@ Run: `graphify path VIMPOFSDPPPOActor vimpo_loss_fn`
 
 Expected: the graph shows the actor update path reaching the combined VIMPO loss.
 
-- [ ] **Step 5: Validate OpenSpec and mark completed tasks**
+- [x] **Step 5: Validate OpenSpec and mark completed tasks**
 
 Run:
 `openspec validate add-vimpo-critic-mode --type change --strict --json --no-interactive`
@@ -1392,7 +1392,7 @@ After matching each checkbox to test evidence, change the corresponding entries 
 checked only after confirming the native ragged SGLang endpoint and non-FSDP backends
 remain follow-up scope.
 
-- [ ] **Step 6: Review the final diff and commit verification artifacts**
+- [x] **Step 6: Review the final diff and commit verification artifacts**
 
 Run:
 `git status --short && git diff --check && git diff --stat c95b9c210a8fd77b7c4b6a2eb1fe1632bd0db8e8`
