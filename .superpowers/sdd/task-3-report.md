@@ -1,47 +1,29 @@
-# Task 3 Fix Report
+# Task 3 Report: Episode-Atomic VIMPO Batching
 
-## Status
-DONE
+> Reconstructed 2026-07-22 by the Task 9 implementer after the uncommitted
+> original was accidentally reverted during pre-commit churn cleanup. Facts
+> below are grounded in git history and
+> `openspec/changes/add-vimpo-critic-mode/.comet/subagent-progress.md`
+> (authoritative per-task detail); exact original wording is lost.
+
+## Status: DONE
+
+## Commit
+- Impl: `c5d19d32..b7af2d70` - `feat(tree-search): add episode-atomic VIMPO batching`
+- Checkoff: `4810d861` - `chore(vimpo): check off Task 3 (episode-atomic batching)`
+
+2 files changed, 231 insertions(+).
 
 ## Files Changed
-- `server/internal/service/diagnosis_tools.go`: Implemented GetTaskContext, added per-turn budget, updated comments on budget constants
-- `server/internal/service/diagnosis_tools_test.go`: Updated TestGetTaskContext with 4 subtests
-- `server/internal/service/interaction_dag.go`: Added GetIssueForTask to MessageStore interface, added compile check for MessageStore
-- `server/pkg/db/generated/issue.sql.go`: Added GetIssueForTask hand-written query
-
-## GetIssueForTask Query
-```sql
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.forked_from_issue_id, i.forked_at_seq, i.forked_at_task_id
-FROM issue i
-JOIN agent_task_queue atq ON atq.issue_id = i.id
-WHERE atq.id::text = $1::text
-```
-
-## TaskContext Goal/Gold Mapping
-- **Goal**: Uses issue.Description if present and non-empty; otherwise uses issue.Title
-- **GoldContext**: Uses issue.AcceptanceCriteria (converted to string) if present; otherwise empty string
-
-## Workspace-Scoping Approach
-1. Retrieve issue via GetIssueForTask
-2. Check if issue.WorkspaceID matches the requested workspaceID
-3. If not, return pgx.ErrNoRows
-
-## Test Additions
-- TestGetTaskContext now includes:
-  - Returns task context with description as goal and acceptance_criteria as gold
-  - Returns task context with title as goal when description is empty
-  - Returns pgx.ErrNoRows for cross-workspace access
-  - Returns error when task not found
-
-## Commit Hash
-1392ac75ef2b443266f725b731b37b523fd02a2e
+- `customized_areal/tree_search/training/vimpo_batching.py` (+128, new):
+  episode-atomic VIMPO batch construction.
+- `customized_areal/tree_search/tests/test_vimpo_batching.py` (+103, new)
 
 ## Test Summary
-- TestGetSegmentMessages: 3/3 pass
-- TestGetInteractionDAG: 1/1 pass
-- TestGetTaskContext: 4/4 pass
-- go vet: clean
-- go build: clean
+New tests in `test_vimpo_batching.py` passed at checkoff (exact pass counts
+lost with the original report). Task review: approved, clean, 1 Minor
+deferred. OpenSpec items 4.4, 4.5 (section 4 done).
 
 ## Concerns
-- The per-turn budget is implemented but not tested due to test setup constraints (segment.EndSeq was hardcoded to 5 in the test data)
+- Deferred Minor: `vimpo_turn_index` validation reads `[row, 0]` only
+  (convention, not a bug) - tracked in `.comet/subagent-progress.md`.

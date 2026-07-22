@@ -376,6 +376,10 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     def _compute_vimpo_advantages(
         self, data: dict[str, Any], meta: Any = None
     ) -> dict[str, Any]:
+        # Step 0: re-index per-query episode ids to batch-unique ids (the
+        # workflow's counter resets per query, so identical indices from
+        # different queries collide after the cross-query concat).
+        data = self._reindex_vimpo_episodes(data, meta)
         # Step 1: validate frozen-reference identity (MP head only).
         if self._is_reference_scoring_head():
             self.reference_scorer.validate_identity(self._expected_reference_identity())
@@ -394,6 +398,57 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # Step 4: assemble reference logps + centered reward + advantage.
         enriched = self._assemble_vimpo_batch(data, stats, scores)
         return enriched
+
+    @staticmethod
+    def _reindex_vimpo_episodes(
+        data: dict[str, Any], meta: Any = None
+    ) -> dict[str, Any]:
+        """Re-index per-query ``vimpo_episode_index`` to batch-unique ids.
+
+        ``annotate_vimpo_episode_metadata`` runs once per query (its counter
+        resets every call), so identical episode indices from different
+        queries collide after the cross-query concat. ``vimpo_query_index``
+        cannot disambiguate: it is also emitted per query and is therefore 0
+        on every row of the batch. The concat metadata's per-dict row counts
+        (``meta.traj_group_sizes``) mark the true query boundaries - each
+        input dict is one query's ``_finalize_episode`` output. Within a
+        group the emitted indices are already unique per episode, so
+        offsetting each group by the running episode count yields compact
+        batch-unique ids. Every downstream consumer (the reverse-lambda
+        advantage recurrence, the episode-atomic batcher, the loss) then
+        sees collision-free episode identity from this single canonical
+        re-index. Rows are shifted uniformly, padded columns included; all
+        consumers read valid positions only. ``vimpo_query_index`` (when
+        present) is rewritten to the group index so the
+        (query, episode) pair is batch-unique again.
+        """
+        if "vimpo_episode_index" not in data:
+            return data
+        episode_index = data["vimpo_episode_index"]
+        attention_mask = data["attention_mask"].bool()
+        group_sizes = getattr(meta, "traj_group_sizes", None)
+        if not group_sizes:
+            group_sizes = [episode_index.shape[0]]
+        data = dict(data)
+        new_index = episode_index.clone()
+        new_query_index = (
+            data["vimpo_query_index"].clone() if "vimpo_query_index" in data else None
+        )
+        offset = 0
+        row = 0
+        for group_index, size in enumerate(group_sizes):
+            rows = slice(row, row + size)
+            valid_values = episode_index[rows][attention_mask[rows]]
+            if valid_values.numel() > 0:
+                new_index[rows] = episode_index[rows] + offset
+                offset += int(valid_values.max().item()) + 1
+            if new_query_index is not None:
+                new_query_index[rows] = group_index
+            row += size
+        data["vimpo_episode_index"] = new_index
+        if new_query_index is not None:
+            data["vimpo_query_index"] = new_query_index
+        return data
 
     def _record_snapshot_scalars(
         self, stats: VIMPOCandidateStats, latency_ms: float | None
@@ -493,16 +548,20 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         batch["vimpo_candidate_ids"] = stats.candidate_ids
         batch["vimpo_ref_sample_logp"] = ref_sample_logp
         batch["vimpo_ref_candidate_logp"] = ref_candidate_logp
+        # Forward the workflow's VIMPO metadata. ``vimpo_episode_index`` was
+        # re-indexed to batch-unique ids by ``_reindex_vimpo_episodes``;
+        # ``vimpo_centered_reward`` is the spec'd query-local centered
+        # terminal target computed by ``annotate_vimpo_episode_metadata``
+        # (mean over distinct episodes sharing the query) and MUST NOT be
+        # recomputed here - a batch-global mean would violate the contract.
         for key in (
             "vimpo_episode_index",
             "vimpo_turn_index",
             "vimpo_expected_turn_count",
+            "vimpo_centered_reward",
         ):
             if key in data:
                 batch[key] = data[key]
-        batch["vimpo_centered_reward"] = self._compute_centered_reward(
-            data, predict_mask
-        )
         # Invoke the advantage computer (writes vimpo_candidate_kl,
         # vimpo_retained_mass, advantages).
         raw_advantages = self._raw_vimpo_advantages(batch)
@@ -604,32 +663,11 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         for tensor in tensors:
             dist.broadcast(tensor, src=mp_head, group=self.mp_group)
 
-    def _compute_centered_reward(
-        self,
-        data: dict[str, Any],
-        predict_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Center the terminal task reward by the batch-mean baseline.
-
-        VIMPO's terminal reward is shared across all positions of an episode.
-        The centered reward (``reward - mean(reward over the group)``) is the
-        task-reward component of the terminal value target, broadcast to every
-        position's ``[B, S]`` shape.
-        """
-        rewards = data.get("rewards")
-        if rewards is None:
-            return torch.zeros(
-                predict_mask.shape, dtype=torch.float32, device=predict_mask.device
-            )
-        rewards = rewards.float()
-        centered = rewards - rewards.mean()
-        if centered.ndim == 1:
-            return centered.unsqueeze(-1).expand(*predict_mask.shape)
-        return centered.expand(*predict_mask.shape)
-
     # -- VIMPO update orchestration -----------------------------------
 
     def _vimpo_update(self, data: dict[str, Any], meta: Any = None) -> None:
+        # NOTE: calling train() is critical to enabling gradient checkpointing
+        self.train()
         # Step 1: validate every required key BEFORE any optimizer mutation.
         self._validate_vimpo_batch(data)
         # Step 2: log batch shape info. Denominators are registered elsewhere:

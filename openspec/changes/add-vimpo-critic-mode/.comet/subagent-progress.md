@@ -39,30 +39,19 @@
 
 ## Current task
 
-- Plan task: Task 9 - Full Regression, Graph Refresh, and Comet Evidence (FINAL task)
-- OpenSpec items: 6.5, 7.1
-- Stage: TASK-REVIEW dispatched (bg, round 0/1) 2026-07-22. Implementer
-  DONE_WITH_CONCERNS, commit e465aad6 (tasks.md 6.5+7.1 checked by implementer per
-  brief; full suite 10 failed \[all pre-existing, byte-identical at base 19c4aaf7\]/593
-  passed/5 skipped; ruff clean on VIMPO files; pre-commit green on VIMPO file set;
-  openspec validate --strict 1/1; graphify BLOCKED-documented: CLI absent, manual
-  call-chain check instead). Risk signal: DONE_WITH_CONCERNS -> reviewer required.
-  Incident recorded: implementer accidentally reverted 4 gitignored .superpowers/sdd
-  scratch files during pre-commit churn cleanup; progress.md restored, task-1/2/3
-  reports reconstructed (labeled); authoritative Comet state + git history intact;
-  scratch files not in commit. Coordinator verified: commit scope = hook formatting +
-  checkoff only; tasks.md now 0 unchecked (28/28). First dispatch failed mid-run on a
-  provider 403 quota error; resumed same agent (context retained) 2026-07-22.
-- Brief: `.superpowers/sdd/task-9-brief.md` | Report:
-  `.superpowers/sdd/task-9-report.md`
-- Baseline given to implementer: 9 pre-existing uvloop/Py3.12 failures (+1 assembler
-  ordering), 2 hardware-gated skips; anything beyond = BLOCKED. Env substitutions:
-  venv-test pytest/ruff, pre-commit via venv-test or documented equivalent, graphify via
-  PATH or documented blocker.
-- Deferred to final review: T7 Minors #4/#5 (weak trainer tests); IMPORTANT-deferrable
-  stock-SGLang /get_model_info contract gap (vocab_size/tokenizer fields omitted; GET vs
-  POST) - needs design decision or e2e validation; T8: unexecuted 2-GPU integration test
-  (correct-by-construction).
+- Stage: FINAL-FIX dispatched (bg, round 1/1) 2026-07-22. Final lightweight review:
+  NOT READY TO MERGE - 3 CRITICAL (C1 zero-padded vimpo_* metadata trips row-constancy
+  checks on unequal-length batches; C2 per-query vimpo_episode_index collides across
+  queries -> silent cross-query advantage chaining + guaranteed multi-query crash; C3
+  actor silently overwrites spec'd query-local centered terminal target with
+  batch-global row-weighted mean) + 2 IMPORTANT (I1 missing self.train() in
+  _vimpo_update; I2 stock-SGLang /get_model_info GET-vs-POST + omitted-field identity
+  gap). Fix agent must also extend the CPU smoke test to multi-query + unequal-length
+  batches (regression net for C1-C3). Review handoff: .superpowers/sdd/final-review-1.md
+  | Fix report: .superpowers/sdd/task-10-report.md. Deferred Minor list triaged by
+  final review as follow-up-acceptable (T1-T7 items); concern (b) unexecuted 2-GPU test
+  upgraded: smoke-test extension now mandatory, done in this fix round. If re-review
+  fails -> BLOCKED, pause, hand to user.
 
 ## Completed tasks
 

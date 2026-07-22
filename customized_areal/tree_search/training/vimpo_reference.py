@@ -25,6 +25,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from areal.utils import logging
+
 __all__ = [
     "ReferenceIdentity",
     "ReferenceScore",
@@ -32,6 +34,8 @@ __all__ = [
     "SGLangVIMPOReferenceScorer",
     "VIMPOReferenceScorer",
 ]
+
+logger = logging.getLogger("VIMPOReference")
 
 
 # ---------------------------------------------------------------------------
@@ -148,10 +152,14 @@ class SGLangVIMPOReferenceScorer:
     # -- Identity validation ---------------------------------------------
 
     def validate_identity(self, expected: ReferenceIdentity) -> None:
-        """Fetch ``/get_model_info`` and compare every field + temperature + quantized."""
+        """Fetch ``/get_model_info`` and compare every field + temperature + quantized.
+
+        Stock SGLang routes ``/get_model_info`` as GET-only, so the request
+        uses GET (a POST would 405 against an unpatched server).
+        """
         if self._closed:
             raise RuntimeError("scorer is closed")
-        response = self._client.post(f"{self._base_url}/get_model_info", json={})
+        response = self._client.get(f"{self._base_url}/get_model_info")
         if response.status_code != 200:
             response.raise_for_status()
         info = response.json()
@@ -166,6 +174,11 @@ class SGLangVIMPOReferenceScorer:
         report a ``revision`` field in ``/get_model_info``, so pinning one
         would fail every real run. A non-empty expected revision is still
         compared exactly.
+
+        Fields the server OMITS (``None``) are unverifiable - stock SGLang
+        does not report vocabulary sizes or special-token IDs - so they are
+        skipped with a logged warning (same precedent as the revision
+        wildcard). Fields the server REPORTS must still match exactly.
         """
         pairs: list[tuple[str, Any, Any]] = [
             ("model_path", info.get("model_path"), expected.model_path),
@@ -182,6 +195,14 @@ class SGLangVIMPOReferenceScorer:
         if expected.revision:
             pairs.append(("revision", info.get("revision"), expected.revision))
         for field, server_val, expected_val in pairs:
+            if server_val is None:
+                logger.warning(
+                    "VIMPO reference /get_model_info omits %r; identity field "
+                    "is unverifiable and skipped (expected=%r)",
+                    field,
+                    expected_val,
+                )
+                continue
             if server_val != expected_val:
                 raise ValueError(
                     f"{field} mismatch: server={server_val!r} expected={expected_val!r}"

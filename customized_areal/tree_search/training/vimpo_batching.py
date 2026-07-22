@@ -32,11 +32,14 @@ def split_episode_atomic_batches(
     """Split ``data`` into micro-batches that never split a VIMPO episode.
 
     Episodes are identified by the per-row constant values in ``data[episode_key]``.
-    Each episode's rows must form a contiguous block in the padded batch and, when
-    ``vimpo_turn_index`` is present, must carry one-based turn indices
-    ``[1, 2, ..., n]`` in row order. Episodes are packed largest-first into the
-    least-loaded eligible micro-batch; an episode that cannot fit any micro-batch's
-    token budget raises ``ValueError``.
+    Row metadata is broadcast to every valid position but the batch is
+    right-padded with zeros, so constancy is checked over the valid
+    (``attention_mask``) positions only: the first valid element is the row's
+    value. Each episode's rows must form a contiguous block in the padded
+    batch and, when ``vimpo_turn_index`` is present, must carry one-based
+    turn indices ``[1, 2, ..., n]`` in row order. Episodes are packed
+    largest-first into the least-loaded eligible micro-batch; an episode
+    that cannot fit any micro-batch's token budget raises ``ValueError``.
     """
     if "attention_mask" not in data:
         raise ValueError("Input data must be padded and contain 'attention_mask' key.")
@@ -49,9 +52,10 @@ def split_episode_atomic_batches(
         raise ValueError("cannot split an empty VIMPO batch")
 
     # Group rows by episode. Each row must belong to exactly one episode.
+    # Metadata is right-padded with zeros; read valid positions only.
     episode_rows: dict[int, list[int]] = {}
     for row in range(batch_size):
-        values = torch.unique(data[episode_key][row])
+        values = torch.unique(data[episode_key][row][attention_mask[row]])
         if values.numel() != 1:
             raise ValueError(f"row {row} belongs to more than one VIMPO episode")
         episode_rows.setdefault(int(values[0]), []).append(row)
@@ -69,7 +73,8 @@ def split_episode_atomic_batches(
             )
         if has_turn_index:
             turn_per_row = [
-                int(data["vimpo_turn_index"][row, 0]) for row in rows_sorted
+                int(data["vimpo_turn_index"][row][attention_mask[row]][0])
+                for row in rows_sorted
             ]
             expected_turns = list(range(1, len(rows_sorted) + 1))
             if turn_per_row != expected_turns:

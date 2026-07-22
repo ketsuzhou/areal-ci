@@ -85,20 +85,27 @@ def _validate_finite(name: str, tensor: torch.Tensor) -> None:
         )
 
 
-def _validate_constant_per_row(name: str, tensor: torch.Tensor) -> None:
-    """For 2D+ tensors, assert every row is constant (broadcast metadata).
+def _validate_constant_per_row(
+    name: str, tensor: torch.Tensor, mask: torch.Tensor
+) -> None:
+    """For 2D+ tensors, assert every row is constant over its VALID positions.
 
     VIMPO per-row metadata (``vimpo_episode_index``, ``vimpo_turn_index``,
     ``vimpo_centered_reward``, ``vimpo_expected_turn_count``) is broadcast to
-    all positions in a row.  A row with differing values indicates a
-    batching bug; raise early so the loss math doesn't silently average
-    inconsistent values.
+    all valid positions in a row, but the batch is right-padded with zeros by
+    ``concat_padded_tensors``. Constancy is therefore checked over the masked
+    (valid predict) positions only: the first valid element is the row's
+    value. A row whose valid values differ indicates a batching bug; raise
+    early so the loss math doesn't silently average inconsistent values.
     """
     if tensor.ndim < 2:
         return
-    row_first = tensor[..., :1]
-    if not torch.all(tensor == row_first):
-        raise ValueError(f"VIMPO batch field {name!r} must be constant within each row")
+    for row in range(tensor.shape[0]):
+        valid = tensor[row][mask[row]]
+        if valid.numel() > 0 and not torch.all(valid == valid[0]):
+            raise ValueError(
+                f"VIMPO batch field {name!r} must be constant within each row"
+            )
 
 
 def validate_vimpo_episode_consistency(
@@ -227,7 +234,8 @@ def vimpo_loss_terms(
         if key in data:
             _validate_finite(key, data[key])
 
-    # --- Validate constant-per-row metadata (2D raw batch only) ---
+    # --- Validate constant-per-row metadata over valid positions (2D raw
+    # batch only; padded columns are zero-filled and excluded) ---
     for key in (
         "vimpo_episode_index",
         "vimpo_turn_index",
@@ -235,7 +243,7 @@ def vimpo_loss_terms(
         "vimpo_expected_turn_count",
     ):
         if key in data:
-            _validate_constant_per_row(key, data[key])
+            _validate_constant_per_row(key, data[key], mask)
 
     # --- Validate nonzero token count ---
     valid_token_count = mask.sum()

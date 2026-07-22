@@ -118,7 +118,6 @@ def test_actor_selected_candidates_and_sample_dedup_keep_order() -> None:
     seen: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        payload = __import__("json").loads(request.content)
         if request.url.path == "/get_model_info":
             return httpx.Response(
                 200,
@@ -134,6 +133,7 @@ def test_actor_selected_candidates_and_sample_dedup_keep_order() -> None:
                     "quantized": False,
                 },
             )
+        payload = __import__("json").loads(request.content)
         seen.append(payload)
         token_ids = payload["token_ids_logprob"]
         return httpx.Response(
@@ -214,6 +214,70 @@ def test_pinned_revision_mismatch_still_fails() -> None:
         scorer.validate_identity(
             ReferenceIdentity("/models/init", "other", 8, 8, 1, 2, 2)
         )
+    scorer.close()
+
+
+def test_get_model_info_uses_get_method() -> None:
+    """Stock SGLang routes /get_model_info as GET-only; the scorer must use GET."""
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/get_model_info":
+            methods.append(request.method)
+            if request.method != "GET":
+                return httpx.Response(405)
+            return httpx.Response(200, json=_IDENTITY_INFO)
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://ref")
+    scorer = SGLangVIMPOReferenceScorer(
+        "http://ref", timeout=2, max_concurrency=2, max_retries=0, client=client
+    )
+    scorer.validate_identity(_REF)
+    assert methods == ["GET"]
+    scorer.close()
+
+
+def test_omitted_identity_fields_pass_with_warning(monkeypatch) -> None:
+    """Fields the server OMITS (stock SGLang reports no vocab sizes or
+    special-token IDs) are unverifiable: validation passes with a logged
+    warning per omitted field instead of raising."""
+    from customized_areal.tree_search.training import vimpo_reference
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        vimpo_reference.logger,
+        "warning",
+        lambda msg, *args: warnings.append(msg % args),
+    )
+    # Stock-like payload: only model_path (+ serving metadata) is reported.
+    scorer = _identity_scorer(
+        revision=None,
+        vocab_size=None,
+        tokenizer_vocab_size=None,
+        bos_token_id=None,
+        eos_token_id=None,
+        pad_token_id=None,
+    )
+    scorer.validate_identity(ReferenceIdentity("/models/init", "", 8, 8, 1, 2, 2))
+    omitted = [w for w in warnings if "omits" in w]
+    assert len(omitted) == 5  # vocab_size, tokenizer_vocab_size, bos/eos/pad
+    scorer.close()
+
+
+def test_reported_but_wrong_field_still_fails() -> None:
+    """A field the server REPORTS must match exactly - omitting other fields
+    does not weaken the check on reported ones."""
+    scorer = _identity_scorer(
+        revision=None,
+        vocab_size=99,
+        tokenizer_vocab_size=None,
+        bos_token_id=None,
+        eos_token_id=None,
+        pad_token_id=None,
+    )
+    with pytest.raises(ValueError, match="vocab_size"):
+        scorer.validate_identity(ReferenceIdentity("/models/init", "", 8, 8, 1, 2, 2))
     scorer.close()
 
 

@@ -186,6 +186,8 @@ def _fake_vimpo_actor(events: list[str]) -> VIMPOFSDPPPOActor:
     actor.optimizer = _RecordingOptimizer()
     actor.mp_group = None
     actor.dp_group = None
+    # _vimpo_update calls self.train() (gradient-checkpointing contract).
+    actor.model = torch.nn.Linear(2, 2)
     stats = _fake_candidate_stats()
 
     def _snapshot(data: Any, *, top_k: int) -> VIMPOCandidateStats:
@@ -283,6 +285,63 @@ def test_ppo_update_uses_one_combined_train_call() -> None:
     actor.ppo_update([_complete_enriched_batch()])
     assert actor.train_vimpo_batch_calls == 1
     assert actor.train_batch_calls == 0
+
+
+def test_vimpo_update_enters_train_mode() -> None:
+    """_vimpo_update calls self.train() before any optimizer mutation - the
+    base contract notes this is critical to enabling gradient checkpointing."""
+    actor = _fake_vimpo_actor_with_engine()
+    actor.model.eval()
+    assert actor.model.training is False
+    actor.ppo_update([_complete_enriched_batch()])
+    assert actor.model.training is True
+
+
+def test_reindex_vimpo_episodes_makes_ids_batch_unique() -> None:
+    """Per-query episode ids (counter resets per query) are re-indexed to
+    batch-unique ids using the concat group boundaries, with constancy read
+    over valid (attention_mask) positions only."""
+    data = {
+        # Group 1: two rows of episode 0; group 2: one row of episode 0
+        # (collides with group 1's id). Padded columns carry zeros.
+        "vimpo_episode_index": torch.tensor(
+            [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=torch.long
+        ),
+        "vimpo_query_index": torch.zeros(3, 4, dtype=torch.long),
+        "attention_mask": torch.tensor(
+            [[1, 1, 1, 1], [1, 1, 0, 0], [1, 1, 1, 0]], dtype=torch.long
+        ),
+    }
+    meta = SimpleNamespace(traj_group_sizes=[2, 1])
+    out = VIMPOFSDPPPOActor._reindex_vimpo_episodes(data, meta)
+    episode = out["vimpo_episode_index"]
+    attention = data["attention_mask"].bool()
+    per_row = [int(episode[row][attention[row]][0]) for row in range(3)]
+    assert per_row == [0, 0, 1]
+    # vimpo_query_index is rewritten to the group index so the
+    # (query, episode) pair is batch-unique again.
+    query = out["vimpo_query_index"]
+    assert [int(query[row][0]) for row in range(3)] == [0, 0, 1]
+    # The input dict is not mutated.
+    assert int(data["vimpo_episode_index"][2][0]) == 0
+
+
+def test_reindex_vimpo_episodes_offsets_by_running_episode_count() -> None:
+    """A group with multiple episodes shifts later groups by its full count."""
+    data = {
+        "vimpo_episode_index": torch.tensor(
+            [[0, 0], [1, 1], [0, 0], [2, 2]], dtype=torch.long
+        ),
+        "attention_mask": torch.tensor(
+            [[1, 1], [1, 1], [1, 0], [1, 1]], dtype=torch.long
+        ),
+    }
+    meta = SimpleNamespace(traj_group_sizes=[2, 2])
+    out = VIMPOFSDPPPOActor._reindex_vimpo_episodes(data, meta)
+    episode = out["vimpo_episode_index"]
+    attention = data["attention_mask"].bool()
+    per_row = [int(episode[row][attention[row]][0]) for row in range(4)]
+    assert per_row == [0, 1, 2, 4]
 
 
 def test_destroy_closes_reference_scorer(monkeypatch) -> None:
