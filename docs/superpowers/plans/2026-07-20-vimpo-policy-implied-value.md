@@ -952,7 +952,7 @@ git commit -m "feat(tree-search): add combined VIMPO actor loss"
 - Consumes: Tasks 1–6 contracts and dynamic actor config attributes copied by `CustomizedPPOTrainer`.
 - Produces: `VIMPOFSDPPPOActor.compute_advantages`, `.ppo_update`, `.destroy`, controller construction, and VIMPO-only trainer selection.
 
-- [ ] **Step 1: Write failing actor orchestration tests with fake scorer/engine**
+- [x] **Step 1: Write failing actor orchestration tests with fake scorer/engine**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_actor.py
@@ -980,7 +980,7 @@ def test_ppo_update_uses_one_combined_train_call() -> None:
     assert engine.train_batch_calls == 0
 ```
 
-- [ ] **Step 2: Write failing trainer selection tests**
+- [x] **Step 2: Write failing trainer selection tests**
 
 ```python
 # customized_areal/tree_search/tests/test_vimpo_trainer.py
@@ -1000,13 +1000,13 @@ def test_vimpo_rejects_non_fsdp_before_actor_creation() -> None:
         trainer._create_train_engine(_actor_config(backend="megatron:d1"), _allocation("megatron"))
 ```
 
-- [ ] **Step 3: Run tests and verify the dedicated actor is absent**
+- [x] **Step 3: Run tests and verify the dedicated actor is absent**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py -q`
 
 Expected: FAIL because `VIMPOFSDPPPOActor` is not defined or selected.
 
-- [ ] **Step 4: Implement the dedicated actor without a global monkey patch**
+- [x] **Step 4: Implement the dedicated actor without a global monkey patch**
 
 ```python
 class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
@@ -1035,19 +1035,19 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
 
 `_compute_vimpo_advantages` validates identity, calls `compute_vimpo_candidate_stats`, builds one `ReferenceScoreRequest` per valid `(row, prediction_position)` using `input_ids[row, :position+1]`, scores only on the model-parallel head, aligns results by key, broadcasts tensors over `mp_group`, and invokes `VIMPOAdvantageComputer`. Record snapshot version before scoring. `_vimpo_update` validates every required key, logs token/episode denominators, outer-splits with `split_episode_atomic_batches`, and calls `train_vimpo_batch` once per complete PPO minibatch.
 
-- [ ] **Step 5: Wire trainer selection and lifecycle**
+- [x] **Step 5: Wire trainer selection and lifecycle**
 
 Import `AdvantageMode` in `training/trainer.py`. At the start of `_create_train_engine`, before distillation/Muon/clip-cov branches, validate `alloc.backend == "fsdp"`, copy every `vimpo_*` setting plus expected actor/tokenizer identity to `actor_config`, select `VIMPOFSDPPPOActor` (or a Muon wrapper that only patches optimizer construction), create its process group, and return it. Do not install the distillation or combined-critic monkey patches. Add lazy exports in both `engine/__init__.py` and the package root.
 
 Because base `PPOTrainer` creates `self.ref` only when `config.actor.kl_ctl > 0 and config.ref is not None`, document and test that a VIMPO run uses `actor.kl_ctl = 0` and `config.ref = None`. Assert `trainer.ref is None` and `trainer.critic is None` in a constructor-level fake test.
 
-- [ ] **Step 6: Run actor/trainer tests and existing patch regressions**
+- [x] **Step 6: Run actor/trainer tests and existing patch regressions**
 
 Run: `uv run pytest customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py customized_areal/tree_search/tests/test_critic_update.py customized_areal/tree_search/tests/test_trainer_integration_critic_gae.py -q`
 
 Expected: PASS; VIMPO uses no generic reference/critic engine and existing critic patches still install/restore normally.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add customized_areal/tree_search/training/actor.py customized_areal/tree_search/training/trainer.py customized_areal/tree_search/engine/__init__.py customized_areal/tree_search/__init__.py customized_areal/tree_search/tests/test_vimpo_actor.py customized_areal/tree_search/tests/test_vimpo_trainer.py

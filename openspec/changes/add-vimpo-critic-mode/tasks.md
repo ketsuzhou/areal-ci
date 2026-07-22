@@ -53,9 +53,9 @@
 - [x] 5.2 Add a VIMPO actor update path that preserves rewards/episode metadata, recomputes
   differentiable sampled-token policy log-probabilities, and performs one combined backward
   and optimizer step.
-- [ ] 5.3 Integrate actor candidate collection, frozen SGLang scoring, advantage construction,
+- [x] 5.3 Integrate actor candidate collection, frozen SGLang scoring, advantage construction,
   and VIMPO update ordering into `CustomizedPPOTrainer` while leaving existing modes intact.
-- [ ] 5.4 Ensure VIMPO does not require a positive PPO KL-reward coefficient, does not create a
+- [x] 5.4 Ensure VIMPO does not require a positive PPO KL-reward coefficient, does not create a
   learned critic, and fails before optimizer mutation on missing or invalid reference data.
 - [x] 5.5 Add loss/gradient tests for terminal residuals, episode averaging, KL/reference
   detachment, actor advantage detachment, PPO clipping, coefficient weighting, and fail-loud
@@ -63,7 +63,7 @@
 
 ## 6. Integration, Observability, and Verification
 
-- [ ] 6.1 Emit distributed VIMPO metrics for candidate KL, retained mass, terminal prediction,
+- [x] 6.1 Emit distributed VIMPO metrics for candidate KL, retained mass, terminal prediction,
   target/residual/RMSE, raw/normalized advantages, component losses, and combined loss.
 - [ ] 6.2 Add a CPU smoke test covering Config -> workflow metadata -> actor/reference stats ->
   advantage -> combined loss with fake FSDP/SGLang components.
