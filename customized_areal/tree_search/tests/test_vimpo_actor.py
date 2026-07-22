@@ -256,7 +256,12 @@ def test_compute_advantages_orders_snapshot_reference_then_advantage() -> None:
     events: list[str] = []
     actor = _fake_vimpo_actor(events)
     enriched = actor.compute_advantages([_vimpo_rollout_batch()])
-    assert events == ["validate_identity", "actor_snapshot", "reference_score", "advantage"]
+    assert events == [
+        "validate_identity",
+        "actor_snapshot",
+        "reference_score",
+        "advantage",
+    ]
     assert "vimpo_candidate_kl" in enriched[0]
     assert enriched[0]["advantages"].requires_grad is False
 

@@ -1210,18 +1210,18 @@ as leaf `SuperNode`s before insertion into `MCTSTreeStore`.
 
 | Module                                          | Responsibility                                                                                                                   |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `agents/multica_client.py`                     | Thin HTTP client for Multica's unified `env-dispatch` API.                                                                       |
+| `agents/multica_client.py`                      | Thin HTTP client for Multica's unified `env-dispatch` API.                                                                       |
 | `agents/swe_lego_issue_runner.py`               | Per-SWE-Lego-issue loop: create env-dispatch, open RL sessions, drive lanes, verify/reward terminal runs, and clean up projects. |
 | `agents/self_play_runner.py`                    | Self-play variant of the issue runner that dispatches a query-bank message instead of a SWE-Lego issue.                          |
 | `agents/verifier_agent/extensions/verifier-rl/` | TypeScript verifier-RL extension and RL gateway tests used by the verifier agent integration.                                    |
 
 ### Per-Agent External Model Runtime
 
-A non-training scratch message dispatch can attach an external model runtime
-to an individual squad agent via `per_agent_env.<agent_id>.runtime`. That
-agent's sandbox starts with the caller-supplied provider instead of the
-agent's configured runtime. The API key is sent to the server in the request
-and is never returned in responses, errors, or structured logs.
+A non-training scratch message dispatch can attach an external model runtime to an
+individual squad agent via `per_agent_env.<agent_id>.runtime`. That agent's sandbox
+starts with the caller-supplied provider instead of the agent's configured runtime. The
+API key is sent to the server in the request and is never returned in responses, errors,
+or structured logs.
 
 ```python
 await client.create_env_dispatch(
@@ -1244,18 +1244,18 @@ await client.create_env_dispatch(
 
 Semantics:
 
-- `runtime` is accepted only for `mode=scratch` + `dispatch_type=message` and
-  must not be attached to the `train_agent_id` entry. Branch dispatch, issue
-  dispatch, the training target, and a partial or invalid provider config are
-  all rejected before any rollout resource is created.
-- A runtime-only entry resolves to the `default` sandbox template; `template`
-  may also be set explicitly alongside `runtime` (template and `base_env_id`
-  remain mutually exclusive).
-- `base_url` must be an absolute HTTP(S) URL; `api_key` and `model` are
-  required and whitespace-trimmed before use.
-- Branch dispatch inherits the source binding's `sandbox_config` verbatim, so a
-  resumed agent keeps its runtime policy; a caller-supplied `runtime` override
-  on a branch dispatch is rejected.
+- `runtime` is accepted only for `mode=scratch` + `dispatch_type=message` and must not
+  be attached to the `train_agent_id` entry. Branch dispatch, issue dispatch, the
+  training target, and a partial or invalid provider config are all rejected before any
+  rollout resource is created.
+- A runtime-only entry resolves to the `default` sandbox template; `template` may also
+  be set explicitly alongside `runtime` (template and `base_env_id` remain mutually
+  exclusive).
+- `base_url` must be an absolute HTTP(S) URL; `api_key` and `model` are required and
+  whitespace-trimmed before use.
+- Branch dispatch inherits the source binding's `sandbox_config` verbatim, so a resumed
+  agent keeps its runtime policy; a caller-supplied `runtime` override on a branch
+  dispatch is rejected.
 - Rotate the provider key out-of-band and never commit it to source control.
 
 ### DAG Rollout Data Flow
@@ -1882,8 +1882,8 @@ The service at `vimpo_ref_base_url` **must**:
   sizes, and BOS/EOS/PAD IDs are validated against `/get_model_info` before every
   scoring round; any mismatch fails the step before the optimizer is touched),
 - return **temperature-one, full-softmax-normalized token-ID log-probabilities**
-  (`temperature: 1.0`, `token_ids_logprob`) for the actor's per-position top-k
-  candidate sets,
+  (`temperature: 1.0`, `token_ids_logprob`) for the actor's per-position top-k candidate
+  sets,
 - run **without quantization** in paper-faithful mode, and
 - **never receive weight updates** — it is a fixed deployment for the entire run.
 
@@ -1891,9 +1891,9 @@ The service at `vimpo_ref_base_url` **must**:
 
 - `vimpo_top_k < vocab_size` computes a **truncated candidate KL**: the forward KL is
   summed only over the actor's top-k candidate set (no renormalization). The missing
-  tail mass is an approximation gap — watch the `vimpo/retained_mass` metrics
-  (mean/min and p10/p50/p90 quantiles); a low retained mass means the truncated KL
-  materially underestimates the true KL and `vimpo_top_k` should be raised.
+  tail mass is an approximation gap — watch the `vimpo/retained_mass` metrics (mean/min
+  and p10/p50/p90 quantiles); a low retained mass means the truncated KL materially
+  underestimates the true KL and `vimpo_top_k` should be raised.
 - `vimpo_top_k == vocab_size` recovers the **exact** full-vocabulary KL
   (`vimpo/exact_kl` is reported as 1) but is expensive: every valid position is scored
   over the whole vocabulary.
@@ -1904,25 +1904,25 @@ The service at `vimpo_ref_base_url` **must**:
   actor creation.
 - `actor.kl_ctl` **may be zero** — VIMPO does not need a positive PPO KL-reward
   coefficient, and the trainer forces `kl_ctl=0` in VIMPO mode.
-- **No `ref` FSDP allocation should be configured** — the frozen reference lives in
-  the external SGLang service, not in the training cluster's allocation.
+- **No `ref` FSDP allocation should be configured** — the frozen reference lives in the
+  external SGLang service, not in the training cluster's allocation.
 
 ### Observability
 
 VIMPO emits distributed metrics via `stats_tracker`:
 
 - `vimpo/candidate_kl`, `vimpo/retained_mass` (+ `p10/p50/p90` quantiles),
-  `vimpo/raw_advantage`, `vimpo/normalized_advantage` — per-position distributions
-  over the `vimpo/valid_tokens` denominator.
+  `vimpo/raw_advantage`, `vimpo/normalized_advantage` — per-position distributions over
+  the `vimpo/valid_tokens` denominator.
 - `vimpo/terminal_prediction`, `vimpo/terminal_target`, `vimpo/terminal_residual` —
   per-episode distributions over the `vimpo/complete_episodes` denominator;
   `vimpo/terminal_rmse` is the scalar RMSE of the terminal value regression.
 - `vimpo/ppo_actor_loss`, `vimpo/value_loss`, `vimpo/combined_loss` — component and
   combined losses from the single two-denominator backward.
 - `vimpo/reference_latency_ms`, `vimpo/reference_retries`, `vimpo/effective_top_k`,
-  `vimpo/exact_kl`, `vimpo/snapshot_policy_version` — reference-service and
-  snapshot scalars.
+  `vimpo/exact_kl`, `vimpo/snapshot_policy_version` — reference-service and snapshot
+  scalars.
 
-Note: `vimpo/terminal_rmse` and the retained-mass `p10/p50/p90` quantiles are
-computed per rank and then averaged across ranks, so they approximate (rather
-than exactly equal) the globally pooled RMSE/quantiles.
+Note: `vimpo/terminal_rmse` and the retained-mass `p10/p50/p90` quantiles are computed
+per rank and then averaged across ranks, so they approximate (rather than exactly equal)
+the globally pooled RMSE/quantiles.

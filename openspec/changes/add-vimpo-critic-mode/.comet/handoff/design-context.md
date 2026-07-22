@@ -7,7 +7,8 @@
 
 Generated-by: comet-handoff.sh
 
-OpenSpec remains the canonical capability spec. This handoff is a deterministic, source-traceable context pack, not an agent-authored summary.
+OpenSpec remains the canonical capability spec. This handoff is a deterministic,
+source-traceable context pack, not an agent-authored summary.
 
 ## openspec/changes/add-vimpo-critic-mode/proposal.md
 
@@ -76,9 +77,9 @@ memory.
 - Lines: 1-213
 - SHA256: 6ce093e2a8c071b2af765ae9736984fc039aef95d48add8213944fc88ae94e6b
 
-[TRUNCATED]
+\[TRUNCATED\]
 
-```md
+````md
 ## Context
 
 VIMPO derives a value recurrence from the optimality conditions of fixed-reference,
@@ -91,18 +92,18 @@ L_V = mean_i 0.5 * (
                   - stop_gradient(KL_t))
     - (R_i - mean_group(R))
 )^2.
-```
+````
 
 The same token term supplies a detached TD advantage, optionally accumulated with a
-GAE-style `lambda` return and whitened over valid response tokens, for a PPO-clipped actor
-loss. The combined update is `L_V + c_A * L_A`; there is no learned value network.
+GAE-style `lambda` return and whitened over valid response tokens, for a PPO-clipped
+actor loss. The combined update is `L_V + c_A * L_A`; there is no learned value network.
 
 The current tree-search stack computes TREE/GAE variants before PPO training and can
-optionally train a shared generative critic through a separate digit-regression step. That
-path is not reusable for VIMPO: it has different inputs, applies a separate optimizer step,
-and treats reward and actor credit differently. AReaL also keeps train and inference
-engines separate. The selected deployment therefore uses an FSDP actor and an
-inference-only SGLang server loaded once from the actor's initial checkpoint.
+optionally train a shared generative critic through a separate digit-regression step.
+That path is not reusable for VIMPO: it has different inputs, applies a separate
+optimizer step, and treats reward and actor credit differently. AReaL also keeps train
+and inference engines separate. The selected deployment therefore uses an FSDP actor and
+an inference-only SGLang server loaded once from the actor's initial checkpoint.
 
 The requested configurable top-k computation is not exact full-vocabulary KL unless
 `k == vocab_size`. It is the authors' candidate-set approximation: select the current
@@ -113,9 +114,9 @@ sum the unrenormalized policy-weighted log-ratio over only those candidates.
 
 **Goals:**
 
-- Add `AdvantageMode.VIMPO` and validated paper-oriented settings, including configurable
-  `vimpo_top_k` (default 128), `beta=5e-4`, `actor_coeff=5e-3`, `gamma=1`, `lambda=1`,
-  detached KL, advantage whitening, and squared terminal loss.
+- Add `AdvantageMode.VIMPO` and validated paper-oriented settings, including
+  configurable `vimpo_top_k` (default 128), `beta=5e-4`, `actor_coeff=5e-3`, `gamma=1`,
+  `lambda=1`, detached KL, advantage whitening, and squared terminal loss.
 - Compute actor-selected top-k policy statistics in the customized FSDP path without
   moving full-vocabulary logits across RPC boundaries.
 - Score those exact candidate IDs with a frozen initial-policy SGLang service using
@@ -124,8 +125,9 @@ sum the unrenormalized policy-weighted log-ratio over only those candidates.
   terminal value loss plus PPO actor loss in one FSDP optimizer update.
 - Preserve a complete multi-turn episode as the unit of reward centering and terminal
   value aggregation.
-- Fail loudly on missing or malformed reference statistics and expose diagnostics for KL,
-  retained mass, terminal residual, advantage distribution, and both loss components.
+- Fail loudly on missing or malformed reference statistics and expose diagnostics for
+  KL, retained mass, terminal residual, advantage distribution, and both loss
+  components.
 
 **Non-Goals:**
 
@@ -152,15 +154,17 @@ VIMPO objective.
 
 ### D2. Use a frozen initial-model SGLang reference
 
-The reference is loaded from the same initial checkpoint and tokenizer as the actor, uses
-temperature 1, remains in evaluation mode, and never receives actor weight updates. It may
-run on a separate GPU or node, so the FSDP training allocation does not hold a second model.
+The reference is loaded from the same initial checkpoint and tokenizer as the actor,
+uses temperature 1, remains in evaluation mode, and never receives actor weight updates.
+It may run on a separate GPU or node, so the FSDP training allocation does not hold a
+second model.
 
-The SGLang adapter accepts response prefixes and ragged per-position actor candidate IDs,
-then returns sampled-token and candidate log-probabilities normalized by the full reference
-vocabulary. The first implementation may batch one prefix-state request per response
+The SGLang adapter accepts response prefixes and ragged per-position actor candidate
+IDs, then returns sampled-token and candidate log-probabilities normalized by the full
+reference vocabulary. The first implementation may batch one prefix-state request per
+response
 
-```
+````
 
 Full source: openspec/changes/add-vimpo-critic-mode/design.md
 
@@ -254,17 +258,18 @@ Full source: openspec/changes/add-vimpo-critic-mode/design.md
 - [ ] 7.1 Verify during implementation review that configuration, candidate scoring,
   advantage computation, and combined training remain one inseparable VIMPO capability;
 
-```
+````
 
 Full source: openspec/changes/add-vimpo-critic-mode/tasks.md
 
 ## openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md
 
-- Source: openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md
+- Source:
+  openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md
 - Lines: 1-157
 - SHA256: cc92041f4c846474e0c4bc42afc913c826689ec6488838faa0c1984b10e49290
 
-[TRUNCATED]
+\[TRUNCATED\]
 
 ```md
 ## ADDED Requirements
@@ -350,4 +355,5 @@ capped at vocabulary size, and `k == vocabulary_size` SHALL recover exact forwar
 
 ```
 
-Full source: openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md
+Full source:
+openspec/changes/add-vimpo-critic-mode/specs/vimpo-policy-implied-value/spec.md

@@ -117,9 +117,7 @@ def test_vimpo_trainer_creates_no_ref_or_critic(monkeypatch) -> None:
     """
     from areal.trainer.rl_trainer import PPOTrainer
 
-    def _stub_ppo_init(
-        self, config, train_dataset=None, valid_dataset=None
-    ) -> None:
+    def _stub_ppo_init(self, config, train_dataset=None, valid_dataset=None) -> None:
         self.config = config
         self.ref = None
         self.critic = None

@@ -296,9 +296,7 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         return self.actor.compute_logp(*args, **kwargs)
 
     @torch.no_grad()
-    def compute_advantages(
-        self, data: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def compute_advantages(self, data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return batched_call(self._compute_vimpo_advantages, data, pass_meta=True)
 
     def ppo_update(self, data: list[dict[str, Any]]) -> None:
@@ -321,9 +319,7 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         controller_cls = (
             PPOActorControllerV2 if config._version == "v2" else PPOActorController
         )
-        return controller_cls(
-            train_engine=cls, config=config, scheduler=scheduler
-        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
 
     # -- VIMPO advantage orchestration --------------------------------
 
@@ -382,13 +378,9 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     ) -> dict[str, Any]:
         # Step 1: validate frozen-reference identity (MP head only).
         if self._is_reference_scoring_head():
-            self.reference_scorer.validate_identity(
-                self._expected_reference_identity()
-            )
+            self.reference_scorer.validate_identity(self._expected_reference_identity())
         # Step 2: snapshot the actor's top-k candidates (all ranks; eval forward).
-        stats = self.compute_vimpo_candidate_stats(
-            data, top_k=self.config.vimpo_top_k
-        )
+        stats = self.compute_vimpo_candidate_stats(data, top_k=self.config.vimpo_top_k)
         # Step 3: build reference score requests and score (MP head only).
         scores: list[ReferenceScore] | None = None
         latency_ms: float | None = None
@@ -695,7 +687,9 @@ class MuonVIMPOFSDPPPOActor:
     :class:`VIMPOFSDPPPOActor`. VIMPO's loss/advantage path is untouched.
     """
 
-    def __new__(cls, config: PPOActorConfig, scorer: VIMPOReferenceScorer | None = None):
+    def __new__(
+        cls, config: PPOActorConfig, scorer: VIMPOReferenceScorer | None = None
+    ):
         from customized_areal.tree_search.engine import VIMPOFSDPPPOActor
 
         _patch_muon_from_actor_config(config)
@@ -711,9 +705,7 @@ class MuonVIMPOFSDPPPOActor:
         controller_cls = (
             PPOActorControllerV2 if config._version == "v2" else PPOActorController
         )
-        return controller_cls(
-            train_engine=cls, config=config, scheduler=scheduler
-        )
+        return controller_cls(train_engine=cls, config=config, scheduler=scheduler)
 
 
 def patch_ppo_actor_class_to_use_distill_loss() -> None:
