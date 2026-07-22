@@ -324,7 +324,9 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         The reference policy is ``pi_ref = pi_0`` (the actor's initial
         checkpoint), so the expected identity is the actor's own model/tokenizer
         identity. ``validate_identity`` compares every field against the SGLang
-        ``/get_model_info`` response before any scoring begins.
+        ``/get_model_info`` response before any scoring begins. ``revision``
+        is left empty: stock SGLang does not report one, and an empty expected
+        revision is treated as a wildcard by the scorer's comparison.
         """
         cached = getattr(self, "_vimpo_expected_identity", None)
         if cached is not None:
@@ -347,7 +349,7 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
             pad = pad if pad is not None else getattr(tok, "pad_token_id", None)
             bos = bos if bos is not None else getattr(tok, "bos_token_id", None)
             eos = eos if eos is not None else getattr(tok, "eos_token_id", None)
-        return ReferenceIdentity(
+        identity = ReferenceIdentity(
             model_path=path,
             revision="",
             vocab_size=vocab_size,
@@ -356,6 +358,8 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
             eos_token_id=eos,
             pad_token_id=pad,
         )
+        self._vimpo_expected_identity = identity
+        return identity
 
     def _is_reference_scoring_head(self) -> bool:
         """Only the model-parallel head builds requests and scores (one HTTP
@@ -524,7 +528,10 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     def _vimpo_update(self, data: dict[str, Any], meta: Any = None) -> None:
         # Step 1: validate every required key BEFORE any optimizer mutation.
         self._validate_vimpo_batch(data)
-        # Step 2: log token/episode denominators (OpenSpec 6.1).
+        # Step 2: log token/episode denominators (OpenSpec 6.1). Only n_seqs is
+        # registered here: the [B, S] vimpo_valid_tokens denominator is already
+        # registered by _assemble_vimpo_batch (double registration would
+        # double-count the exported SUM).
         mask = data["vimpo_predict_mask"].bool()
         episode_index = data["vimpo_episode_index"]
         n_valid_tokens = int(mask.sum().item())
@@ -532,7 +539,6 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         batch_size = data["attention_mask"].shape[0]
         stats_tracker.denominator(
             n_seqs=torch.ones(batch_size, dtype=torch.bool, device=data["attention_mask"].device),
-            vimpo_valid_tokens=mask.any(dim=-1),
         )
         logger.info(
             "VIMPO ppo_update: %d valid tokens, %d episodes, %d PPO minibatches",

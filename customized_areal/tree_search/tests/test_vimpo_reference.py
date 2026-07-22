@@ -189,6 +189,34 @@ def test_identity_mismatch_fails_before_scoring(field: str) -> None:
         )
 
 
+def test_empty_expected_revision_is_wildcard() -> None:
+    """An empty expected revision matches any server revision (regression: the
+    actor builds its expected identity with revision="" because stock SGLang
+    does not report one)."""
+    # Server reports a non-empty revision: empty expected revision must pass.
+    scorer = _identity_scorer()
+    scorer.validate_identity(ReferenceIdentity("/models/init", "", 8, 8, 1, 2, 2))
+    scorer.close()
+
+
+def test_empty_expected_revision_matches_server_omitting_revision() -> None:
+    """A real SGLang /get_model_info omits `revision`; empty expected revision
+    must still pass (None vs "" must not fail validation)."""
+    scorer = _identity_scorer(**{"revision": None})
+    scorer.validate_identity(ReferenceIdentity("/models/init", "", 8, 8, 1, 2, 2))
+    scorer.close()
+
+
+def test_pinned_revision_mismatch_still_fails() -> None:
+    """A non-empty expected revision is still compared exactly."""
+    scorer = _identity_scorer(revision="main")
+    with pytest.raises(ValueError, match="revision"):
+        scorer.validate_identity(
+            ReferenceIdentity("/models/init", "other", 8, 8, 1, 2, 2)
+        )
+    scorer.close()
+
+
 # ---------------------------------------------------------------------------
 # Failure-mode tests (also mandated by the brief)
 # ---------------------------------------------------------------------------

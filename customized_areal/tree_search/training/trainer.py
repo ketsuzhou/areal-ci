@@ -159,6 +159,10 @@ class CustomizedPPOTrainer(PPOTrainer):
                 MuonVIMPOFSDPPPOActor,
             )
 
+            # Copy muon_* attrs onto actor_config: MuonVIMPOFSDPPPOActor.__new__
+            # reads them via _patch_muon_from_actor_config (optimizer.type was
+            # already set by the init-time _patch_muon_optimizer).
+            self._set_muon_actor_attrs(actor_config)
             actor_cls = MuonVIMPOFSDPPPOActor
         else:
             actor_cls = VIMPOFSDPPPOActor
@@ -168,7 +172,8 @@ class CustomizedPPOTrainer(PPOTrainer):
             actor = actor_cls(config=actor_config)
         actor.create_process_group(parallel_strategy=alloc.parallel)
         logger.info(
-            "Created VIMPOFSDPPPOActor (top_k=%d, beta=%g, ref=%s)",
+            "Created %s (top_k=%d, beta=%g, ref=%s)",
+            actor_cls.__name__,
             self.tree_search_config.vimpo_top_k,
             self.tree_search_config.vimpo_beta,
             self.tree_search_config.vimpo_ref_base_url,

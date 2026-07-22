@@ -163,6 +163,40 @@ def test_vimpo_trainer_creates_no_ref_or_critic(monkeypatch) -> None:
     assert trainer.tree_search_config.advantage_mode is AdvantageMode.VIMPO
 
 
+def test_vimpo_muon_selects_muon_actor_and_copies_muon_attrs(monkeypatch) -> None:
+    """Muon+VIMPO selects MuonVIMPOFSDPPPOActor and copies muon_* attrs onto the
+    actor config (regression: the VIMPO branch used to skip
+    _set_muon_actor_attrs, so MuonVIMPOFSDPPPOActor.__new__ crashed reading
+    config.muon_momentum)."""
+    _stub_heavy_actor_init(monkeypatch)
+    monkeypatch.setattr(
+        "customized_areal.tree_search.training.trainer.is_single_controller",
+        lambda: False,
+    )
+    # Record the Muon patch instead of installing it (no FSDP/GPU here).
+    patch_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "customized_areal.optimizers.patch_fsdp_engine_for_muon",
+        lambda **kwargs: patch_calls.append(kwargs),
+    )
+    trainer = _uninitialized_trainer(
+        Config(
+            advantage_mode="vimpo",
+            vimpo_ref_base_url="http://ref",
+            use_muon_optimizer=True,
+        )
+    )
+    actor_config = _actor_config(backend="fsdp:d1")
+    actor = trainer._create_train_engine(actor_config, _allocation("fsdp"))
+    # MuonVIMPOFSDPPPOActor.__new__ delegates to VIMPOFSDPPPOActor; the
+    # recorded Muon patch call proves the Muon variant was selected.
+    assert actor.__class__.__name__ == "VIMPOFSDPPPOActor"
+    assert patch_calls, "Muon optimizer patch was not installed"
+    tree_config = trainer.tree_search_config
+    for attr in ("muon_momentum", "muon_adam_lr", "muon_ns_steps", "muon_nesterov"):
+        assert getattr(actor_config, attr) == getattr(tree_config, attr)
+
+
 def test_vimpo_branch_does_not_install_distill_or_critic_patches(
     monkeypatch,
 ) -> None:

@@ -44,7 +44,8 @@ class ReferenceIdentity:
     """Canonical identity of the frozen reference checkpoint.
 
     Every field is compared against ``/get_model_info``; any mismatch fails
-    ``validate_identity`` before scoring begins.
+    ``validate_identity`` before scoring begins. An empty ``revision`` is a
+    wildcard (stock SGLang does not report one) and is not compared.
     """
 
     model_path: str
@@ -155,10 +156,15 @@ class SGLangVIMPOReferenceScorer:
 
     @staticmethod
     def _compare_identity(info: dict[str, Any], expected: ReferenceIdentity) -> None:
-        """Raise ``ValueError`` naming the mismatched field."""
+        """Raise ``ValueError`` naming the mismatched field.
+
+        An empty expected ``revision`` is a wildcard: stock SGLang does not
+        report a ``revision`` field in ``/get_model_info``, so pinning one
+        would fail every real run. A non-empty expected revision is still
+        compared exactly.
+        """
         pairs: list[tuple[str, Any, Any]] = [
             ("model_path", info.get("model_path"), expected.model_path),
-            ("revision", info.get("revision"), expected.revision),
             ("vocab_size", info.get("vocab_size"), expected.vocab_size),
             (
                 "tokenizer_vocab_size",
@@ -169,6 +175,8 @@ class SGLangVIMPOReferenceScorer:
             ("eos_token_id", info.get("eos_token_id"), expected.eos_token_id),
             ("pad_token_id", info.get("pad_token_id"), expected.pad_token_id),
         ]
+        if expected.revision:
+            pairs.append(("revision", info.get("revision"), expected.revision))
         for field, server_val, expected_val in pairs:
             if server_val != expected_val:
                 raise ValueError(
