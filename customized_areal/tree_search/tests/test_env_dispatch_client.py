@@ -763,6 +763,7 @@ def test_debug_main_requires_deployment_coordinates(monkeypatch, capsys):
 
 def test_debug_run_passes_external_runtime_from_environment(monkeypatch, capsys):
     sentinel = "sentinel-external-key"
+    monkeypatch.setenv("MULTICA_EXTERNAL_PROVIDER", "anthropic")
     monkeypatch.setenv("MULTICA_EXTERNAL_BASE_URL", "https://provider.invalid/api/plan")
     monkeypatch.setenv("MULTICA_EXTERNAL_API_KEY", sentinel)
     monkeypatch.setenv("MULTICA_EXTERNAL_MODEL", "model-a")
@@ -810,6 +811,7 @@ def test_debug_run_passes_external_runtime_from_environment(monkeypatch, capsys)
     assert seen["per_agent_env"] == {
         "agent-1": {
             "runtime": {
+                "provider": "anthropic",
                 "base_url": "https://provider.invalid/api/plan",
                 "api_key": sentinel,
                 "model": "model-a",
@@ -820,6 +822,7 @@ def test_debug_run_passes_external_runtime_from_environment(monkeypatch, capsys)
 
 
 def test_debug_run_rejects_partial_external_runtime_environment(monkeypatch, capsys):
+    monkeypatch.setenv("MULTICA_EXTERNAL_PROVIDER", "anthropic")
     monkeypatch.setenv("MULTICA_EXTERNAL_BASE_URL", "https://provider.invalid/api/plan")
     monkeypatch.delenv("MULTICA_EXTERNAL_API_KEY", raising=False)
     monkeypatch.delenv("MULTICA_EXTERNAL_MODEL", raising=False)

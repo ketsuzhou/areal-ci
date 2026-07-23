@@ -536,20 +536,21 @@ def _debug_external_runtime_policy(
 ) -> dict[str, dict] | None:
     """Build a secret-bearing debug runtime policy from local environment only."""
     names = (
+        "MULTICA_EXTERNAL_PROVIDER",
         "MULTICA_EXTERNAL_BASE_URL",
         "MULTICA_EXTERNAL_API_KEY",
         "MULTICA_EXTERNAL_MODEL",
     )
-    base_url, api_key, model = tuple(
+    provider, base_url, api_key, model = tuple(
         (os.environ.get(name) or "").strip() for name in names
     )
-    configured = (base_url, api_key, model)
+    configured = (provider, base_url, api_key, model)
     if not any(configured):
         return None
     if not all(configured):
         raise RuntimeError(
-            "MULTICA_EXTERNAL_BASE_URL, MULTICA_EXTERNAL_API_KEY, and "
-            "MULTICA_EXTERNAL_MODEL must be set together"
+            "MULTICA_EXTERNAL_PROVIDER, MULTICA_EXTERNAL_BASE_URL, "
+            "MULTICA_EXTERNAL_API_KEY, and MULTICA_EXTERNAL_MODEL must be set together"
         )
     if train_agent_id:
         raise RuntimeError(
@@ -559,6 +560,7 @@ def _debug_external_runtime_policy(
     return {
         agent_id: {
             "runtime": {
+                "provider": provider,
                 "base_url": base_url,
                 "api_key": api_key,
                 "model": model,
