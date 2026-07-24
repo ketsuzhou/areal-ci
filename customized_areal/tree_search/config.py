@@ -58,10 +58,12 @@ class Config:
     vimpo_top_k: int = 128
     vimpo_whiten_advantages: bool = True
     vimpo_detach_kl: bool = True
+    vimpo_ref_backend: str = "sglang"
     vimpo_ref_base_url: str = ""
     vimpo_ref_timeout: float = 300.0
     vimpo_ref_max_concurrency: int = 8
     vimpo_ref_max_retries: int = 3
+    vimpo_ref_path: str = ""
     # Weight of the co-trained generative-critic value loss in the combined
     # actor+critic objective (``actor_PG + critic_loss_weight * critic_value_loss``)
     # when ``advantage_mode == GAE`` for DAG runs (Phase 3). Start small to limit
@@ -259,14 +261,31 @@ class Config:
                 raise ValueError(
                     "vimpo_detach_kl=False is not supported in VIMPO version 1"
                 )
-            if not self.vimpo_ref_base_url.startswith(("http://", "https://")):
-                raise ValueError("vimpo_ref_base_url is required and must be HTTP(S)")
-            if not math.isfinite(self.vimpo_ref_timeout) or self.vimpo_ref_timeout <= 0:
-                raise ValueError("vimpo_ref_timeout must be finite and > 0")
-            if self.vimpo_ref_max_concurrency <= 0:
-                raise ValueError("vimpo_ref_max_concurrency must be > 0")
-            if self.vimpo_ref_max_retries < 0:
-                raise ValueError("vimpo_ref_max_retries must be >= 0")
+            if self.vimpo_ref_backend not in ("sglang", "local"):
+                raise ValueError(
+                    "vimpo_ref_backend must be 'sglang' or 'local', got "
+                    f"{self.vimpo_ref_backend!r}"
+                )
+            if self.vimpo_ref_backend == "sglang":
+                if not self.vimpo_ref_base_url.startswith(("http://", "https://")):
+                    raise ValueError(
+                        "vimpo_ref_base_url is required and must be HTTP(S) "
+                        "when vimpo_ref_backend='sglang'"
+                    )
+                if (
+                    not math.isfinite(self.vimpo_ref_timeout)
+                    or self.vimpo_ref_timeout <= 0
+                ):
+                    raise ValueError("vimpo_ref_timeout must be finite and > 0")
+                if self.vimpo_ref_max_concurrency <= 0:
+                    raise ValueError("vimpo_ref_max_concurrency must be > 0")
+                if self.vimpo_ref_max_retries < 0:
+                    raise ValueError("vimpo_ref_max_retries must be >= 0")
+            elif self.vimpo_ref_path and not os.path.isdir(self.vimpo_ref_path):
+                raise ValueError(
+                    "vimpo_ref_path must be an existing directory when set, got "
+                    f"{self.vimpo_ref_path!r}"
+                )
             if self.loss_mode is not LossMode.GRPO:
                 raise ValueError("VIMPO requires loss_mode='grpo'")
             if self.enable_generative_critic:

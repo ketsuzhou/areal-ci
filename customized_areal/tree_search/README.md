@@ -1849,9 +1849,15 @@ When `tree_search.advantage_mode=vimpo`, the actor is trained with **VIMPO**
 (Variational Implicit Multi-turn Policy Optimization): a critic-free objective whose
 per-position TD signal is the policy-implied terminal value
 `beta * (log pi(y|x) - log pi_ref(y|x) - KL_topK(pi || pi_ref))`, where `pi_ref` is a
-**frozen copy of the actor's initial checkpoint** served by a dedicated SGLang service.
-There is no learned critic, no FSDP reference engine, and no PPO KL-reward coefficient
-requirement (`actor.kl_ctl` may be zero).
+**frozen copy of the actor's initial checkpoint**. There is no learned critic and no PPO
+KL-reward coefficient requirement (`actor.kl_ctl` may be zero).
+
+The frozen reference has two interchangeable backends, selected by `vimpo_ref_backend`:
+
+| Backend                         | `vimpo_ref_backend` | Deployment                                                            | GPU cost in the training allocation                                                                                                         |
+| ------------------------------- | ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Remote SGLang service (default) | `sglang`            | Dedicated SGLang server serving the initial checkpoint                | None — the reference lives outside the training cluster                                                                                     |
+| Local FSDP reference            | `local`             | A second FSDP engine inside the actor process, sharded like the actor | Near zero — sharded parameters stay on CPU (`fsdp.offload_params=True`) and stream to GPU layer-by-layer during the no-grad scoring forward |
 
 ### Runnable configuration fragment
 
@@ -1867,13 +1873,18 @@ tree_search:
   vimpo_top_k: 128
   vimpo_whiten_advantages: true
   vimpo_detach_kl: true
+  # --- reference backend: remote SGLang (default) ---
+  vimpo_ref_backend: sglang
   vimpo_ref_base_url: http://vimpo-reference:30000
   vimpo_ref_timeout: 300.0
   vimpo_ref_max_concurrency: 8
   vimpo_ref_max_retries: 3
+  # --- reference backend: local FSDP (alternative) ---
+  # vimpo_ref_backend: local
+  # vimpo_ref_path: ""   # empty = actor's initial checkpoint (actor.path)
 ```
 
-### Frozen-reference deployment requirements
+### Frozen-reference deployment requirements (sglang backend)
 
 The service at `vimpo_ref_base_url` **must**:
 
@@ -1886,6 +1897,46 @@ The service at `vimpo_ref_base_url` **must**:
   sets,
 - run **without quantization** in paper-faithful mode, and
 - **never receive weight updates** — it is a fixed deployment for the entire run.
+
+### Local reference backend (vimpo_ref_backend=local)
+
+With `vimpo_ref_backend: local` no external service is needed. The VIMPO actor creates a
+second, frozen `MultiCandidateFSDPEngine` inside the same process that:
+
+- loads **once** from `vimpo_ref_path` (default: the actor's initial checkpoint
+  `actor.path`, which stays the initial checkpoint even under recovery) with
+  `fsdp.memory_efficient_load=True`, so the full model never materializes on GPU — not
+  even at init;
+- shards over the **same ranks and parallel strategy** as the actor, with
+  `fsdp.offload_params=True`: sharded parameters reside in **host memory** and stream to
+  GPU layer-by-layer during each no-grad scoring forward, then return to CPU (FSDP2
+  `CPUOffloadPolicy`);
+- carries **no optimizer and no LoRA**, runs in eval mode with gradients disabled, and
+  is never weight-updated;
+- fails fast at construction if the reference checkpoint's vocabulary is incompatible
+  with the actor's, and surfaces load failures at `initialize()` — both before any
+  optimizer mutation, preserving the fail-before-update contract.
+
+Per training step, `compute_advantages` runs two passes over one shared micro-batch
+list: (1) the actor eval forward snapshots top-k candidates and stashes their packed
+token IDs; (2) the reference engine replays the same micro-batches and gathers reference
+log-probs (full-vocabulary log-softmax normalizer, temperature-1 semantics) for exactly
+those candidate IDs plus the sampled token. Both flat and packed-tree batches are
+supported; SP/TP layouts match the actor's.
+
+**Resource expectations and limits:**
+
+- Host RAM must hold one full sharded copy of the model (total across ranks ≈ model size
+  in the storage dtype).
+- Scoring is slower than a GPU-resident or SGLang reference: parameters cross the
+  PCIe/NVLink link once per micro-batch. The cost is reported as
+  `vimpo/reference_latency_ms`.
+- GPU memory needed during scoring is only the current layer plus one micro-batch of
+  activations/logits, so arbitrarily large models are supported as long as the host RAM
+  constraint is met.
+- `vimpo_top_k == vocab_size` (exact KL) additionally needs one full-vocabulary
+  `[micro_batch_tokens, vocab]` float32 logits buffer per micro-batch — same as the
+  sglang backend's actor pass.
 
 ### Top-k truncation semantics
 
@@ -1904,8 +1955,10 @@ The service at `vimpo_ref_base_url` **must**:
   actor creation.
 - `actor.kl_ctl` **may be zero** — VIMPO does not need a positive PPO KL-reward
   coefficient, and the trainer forces `kl_ctl=0` in VIMPO mode.
-- **No `ref` FSDP allocation should be configured** — the frozen reference lives in the
-  external SGLang service, not in the training cluster's allocation.
+- **No `ref` FSDP allocation should be configured** — with `vimpo_ref_backend=sglang`
+  the frozen reference lives in the external SGLang service; with
+  `vimpo_ref_backend=local` it is a private second engine nested inside the VIMPO actor.
+  Neither uses the training cluster's `ref` allocation.
 
 ### Observability
 

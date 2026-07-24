@@ -57,3 +57,41 @@ def test_vimpo_rejects_invalid_configuration(kwargs: dict, message: str) -> None
 
 def test_non_vimpo_mode_does_not_require_reference_url() -> None:
     assert Config().advantage_mode is AdvantageMode.TREE
+
+
+def test_vimpo_local_backend_does_not_require_reference_url() -> None:
+    cfg = Config(advantage_mode="vimpo", vimpo_ref_backend="local")
+    assert cfg.vimpo_ref_backend == "local"
+    assert cfg.vimpo_ref_path == ""
+
+
+def test_vimpo_local_backend_accepts_existing_ref_path(tmp_path) -> None:
+    cfg = Config(
+        advantage_mode="vimpo",
+        vimpo_ref_backend="local",
+        vimpo_ref_path=str(tmp_path),
+    )
+    assert cfg.vimpo_ref_path == str(tmp_path)
+
+
+def test_vimpo_rejects_unknown_ref_backend() -> None:
+    with pytest.raises(
+        ValueError, match="vimpo_ref_backend must be 'sglang' or 'local'"
+    ):
+        Config(advantage_mode="vimpo", vimpo_ref_backend="vllm")
+
+
+def test_vimpo_local_backend_rejects_missing_ref_path() -> None:
+    with pytest.raises(
+        ValueError, match="vimpo_ref_path must be an existing directory"
+    ):
+        Config(
+            advantage_mode="vimpo",
+            vimpo_ref_backend="local",
+            vimpo_ref_path="/nonexistent/vimpo/ref",
+        )
+
+
+def test_vimpo_sglang_backend_still_validates_url_when_explicit() -> None:
+    with pytest.raises(ValueError, match="vimpo_ref_base_url is required"):
+        Config(advantage_mode="vimpo", vimpo_ref_backend="sglang")

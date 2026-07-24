@@ -221,10 +221,12 @@ VIMPO_ACTOR_CONFIG_FIELDS = (
     "vimpo_top_k",
     "vimpo_whiten_advantages",
     "vimpo_detach_kl",
+    "vimpo_ref_backend",
     "vimpo_ref_base_url",
     "vimpo_ref_timeout",
     "vimpo_ref_max_concurrency",
     "vimpo_ref_max_retries",
+    "vimpo_ref_path",
 )
 
 
@@ -234,8 +236,11 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     Extends ``MultiCandidateFSDPEngine`` (like ``MultiCandidateFSDPPPOActor``)
     and owns two VIMPO-specific dependencies:
 
-    - a **frozen SGLang reference scorer** (``pi_ref = pi_0``, the actor's
-      initial checkpoint, never weight-updated), and
+    - a **frozen reference** (``pi_ref = pi_0``, the actor's initial
+      checkpoint, never weight-updated), served either by a remote SGLang
+      scorer (``vimpo_ref_backend='sglang'``) or by a local second FSDP
+      engine with CPU-resident sharded parameters
+      (``vimpo_ref_backend='local'``), and
     - a :class:`VIMPOAdvantageComputer` (critic-free, policy-implied terminal
       value).
 
@@ -261,15 +266,28 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     ) -> None:
         super().__init__(config)
         self.actor = PPOActor(config, self)
-        self.reference_scorer: VIMPOReferenceScorer = (
-            scorer
-            or SGLangVIMPOReferenceScorer(
+        self.vimpo_ref_backend = getattr(config, "vimpo_ref_backend", "sglang")
+        self.reference_scorer: VIMPOReferenceScorer | None = None
+        self._ref_engine: MultiCandidateFSDPEngine | None = None
+        if scorer is not None:
+            self.reference_scorer = scorer
+        elif self.vimpo_ref_backend == "local":
+            # Local frozen reference: a second FSDP engine sharded like the
+            # actor whose parameters live on CPU (fsdp.offload_params=True)
+            # and stream to GPU layer-by-layer during the no-grad scoring
+            # forward. Weights are loaded once at initialize() and never
+            # change, so no per-step load/offload bookkeeping is needed.
+            self._ref_engine = MultiCandidateFSDPEngine(
+                self._build_ref_engine_config(config)
+            )
+            self._validate_ref_identity()
+        else:
+            self.reference_scorer = SGLangVIMPOReferenceScorer(
                 config.vimpo_ref_base_url,
                 timeout=config.vimpo_ref_timeout,
                 max_concurrency=config.vimpo_ref_max_concurrency,
                 max_retries=config.vimpo_ref_max_retries,
             )
-        )
         self.vimpo_advantage = VIMPOAdvantageComputer(
             beta=config.vimpo_beta,
             gamma=config.vimpo_gamma,
@@ -283,11 +301,46 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # terminal RMSE). Keys match the stats_tracker metric names.
         self.last_vimpo_metrics: dict[str, float] = {}
         logger.info(
-            "VIMPOFSDPPPOActor initialized (top_k=%d, beta=%g, ref=%s)",
+            "VIMPOFSDPPPOActor initialized (top_k=%d, beta=%g, ref_backend=%s, ref=%s)",
             config.vimpo_top_k,
             config.vimpo_beta,
-            config.vimpo_ref_base_url,
+            self.vimpo_ref_backend,
+            getattr(config, "vimpo_ref_base_url", ""),
         )
+
+    @staticmethod
+    def _build_ref_engine_config(config: PPOActorConfig) -> PPOActorConfig:
+        """Clone the actor config for the frozen local reference engine.
+
+        The reference loads from ``vimpo_ref_path`` (default: the actor's own
+        initial checkpoint ``config.path``), carries no optimizer, never uses
+        LoRA, and keeps its FSDP-sharded parameters on CPU
+        (``fsdp.offload_params=True``) with memory-efficient CPU loading so
+        the full model never materializes on GPU - even at init.
+        """
+        ref_config = copy.deepcopy(config)
+        ref_config.path = getattr(config, "vimpo_ref_path", "") or config.path
+        ref_config.optimizer = None
+        ref_config.use_lora = False
+        ref_config.init_from_scratch = False
+        ref_config.fsdp.offload_params = True
+        ref_config.fsdp.memory_efficient_load = True
+        return ref_config
+
+    def _validate_ref_identity(self) -> None:
+        """Fail fast if the local reference checkpoint is vocab-incompatible."""
+        actor_vocab = int(getattr(self.model_config, "vocab_size", 0) or 0)
+        ref_vocab = (
+            int(getattr(self._ref_engine.model_config, "vocab_size", 0) or 0)
+            if self._ref_engine is not None
+            else 0
+        )
+        if actor_vocab and ref_vocab and actor_vocab != ref_vocab:
+            raise ValueError(
+                "VIMPO local reference vocab_size mismatch: "
+                f"actor={actor_vocab} ref={ref_vocab} "
+                f"(ref path={self._ref_engine.config.path!r})"
+            )
 
     # -- PPO-facing surface (compute_logp delegates; the rest is VIMPO-specific) --
 
@@ -302,11 +355,35 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
     def ppo_update(self, data: list[dict[str, Any]]) -> None:
         batched_call(self._vimpo_update, data, unpack=False)
 
+    def create_process_group(self, parallel_strategy: Any = None) -> None:
+        super().create_process_group(parallel_strategy=parallel_strategy)
+        if self._ref_engine is not None:
+            # The reference engine shards over the same ranks/strategy; its
+            # process groups are independent of the actor's (same pattern as
+            # the upstream train/ref engine pair).
+            self._ref_engine.create_process_group(parallel_strategy=parallel_strategy)
+
+    def initialize(self, addr: str | None, ft_spec: Any, *args: Any, **kwargs: Any):
+        super().initialize(addr, ft_spec, *args, **kwargs)
+        if self._ref_engine is not None:
+            self._ref_engine.initialize(addr, ft_spec, *args, **kwargs)
+            # Frozen: eval mode (no dropout) and no gradient tracking.
+            self._ref_engine.model.eval()
+            for p in self._ref_engine.model.parameters():
+                p.requires_grad_(False)
+
     def destroy(self) -> None:
         try:
-            self.reference_scorer.close()
+            if self.reference_scorer is not None:
+                self.reference_scorer.close()
         except Exception as e:  # pragma: no cover - best-effort cleanup
             logger.warning("VIMPO reference scorer close failed (ignored): %s", e)
+        try:
+            ref_engine = getattr(self, "_ref_engine", None)
+            if ref_engine is not None:
+                ref_engine.destroy()
+        except Exception as e:  # pragma: no cover - best-effort cleanup
+            logger.warning("VIMPO reference engine destroy failed (ignored): %s", e)
         super().destroy()
 
     @classmethod
@@ -380,6 +457,27 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # workflow's counter resets per query, so identical indices from
         # different queries collide after the cross-query concat).
         data = self._reindex_vimpo_episodes(data, meta)
+        # ``getattr`` keeps test doubles (built via ``__new__``) on the
+        # default SGLang path.
+        if getattr(self, "vimpo_ref_backend", "sglang") == "local":
+            # Local frozen reference (all ranks): actor candidate pass + CPU
+            # resident FSDP reference pass, then attach ref tensors directly
+            # (no HTTP scorer, no broadcast). Reference identity was already
+            # validated at construction (vocab compatibility) and any load
+            # failure surfaced at initialize() - both before any optimizer
+            # mutation, preserving the fail-before-update contract.
+            start = time.perf_counter()
+            stats, ref_stats = self.compute_vimpo_stats_with_local_reference(
+                data, top_k=self.config.vimpo_top_k
+            )
+            latency_ms = (time.perf_counter() - start) * 1e3
+            self._record_snapshot_scalars(stats, latency_ms)
+            return self._assemble_vimpo_batch(
+                data,
+                stats,
+                None,
+                ref_tensors=(ref_stats.sampled_logp, ref_stats.candidate_logp),
+            )
         # Step 1: validate frozen-reference identity (MP head only).
         if self._is_reference_scoring_head():
             self.reference_scorer.validate_identity(self._expected_reference_identity())
@@ -398,6 +496,37 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         # Step 4: assemble reference logps + centered reward + advantage.
         enriched = self._assemble_vimpo_batch(data, stats, scores)
         return enriched
+
+    @torch.no_grad()
+    def compute_vimpo_stats_with_local_reference(
+        self,
+        data: list[dict[str, Any]] | dict[str, Any],
+        *,
+        top_k: int,
+    ) -> tuple[VIMPOCandidateStats, VIMPOCandidateStats]:
+        """Two-pass local-reference scoring: actor candidates + frozen ref logps.
+
+        Pass 1 runs the actor's eval forward over one prepared mb_list and
+        stashes each micro-batch's packed candidate IDs. Pass 2 replays the
+        same mb_list on the frozen reference engine (CPU-resident FSDP params
+        streamed per layer) and gathers reference log-probs for exactly those
+        candidates. Returns ``(actor_stats, ref_stats)``, both shaped
+        ``[B, S, ...]`` on every rank.
+        """
+        if self._ref_engine is None:
+            raise RuntimeError(
+                "compute_vimpo_stats_with_local_reference requires "
+                "vimpo_ref_backend='local' with an initialized reference engine"
+            )
+        mb_list, output_seqlens, batch_size = self._prepare_vimpo_mb(data)
+        packed_ids: list[Any] = []
+        actor_stats = self.run_vimpo_actor_pass(
+            mb_list, output_seqlens, batch_size, top_k=top_k, packed_ids_sink=packed_ids
+        )
+        ref_stats = self._ref_engine.run_vimpo_reference_pass(
+            mb_list, packed_ids, output_seqlens, batch_size, top_k=top_k
+        )
+        return actor_stats, ref_stats
 
     @staticmethod
     def _reindex_vimpo_episodes(
@@ -479,9 +608,10 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         }
         if latency_ms is not None:
             scalars["vimpo/reference_latency_ms"] = float(latency_ms)
-            scalars["vimpo/reference_retries"] = float(
-                getattr(self.reference_scorer, "retry_count", 0) or 0
-            )
+            if self.reference_scorer is not None:
+                scalars["vimpo/reference_retries"] = float(
+                    getattr(self.reference_scorer, "retry_count", 0) or 0
+                )
         stats_tracker.scalar(**scalars)
         self.last_vimpo_metrics = {
             **getattr(self, "last_vimpo_metrics", {}),
@@ -529,17 +659,26 @@ class VIMPOFSDPPPOActor(MultiCandidateFSDPEngine):
         data: dict[str, Any],
         stats: VIMPOCandidateStats,
         scores: list[ReferenceScore] | None,
+        ref_tensors: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> dict[str, Any]:
-        """Fill reference logps from scores, broadcast, and compute advantages."""
+        """Fill reference logps from scores, broadcast, and compute advantages.
+
+        When ``ref_tensors`` is provided (local reference backend), the
+        per-rank ``(ref_sample_logp, ref_candidate_logp)`` tensors are used
+        directly and the HTTP-scorer fill + MP-head broadcast are skipped.
+        """
         predict_mask = stats.predict_mask
-        ref_sample_logp = torch.zeros_like(stats.sampled_logp)
-        ref_candidate_logp = torch.zeros_like(stats.candidate_logp)
-        if scores is not None:
-            self._fill_reference_logps(
-                ref_sample_logp, ref_candidate_logp, stats, scores
-            )
-        # Broadcast reference tensors from the MP head to all ranks.
-        self._broadcast_vimpo_reference_tensors(ref_sample_logp, ref_candidate_logp)
+        if ref_tensors is not None:
+            ref_sample_logp, ref_candidate_logp = ref_tensors
+        else:
+            ref_sample_logp = torch.zeros_like(stats.sampled_logp)
+            ref_candidate_logp = torch.zeros_like(stats.candidate_logp)
+            if scores is not None:
+                self._fill_reference_logps(
+                    ref_sample_logp, ref_candidate_logp, stats, scores
+                )
+            # Broadcast reference tensors from the MP head to all ranks.
+            self._broadcast_vimpo_reference_tensors(ref_sample_logp, ref_candidate_logp)
         # Build the advantage batch.
         batch: dict[str, Any] = dict(data)
         batch["vimpo_predict_mask"] = predict_mask

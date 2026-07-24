@@ -172,11 +172,13 @@ class CustomizedPPOTrainer(PPOTrainer):
             actor = actor_cls(config=actor_config)
         actor.create_process_group(parallel_strategy=alloc.parallel)
         logger.info(
-            "Created %s (top_k=%d, beta=%g, ref=%s)",
+            "Created %s (top_k=%d, beta=%g, ref_backend=%s, ref=%s)",
             actor_cls.__name__,
             self.tree_search_config.vimpo_top_k,
             self.tree_search_config.vimpo_beta,
-            self.tree_search_config.vimpo_ref_base_url,
+            self.tree_search_config.vimpo_ref_backend,
+            self.tree_search_config.vimpo_ref_base_url
+            or self.tree_search_config.vimpo_ref_path,
         )
         return actor
 

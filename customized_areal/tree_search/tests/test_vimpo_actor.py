@@ -383,3 +383,96 @@ def test_retained_mass_quantiles_subsample_over_quantile_limit(monkeypatch) -> N
     actor.compute_advantages([_vimpo_rollout_batch()])
     # 2 valid tokens with ceiling 1 -> stride-2 subsample of 1 element.
     assert seen_numel == [1]
+
+
+# =============================================================================
+# Local reference backend (vimpo_ref_backend="local") orchestration tests
+# =============================================================================
+
+
+def _fake_ref_stats() -> VIMPOCandidateStats:
+    """Reference stats with distinctive values (vs ``_fake_candidate_stats``)."""
+    return VIMPOCandidateStats(
+        sampled_logp=torch.tensor([[-0.9, -0.8, 0.0, 0.0]], dtype=torch.float32),
+        candidate_ids=torch.tensor(
+            [[[10, 11], [12, 13], [-1, -1], [-1, -1]]], dtype=torch.long
+        ),
+        candidate_logp=torch.tensor(
+            [[[-0.9, -0.8], [-0.7, -0.6], [0.0, 0.0], [0.0, 0.0]]],
+            dtype=torch.float32,
+        ),
+        retained_mass=torch.tensor([[1.0, 1.0, 0.0, 0.0]], dtype=torch.float32),
+        predict_mask=torch.tensor([[True, True, False, False]]),
+    )
+
+
+def _fake_vimpo_actor_local(
+    events: list[str], *, fail_on_reference: bool = False
+) -> VIMPOFSDPPPOActor:
+    """Local-backend actor whose two-pass reference call records into ``events``."""
+    actor = VIMPOFSDPPPOActor.__new__(VIMPOFSDPPPOActor)
+    actor.config = _fake_config()
+    actor.vimpo_ref_backend = "local"
+    actor.reference_scorer = None
+    actor._ref_engine = object()  # sentinel: engine exists
+    actor.vimpo_advantage = _RecordingAdvantage(events)
+    actor.optimizer = _RecordingOptimizer()
+    actor.mp_group = None
+    actor.dp_group = None
+    actor.model = torch.nn.Linear(2, 2)
+    stats = _fake_candidate_stats()
+    ref_stats = _fake_ref_stats()
+
+    def _local_reference(
+        data: Any, *, top_k: int
+    ) -> tuple[VIMPOCandidateStats, VIMPOCandidateStats]:
+        if fail_on_reference:
+            raise RuntimeError("local reference forward failed")
+        events.append("local_reference")
+        return stats, ref_stats
+
+    actor.compute_vimpo_stats_with_local_reference = _local_reference  # type: ignore[method-assign]
+    return actor
+
+
+def test_local_backend_skips_scorer_and_broadcast() -> None:
+    """Local backend: no validate_identity/reference_score events, no MP-head
+    broadcast; ref tensors come straight from the local reference pass."""
+    events: list[str] = []
+    actor = _fake_vimpo_actor_local(events)
+    broadcast_calls: list[int] = []
+
+    def _record_broadcast(*tensors: Any) -> None:
+        broadcast_calls.append(1)
+
+    actor._broadcast_vimpo_reference_tensors = _record_broadcast  # type: ignore[method-assign]
+    scorer = _RecordingScorer(events)
+    # Even if a scorer were present, the local path must not call it.
+    actor.reference_scorer = scorer
+
+    enriched = actor.compute_advantages([_vimpo_rollout_batch()])
+
+    assert events == ["local_reference", "advantage"]
+    assert broadcast_calls == []
+    assert enriched[0]["vimpo_ref_sample_logp"][0, 0].item() == pytest.approx(-0.9)
+    assert enriched[0]["vimpo_ref_candidate_logp"][0, 0, 0].item() == pytest.approx(
+        -0.9
+    )
+
+
+def test_local_reference_failure_happens_before_optimizer_mutation() -> None:
+    """A failing local reference pass raises in compute_advantages before any
+    optimizer zero_grad / step (same fail-before-update contract)."""
+    actor = _fake_vimpo_actor_local([], fail_on_reference=True)
+    with pytest.raises(RuntimeError, match="local reference forward failed"):
+        actor.compute_advantages([_vimpo_rollout_batch()])
+    assert actor.optimizer.zero_grad_calls == 0
+    assert actor.optimizer.step_calls == 0
+
+
+def test_local_backend_emits_reference_latency_without_retries() -> None:
+    """Local mode emits vimpo/reference_latency_ms but no HTTP retry metric."""
+    actor = _fake_vimpo_actor_local([])
+    actor.compute_advantages([_vimpo_rollout_batch()])
+    assert "vimpo/reference_latency_ms" in actor.last_vimpo_metrics
+    assert "vimpo/reference_retries" not in actor.last_vimpo_metrics
