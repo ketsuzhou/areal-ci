@@ -72,6 +72,7 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
             group_size=self.group_size,
             domain="multica",
             message=data.get("message"),
+            training_mode=True,
         )
         from customized_areal.tree_search.agents.multica_dag_client import DagTimeout
 

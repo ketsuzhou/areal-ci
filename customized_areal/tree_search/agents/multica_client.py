@@ -208,6 +208,10 @@ class MulticaEnvDispatchClient:
         # must not turn a squad dispatch into a single-agent one.
         if not agent_id and not squad_id:
             agent_id = os.environ.get("MULTICA_AGENT_ID") or None
+        # The server requires train_agent_id == agent_id for a single-agent
+        # training dispatch, and an empty train_agent_id means no training session.
+        if training_mode and not train_agent_id and not squad_id:
+            train_agent_id = agent_id
         payload: dict = {
             "mode": mode,
             "dispatch_type": dispatch_type,
