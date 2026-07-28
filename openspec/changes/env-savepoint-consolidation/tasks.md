@@ -40,11 +40,16 @@ is the primary open risk to carry into verification.
 
 ## 2. Savepoint schema and snapshot save mode
 
-- [ ] 2.1 Migration: add `save_mode` (default `pause_in_place`) to `env_checkpoint`;
+- [x] 2.1 Migration: add `save_mode` (default `pause_in_place`) to `env_checkpoint`;
   give `sandbox_snapshot` a single owning checkpoint reference that cascades on
   checkpoint deletion; write the matching down migration
-- [ ] 2.2 Verify existing `env_checkpoint` rows resolve to `pause_in_place` with no
-  owned savepoint and need no backfill
+- [x] 2.2 Verify existing `env_checkpoint` rows resolve to `pause_in_place` with no
+  owned savepoint and need no backfill — guaranteed by the DDL itself
+  (`ADD COLUMN ... NOT NULL DEFAULT 'pause_in_place'` fills every existing row, and a
+  new nullable `checkpoint_id` leaves every existing snapshot unowned), and asserted by
+  `TestMigration244AddsSaveModeAndCheckpointOwnedSavepoints`, which fails if any
+  backfill statement appears. Applying the migration against a live database is part of
+  the deferred verification above.
 - [ ] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
   list a checkpoint's savepoints
 - [ ] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
