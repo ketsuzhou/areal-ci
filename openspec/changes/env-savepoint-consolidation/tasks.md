@@ -27,13 +27,14 @@ is the primary open risk to carry into verification.
   strategy interface
 - [x] 1.2 Select the strategy from the checkpoint's save mode at resume time, defaulting
   to same-runtime for existing rows
-- [ ] 1.3 Move the per-lane task enqueue currently inline in
+- [x] 1.3 Move the per-lane task enqueue currently inline in
   `provisionEnvDispatchAgentBranch` behind the forked-runtime strategy without changing
-  its behavior
+  its behavior (the enqueue is actually in `dispatchBranchChannelMessage`, not
+  `provisionEnvDispatchAgentBranch`, which never enqueues)
 - [x] 1.4 Report the continuation outcome (executed, skipped, failed) uniformly from
   both strategies, keeping a failed continuation after a successful restore visible as a
   partial resume
-- [ ] 1.5 Service tests: strategy selection by save mode; branch continuation routed
+- [x] 1.5 Service tests: strategy selection by save mode; branch continuation routed
   through the seam; terminal-task and runtime-mismatch rejections still hold; skipped
   outcome when no continuation descriptor exists
 
