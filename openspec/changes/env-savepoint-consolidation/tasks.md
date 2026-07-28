@@ -95,9 +95,11 @@ mutation-checked.
   runtime
 - [ ] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
   its single-instance resume unchanged
-- [ ] 3.5 Migration and queries for `env_checkpoint_lane`:
+- [x] 3.5 Migration and queries for `env_checkpoint_lane`:
   `UNIQUE (checkpoint_id, lane_key)`, a `provisioning` / `ready` / `failed` status,
-  per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion
+  per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion —
+  the claim derives `workspace_id` from the checkpoint rather than accepting it, so a
+  lane cannot escape its checkpoint's workspace
 - [ ] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
   existing row's status when the insert loses: return a `ready` lane, continue a stale
   `provisioning` lane from its first incomplete step, surface a `failed` lane
@@ -118,7 +120,10 @@ mutation-checked.
   rejected; timed-out checkpoint rejected; zero lane count rejected; all-lanes-failed
   reported as failure
 - [ ] 3.14 Query tests against the real unique index: concurrent claims of one lane key
-  create one lane; an interrupted lane is continued rather than duplicated
+  create one lane; an interrupted lane is continued rather than duplicated — written as
+  `TestEnvCheckpointLaneUniqueIndex_Integration`, but left unchecked because it has
+  never run: without Postgres it self-skips, and a claim race is precisely what no fake
+  can demonstrate
 
 ## 4. Route branch dispatch through resume
 
