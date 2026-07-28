@@ -138,7 +138,20 @@ mutation-checked.
 - [x] 3.11 Report failure when every requested lane fails, rather than success with an
   empty lane set — the first lane's cause is wrapped so a typed failure stays
   recognizable through the summary error
-- [ ] 3.12 Add a sweeper for lanes stuck in `provisioning`
+- [x] 3.12 Add a sweeper for lanes stuck in `provisioning` — global scheduler job on a
+  5-minute cadence, failing lanes 15 minutes past their last progress. Deviates from the
+  plan in one respect: the plan's `ListStaleProvisioningEnvCheckpointLanes` +
+  per-row-mark shape was replaced by a single `UPDATE ... RETURNING`
+  (`SweepStaleProvisioningEnvCheckpointLanes`), because `MarkEnvCheckpointLaneFailed`
+  carries no status guard, so list-then-mark would fail a lane its owner drove to
+  `ready` in between. No fake can reproduce that race, so
+  `TestLaneSweepFailsStaleLanesInOneStatement` asserts the atomicity statically instead.
+  The staleness cutoff derives from the scheduler's plan time (floored from the database
+  clock) rather than the process clock, so it cannot drift with app/DB clock skew and
+  errs toward sweeping late. Sweeping only fails the row; it does not release sandboxes,
+  and the recorded error says so — reclamation is 6.x's job. Note `sqlc` statically
+  caught an ambiguous `updated_at` between the UPDATE target and its candidate subquery,
+  which is the class of error this environment otherwise could not catch
 - [x] 3.13 Service tests: three lanes trigger exactly one snapshot per source instance
   (assert the savepoint creator's call count, not the lane count); a new lane key
   re-expands the frontier without creating a second checkpoint; pause-in-place fan-out
