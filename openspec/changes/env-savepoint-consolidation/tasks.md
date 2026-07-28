@@ -13,12 +13,23 @@ review is skipped at the user's explicit request; the per-phase Go tests named i
 task below remain the acceptance evidence.
 
 Verification limit, decided explicitly: Postgres is **not** installed in the build
-environment, and `sqlc` is unavailable, so generated query code is hand-written. The
-`*_Integration` query tests are written but self-skip without `DATABASE_URL` and must
-not be reported as passing. Migrations 244/245/246, the
-`UNIQUE (checkpoint_id, lane_key)` claim race, the `ON DELETE CASCADE` reclamation, and
-every hand-written SQL string stay unverified until run against a real database — this
-is the primary open risk to carry into verification.
+environment. The `*_Integration` query tests are written but self-skip without
+`DATABASE_URL` and must not be reported as passing. Migrations 244/245/246, the
+`UNIQUE (checkpoint_id, lane_key)` claim race, and the `ON DELETE CASCADE` reclamation
+stay unverified until run against a real database — this is the primary open risk to
+carry into verification.
+
+`sqlc` **is** usable (v1.31.1, matching the version that generated the checked-in code;
+it reads the schema from `migrations/` statically and needs no database), so column
+order in generated code is derived rather than guessed. It cannot simply be run, though:
+the checked-in generated code is hand-maintained — `sandbox.sql.go` routes all
+`sandbox_snapshot` reads through one hand-written scan helper, and files are laid out in
+query-file order instead of the alphabetical order sqlc v1.31.1 emits — so a wholesale
+regeneration rewrites roughly 20 unrelated files. The working method is to regenerate,
+transplant only the hunks belonging to this change, and revert the rest. Because a
+scan/column misalignment there is invisible to the compiler and to every non-database
+test, `TestGeneratedSnapshotScanMatchesSelectedColumns` guards it and was
+mutation-checked.
 
 ## 1. Continuation seam extraction (behavior-preserving)
 
@@ -50,7 +61,7 @@ is the primary open risk to carry into verification.
   `TestMigration244AddsSaveModeAndCheckpointOwnedSavepoints`, which fails if any
   backfill statement appears. Applying the migration against a live database is part of
   the deferred verification above.
-- [ ] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
+- [x] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
   list a checkpoint's savepoints
 - [ ] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
   through the existing `create_template` job, wait for the snapshot record to reach
