@@ -238,6 +238,8 @@ class MulticaDagClient:
         poll_backoff: float = 1.5,
         poll_max_interval: float = 10.0,
         http_timeout: float = 10.0,
+        workspace_slug: str | None = None,
+        workspace_id: str | None = None,
         _transport: httpx.BaseTransport | None = None,
     ) -> None:
         resolved_base_url = base_url or os.environ.get("MULTICA_BASE_URL") or ""
@@ -251,6 +253,26 @@ class MulticaDagClient:
         self._poll_backoff = poll_backoff
         self._poll_max_interval = poll_max_interval
         self._http_timeout = http_timeout
+        # Mirrors MulticaClient: a user PAT carries no workspace, so the server
+        # resolves it from ?workspace_slug / ?workspace_id. Without this the
+        # dispatch-scoped /dag routes reject the request with 400 "workspace ID
+        # required" before any lookup happens.
+        workspace_slug = (
+            workspace_slug or os.environ.get("MULTICA_WORKSPACE_SLUG") or None
+        )
+        workspace_id = workspace_id or os.environ.get("MULTICA_WORKSPACE_ID") or None
+        if workspace_slug and workspace_id:
+            raise ValueError("pass at most one of workspace_slug or workspace_id")
+        self._workspace_slug = workspace_slug
+        self._workspace_id = workspace_id
+
+    def _params(self) -> dict[str, str]:
+        """Workspace query params for user-PAT auth (empty for task-token auth)."""
+        if self._workspace_slug:
+            return {"workspace_slug": self._workspace_slug}
+        if self._workspace_id:
+            return {"workspace_id": self._workspace_id}
+        return {}
 
     def get_dag(
         self,
@@ -306,7 +328,9 @@ class MulticaDagClient:
             while True:
                 request_succeeded = False
                 try:
-                    resp = client.get(url, headers=headers)
+                    resp = client.get(
+                        url, headers=headers, params=self._params()
+                    )
                 except httpx.RequestError:
                     pass
                 else:

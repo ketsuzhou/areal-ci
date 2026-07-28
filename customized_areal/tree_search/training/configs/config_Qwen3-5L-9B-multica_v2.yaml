@@ -11,6 +11,10 @@ tree_search:
   loss_mode: GRPO
   sample_source: SCRATCH
   branch_probability: 0.5
+  # agent.mode=online replaces the parquet dataloader with an empty one,
+  # so training queries are claimed from the DB query bank instead.
+  use_fresh_query: true
+  fresh_query_table: query_bank
 total_train_epochs: 4
 # Online mode requires explicit total_train_steps (cannot derive from dataset
 # length). 100 steps = 25 steps/epoch. Adjust based on multica throughput.
@@ -46,13 +50,15 @@ scheduler:
 
 rollout:
   _version: v2
-  admin_api_key: areal-admin-key
+  # Must equal the Multica server AREAL_ADMIN_API_KEY: Multica authenticates
+  # its /rl/start_session callback with that value as a bearer token.
+  admin_api_key: ${oc.env:AREAL_ADMIN_API_KEY,areal-admin-5058bdacf2a9ae2ea4d00ada0de399ff2516af047f8d117f}
   backend: sglang:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
-  max_concurrent_rollouts: 5
+  max_concurrent_rollouts: 1
   queue_size: 256
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 20
@@ -70,7 +76,7 @@ rollout:
     engine_max_tokens: 15000
 
 gconfig:
-  n_samples: 8
+  n_samples: 2
   min_new_tokens: 0
   max_new_tokens: 1024
   max_tokens: 15000
@@ -178,7 +184,7 @@ vllm:
 # TPFC dataset configuration - uses generated_training_final.parquet
 # NOTE: All samples have ~1034-1366 tokens due to long system prompts
 train_dataset:
-  batch_size: 32
+  batch_size: 2
   shuffle: false
   pin_memory: true
   num_workers: 2

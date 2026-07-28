@@ -481,7 +481,7 @@ def create_app(config: DataProxyConfig) -> FastAPI:
         for i in range(group_size):
             try:
                 session_id, session_api_key = store.start_session(
-                    body.task_id, body.api_key if i == 0 else None
+                    body.canonical_session_ref, body.api_key if i == 0 else None
                 )
             except ValueError as e:
                 raise HTTPException(status_code=409, detail=str(e))
@@ -490,7 +490,12 @@ def create_app(config: DataProxyConfig) -> FastAPI:
                     session_id=session_id, session_api_key=session_api_key
                 )
             )
-        return StartSessionResponse(group_id=group_id, sessions=credentials)
+        return StartSessionResponse(
+            group_id=group_id,
+            sessions=credentials,
+            session_id=credentials[0].session_id,
+            api_key=credentials[0].session_api_key,
+        )
 
     @app.post("/rl/set_reward", response_model=SetRewardResponse)
     async def set_reward(body: SetRewardRequest, request: Request):

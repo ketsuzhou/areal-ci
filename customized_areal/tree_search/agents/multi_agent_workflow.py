@@ -26,6 +26,22 @@ from areal.api.workflow_api import RolloutWorkflow
 logger = logging.getLogger("MultiAgentEnvDispatchWorkflow")
 
 
+def _dispatch_message(data: dict[str, Any]) -> str:
+    """Return the user-facing task text for a Multica message dispatch.
+
+    The TPFC dataset exposes it as ``query``; rows whose extraction produced
+    nothing still carry the raw ``messages`` turns, so fall back to the last
+    user turn.
+    """
+    query = (data.get("query") or "").strip()
+    if query:
+        return query
+    for msg in reversed(data.get("messages") or []):
+        if msg.get("role") == "user":
+            return (msg.get("content") or "").strip()
+    return ""
+
+
 class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
     """One arun_episode = one Multica task = N agents = N sessions -> AssembledDag.
 
@@ -64,14 +80,24 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         # Multica task = one project). create_env_dispatch returns the top-level
         # project_id directly; the empty-trajectory check is deferred to the
         # assembler (it returns None when the polled DAG has no segments).
+        # RL datasets name the user turn "query" (see tpfc_dataset); "message" is
+        # accepted for callers that already pass a ready dispatch message.
+        message = data.get("message") or data.get("query")
+        if not getattr(self, "_logged_data_keys", False):
+            self._logged_data_keys = True
+            logger.warning(
+                "DBG env-dispatch data: keys=%s preview=%s",
+                sorted(data.keys()),
+                {k: str(v)[:100] for k, v in list(data.items())[:15]},
+            )
         handle = await self._dispatch.create_env_dispatch(
             mode="scratch",
             env_id=self.base_env_id,
             dispatch_type="message",
             agent_id=data.get("agent_id", ""),
             group_size=self.group_size,
-            domain="multica",
-            message=data.get("message"),
+            domain="self_play",
+            message=message,
             training_mode=True,
         )
         from customized_areal.tree_search.agents.multica_dag_client import DagTimeout

@@ -42,6 +42,30 @@ logger = logging.getLogger("RolloutControllerV2")
 
 _MAX_COMPLETED_ONLINE_RESULTS = 1024
 _DEFAULT_SERVICE_LOG_LEVEL = "warning"
+_GATEWAY_FIXED_BIND_ENV = "AREAL_GATEWAY_FIXED_BIND"
+
+
+def _apply_gateway_fixed_bind(role: str, host: str, port: int) -> tuple[str, int]:
+    """Return the ``(bind_host, port)`` to launch *role* on.
+
+    The guard hands out a free port on the node IP, which is unreachable to a
+    caller that can only target one fixed address: the Multica db_bridge
+    executor forwards Multica's ``/rl/*`` callbacks to a hardcoded loopback URL
+    and never discovers the live port. Setting
+    ``AREAL_GATEWAY_FIXED_BIND=0.0.0.0:17727`` pins the gateway to that address
+    instead. Only the bind address changes — callers keep advertising the node
+    IP, now paired with the pinned port.
+    """
+    raw = os.environ.get(_GATEWAY_FIXED_BIND_ENV, "").strip()
+    if role != "gateway" or not raw:
+        return host, port
+    bind_host, sep, bind_port = raw.rpartition(":")
+    if not sep or not bind_host or not bind_port.isdigit():
+        raise ValueError(f"{_GATEWAY_FIXED_BIND_ENV} must be 'host:port', got {raw!r}")
+    logger.info(
+        "Gateway pinned to bind %s:%s (guard offered %d)", bind_host, bind_port, port
+    )
+    return bind_host, int(bind_port)
 
 
 @dataclass
@@ -1857,7 +1881,8 @@ class RolloutControllerV2:
         host = port_data["host"]
         port = port_data["ports"][0]
 
-        cmd = list(raw_cmd) + ["--host", host, "--port", str(port)]
+        bind_host, port = _apply_gateway_fixed_bind(role, host, port)
+        cmd = list(raw_cmd) + ["--host", bind_host, "--port", str(port)]
 
         resp = self._sync_client.post(
             f"{guard_addr}/fork",
@@ -1899,7 +1924,8 @@ class RolloutControllerV2:
         host = port_data["host"]
         port = port_data["ports"][0]
 
-        cmd = list(raw_cmd) + ["--host", host, "--port", str(port)]
+        bind_host, port = _apply_gateway_fixed_bind(role, host, port)
+        cmd = list(raw_cmd) + ["--host", bind_host, "--port", str(port)]
         fork_payload: dict[str, Any] = {
             "role": role,
             "worker_index": worker_index,

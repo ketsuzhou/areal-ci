@@ -12,7 +12,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from areal.experimental.openai.cache import InteractionCache
 from areal.experimental.openai.types import InteractionWithTokenLogpReward
@@ -34,9 +34,23 @@ class StartSessionRequest(BaseModel):
     list — single-session is just ``group_size=1``.
     """
 
-    task_id: str
+    session_ref: str | None = None
+    task_id: str | None = None
     api_key: str | None = None  # Reuse a previously-issued key (refresh)
     group_size: int = 1
+
+    @model_validator(mode="after")
+    def validate_session_reference(self) -> StartSessionRequest:
+        """Require one stable session namespace while retaining legacy clients."""
+        references = [ref for ref in (self.session_ref, self.task_id) if ref]
+        if len(references) != 1:
+            raise ValueError("exactly one of session_ref or task_id is required")
+        return self
+
+    @property
+    def canonical_session_ref(self) -> str:
+        """Return the new session reference or the legacy task identifier."""
+        return self.session_ref or self.task_id or ""
 
 
 class SessionCredentials(BaseModel):
@@ -51,6 +65,8 @@ class StartSessionResponse(BaseModel):
 
     group_id: str
     sessions: list[SessionCredentials]
+    session_id: str
+    api_key: str
 
 
 class SetRewardRequest(BaseModel):
