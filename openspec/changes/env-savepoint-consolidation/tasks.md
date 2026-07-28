@@ -22,15 +22,15 @@ is the primary open risk to carry into verification.
 
 ## 1. Continuation seam extraction (behavior-preserving)
 
-- [ ] 1.1 Introduce two named strategies behind the existing `ResumeAgentRunner` seam: a
+- [x] 1.1 Introduce two named strategies behind the existing `ResumeAgentRunner` seam: a
   same-runtime strategy wrapping today's `taskResumeRunner`, and a forked-runtime
   strategy interface
-- [ ] 1.2 Select the strategy from the checkpoint's save mode at resume time, defaulting
+- [x] 1.2 Select the strategy from the checkpoint's save mode at resume time, defaulting
   to same-runtime for existing rows
 - [ ] 1.3 Move the per-lane task enqueue currently inline in
   `provisionEnvDispatchAgentBranch` behind the forked-runtime strategy without changing
   its behavior
-- [ ] 1.4 Report the continuation outcome (executed, skipped, failed) uniformly from
+- [x] 1.4 Report the continuation outcome (executed, skipped, failed) uniformly from
   both strategies, keeping a failed continuation after a successful restore visible as a
   partial resume
 - [ ] 1.5 Service tests: strategy selection by save mode; branch continuation routed
