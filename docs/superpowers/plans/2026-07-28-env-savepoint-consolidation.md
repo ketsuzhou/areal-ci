@@ -2392,6 +2392,32 @@ ______________________________________________________________________
 > mode **requires** it. A branch dispatch without an idempotency key is rejected at
 > validation rather than silently made retry-unsafe.
 
+> **SUPERSEDED at execution time (user decision).** The anchor choice above stands and
+> is now documented on `laneKeyForOrdinal`, but **the requirement is not enforced here**
+> — it moves to Task 13, where branch dispatch actually starts deriving lane keys.
+>
+> Two facts forced the split. First, the AReaL client sends no idempotency key at all:
+> `create_env_dispatch`'s payload (`multica_client.py:216`) carries mode, dispatch_type,
+> group_size, training_mode and a few optional ids, and the string `idempotency` appears
+> nowhere in `customized_areal/`. So the validation in Step 3 would reject every branch
+> dispatch the current client can make — and `proposal.md:96` promises "no client
+> contract change". Second, lane keys do not govern branch dispatch until Task 13
+> reroutes it through resume, so enforcing now buys a retry-safety property that nothing
+> yet consumes.
+>
+> **Do in this task:** Step 1's retry-stability test (kept, as
+> `TestRetriedRequestDerivesTheSameLaneKeys` in `env_checkpoint_lane_test.go`, since
+> `laneKeyForOrdinal` lives there) and Step 3's documentation half. **Skip** Step 3's
+> validation and Step 5's client change.
+>
+> **Carry into Task 13:** (a) add the validation there, (b) the client must send the key
+> *before* the server requires it — a server-first rollout fails every branch dispatch
+> in the gap, and (c) it is a client-visible contract change, so `proposal.md:96`,
+> tasks.md 4.5 ("Confirm no AReaL client change is required") and the protocol doc (Task
+> 20\) all have to be corrected. `TestBranchDispatchStillAcceptsAKeylessRequest` is the
+> tripwire holding the deferral in place; it was mutation-checked and fails as soon as
+> the validation lands, which is also the signal to update those three documents.
+
 **Files:**
 
 - Modify: `multica/server/internal/service/env_dispatch.go` (`validate`, ~line 822)
@@ -2775,6 +2801,22 @@ ______________________________________________________________________
 ## Task 13: `[multica]` Serve branch dispatch by checkpoint resume
 
 **tasks.md:** 4.1, 4.3, 4.4, 4.5
+
+> **Carried in from Task 9 (do not skip).** This is where branch dispatch first derives
+> lane keys, so it is where the anchor requirement belongs. Add the validation Task 9
+> deferred — `in.Mode == EnvModeBranch && in.IdempotencyKey == ""` rejected in
+> `EnvDispatchService.validate`, right after the `GroupSize` bound check — and delete
+> the tripwire `TestBranchDispatchStillAcceptsAKeylessRequest` in the same commit,
+> inverting it into a rejection test.
+>
+> Doing so is a client-visible contract change with a rollout order: **the AReaL client
+> must send `idempotency_key` for branch before the server requires it** (add it in
+> `multica_client.create_env_dispatch` as one `uuid4()` per logical branch request,
+> reused across retries of that request — it must be minted by the caller, not per HTTP
+> attempt, or retries present fresh anchors and double the lanes). A server-first
+> rollout rejects every branch dispatch in the gap. Also correct `proposal.md:96` ("no
+> client contract change") and tasks.md 4.5, which currently asserts the opposite, and
+> note it in the protocol doc (Task 20).
 
 **Files:**
 

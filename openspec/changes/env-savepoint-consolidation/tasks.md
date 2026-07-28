@@ -109,9 +109,24 @@ mutation-checked.
 - [x] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
   existing row's status when the insert loses: return a `ready` lane, continue a stale
   `provisioning` lane from its first incomplete step, surface a `failed` lane
-- [ ] 3.7 Derive lane keys from an anchor that is stable across retries of the same
+- [x] 3.7 Derive lane keys from an anchor that is stable across retries of the same
   branch request, and pin the chosen anchor against the dispatch record's actual stable
-  id
+  id — anchor is `env_dispatch_request.idempotency_key` (a request-body field the
+  handler already validates as a UUID when present). Nothing else in the request
+  qualifies: server-minted ids are fresh per attempt, and the `env_dispatch_request` row
+  is written only after the dispatch completes, so a retry arriving mid-flight has no
+  prior row to recover the anchor from. **Enforcement is deferred to 4.1, by user
+  decision.** The AReaL client sends no idempotency key at all (verified: the field
+  appears nowhere in `customized_areal/`), and lane keys do not govern branch dispatch
+  until the branch path is served by checkpoint resume, so requiring it now would reject
+  live branch dispatches for a property nothing yet relies on — and `proposal.md`
+  promises no client contract change. Two ordering constraints carry forward: the client
+  must send the key **before** the server requires it, and making it required is a
+  client-visible contract change that must be reflected in `proposal.md`, task 4.5
+  (which currently asserts no AReaL client change is required), and the protocol doc
+  (task 8.3) when it lands. `TestBranchDispatchStillAcceptsAKeylessRequest` is the
+  tripwire guarding the deferral; it was mutation-checked and fails the moment the
+  validation is added
 - [x] 3.8 Reject a requested lane count of zero as invalid input — validated before the
   checkpoint is loaded, so a bad count cannot have a side effect
 - [x] 3.9 Reject a checkpoint whose save status is not complete with a typed
