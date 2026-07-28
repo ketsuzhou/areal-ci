@@ -32,7 +32,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import torch
 
-from customized_areal.tree_search.config import AdvantageMode, CacheMode, LossMode
+from customized_areal.tree_search.config import (
+    AdvantageMode,
+    CacheMode,
+    Config,
+    LossMode,
+)
 from customized_areal.tree_search.core.customized_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
 )
@@ -125,6 +130,9 @@ def _make_workflow(
     cache_mode: CacheMode = CacheMode.CROSS_TRAINING,
     checkpoint_dir: str = "/tmp/test_tree_search_ckpt",
     teacher_provider: str = "external",
+    diagnose_model_name: str = "",
+    diagnose_base_url: str = "",
+    diagnose_api_key: str = "",
 ) -> TreeSearchGroupedRolloutWorkflow:
     """Create a workflow instance with a mock inner workflow."""
     # TRAIN_ID is required when loading a CROSS_TRAINING checkpoint
@@ -135,15 +143,20 @@ def _make_workflow(
     return TreeSearchGroupedRolloutWorkflow(
         workflow=inner,
         group_size=group_size,
-        checkpoint_dir=checkpoint_dir,
-        advantage_mode=advantage_mode,
-        loss_mode=loss_mode,
-        cache_mode=cache_mode,
+        config=Config(
+            checkpoint_dir=checkpoint_dir,
+            advantage_mode=advantage_mode,
+            loss_mode=loss_mode,
+            mode=cache_mode,
+            teacher_provider=teacher_provider,
+            teacher_base_url="http://localhost:9999",
+            teacher_backend="openai",
+            teacher_top_k=5,
+            diagnose_model_name=diagnose_model_name,
+            diagnose_base_url=diagnose_base_url,
+            diagnose_api_key=diagnose_api_key,
+        ),
         tokenizer_path="fake/tokenizer",
-        teacher_provider=teacher_provider,
-        teacher_base_url="http://localhost:9999",
-        teacher_backend="openai",
-        teacher_top_k=5,
     )
 
 
@@ -401,7 +414,7 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.distill_prep._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
@@ -445,7 +458,7 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.distill_prep._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
@@ -482,7 +495,7 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.distill_prep._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
@@ -527,7 +540,7 @@ class TestPrepareDistillForEpisode:
 
         with (
             patch(
-                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.distill_prep._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
             patch(
@@ -568,8 +581,9 @@ class TestPrepareDistillForNodeGroups:
         mock_provider = AsyncMock()
         mock_tokenizer = MagicMock()
 
-        with patch.object(
-            wf, "_prepare_distill_for_episode", new_callable=AsyncMock
+        with patch(
+            "customized_areal.tree_search.core.distill_prep.prepare_distill_for_episode",
+            new_callable=AsyncMock,
         ) as mock_ep:
             mock_ep.side_effect = [
                 (ep1, {"a": []}),
@@ -591,8 +605,9 @@ class TestPrepareDistillForNodeGroups:
         mock_provider = AsyncMock()
         mock_tokenizer = MagicMock()
 
-        with patch.object(
-            wf, "_prepare_distill_for_episode", new_callable=AsyncMock
+        with patch(
+            "customized_areal.tree_search.core.distill_prep.prepare_distill_for_episode",
+            new_callable=AsyncMock,
         ) as mock_ep:
             mock_ep.side_effect = [
                 RuntimeError("boom"),
@@ -892,7 +907,7 @@ class TestFullArunEpisode:
                 return_value=mock_tokenizer,
             ),
             patch(
-                "customized_areal.tree_search.core.customized_grouped_workflow._input_ids_to_messages",
+                "customized_areal.tree_search.core.distill_prep._input_ids_to_messages",
                 return_value=[{"role": "user", "content": "hello"}],
             ),
         ):
@@ -1066,7 +1081,7 @@ class TestProfiling:
 
 class TestInputIdsToMessages:
     def test_basic_parsing(self):
-        from customized_areal.tree_search.core.customized_grouped_workflow import (
+        from customized_areal.tree_search.core.distill_prep import (
             _input_ids_to_messages,
         )
 
@@ -1082,7 +1097,7 @@ class TestInputIdsToMessages:
         assert len(messages) >= 1
 
     def test_fallback_on_decode_failure(self):
-        from customized_areal.tree_search.core.customized_grouped_workflow import (
+        from customized_areal.tree_search.core.distill_prep import (
             _input_ids_to_messages,
         )
 
@@ -1102,7 +1117,7 @@ class TestInputIdsToMessages:
 
 class TestFilterDistillEpisodeFailure:
     def test_distill_mode_returns_empty(self):
-        from customized_areal.tree_search.core.customized_grouped_workflow import (
+        from customized_areal.tree_search.core.distill_prep import (
             _filter_distill_episode_failure,
         )
 
@@ -1111,7 +1126,7 @@ class TestFilterDistillEpisodeFailure:
         assert result == []
 
     def test_non_distill_mode_returns_nodes(self):
-        from customized_areal.tree_search.core.customized_grouped_workflow import (
+        from customized_areal.tree_search.core.distill_prep import (
             _filter_distill_episode_failure,
         )
 

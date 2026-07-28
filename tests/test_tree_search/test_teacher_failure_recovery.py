@@ -7,10 +7,26 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = (
     REPO_ROOT / "customized_areal/tree_search/core/customized_grouped_workflow.py"
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_sys_modules():
+    """Undo _install_workflow_stubs after each test.
+
+    The stubs replace real packages (customized_areal, areal, ...) in
+    sys.modules; without a restore they leak into every later test file in
+    the same pytest process.
+    """
+    saved = dict(sys.modules)
+    yield
+    sys.modules.clear()
+    sys.modules.update(saved)
 
 
 class LossMode(str, Enum):
@@ -72,15 +88,25 @@ class DiagnoseFailureProvider:
         raise TeacherServiceError("teacher diagnose backend unavailable")
 
 
+class StaticDiagnoseProvider:
+    """Diagnose succeeds; parsing is handled by StubSelectedTurnModule."""
+
+    async def diagnose_episode(self, conversation, gold_answer, temperature=None):
+        return "diagnosis"
+
+
 class StubSelectedTurnModule:
-    def __init__(self, planned_results):
+    def __init__(self, planned_results, selected_turns=None):
         self.planned_results = list(planned_results)
+        self.selected_turns = selected_turns
         self.calls = []
 
     def parse_episode_diagnosis(self, raw_text):
-        raise AssertionError(
-            "parse_episode_diagnosis should not be called in this test"
-        )
+        if self.selected_turns is None:
+            raise AssertionError(
+                "parse_episode_diagnosis should not be called in this test"
+            )
+        return types.SimpleNamespace(selected_turns=self.selected_turns)
 
     async def selected_turn_to_position_rewards(
         self,
@@ -93,6 +119,7 @@ class StubSelectedTurnModule:
         topk_distill,
         engine,
         teacher_top_k,
+        max_distill_tokens=0,
     ):
         self.calls.append(
             {
@@ -152,14 +179,33 @@ def _install_workflow_stubs(selected_turn_module: StubSelectedTurnModule) -> Non
         BRANCH = "branch"
         MIXED = "mixed"
 
+    class Config:
+        """Import-time stand-in (the workflow module imports Config)."""
+
     config_module.AdvantageMode = AdvantageMode
     config_module.CacheMode = CacheMode
+    config_module.Config = Config
     config_module.LossMode = LossMode
     config_module.SampleSource = SampleSource
     sys.modules["customized_areal.tree_search.config"] = config_module
 
+    agents_pkg = types.ModuleType("customized_areal.tree_search.agents")
+    agents_pkg.__path__ = []
+    execution_dag = types.ModuleType(
+        "customized_areal.tree_search.agents.execution_dag"
+    )
+
+    class SuperNode:
+        pass
+
+    execution_dag.SuperNode = SuperNode
+    agents_pkg.execution_dag = execution_dag
+    sys.modules["customized_areal.tree_search.agents"] = agents_pkg
+    sys.modules["customized_areal.tree_search.agents.execution_dag"] = execution_dag
+
     tree_store_module = types.ModuleType("customized_areal.tree_search.core.tree_store")
     tree_store_module.Node = Node
+    tree_store_module.version_id_from_versions = lambda versions: -1
     sys.modules["customized_areal.tree_search.core.tree_store"] = tree_store_module
 
     uncertainty_module = types.ModuleType(
@@ -208,6 +254,21 @@ def _install_workflow_stubs(selected_turn_module: StubSelectedTurnModule) -> Non
     sys.modules["areal.utils"] = areal_utils
     sys.modules["areal.utils.logging"] = logging_module
 
+    # The workflow module's top-level imports include the split-out helper
+    # modules. Register them from their real file locations; their own
+    # top-level imports only reference the stubs installed above (stdlib,
+    # config, tree_store, execution_dag, areal.utils.logging).
+    core_dir = REPO_ROOT / "customized_areal" / "tree_search" / "core"
+    for helper_name in ("fresh_query", "batch_convert", "distill_prep"):
+        helper_module_name = f"customized_areal.tree_search.core.{helper_name}"
+        spec = importlib.util.spec_from_file_location(
+            helper_module_name, core_dir / f"{helper_name}.py"
+        )
+        helper_module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[helper_module_name] = helper_module
+        spec.loader.exec_module(helper_module)
+
 
 def _load_workflow_module(selected_turn_module: StubSelectedTurnModule):
     module_name = "tests._teacher_failure_recovery_workflow"
@@ -226,6 +287,7 @@ def _make_workflow(module, loss_mode: LossMode):
     workflow.loss_mode = loss_mode
     workflow.topk_distill = False
     workflow.teacher_top_k = 4
+    workflow.max_distill_tokens = 0
     return workflow
 
 
@@ -241,7 +303,8 @@ def _make_node(node_id: str, episode_id: str, turn_idx: int) -> Node:
     )
 
 
-def test_prepare_distill_for_episode_falls_back_after_diagnose_failure():
+def test_prepare_distill_for_episode_skips_distillation_after_diagnose_failure():
+    """Diagnose backend down -> no distill targets, but nodes are kept."""
     selected_turn = StubSelectedTurnModule(
         planned_results=[[Reward(teacher_logprobs=[-0.2], candidate_token_ids=[11])]]
     )
@@ -261,15 +324,9 @@ def test_prepare_distill_for_episode_falls_back_after_diagnose_failure():
     )
 
     assert prepared_nodes == [node]
-    assert list(rewards_by_node_id) == ["node-1"]
-    assert rewards_by_node_id["node-1"][0].teacher_logprobs == [-0.2]
-    assert selected_turn.calls == [
-        {
-            "node_id": "node-1",
-            "guidance": "",
-            "sample_index": 0,
-        }
-    ]
+    assert rewards_by_node_id == {}
+    # Diagnosis produced no selected turns, so no teacher logprob calls happen.
+    assert selected_turn.calls == []
 
 
 def test_prepare_distill_for_episode_skips_only_failed_nodes():
@@ -277,11 +334,12 @@ def test_prepare_distill_for_episode_skips_only_failed_nodes():
         planned_results=[
             [Reward(teacher_logprobs=[-0.1], candidate_token_ids=[11])],
             TeacherServiceError("teacher logprob backend unavailable"),
-        ]
+        ],
+        selected_turns={1: "improve turn 1", 2: "improve turn 2"},
     )
     module = _load_workflow_module(selected_turn)
     workflow = _make_workflow(module, LossMode.DISTILL)
-    provider = DiagnoseFailureProvider()
+    provider = StaticDiagnoseProvider()
     failed_node = _make_node("node-fail", "episode-2", 1)
     kept_node = _make_node("node-keep", "episode-2", 2)
 
@@ -303,11 +361,12 @@ def test_prepare_distill_for_episode_skips_only_failed_nodes():
 
 def test_prepare_distill_for_episode_drops_distill_episode_if_all_nodes_fail():
     selected_turn = StubSelectedTurnModule(
-        planned_results=[TeacherServiceError("teacher logprob backend unavailable")]
+        planned_results=[TeacherServiceError("teacher logprob backend unavailable")],
+        selected_turns={1: "improve turn 1"},
     )
     module = _load_workflow_module(selected_turn)
     workflow = _make_workflow(module, LossMode.DISTILL)
-    provider = DiagnoseFailureProvider()
+    provider = StaticDiagnoseProvider()
     node = _make_node("node-drop", "episode-3", 1)
 
     prepared_nodes, rewards_by_node_id = asyncio.run(

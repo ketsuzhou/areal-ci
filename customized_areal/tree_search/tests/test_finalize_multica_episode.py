@@ -23,6 +23,7 @@ from customized_areal.tree_search.agents.execution_dag import (
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
+    Config,
     LossMode,
 )
 from customized_areal.tree_search.core.customized_grouped_workflow import (
@@ -90,10 +91,12 @@ async def test_finalize_episode_multica_inserts_and_returns_batch(tmp_path):
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),  # dummy; the multica branch never calls it
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
     )
     sn1 = _seg("seg1")
     sn2 = _seg("seg2")
@@ -122,10 +125,12 @@ async def test_finalize_episode_multica_empty_returns_none(tmp_path):
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
     )
     out = await wf._finalize_episode(
         fresh_nodes=[], cached_nodes=[], engine=None, data={}, query_id="q1"
@@ -143,12 +148,14 @@ async def test_finalize_episode_multica_m2_per_episode_advantages(tmp_path):
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
-        critic_gamma=1.0,
-        critic_lambda=1.0,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
     )
     sn0 = SuperNode(
         node_id="ep0_seg",
@@ -205,10 +212,12 @@ async def test_arun_episode_fixed_m2_aggregates_parallel_rollouts(tmp_path):
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=fake,
         group_size=2,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
     )
 
     out = await wf._arun_episode_fixed(engine=None, data={}, query_id="q1")
@@ -226,12 +235,14 @@ async def test_finalize_episode_multica_branch_backup_propagates_to_parent(tmp_p
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
-        critic_gamma=1.0,
-        critic_lambda=1.0,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
     )
     parent = SuperNode(
         node_id="parent",
@@ -253,7 +264,11 @@ async def test_finalize_episode_multica_branch_backup_propagates_to_parent(tmp_p
     )
 
     out = await wf._finalize_episode(
-        fresh_nodes=[parent, child], cached_nodes=[], engine=None, data={}, query_id="q1"
+        fresh_nodes=[parent, child],
+        cached_nodes=[],
+        engine=None,
+        data={},
+        query_id="q1",
     )
 
     assert out is not None
@@ -273,12 +288,14 @@ async def test_finalize_episode_multica_two_level_branch_tree_aggregates(tmp_pat
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
-        critic_gamma=1.0,
-        critic_lambda=1.0,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
     )
     root = SuperNode(
         node_id="root",

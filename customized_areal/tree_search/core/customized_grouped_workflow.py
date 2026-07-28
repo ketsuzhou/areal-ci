@@ -7,10 +7,14 @@ TreeSearchGroupedRolloutWorkflow, and TreeSearchWorkflowExecutor into a single
 
 Architecture
 ~~~~~~~~~~~~
-The main entry point is ``arun_episode``, which dispatches to either
-``_arun_episode_fixed`` or ``_arun_episode_dynamic`` depending on
-``dynamic_group_size``.  Both paths converge on ``_finalize_episode`` for
-shared post-processing.
+The main entry point is ``arun_episode``. When ``use_fresh_query`` is enabled
+it first runs the two-phase fresh-query flow — ``_select_fresh_query_data``
+picks an eligible row WITHOUT claiming it and ``_claim_fresh_query`` consumes
+it only after the episode produced a usable training batch (helpers live in
+``core/fresh_query.py``). It then dispatches to either ``_arun_episode_fixed``
+or ``_arun_episode_dynamic`` depending on ``dynamic_group_size``. Both paths
+share ``_generate_initial_round`` (cache lookup + parallel fresh generation)
+and converge on ``_finalize_episode`` for shared post-processing.
 
 Fixed group_size path (``_arun_episode_fixed``):
   1. Query the tree_store for cached (untrained) episodes.
@@ -21,8 +25,8 @@ Fixed group_size path (``_arun_episode_fixed``):
   3. Combine cached + fresh nodes.
 
 Dynamic group_size path (``_arun_episode_dynamic``):
-  1. Same cache lookup and initial generation as fixed, but starting from
-     ``initial_group_size`` instead of ``group_size``.
+  1. Same initial round as fixed, but starting from ``initial_group_size``
+     instead of ``group_size``.
   2. Iteratively sample one more episode, recompute uncertainty U(q), and
      stop when U(q) falls below ``uncertainty_threshold`` or
      ``max_group_size`` is reached.  A consecutive-failure circuit breaker
@@ -32,24 +36,28 @@ Shared finalization (``_finalize_episode``):
   4. Zero-variance discard: if all episodes have identical reward, insert
      fresh nodes, mark them discarded, save checkpoint, and return None.
   5. Insert fresh nodes into the tree_store.
-  6. If ``loss_mode != GRPO``: run selected-turn distillation — diagnose
-     the episode, identify turns needing improvement, gather teacher
-     logprobs, and build per-position reward info.
+  6. If ``loss_mode != GRPO``: run selected-turn distillation (orchestration
+     lives in ``core/distill_prep.py``) — diagnose the episode, identify turns
+     needing improvement, gather teacher logprobs, and build per-position
+     reward info.
   7. If ``advantage_mode == TREE``: compute GRPO-normalized tree advantages
      across episodes.
   8. Mark all nodes as trained, save the tree checkpoint, and convert to a
      batched tensor dict.
 
-Helper functions
-~~~~~~~~~~~~~~~~
-- ``choose_sample_source`` — probabilistic selection between SCRATCH / BRANCH / MIXED.
-- ``select_branch_candidate`` — pick the highest-entropy node eligible for branching.
-- ``interactions_dict_to_nodes`` — convert inference-engine interactions to ``Node``
-  objects, handling both live ``model_response`` and proxy-deserialized tensor caches.
-- ``annotate_nodes_from_run`` — stamp TPFC assistant metadata (entropy, branch info)
-  onto nodes by turn index.
-- ``_input_ids_to_messages`` — heuristic token-ID → message-list conversion used by
-  the diagnosis step.
+Helper modules and functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- ``core/fresh_query.py`` — fresh-query row normalization and claim helpers
+  (``_apply_fresh_query_row``, ``_execute_fresh_query_claim_update``, ...).
+- ``core/batch_convert.py`` — ``interactions_dict_to_nodes`` plus the batched
+  tensor-dict converters for Nodes/SuperNodes and the VIMPO metadata stamper
+  (re-exported here for backward compatibility).
+- ``core/distill_prep.py`` — selected-turn distillation orchestration
+  (``prepare_distill_for_episode`` / ``prepare_distill_for_node_groups`` /
+  ``setup_distill_provider``); the class keeps thin delegating methods under
+  the historical ``_prepare_distill_*`` / ``_setup_distill_provider`` names.
+- ``annotate_nodes_from_run`` — stamp TPFC assistant metadata (entropy, branch
+  info) onto nodes by turn index.
 """
 
 from __future__ import annotations
@@ -64,7 +72,6 @@ try:
     load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 except ImportError:
     pass
-import re
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -74,10 +81,33 @@ from customized_areal.tree_search.agents.execution_dag import SuperNode
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
+    Config,
     LossMode,
     SampleSource,
 )
-from customized_areal.tree_search.core.tree_store import Node, version_id_from_versions
+
+# Re-exported for backward compatibility: tests import/patch these names on
+# this module while the implementations live in the split-out helper modules.
+from customized_areal.tree_search.core.batch_convert import (
+    _nodes_to_batched_tensor_dict,
+    _supernodes_to_batched_tensor_dict,
+    annotate_vimpo_episode_metadata,
+    interactions_dict_to_nodes,
+)
+from customized_areal.tree_search.core.distill_prep import (
+    prepare_distill_for_episode,
+    prepare_distill_for_node_groups,
+    setup_distill_provider,
+)
+from customized_areal.tree_search.core.fresh_query import (
+    _FRESH_QUERY_SELECT_LIMIT,
+    _affected_row_count,
+    _apply_fresh_query_row,
+    _apply_train_id_not_contains_filter,
+    _execute_fresh_query_claim_update,
+    _normalize_used4train,
+)
+from customized_areal.tree_search.core.tree_store import Node
 from customized_areal.tree_search.core.uncertainty import should_discard_query
 
 from areal.api import RolloutWorkflow
@@ -85,7 +115,11 @@ from areal.utils import logging
 
 logger = logging.getLogger("TreeSearchGroupedWorkflow")
 
-_FRESH_QUERY_SELECT_LIMIT = 100
+# Circuit breaker for the dynamic-group-size sampling loop: stop after this
+# many CONSECUTIVE failed episode additions. Deliberately small and
+# independent of max_group_size — failures come with exponential backoff in
+# _retry_episode, so a large budget would stall the rollout for minutes.
+_MAX_CONSECUTIVE_FAILED_ADDITIONS = 3
 
 
 def _wrap_leaf_super(nodes: list[Node], *, super_id: str = "") -> SuperNode:
@@ -135,159 +169,6 @@ def _with_episode_metadata(
             ),
         )
     return result
-
-
-def _normalize_used4train(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(item) for item in value if isinstance(item, str)]
-    return []
-
-
-def _apply_fresh_query_row(data: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(data)
-    query_id = row.get("query_id")
-    query = row.get("query")
-    gold_answer = row.get("gold_answer")
-    evaluation_rubric = row.get("evaluation_rubric")
-    used4train = row.get("used4train")
-
-    file_paths = row.get("file_paths")
-
-    merged["query_id"] = str(query_id or "")
-    merged["query"] = str(query or "")
-    merged["answer"] = str(gold_answer or "")
-    merged["evaluation_rubric"] = (
-        evaluation_rubric if isinstance(evaluation_rubric, list) else []
-    )
-    merged["used4train"] = _normalize_used4train(used4train)
-    merged["file_paths"] = file_paths if isinstance(file_paths, list) else []
-    return merged
-
-
-async def _execute_fresh_query_claim_update(
-    query: Any,
-    *,
-    train_id: str,
-) -> Any:
-    query = _apply_train_id_not_contains_filter(query, train_id=train_id)
-    return await query.execute()
-
-
-def _apply_train_id_not_contains_filter(query: Any, *, train_id: str) -> Any:
-    try:
-        return query.not_.contains("used4train", [train_id])
-    except AttributeError:
-        logger.warning(
-            "Supabase client does not expose not_.contains; fresh query claim "
-            "will rely on the query_id update guard only"
-        )
-        return query
-
-
-def _affected_row_count(result: Any) -> int:
-    data = getattr(result, "data", None)
-    if isinstance(data, list):
-        return len(data)
-    count = getattr(result, "count", None)
-    return count if isinstance(count, int) else 0
-
-
-def choose_sample_source(
-    mode: SampleSource,
-    *,
-    branch_probability: float,
-    has_candidate: bool,
-    random_value: float,
-) -> SampleSource:
-    if mode == SampleSource.SCRATCH or not has_candidate:
-        return SampleSource.SCRATCH
-    if mode == SampleSource.BRANCH:
-        return SampleSource.BRANCH
-    if mode == SampleSource.MIXED and random_value < branch_probability:
-        return SampleSource.BRANCH
-    return SampleSource.SCRATCH
-
-
-def _max_entropy(node: Node) -> float:
-    stats = node.entropy_stats or {}
-    value = stats.get("max_entropy") if isinstance(stats, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return 0.0
-    return float(value)
-
-
-def _critic_value(node: Node, tree_store: Any | None) -> tuple[float, bool]:
-    """Return ``(v(s_t), has_value)`` for a node from the critic.
-
-    Prefers the tree store's recorded value (authoritative ``has_value``);
-    falls back to ``Node.value`` where a non-zero value is treated as present.
-    A missing value (``has_value is False``) makes the caller bypass the TD gate.
-    """
-    node_id = getattr(node, "node_id", "") or ""
-    if tree_store is not None and node_id and tree_store.has_value(node_id):
-        return float(tree_store.get_value(node_id)), True
-    v = float(getattr(node, "value", 0.0) or 0.0)
-    return v, v != 0.0
-
-
-def select_branch_candidate(
-    nodes: list[Node],
-    query_id: str,
-    tree_store: Any | None = None,
-    td_threshold: float = 0.0,
-    gamma: float = 1.0,
-) -> Node | None:
-    """Pick the best branch candidate, optionally gated by critic TD-error.
-
-    Candidates are ``need_branch`` nodes (with a task) for this query.
-    When ``td_threshold > 0`` and a tree store is supplied, a candidate is kept
-    only if its critic TD-error magnitude meets the threshold::
-
-        |delta_t| = |r_t + gamma * v(s_{t+1}) - v(s_t)|
-
-    computed from critic values only, where ``v(s_{t+1})`` is the candidate's
-    successor turn in the same episode (terminal: ``r_t = outcome_reward`` and
-    ``v(s_{t+1}) = 0``). Candidates whose own critic value is unavailable bypass
-    the gate (entropy-only fallback), so disabling the critic degrades to the
-    previous entropy-only behavior. Surviving candidates are ranked by entropy.
-    """
-    candidates = [
-        node
-        for node in nodes
-        if node.query_id == query_id and node.need_branch and bool(node.task_id)
-    ]
-    if not candidates:
-        return None
-    if tree_store is None or td_threshold <= 0.0:
-        return max(candidates, key=_max_entropy)
-
-    # Successor lookup over all query nodes (the successor need not be a
-    # branch candidate itself).
-    by_turn: dict[tuple[str, int], Node] = {}
-    for n in nodes:
-        if n.query_id == query_id and n.episode_id:
-            by_turn[(n.episode_id, getattr(n, "turn_idx", 0))] = n
-
-    gated: list[Node] = []
-    for node in candidates:
-        v_t, has_v = _critic_value(node, tree_store)
-        if not has_v:
-            # No critic value -> cannot gate; keep as entropy-only fallback.
-            gated.append(node)
-            continue
-        successor = by_turn.get((node.episode_id, getattr(node, "turn_idx", 0) + 1))
-        if successor is not None:
-            r_t = 0.0
-            v_next, _ = _critic_value(successor, tree_store)
-        else:
-            r_t = float(getattr(node, "outcome_reward", 0.0) or 0.0)
-            v_next = 0.0
-        delta = abs(r_t + gamma * v_next - v_t)
-        if delta >= td_threshold:
-            gated.append(node)
-    if not gated:
-        return None
-    return max(gated, key=_max_entropy)
 
 
 def _assistant_metadata(raw_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -351,371 +232,6 @@ def annotate_nodes_from_run(
                 node.topk_ids = topk_ids
 
 
-def interactions_dict_to_nodes(interactions: dict[str, Any]) -> list[Node]:
-    """Convert dict[str, InteractionWithTokenLogpReward] to list[Node].
-
-    Each interaction becomes one Node representing a single turn.
-    """
-    from areal.experimental.openai.types import InteractionWithTokenLogpReward
-
-    nodes: list[Node] = []
-
-    for turn_idx, (interaction_id, interaction) in enumerate(
-        interactions.items(), start=1
-    ):
-        if not isinstance(interaction, InteractionWithTokenLogpReward):
-            logger.warning(
-                "Skipping interaction %s (type=%s, expected InteractionWithTokenLogpReward)",
-                interaction_id,
-                type(interaction).__name__,
-            )
-            continue
-        # When interactions are deserialized from the proxy server (via HTTP),
-        # model_response is None but _cache contains the pre-computed tensor
-        # dict. Use to_tensor_dict() which checks _cache first.
-        resp = interaction.model_response
-        if resp is not None:
-            seq_tokens = resp.input_tokens + resp.output_tokens
-
-            if (
-                interaction.chat_template_type == "concat"
-                and interaction.parent is not None
-            ):
-                from areal.infra.rpc.rtensor import RTensor
-
-                parent_res = RTensor.localize(interaction.parent.to_tensor_dict())
-                parent_logprobs = parent_res["logprobs"].squeeze(0).tolist()
-                parent_loss_mask = parent_res["loss_mask"].squeeze(0).tolist()
-                parent_versions = parent_res["versions"].squeeze(0).tolist()
-                parent_len = len(parent_logprobs)
-                assert parent_len == len(parent_loss_mask) == len(parent_versions)
-
-                if resp.input_len > parent_len:
-                    logprobs = (
-                        parent_logprobs
-                        + [0.0] * (resp.input_len - parent_len)
-                        + resp.output_logprobs
-                    )
-                    loss_mask = (
-                        parent_loss_mask
-                        + [0] * (resp.input_len - parent_len)
-                        + [1] * resp.output_len
-                    )
-                    versions = (
-                        parent_versions
-                        + [-1] * (resp.input_len - parent_len)
-                        + resp.output_versions
-                    )
-                else:
-                    logger.error(
-                        "concat mode: resp.input_len (%d) <= parent_len (%d) — "
-                        "expected monotonic growth. Zero-filling prompt context.",
-                        resp.input_len,
-                        parent_len,
-                    )
-                    logprobs = [0.0] * resp.input_len + resp.output_logprobs
-                    loss_mask = [0] * resp.input_len + [1] * resp.output_len
-                    versions = [-1] * resp.input_len + resp.output_versions
-            else:
-                logprobs = [0.0] * resp.input_len + resp.output_logprobs
-                loss_mask = [0] * resp.input_len + [1] * resp.output_len
-                versions = [-1] * resp.input_len + resp.output_versions
-
-            outcome_reward = (
-                interaction.reward if interaction.reward is not None else 0.0
-            )
-
-            topk_ids: list[list[int]] = []
-            topk_logp: list[list[float]] = []
-            if resp.output_top_logprobs is not None:
-                for pos_logprobs in resp.output_top_logprobs:
-                    ids = []
-                    logps = []
-                    for token_id, lp in pos_logprobs:
-                        ids.append(token_id)
-                        logps.append(lp)
-                    topk_ids.append(ids)
-                    topk_logp.append(logps)
-        elif interaction.has_tensor_data:
-            # Deserialized from proxy server: _cache is set but model_response
-            # is None. Extract fields from the pre-computed tensor dict.
-            # to_tensor_dict() returns RTensor-wrapped tensors after proxy
-            # deserialization; localize them to real tensors first.
-            from areal.infra.rpc.rtensor import RTensor
-
-            td = RTensor.localize(interaction.to_tensor_dict())
-            seq_tokens = td["input_ids"].squeeze(0).tolist()
-            logprobs = td["logprobs"].squeeze(0).tolist()
-            loss_mask = td["loss_mask"].squeeze(0).tolist()
-            versions = td["versions"].squeeze(0).tolist()
-            outcome_reward = (
-                interaction.reward if interaction.reward is not None else 0.0
-            )
-            topk_ids = []
-            topk_logp = []
-        else:
-            logger.warning(
-                "Skipping interaction %s: no tensor data (model_response and _cache are both None)",
-                interaction_id,
-            )
-            continue
-
-        pn_id: str | None = None
-        if interaction.parent is not None:
-            pn_id = interaction.parent.interaction_id
-
-        node = Node(
-            input_ids=seq_tokens,
-            loss_mask=loss_mask,
-            logprobs=logprobs,
-            versions=versions,
-            outcome_reward=outcome_reward,
-            turn_idx=turn_idx,
-            node_id=interaction_id,
-            parent_node_id=pn_id,
-            version_id=version_id_from_versions(versions),
-            topk_ids=topk_ids if topk_ids else None,
-            topk_logp=topk_logp if topk_logp else None,
-        )
-
-        nodes.append(node)
-
-    return nodes
-
-
-def _nodes_to_batched_tensor_dict(
-    nodes: list[Node],
-    max_tokens: int = 0,
-    loss_mode: str | None = None,
-    advantage_mode: str | None = None,
-) -> dict[str, Any] | None:
-    """Convert list[Node] to a batched tensor dict with metadata.
-
-    Each Node is converted to a [1, seq_len] tensor dict via
-    _node_to_tensor_dict, then all are concatenated via
-    concat_padded_tensors into a single [N, seq_len] batched dict.
-
-    If max_tokens > 0, each node's sequence is truncated to max_tokens
-    from the beginning before conversion.
-
-    ``advantage_mode`` is forwarded to ``_node_to_tensor_dict`` so the VIMPO
-    branch can emit its episode-identity / centered-target metadata tensors;
-    pass ``"vimpo"`` only from the VIMPO branch of ``_finalize_episode``.
-
-    Returns None if nodes is empty.
-    """
-    if not nodes:
-        return None
-
-    from customized_areal.tree_search.core.tree_store import _node_to_tensor_dict
-
-    from areal.utils.data import concat_padded_tensors
-
-    tensor_dicts = [
-        _node_to_tensor_dict(
-            node,
-            query_id=node.query_id or "",
-            node_id=node.node_id,
-            max_tokens=max_tokens,
-            loss_mode=loss_mode,
-            advantage_mode=advantage_mode,
-        )
-        for node in nodes
-    ]
-    return concat_padded_tensors(tensor_dicts)
-
-
-def annotate_vimpo_episode_metadata(nodes: list[Node]) -> None:
-    """Stamp VIMPO episode identity + centered terminal-reward onto nodes.
-
-    Groups nodes by ``query_id`` then ``episode_id`` (falling back to
-    ``node_id`` when ``episode_id`` is empty). Within a query, the per-episode
-    outcome reward is mean-subtracted across that query's distinct episodes to
-    form ``vimpo_centered_reward`` (the policy-implied terminal-value target).
-    ``vimpo_query_index`` orders the query within the batch (queries are
-    sorted for determinism) and ``vimpo_episode_index`` is a globally-unique,
-    monotonically increasing episode counter over distinct episodes -- not
-    turns -- so every turn of one episode shares one index.
-
-    Called only from the VIMPO branch of ``_finalize_episode`` (VIMPO is
-    critic-free and skips the Node advantage computers). Raises ``ValueError``
-    on a missing ``query_id``/``episode_id``, a duplicate ``turn_idx`` within
-    an episode, or an inconsistent ``outcome_reward`` across one episode's
-    turns.
-    """
-    grouped: dict[str, dict[str, list[Node]]] = {}
-    for node in nodes:
-        if not node.query_id:
-            raise ValueError("VIMPO requires a non-empty query_id")
-        episode_id = node.episode_id or node.node_id
-        if not episode_id:
-            raise ValueError("VIMPO requires a non-empty episode_id or node_id")
-        grouped.setdefault(node.query_id, {}).setdefault(episode_id, []).append(node)
-    episode_counter = 0
-    for query_index, query_id in enumerate(sorted(grouped)):
-        episodes = grouped[query_id]
-        rewards: dict[str, float] = {}
-        for episode_id, episode_nodes in episodes.items():
-            turns = [node.turn_idx for node in episode_nodes]
-            if len(turns) != len(set(turns)):
-                raise ValueError(f"duplicate turn_idx in episode {episode_id!r}")
-            values = {float(node.outcome_reward) for node in episode_nodes}
-            if len(values) != 1:
-                raise ValueError(
-                    f"inconsistent outcome_reward in episode {episode_id!r}"
-                )
-            rewards[episode_id] = values.pop()
-        mean_reward = sum(rewards.values()) / len(rewards)
-        for episode_id in sorted(episodes):
-            for node in episodes[episode_id]:
-                node.vimpo_query_index = query_index
-                node.vimpo_episode_index = episode_counter
-                node.vimpo_centered_reward = rewards[episode_id] - mean_reward
-            episode_counter += 1
-
-
-def _supernodes_to_batched_tensor_dict(
-    super_nodes: list[SuperNode],
-    advantages: Any,
-    *,
-    max_tokens: int = 0,
-    loss_mode: str | None = None,
-) -> dict[str, Any] | None:
-    """Convert multica SuperNodes to a batched tensor dict.
-
-    The multica parallel of :func:`_nodes_to_batched_tensor_dict`: each SuperNode
-    is one segment whose resolved tensors live in ``metadata["tensors"]``
-    (torch-free lists: ``input_ids`` / ``loss_mask`` / ``logprobs`` /
-    ``versions``). The per-segment scalar advantage from
-    :func:`assemble_node_advantages` is broadcast to the response span (where
-    ``loss_mask == 1``), mirroring the per-token advantage the Node path
-    carries. ``topk_ids`` is a -1 sentinel (the trainer fills it) and
-    ``teacher_logp`` is zeros when ``loss_mode != "grpo"`` -- distillation is a
-    Change 2 concern and is not sourced from the segment tensors here.
-
-    Returns ``None`` if ``super_nodes`` is empty.
-    """
-    if not super_nodes:
-        return None
-    from customized_areal.tree_search.core.tree_store import (
-        _lazy_torch,
-        _response_span,
-    )
-
-    from areal.utils.data import concat_padded_tensors
-
-    torch = _lazy_torch()
-    tensor_dicts: list[dict[str, Any]] = []
-    for sn in super_nodes:
-        t = sn.metadata.get("tensors") or {}
-        input_ids = list(t.get("input_ids", []))
-        loss_mask = list(t.get("loss_mask", []))
-        logprobs = list(t.get("logprobs", []))
-        versions = list(t.get("versions", []))
-        if max_tokens > 0 and len(input_ids) > max_tokens:
-            cut = len(input_ids) - max_tokens
-            input_ids = input_ids[cut:]
-            loss_mask = loss_mask[cut:]
-            logprobs = logprobs[cut:]
-            versions = versions[cut:]
-        seq_len = len(input_ids)
-        resp_start, resp_end = _response_span(loss_mask)
-        resp_len = max(0, resp_end - resp_start)
-        adv = (
-            float(advantages.advantages.get(sn.node_id, 0.0))
-            if advantages is not None
-            else 0.0
-        )
-        traj: dict[str, Any] = {
-            "input_ids": torch.tensor(input_ids, dtype=torch.int32).unsqueeze(0),
-            "loss_mask": torch.tensor(loss_mask, dtype=torch.int32).unsqueeze(0),
-            "logprobs": torch.tensor(logprobs, dtype=torch.float32).unsqueeze(0),
-            "versions": torch.tensor(versions, dtype=torch.int32).unsqueeze(0),
-            "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
-            "rewards": torch.tensor(
-                float(sn.outcome_reward), dtype=torch.float32
-            ).unsqueeze(0),
-            "topk_ids": torch.full((1, resp_len, 1), -1, dtype=torch.int32),
-            "advantages": torch.full((1, resp_len), adv, dtype=torch.float32),
-        }
-        if loss_mode != "grpo":
-            traj["teacher_logp"] = torch.zeros(1, resp_len, 1, dtype=torch.float32)
-        tensor_dicts.append(traj)
-    return concat_padded_tensors(tensor_dicts)
-
-
-def _filter_distill_episode_failure(
-    nodes: list[Node], loss_mode: LossMode
-) -> list[Node]:
-    if loss_mode == LossMode.DISTILL:
-        return []
-    return nodes
-
-
-def _set_position_reward_sample_indices(
-    nodes: list[Node],
-    rewards_by_node_id: dict[str, list[Any]],
-) -> list[Any]:
-    all_rewards: list[Any] = []
-    for sample_index, node in enumerate(nodes):
-        for reward in rewards_by_node_id.get(node.node_id, []):
-            reward.sample_index = sample_index
-            all_rewards.append(reward)
-    return all_rewards
-
-
-def _input_ids_to_messages(
-    input_ids: list[int], tokenizer: Any
-) -> list[dict[str, str]]:
-    """Convert full-context token IDs to a list of role/content message dicts.
-
-    Uses ``apply_chat_template`` on a dummy conversation to derive the
-    format markers, then parses the decoded token sequence with those
-    markers.  Falls back to a single-user-message format for unrecognized
-    templates.
-    """
-    # Derive the chat-template markers from a dummy round-trip.
-    _DUMMY = [{"role": "user", "content": "X"}]
-    try:
-        formatted = tokenizer.apply_chat_template(_DUMMY, tokenize=False)
-    except Exception:
-        formatted = "<|im_start|>user\nX<|im_end|>\n"
-    m_start = re.search(r"(<\S+?>)(system|user|assistant)", formatted)
-    start_token = m_start.group(1) if m_start else "<|im_start|>"
-    m_end = re.search(r"(<\S+?>)", formatted[::-1])
-    end_token = m_end.group(1)[::-1] if m_end else "<|im_end|>"
-
-    try:
-        raw = tokenizer.decode(input_ids, skip_special_tokens=False)
-    except TypeError:
-        raw = tokenizer.decode(input_ids)
-
-    pattern = re.compile(
-        re.escape(start_token)
-        + r"(system|user|assistant|tool)\s*\n(.*?)"
-        + re.escape(end_token),
-        re.DOTALL,
-    )
-
-    messages: list[dict[str, str]] = []
-    for match in pattern.finditer(raw):
-        role = match.group(1)
-        content = match.group(2).strip()
-        if content:
-            if role == "tool":
-                role = "user"
-            messages.append({"role": role, "content": content})
-
-    if not messages:
-        try:
-            fallback = tokenizer.decode(input_ids, skip_special_tokens=True)
-        except TypeError:
-            fallback = tokenizer.decode(input_ids)
-        messages = [{"role": "user", "content": fallback}]
-
-    return messages
-
-
 class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     """Grouped rollout workflow with tree-search cache reuse and teacher distillation.
 
@@ -742,69 +258,14 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
     controls whether the checkpoint is *loaded* at init time.
     """
 
-    _tokenizer_cache: dict[str, Any] = {}
-    _tokenizer_lock = asyncio.Lock()
-
     def __init__(
         self,
         workflow: RolloutWorkflow,
         group_size: int,
-        checkpoint_dir: str,
-        advantage_mode: AdvantageMode,
-        loss_mode: LossMode,
-        cache_mode: CacheMode,
+        config: Config,
+        *,
         tokenizer_path: str = "",
-        max_reasoning_tokens: int = 1000,
-        rl_loss_weight: float = 1.0,
-        distill_loss_weight: float = 0.005,
-        topk_distill: bool = False,
-        teacher_provider: str = "external",
-        teacher_base_url: str = "http://localhost:8001",
-        teacher_backend: str = "openai",
-        teacher_model_name: str = "",
-        teacher_api_key: str = "",
-        teacher_top_k: int = 10,
-        teacher_max_retries: int = 3,
-        teacher_timeout: float = 300.0,
-        teacher_max_concurrency: int = 4,
-        teacher_missing_logprob: float = -23.0,
-        diagnose_model_name: str = "",
-        diagnose_max_tokens: int = 1024,
-        diagnose_temperature: float = 0.0,
-        diagnose_base_url: str = "",
-        diagnose_api_key: str = "",
-        strict_distill_json: bool = True,
         max_tokens: int = 0,
-        sample_source: SampleSource = SampleSource.SCRATCH,
-        branch_probability: float = 0.5,
-        dynamic_group_size: bool = False,
-        initial_group_size: int = 0,
-        max_group_size: int = 64,
-        uncertainty_threshold: float = 0.05,
-        reward_type: str = "binary",
-        distill_kl_mode: str = "reverse_kl",
-        max_distill_tokens: int = 0,
-        use_fresh_query: bool = False,
-        fresh_query_table: str = "",
-        enable_generative_critic: bool = False,
-        critic_gamma: float = 1.0,
-        critic_lambda: float = 0.95,
-        critic_avg_success_rate: float = 0.29,
-        critic_score_max: int = 10,
-        critic_max_new_tokens: int = 1024,
-        critic_temperature: float = 0.0,
-        critic_target_scale: float = 1.0,
-        critic_mc_weight: float = 1.0,
-        critic_td_n_steps: int = 1,
-        critic_mc_adaptive: bool = False,
-        critic_mc_c: float = 4.0,
-        hybrid_mc_min_visits: int = 5,
-        hybrid_critic_var_floor: float = 1e-3,
-        hybrid_critic_error_var: float = 0.05,
-        branch_td_threshold: float = 0.0,
-        versioned_rho: float = 1.0,
-        versioned_n_min: int = 1,
-        versioned_n_max: int = 10,
         multica_dag_enabled: bool = False,
         multica_dag_client=None,
         multica_assembler=None,
@@ -817,110 +278,89 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
 
         if group_size < 1:
             raise ValueError(f"group_size must be >= 1, got {group_size}")
+        self.config = config
         self.workflow = workflow
         self.group_size = group_size
-        self.advantage_mode = advantage_mode
-        self.enable_generative_critic = enable_generative_critic
-        self.critic_gamma = critic_gamma
-        self.critic_lambda = critic_lambda
-        self.critic_avg_success_rate = critic_avg_success_rate
-        self.critic_score_max = critic_score_max
-        self.critic_max_new_tokens = critic_max_new_tokens
-        self.critic_temperature = critic_temperature
-        self.critic_target_scale = critic_target_scale
-        self.critic_mc_weight = critic_mc_weight
-        self.critic_td_n_steps = critic_td_n_steps
-        self.critic_mc_adaptive = critic_mc_adaptive
-        self.critic_mc_c = critic_mc_c
+        self.advantage_mode = config.advantage_mode
+        self.loss_mode = config.loss_mode
+        self.cache_mode = config.mode
+        self.enable_generative_critic = config.enable_generative_critic
+        # Generative-critic knobs.
+        self.critic_gamma = config.critic_gamma
+        self.critic_lambda = config.critic_lambda
+        self.critic_avg_success_rate = config.critic_avg_success_rate
+        self.critic_score_max = config.critic_score_max
+        self.critic_max_new_tokens = config.critic_max_new_tokens
+        self.critic_temperature = config.critic_temperature
+        self.critic_target_scale = config.critic_target_scale
+        self.critic_td_n_steps = config.critic_td_n_steps
         # Variance-aware hybrid GAE + TD-gated branching knobs.
-        self.hybrid_mc_min_visits = hybrid_mc_min_visits
-        self.hybrid_critic_var_floor = hybrid_critic_var_floor
-        self.hybrid_critic_error_var = hybrid_critic_error_var
-        self.branch_td_threshold = branch_td_threshold
+        self.hybrid_mc_min_visits = config.hybrid_mc_min_visits
+        self.hybrid_critic_var_floor = config.hybrid_critic_var_floor
+        self.hybrid_critic_error_var = config.hybrid_critic_error_var
+        self.branch_td_threshold = config.branch_td_threshold
         # ARE-4 ΔV advantage (advantage_mode=VERSIONED_BACKUP) hyperparameters.
-        self.versioned_rho = versioned_rho
-        self.versioned_n_min = versioned_n_min
-        self.versioned_n_max = versioned_n_max
+        self.versioned_rho = config.versioned_rho
+        self.versioned_n_min = config.versioned_n_min
+        self.versioned_n_max = config.versioned_n_max
         # Resolved blend weight passed to ``compute_critic_targets``: either the
         # fixed float ``critic_mc_weight`` or an adaptive controller. The
         # controller is stateful and persists across rollouts so its critic-error
         # EMA can be updated if/when training-side feedback is wired in.
-        if critic_mc_adaptive:
+        if config.critic_mc_adaptive:
             from customized_areal.tree_search.training.losses.critic import (
                 AdaptiveMCWeight,
             )
 
-            self._mc_mixer: Any = AdaptiveMCWeight(c=critic_mc_c)
+            self._mc_mixer: Any = AdaptiveMCWeight(c=config.critic_mc_c)
         else:
-            self._mc_mixer = critic_mc_weight
-        self.loss_mode = loss_mode
-        self.cache_mode = cache_mode
+            self._mc_mixer = config.critic_mc_weight
         self.tokenizer_path = tokenizer_path
-        self.max_reasoning_tokens = max_reasoning_tokens
-        self.rl_loss_weight = rl_loss_weight
-        self.distill_loss_weight = distill_loss_weight
-        self.topk_distill = topk_distill
-        self.teacher_provider = teacher_provider
-        self.teacher_base_url = teacher_base_url
-        self.teacher_backend = teacher_backend
-        self.teacher_model_name = teacher_model_name
-        self.teacher_api_key = teacher_api_key
-        self.teacher_top_k = teacher_top_k
-        self.teacher_max_retries = teacher_max_retries
-        self.teacher_timeout = teacher_timeout
-        self.teacher_max_concurrency = teacher_max_concurrency
-        self.teacher_missing_logprob = teacher_missing_logprob
-        self.diagnose_model_name = diagnose_model_name
-        self.diagnose_max_tokens = diagnose_max_tokens
-        self.diagnose_temperature = diagnose_temperature
-        self.diagnose_base_url = diagnose_base_url
-        self.diagnose_api_key = diagnose_api_key
-        self.strict_distill_json = strict_distill_json
+        self.max_reasoning_tokens = config.max_reasoning_tokens
+        self.rl_loss_weight = config.rl_loss_weight
+        self.distill_loss_weight = config.distill_loss_weight
+        self.topk_distill = config.topk_distill
+        self.teacher_provider = config.teacher_provider
+        self.teacher_base_url = config.teacher_base_url
+        self.teacher_backend = config.teacher_backend
+        self.teacher_model_name = config.teacher_model_name
+        self.teacher_api_key = config.teacher_api_key
+        self.teacher_top_k = config.teacher_top_k
+        self.teacher_max_retries = config.teacher_max_retries
+        self.teacher_timeout = config.teacher_timeout
+        self.teacher_max_concurrency = config.teacher_max_concurrency
+        self.teacher_missing_logprob = config.teacher_missing_logprob
+        self.diagnose_model_name = config.diagnose_model_name
+        self.diagnose_max_tokens = config.diagnose_max_tokens
+        self.diagnose_temperature = config.diagnose_temperature
+        self.diagnose_base_url = config.diagnose_base_url
+        self.diagnose_api_key = config.diagnose_api_key
+        self.strict_distill_json = config.strict_distill_json
         self.max_tokens = max_tokens
-        self.sample_source = SampleSource(sample_source)
-        self.branch_probability = branch_probability
-        self.dynamic_group_size = dynamic_group_size
-        self.initial_group_size = (
-            initial_group_size if initial_group_size > 0 else group_size
-        )
-        self.max_group_size = max_group_size
-        self.uncertainty_threshold = uncertainty_threshold
-        self.reward_type = reward_type
-        self.distill_kl_mode = distill_kl_mode
-        self.max_distill_tokens = max_distill_tokens or max_tokens
-        self.use_fresh_query = use_fresh_query
-        self.fresh_query_table = fresh_query_table or os.environ.get(
-            "FRESH_QUERY_TABLE", ""
-        )
-        if self.use_fresh_query and not self.fresh_query_table:
-            raise ValueError(
-                "fresh_query_table must be set when use_fresh_query=True "
-                "(or set FRESH_QUERY_TABLE)"
-            )
-        if dynamic_group_size:
-            if self.initial_group_size < 1:
-                raise ValueError(
-                    f"initial_group_size must be >= 1, got {self.initial_group_size}"
-                )
-            if self.max_group_size < self.initial_group_size:
-                raise ValueError(
-                    "max_group_size must be >= initial_group_size, "
-                    f"got max_group_size={self.max_group_size}, "
-                    f"initial_group_size={self.initial_group_size}"
-                )
-            if self.uncertainty_threshold < 0:
-                raise ValueError(
-                    "uncertainty_threshold must be non-negative, "
-                    f"got {self.uncertainty_threshold}"
-                )
-            if self.reward_type not in ("binary", "continuous"):
-                raise ValueError(
-                    "reward_type must be 'binary' or 'continuous', "
-                    f"got {self.reward_type!r}"
-                )
-            self.group_size = self.initial_group_size
+        self.sample_source = SampleSource(config.sample_source)
+        self.branch_probability = config.branch_probability
+        self.dynamic_group_size = config.dynamic_group_size
+        self.initial_group_size = config.initial_group_size
+        self.max_group_size = config.max_group_size
+        self.uncertainty_threshold = config.uncertainty_threshold
+        self.reward_type = config.reward_type
+        self.distill_kl_mode = config.distill_kl_mode
+        self.max_distill_tokens = config.max_distill_tokens or max_tokens
+        self.use_fresh_query = config.use_fresh_query
+        self.fresh_query_table = config.fresh_query_table
+        # query_ids selected by in-flight arun_episode calls (claim is deferred
+        # until a usable batch exists; see _select/_claim_fresh_query).
+        self._inflight_fresh_queries: set[str] = set()
+        # Per-instance tokenizer cache (a class-level dict/lock would leak
+        # across instances and bind one asyncio.Lock to foreign event loops).
+        self._tokenizer_cache: dict[str, Any] = {}
+        self._tokenizer_lock = asyncio.Lock()
+        if config.dynamic_group_size:
+            # Field-level validation (initial >= 1, max >= initial, threshold
+            # >= 0, reward_type) already lives in Config.__post_init__.
+            self.group_size = config.initial_group_size
 
-        self.tree_checkpoint_manager = TreeCheckpointManager(checkpoint_dir)
+        self.tree_checkpoint_manager = TreeCheckpointManager(config.checkpoint_dir)
 
         # Load existing tree checkpoint if present (CROSS_TRAINING mode)
         if self.cache_mode == CacheMode.CROSS_TRAINING:
@@ -1007,10 +447,21 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 session_remover=multica_session_remover,
             )
 
-    async def _load_fresh_query_data(
+    async def _select_fresh_query_data(
         self,
         data: dict[str, Any],
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any], tuple[str, str]] | None:
+        """Select an eligible fresh-query row WITHOUT claiming it.
+
+        The claim (appending TRAIN_ID to ``used4train``) is deferred to
+        :meth:`_claim_fresh_query`, which runs only after the episode produced
+        a usable training batch — otherwise failed or zero-variance-discarded
+        rollouts would permanently consume the query.
+
+        Returns ``(merged_data, (query_id, train_id))``, or ``None`` when no
+        eligible row exists. Rows already in-flight in this process (selected
+        by another concurrent ``arun_episode``) are skipped.
+        """
         from customized_areal.db_service import DBConnection
 
         train_id = os.environ.get("TRAIN_ID", "")
@@ -1042,36 +493,19 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             query_id = row.get("query_id")
             if not isinstance(query_id, str) or not query_id:
                 continue
+            if query_id in self._inflight_fresh_queries:
+                continue
             used4train = _normalize_used4train(row.get("used4train"))
             if train_id in used4train:
                 continue
 
-            next_used4train = [*used4train, train_id]
-            update_query = (
-                client.table(self.fresh_query_table)
-                .update({"used4train": next_used4train})
-                .eq("query_id", query_id)
-            )
-            claim_result = await _execute_fresh_query_claim_update(
-                update_query,
-                train_id=train_id,
-            )
-            if _affected_row_count(claim_result) < 1:
-                logger.info(
-                    "Fresh query claim lost race for query_id=%s train_id=%s; retrying",
-                    query_id,
-                    train_id,
-                )
-                continue
-
+            self._inflight_fresh_queries.add(query_id)
             logger.info(
-                "Claimed fresh query query_id=%s for train_id=%s",
+                "Selected fresh query query_id=%s for train_id=%s (claim deferred)",
                 query_id,
                 train_id,
             )
-            claimed_row = dict(row)
-            claimed_row["used4train"] = next_used4train
-            return _apply_fresh_query_row(data, claimed_row)
+            return _apply_fresh_query_row(data, row), (query_id, train_id)
 
         logger.warning(
             "No eligible fresh query rows found in table=%s for train_id=%s",
@@ -1079,6 +513,54 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             train_id,
         )
         return None
+
+    async def _claim_fresh_query(self, query_id: str, train_id: str) -> None:
+        """Claim a previously selected fresh query after a successful rollout.
+
+        Re-reads ``used4train`` so concurrent claims by other train runs are
+        preserved, then appends ``train_id`` with a ``not_.contains`` guard so
+        a retried/duplicated claim is a no-op. Best-effort: a lost race is
+        logged, not raised.
+        """
+        from customized_areal.db_service import DBConnection
+
+        client = await DBConnection().get_client()
+        row_result = (
+            await client.table(self.fresh_query_table)
+            .select("used4train")
+            .eq("query_id", query_id)
+            .execute()
+        )
+        rows = getattr(row_result, "data", None)
+        current = (
+            _normalize_used4train(rows[0].get("used4train"))
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict)
+            else []
+        )
+        if train_id in current:
+            return
+        update_query = (
+            client.table(self.fresh_query_table)
+            .update({"used4train": [*current, train_id]})
+            .eq("query_id", query_id)
+        )
+        claim_result = await _execute_fresh_query_claim_update(
+            update_query,
+            train_id=train_id,
+        )
+        if _affected_row_count(claim_result) < 1:
+            logger.warning(
+                "Fresh query claim lost race for query_id=%s train_id=%s; "
+                "the rollout may be re-used by another run",
+                query_id,
+                train_id,
+            )
+            return
+        logger.info(
+            "Claimed fresh query query_id=%s for train_id=%s",
+            query_id,
+            train_id,
+        )
 
     def _result_to_nodes(
         self, result: Any, query_id: str, group_idx: int
@@ -1156,34 +638,23 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             annotate_nodes_from_run(nodes, task_id=task_id, raw_messages=raw_messages)
         return nodes
 
-    async def _get_tokenizer(self):
-        if self.loss_mode == LossMode.GRPO:
-            return None
+    async def _get_tokenizer(self, *, purpose: str):
+        """Load the HF tokenizer for ``purpose`` (cached per instance).
+
+        Raises ValueError when ``tokenizer_path`` is unset — a configuration
+        error, not a transient per-episode failure. The blocking HF load runs
+        in a thread so the rollout event loop stays responsive.
+        """
         if not self.tokenizer_path:
-            raise ValueError(
-                "tokenizer_path is required when tree-search distillation is enabled"
-            )
+            raise ValueError(f"tokenizer_path is required for {purpose}")
         async with self._tokenizer_lock:
             tokenizer = self._tokenizer_cache.get(self.tokenizer_path)
             if tokenizer is None:
                 from areal.utils.hf_utils import load_hf_tokenizer
 
-                tokenizer = load_hf_tokenizer(self.tokenizer_path)
-                self._tokenizer_cache[self.tokenizer_path] = tokenizer
-            return tokenizer
-
-    async def _get_tokenizer_unconditional(self):
-        """Load the tokenizer regardless of loss_mode (needed by the critic)."""
-        if not self.tokenizer_path:
-            raise ValueError(
-                "tokenizer_path is required when enable_generative_critic=True"
-            )
-        async with self._tokenizer_lock:
-            tokenizer = self._tokenizer_cache.get(self.tokenizer_path)
-            if tokenizer is None:
-                from areal.utils.hf_utils import load_hf_tokenizer
-
-                tokenizer = load_hf_tokenizer(self.tokenizer_path)
+                tokenizer = await asyncio.to_thread(
+                    load_hf_tokenizer, self.tokenizer_path
+                )
                 self._tokenizer_cache[self.tokenizer_path] = tokenizer
             return tokenizer
 
@@ -1199,7 +670,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
 
         if self._critic_value_client is None:
-            tokenizer = await self._get_tokenizer_unconditional()
+            tokenizer = await self._get_tokenizer(purpose="the generative critic")
             self._critic_value_client = CriticValueClient(
                 tokenizer,
                 score_max=self.critic_score_max,
@@ -1267,98 +738,7 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             )
 
     async def _setup_distill_provider(self, engine, tokenizer=None):
-        from customized_areal.tree_search.distilling.diagnose_provider import (
-            ExternalDiagnoseProvider,
-        )
-        from customized_areal.tree_search.distilling.teacher_client import (
-            TeacherClient,
-            TeacherConfig,
-        )
-
-        if self.teacher_provider == "engine":
-            proxy_addr = getattr(engine, "_proxy_gateway_addr", "") or ""
-            engine_addrs = getattr(engine, "addresses", None) or []
-            admin_api_key = getattr(engine.config, "admin_api_key", "") or ""
-            if proxy_addr:
-                teacher_base_url = proxy_addr
-            elif engine_addrs:
-                teacher_base_url = f"http://{engine_addrs[0]}"
-            else:
-                teacher_base_url = self.teacher_base_url
-
-            # Detect backend type from engine's backend attribute
-            backend_obj = getattr(engine, "backend", None)
-            backend_cls_name = type(backend_obj).__name__ if backend_obj else ""
-            if backend_cls_name == "SGLangBackend":
-                teacher_backend = "sglang"
-                # SGLang /generate is not available on the proxy gateway;
-                # use the direct SGLang server address instead.
-                if engine_addrs:
-                    teacher_base_url = f"http://{engine_addrs[0]}"
-            else:
-                teacher_backend = "openai"
-
-            logger.info(
-                "Teacher provider=engine, resolved teacher_base_url=%s, "
-                "teacher_backend=%s",
-                teacher_base_url,
-                teacher_backend,
-            )
-
-            if not teacher_base_url.startswith(("http://", "https://")):
-                raise ValueError(
-                    f"teacher_base_url must start with http:// or https://, "
-                    f"got: {teacher_base_url!r}"
-                )
-
-            config = TeacherConfig(
-                teacher_base_url=teacher_base_url,
-                teacher_model_name=self.teacher_model_name,
-                teacher_api_key=admin_api_key,
-                teacher_top_k=self.teacher_top_k,
-                teacher_max_retries=self.teacher_max_retries,
-                teacher_timeout=self.teacher_timeout,
-                teacher_missing_logprob=self.teacher_missing_logprob,
-                teacher_backend=teacher_backend,
-                teacher_max_concurrency=self.teacher_max_concurrency,
-            )
-            client = TeacherClient(config)
-        else:
-            config = TeacherConfig(
-                teacher_base_url=self.teacher_base_url,
-                teacher_model_name=self.teacher_model_name,
-                teacher_api_key=self.teacher_api_key,
-                teacher_top_k=self.teacher_top_k,
-                teacher_max_retries=self.teacher_max_retries,
-                teacher_timeout=self.teacher_timeout,
-                teacher_missing_logprob=self.teacher_missing_logprob,
-                teacher_backend=self.teacher_backend,
-                teacher_max_concurrency=self.teacher_max_concurrency,
-            )
-            client = TeacherClient(config)
-
-        diagnose_model_name = self.diagnose_model_name or "qwen/qwen3.7-max"
-        diagnose_api_key = (
-            self.diagnose_api_key
-            or os.environ.get("OPENROUTER_API_KEY", "")
-            or os.environ.get("WORKSPACE_OPENAI_API_KEY", "")
-        )
-        diagnose_base_url = (
-            self.diagnose_base_url
-            or os.environ.get("OPENROUTER_BASE_URL", "")
-            or os.environ.get("WORKSPACE_OPENAI_API_BASE", "")
-        )
-        provider = ExternalDiagnoseProvider(
-            client=client,
-            diagnose_model_name=diagnose_model_name,
-            diagnose_temperature=self.diagnose_temperature,
-            diagnose_max_tokens=self.diagnose_max_tokens,
-            diagnose_base_url=diagnose_base_url,
-            diagnose_api_key=diagnose_api_key,
-            tokenizer=tokenizer,
-        )
-
-        return provider, client
+        return await setup_distill_provider(self.config, engine, tokenizer)
 
     async def _prepare_distill_for_episode(
         self,
@@ -1368,116 +748,19 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         provider: Any,
         tokenizer: Any,
     ) -> tuple[list[Node], dict[str, list[Any]]]:
-        from customized_areal.tree_search.distilling.selected_turn_distill import (
-            parse_episode_diagnosis,
-            selected_turn_to_position_rewards,
+        # Thin delegate: reads only the mirror attributes (never self.config)
+        # so the failure-recovery stub tests can drive it on a bare instance.
+        return await prepare_distill_for_episode(
+            nodes,
+            data,
+            engine,
+            provider,
+            tokenizer,
+            loss_mode=self.loss_mode,
+            topk_distill=self.topk_distill,
+            teacher_top_k=self.teacher_top_k,
+            max_distill_tokens=self.max_distill_tokens,
         )
-        from customized_areal.tree_search.distilling.teacher_client import (
-            TeacherServiceError,
-        )
-
-        if not nodes:
-            return nodes, {}
-        # Reuse cached guidance from a previous diagnosis to avoid the
-        # expensive diagnose_episode call across training iterations.
-        if nodes[-1].guidance:
-            selected = nodes[-1].guidance
-        else:
-            # Build structured messages from the last node's full context,
-            # then append the diagnosis instruction as the final user message.
-            conversation = _input_ids_to_messages(nodes[-1].input_ids, tokenizer)
-            gold_answer = str(data.get("answer", ""))
-
-            raw = None
-            diagnosis = None
-            max_retries = 3
-            base_temp = 0.7
-            for retry in range(max_retries):
-                try:
-                    temp = base_temp + retry * 0.3
-                    raw = await provider.diagnose_episode(
-                        conversation, gold_answer, temperature=temp
-                    )
-                    diagnosis = parse_episode_diagnosis(raw)
-                    break
-                except TeacherServiceError as exc:
-                    logger.warning(
-                        "Diagnose request failed for episode_id=%s; proceeding "
-                        "without guidance: %s",
-                        nodes[0].episode_id,
-                        exc,
-                    )
-                    diagnosis = None
-                    break
-                except ValueError:
-                    if retry < max_retries - 1:
-                        logger.warning(
-                            "Diagnose parse failed (attempt %d/%d), retrying "
-                            "with temperature=%.1f",
-                            retry + 1,
-                            max_retries,
-                            base_temp + (retry + 1) * 0.3,
-                        )
-                    else:
-                        logger.error(
-                            "Diagnose parse failed after %d attempts for episode_id=%s",
-                            max_retries,
-                            nodes[0].episode_id,
-                        )
-                        raise
-            selected = diagnosis.selected_turns if diagnosis is not None else {}
-            if selected:
-                nodes[-1].guidance = dict(selected)
-        if not selected:
-            return nodes, {}
-
-        async def _run_one_node(node: Node) -> tuple[str, list[Any]] | None:
-            guidance = selected.get(node.turn_idx, "")
-            if not guidance:
-                return None
-            try:
-                rewards = await selected_turn_to_position_rewards(
-                    node=node,
-                    guidance=guidance,
-                    tokenizer=tokenizer,
-                    provider=provider,
-                    sample_index=0,
-                    topk_distill=self.topk_distill,
-                    engine=engine,
-                    teacher_top_k=self.teacher_top_k,
-                    max_distill_tokens=self.max_distill_tokens,
-                )
-            except TeacherServiceError as exc:
-                logger.warning(
-                    "Teacher logprob request failed for episode_id=%s "
-                    "node_id=%s turn_idx=%s; skipping distill targets: %s",
-                    node.episode_id,
-                    node.node_id,
-                    node.turn_idx,
-                    exc,
-                )
-                return None
-            if not rewards:
-                return None
-            node.teacher_logp = [reward.teacher_logprobs or [] for reward in rewards]
-            node.topk_ids = [reward.candidate_token_ids for reward in rewards]
-            return node.node_id, rewards
-
-        # Run the last node first to warm the KV cache, then parallelize
-        # the remaining nodes so they benefit from the pre-warmed cache.
-        last_result = await _run_one_node(nodes[-1])
-        other_results = await asyncio.gather(
-            *[_run_one_node(node) for node in nodes[:-1]]
-        )
-
-        rewards_by_node_id: dict[str, list[Any]] = {}
-        for result in [last_result, *other_results]:
-            if result is not None:
-                node_id, rewards = result
-                rewards_by_node_id[node_id] = rewards
-        if not rewards_by_node_id:
-            return _filter_distill_episode_failure(nodes, self.loss_mode), {}
-        return nodes, rewards_by_node_id
 
     async def _retry_episode(
         self,
@@ -1514,6 +797,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                         )
                     ),
                 )
+            if attempt == max_retries:
+                break
             wait = 2**attempt
             logger.info(
                 "Episode %s retry %d — waiting %ds before next attempt",
@@ -1548,66 +833,89 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         provider: Any,
         tokenizer: Any,
     ) -> tuple[list[Node], dict[str, list[Any]]]:
-        async def _run_one(
-            nodes: list[Node],
-        ) -> tuple[list[Node], dict[str, list[Any]]]:
-            try:
-                return await self._prepare_distill_for_episode(
-                    nodes=nodes,
-                    data=data,
-                    engine=engine,
-                    provider=provider,
-                    tokenizer=tokenizer,
-                )
-            except Exception:
-                logger.exception(
-                    "Selected-turn distillation failed for episode_id=%s",
-                    nodes[0].episode_id if nodes else "",
-                )
-                return _filter_distill_episode_failure(nodes, self.loss_mode), {}
-
-        results = await asyncio.gather(*[_run_one(nodes) for nodes in node_groups])
-
-        prepared_nodes: list[Node] = []
-        rewards_by_node_id: dict[str, list[Any]] = {}
-        for episode_nodes, episode_rewards in results:
-            prepared_nodes.extend(episode_nodes)
-            rewards_by_node_id.update(episode_rewards)
-        return prepared_nodes, rewards_by_node_id
+        # Thin delegate: reads only the mirror attributes (never self.config)
+        # so the failure-recovery stub tests can drive it on a bare instance.
+        return await prepare_distill_for_node_groups(
+            node_groups,
+            data,
+            engine,
+            provider,
+            tokenizer,
+            loss_mode=self.loss_mode,
+            topk_distill=self.topk_distill,
+            teacher_top_k=self.teacher_top_k,
+            max_distill_tokens=self.max_distill_tokens,
+        )
 
     async def arun_episode(self, engine, data: dict[str, Any]) -> dict[str, Any] | None:
+        fresh_claim: tuple[str, str] | None = None
         if self.use_fresh_query:
-            fresh_data = await self._load_fresh_query_data(data)
-            if fresh_data is None:
+            selected = await self._select_fresh_query_data(data)
+            if selected is None:
                 return None
-            data = fresh_data
+            data, fresh_claim = selected
 
         query_id = data.get("query_id") or ""
         try:
             if self.dynamic_group_size:
-                return await self._arun_episode_dynamic(engine, data, query_id)
-            return await self._arun_episode_fixed(engine, data, query_id)
+                result = await self._arun_episode_dynamic(engine, data, query_id)
+            else:
+                result = await self._arun_episode_fixed(engine, data, query_id)
+        except ValueError:
+            # Configuration/programming errors (missing tokenizer_path,
+            # inconsistent VIMPO metadata, ...) are not transient per-episode
+            # failures — surface them instead of silently skipping every
+            # query and training on nothing.
+            logger.exception(
+                "TreeSearchGroupedWorkflow.arun_episode hit a fatal error "
+                "for query_id=%s",
+                query_id,
+            )
+            raise
         except Exception:
             logger.exception(
                 "TreeSearchGroupedWorkflow.arun_episode failed for query_id=%s",
                 query_id,
             )
             return None
+        finally:
+            if fresh_claim is not None:
+                self._inflight_fresh_queries.discard(fresh_claim[0])
 
-    async def _arun_episode_fixed(
-        self, engine, data: dict[str, Any], query_id: str
-    ) -> dict[str, Any] | None:
-        """Original fixed group_size logic (with zero-variance discard)."""
+        if result is not None and fresh_claim is not None:
+            # Only consume the query once a usable batch actually exists.
+            await self._claim_fresh_query(*fresh_claim)
+        return result
+
+    async def _generate_initial_round(
+        self,
+        engine,
+        data: dict[str, Any],
+        query_id: str,
+        n_episodes: int,
+        *,
+        mode_label: str = "",
+    ) -> tuple[list[Node], list[Node]]:
+        """Shared initial round of the fixed/dynamic paths.
+
+        Looks up cached (untrained) episodes for ``query_id``, generates the
+        ``n_episodes - cached_count`` deficit of fresh episodes in parallel,
+        loads the cached nodes, and returns ``(fresh_nodes, cached_nodes)``.
+        DISTILL mode consumes the cache only (no fresh generation).
+        ``mode_label`` distinguishes the callers in the log line ("" for
+        fixed, " [dynamic]" for dynamic).
+        """
         cached_count = (
             self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
         )
-        need_gen = max(0, self.group_size - cached_count)
+        need_gen = max(0, n_episodes - cached_count)
 
         logger.info(
-            "TreeSearchGroupedWorkflow: query_id=%s, group_size=%d, "
+            "TreeSearchGroupedWorkflow%s: query_id=%s, group_size=%d, "
             "cached=%d, need_gen=%d",
+            mode_label,
             query_id,
-            self.group_size,
+            n_episodes,
             cached_count,
             need_gen,
         )
@@ -1637,6 +945,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             cached_nodes = self.tree_store.load_untrained_episodes(
                 query_id, cached_count
             )
+
+        return fresh_nodes, cached_nodes
+
+    async def _arun_episode_fixed(
+        self, engine, data: dict[str, Any], query_id: str
+    ) -> dict[str, Any] | None:
+        """Original fixed group_size logic (with zero-variance discard)."""
+        fresh_nodes, cached_nodes = await self._generate_initial_round(
+            engine, data, query_id, self.group_size
+        )
 
         return await self._finalize_episode(
             fresh_nodes, cached_nodes, engine, data, query_id
@@ -1658,45 +976,20 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         """Dynamic group_size: iterative sampling with uncertainty threshold."""
 
         # 1. Initial round
+        fresh_nodes, cached_nodes = await self._generate_initial_round(
+            engine,
+            data,
+            query_id,
+            self.initial_group_size,
+            mode_label=" [dynamic]",
+        )
+        # The group-idx counter for additional episodes starts where the
+        # initial round left off. This is the same need_gen the helper
+        # computed — the untrained count is unchanged between the two reads.
         cached_count = (
             self.tree_store.get_untrained_episode_count(query_id) if query_id else 0
         )
-        need_gen = max(0, self.initial_group_size - cached_count)
-
-        logger.info(
-            "TreeSearchGroupedWorkflow [dynamic]: query_id=%s, "
-            "initial_group_size=%d, cached=%d, need_gen=%d, max=%d",
-            query_id,
-            self.initial_group_size,
-            cached_count,
-            need_gen,
-            self.max_group_size,
-        )
-
-        fresh_nodes: list[Node] = []
-        if need_gen > 0 and self.loss_mode != LossMode.DISTILL:
-            results = await asyncio.gather(
-                *[
-                    self._run_fresh_episode(engine, data, group_idx, query_id)
-                    for group_idx in range(need_gen)
-                ],
-                return_exceptions=True,
-            )
-            for group_idx, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error("Episode %d unrecoverable: %s", group_idx, result)
-                    continue
-                if result is None:
-                    continue
-                nodes = self._result_to_nodes(result, query_id, group_idx)
-                if nodes:
-                    fresh_nodes.extend(nodes)
-
-        cached_nodes: list[Node] = []
-        if cached_count > 0 and query_id:
-            cached_nodes = self.tree_store.load_untrained_episodes(
-                query_id, cached_count
-            )
+        next_group_idx = max(0, self.initial_group_size - cached_count)
 
         # 2. Compute initial uncertainty
         all_nodes = fresh_nodes + cached_nodes
@@ -1711,9 +1004,8 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
 
         # 3. Iterative sampling loop
-        next_group_idx = need_gen
         consecutive_failed_additions = 0
-        max_failed_additions = max(3, self.max_group_size)
+        max_failed_additions = _MAX_CONSECUTIVE_FAILED_ADDITIONS
         branch_budget = self._branch_budget
         branch_samples = 0  # successful additional (branch) episodes
         while (
@@ -1842,19 +1134,29 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         if fresh_nodes and isinstance(fresh_nodes[0], SuperNode):
             return await self._finalize_multica_episode(fresh_nodes, query_id)
         all_nodes = fresh_nodes + cached_nodes
+        # A partially-trained cached episode is loaded whole by
+        # load_untrained_episodes; drop its already-trained nodes so they are
+        # neither re-batched (double training) nor re-marked below.
+        all_nodes = [
+            node
+            for node in all_nodes
+            if not node.node_id or not self.tree_store.is_trained(node.node_id)
+        ]
 
         if not all_nodes:
             return None
 
-        # Zero-variance discard: if all episodes have identical reward,
-        # there is no learning signal for GRPO.
+        # Zero-variance discard: if all episodes have identical reward, there
+        # is no learning signal for GRPO. Distillation modes keep the query —
+        # an all-wrong (or all-right) group is exactly where teacher guidance
+        # still provides a training signal.
         episode_rewards: list[float] = []
         seen_episodes: set[str] = set()
         for node in all_nodes:
             if node.episode_id and node.episode_id not in seen_episodes:
                 episode_rewards.append(node.outcome_reward)
                 seen_episodes.add(node.episode_id)
-        if should_discard_query(episode_rewards):
+        if self.loss_mode == LossMode.GRPO and should_discard_query(episode_rewards):
             if fresh_nodes:
                 self.tree_store.insert_super_batch(
                     [_wrap_leaf_super(fresh_nodes)], query_id=query_id
@@ -1862,7 +1164,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
             for node in all_nodes:
                 if node.node_id:
                     self.tree_store.set_discarded(node.node_id, True)
-            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
+            await asyncio.to_thread(
+                self.tree_checkpoint_manager.save_query, self.tree_store, query_id
+            )
             logger.info(
                 "TreeSearchGroupedWorkflow: discarding query_id=%s — "
                 "all %d episodes have identical reward",
@@ -1896,7 +1200,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                 )
 
             if self.loss_mode != LossMode.GRPO:
-                tokenizer = await self._get_tokenizer()
+                tokenizer = await self._get_tokenizer(
+                    purpose="tree-search distillation"
+                )
                 provider, provider_client = await self._setup_distill_provider(
                     engine, tokenizer
                 )
@@ -1965,7 +1271,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
                     self.tree_store.set_trained(node.node_id, True)
 
             # Save tree checkpoint
-            self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
+            await asyncio.to_thread(
+                self.tree_checkpoint_manager.save_query, self.tree_store, query_id
+            )
 
             return result_dict
         finally:
@@ -2058,7 +1366,9 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         )
         if not result_dict:
             return None
-        self.tree_checkpoint_manager.save_query(self.tree_store, query_id)
+        await asyncio.to_thread(
+            self.tree_checkpoint_manager.save_query, self.tree_store, query_id
+        )
         return result_dict
 
 

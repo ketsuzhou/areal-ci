@@ -19,6 +19,7 @@ from customized_areal.tree_search.agents.multica_client import (
 from customized_areal.tree_search.config import (
     AdvantageMode,
     CacheMode,
+    Config,
     LossMode,
 )
 from customized_areal.tree_search.core.customized_grouped_workflow import (
@@ -30,10 +31,12 @@ def _make(tmp_path, **multica_kwargs):
     return TreeSearchGroupedRolloutWorkflow(
         workflow=SimpleNamespace(),  # ignored on the multica path
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
         **multica_kwargs,
     )
 
@@ -78,10 +81,12 @@ def test_multica_disabled_keeps_passed_workflow(tmp_path):
     wf = TreeSearchGroupedRolloutWorkflow(
         workflow=base_workflow,  # multica_dag_enabled defaults to False
         group_size=1,
-        checkpoint_dir=str(tmp_path),
-        advantage_mode=AdvantageMode.TREE,
-        loss_mode=LossMode.GRPO,
-        cache_mode=CacheMode.OFF,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
     )
 
     assert wf._multica_dag_enabled is False

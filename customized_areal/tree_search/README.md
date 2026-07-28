@@ -633,40 +633,30 @@ to provide tree-search-aware rollout with cache reuse and branch sampling.
 
 **Initialization (`__init__`):**
 
-Accepts the full set of configuration parameters (see `Config` above), plus:
+Signature:
+`TreeSearchGroupedRolloutWorkflow(workflow, group_size, config, *, tokenizer_path="", max_tokens=0, multica_dag_enabled=False, ...)`.
 
-| Parameter            | Type              | Description                                      |
-| -------------------- | ----------------- | ------------------------------------------------ |
-| `workflow`           | `RolloutWorkflow` | Base workflow for episode generation             |
-| `group_size`         | `int`             | Number of episodes per query (must be >= 1)      |
-| `checkpoint_dir`     | `str`             | Directory for tree checkpoint persistence        |
-| `advantage_mode`     | `AdvantageMode`   | TREE or GAE advantage computation                |
-| `loss_mode`          | `LossMode`        | GRPO, DISTILL, or BOTH                           |
-| `cache_mode`         | `CacheMode`       | OFF, IN_TRAINING, or CROSS_TRAINING              |
-| `tokenizer_path`     | `str`             | Path to HF tokenizer (required for distillation) |
-| `max_tokens`         | `int`             | Max tokens per node sequence (0 = no truncation) |
-| `sample_source`      | `SampleSource`    | SCRATCH, BRANCH, or MIXED                        |
-| `branch_probability` | `float`           | Probability of branch in MIXED mode              |
-| ...                  | ...               | All `Config` fields (see config table)           |
+| Parameter        | Type              | Description                                                          |
+| ---------------- | ----------------- | -------------------------------------------------------------------- |
+| `workflow`       | `RolloutWorkflow` | Base workflow for episode generation (overridden when multica is on) |
+| `group_size`     | `int`             | Number of episodes per query (must be >= 1)                          |
+| `config`         | `Config`          | Tree-search config dataclass (all fields; see Config table above)    |
+| `tokenizer_path` | `str`             | Path to HF tokenizer (required for distillation / generative critic) |
+| `max_tokens`     | `int`             | Max tokens per node sequence (0 = no truncation)                     |
 
 - Creates `TreeCheckpointManager` and `MCTSTreeStore`
 - On `CROSS_TRAINING` mode, loads existing tree checkpoint if available
-- Creates `TreeAdvantageComputer`
+- Creates the advantage computers (TREE / GAE / HYBRID_GAE / VERSIONED_BACKUP)
 
 **Per-episode flow (`arun_episode`):**
 
 1. **Check cache**: Count untrained episodes for the query via
    `tree_store.get_untrained_episode_count()`
-1. **Generate fresh episodes** if needed: For each of `group_size - cached_count`
-   episodes, decide the sampling strategy:
-   - **SCRATCH**: Run a fresh episode from scratch via `_retry_episode()`
-   - **BRANCH**: Select a branch candidate node (highest max-entropy), build a branch
-     task from its sandbox, run the episode from the branch point, then clean up the
-     branch sandbox via `_cleanup_branch()`
-   - **MIXED**: Probabilistically choose between SCRATCH and BRANCH based on
-     `branch_probability`
-   - Each fresh episode result is wrapped in `EpisodeRunResult` (carrying `task_id` and
-     `raw_messages` from the TPFC backend)
+1. **Generate fresh episodes** if needed: run `group_size - cached_count` fresh episodes
+   from scratch in parallel via `_retry_episode()` (branching lives in the env-dispatch
+   runner model; this workflow always samples from scratch). Each fresh episode result
+   is wrapped in `EpisodeRunResult` (carrying `task_id` and `raw_messages` from the TPFC
+   backend)
 1. **Annotate Nodes**: `annotate_nodes_from_run()` copies TPFC assistant-message
    metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto fresh Nodes
 1. **Convert results to Nodes**: `_result_to_nodes()` converts each arun_episode result
@@ -692,10 +682,11 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 1. **Compute advantages** (dispatched by `advantage_mode`): `TREE` →
    `tree_advantage_computer.compute(all_nodes)`; `GAE` →
    `gae_advantage_computer.compute(all_nodes)`; `HYBRID_GAE` →
-   `hybrid_gae_advantage_computer.compute(all_nodes)`. When `enable_generative_critic`
-   is on, `_annotate_critic_values(engine, all_nodes)` runs first to populate
-   `Node.value` / `Node.value_variance`; when `enable_judge_process_reward` is on,
-   `_annotate_judge_process_rewards(...)` runs first to populate per-node judge scores.
+   `hybrid_gae_advantage_computer.compute(all_nodes)`; `VERSIONED_BACKUP` →
+   `versioned_backup_advantage_computer.compute(all_nodes)`; `VIMPO` →
+   `annotate_vimpo_episode_metadata(all_nodes)`. When `enable_generative_critic` is on,
+   `_annotate_critic_values(engine, all_nodes)` runs first to populate `Node.value` /
+   `Node.value_variance`.
 1. **Mark trained**: `tree_store.set_trained(node.node_id, True)` for all nodes
 1. **Save checkpoint**: `tree_checkpoint_manager.save_query(tree_store, query_id)`
    (CROSS_TRAINING mode)
@@ -704,40 +695,40 @@ Accepts the full set of configuration parameters (see `Config` above), plus:
 
 **Utility functions and dataclasses:**
 
-| Name                                    | Description                                                                                                                                                   |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EpisodeRunResult`                      | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                                                  |
-| `choose_sample_source()`                | Decide SCRATCH/BRANCH/MIXED based on mode, candidate availability, and random value                                                                           |
-| `select_branch_candidate()`             | Select the best node for branching: highest max-entropy among `need_branch` nodes with a sandbox, optionally gated by critic TD-error (`branch_td_threshold`) |
-| `_wrap_leaf_super()`                    | Wrap a single-agent episode's Nodes in one leaf `SuperNode` so the unified store path is always exercised                                                     |
-| `build_branch_task()`                   | Create a TPFC branch task from a candidate node's sandbox and truncated message prefix                                                                        |
-| `annotate_nodes_from_run()`             | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                                          |
-| `_with_episode_metadata()`              | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                                                 |
-| `_max_entropy()`                        | Extract max_entropy value from a Node's entropy_stats                                                                                                         |
-| `interactions_dict_to_nodes()`          | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None)                     |
-| `_result_to_nodes()`                    | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                                     |
-| `_nodes_to_batched_tensor_dict()`       | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                                       |
-| `_input_ids_to_messages()`              | Convert full-context token IDs to a list of role/content message dicts using chat template markers                                                            |
-| `_retry_episode()`                      | Retry a failed episode with exponential backoff (up to 1 retry)                                                                                               |
-| `_prepare_distill_for_episode()`        | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                                              |
-| `_prepare_distill_for_node_groups()`    | Apply distillation to multiple episode groups with error handling                                                                                             |
-| `_group_nodes_by_episode()`             | Group a flat list of Nodes by `episode_id`                                                                                                                    |
-| `_filter_distill_episode_failure()`     | In DISTILL mode, return empty list on failure (drop episode); otherwise return nodes unchanged                                                                |
-| `_set_position_reward_sample_indices()` | Assign `sample_index` to each `PositionRewardInfo` based on node position in batch                                                                            |
+Batch-conversion helpers live in `core/batch_convert.py` (`interactions_dict_to_nodes`,
+`_nodes_to_batched_tensor_dict`, `_supernodes_to_batched_tensor_dict`,
+`annotate_vimpo_episode_metadata`), distillation orchestration in `core/distill_prep.py`
+(`setup_distill_provider`, `prepare_distill_for_episode`,
+`prepare_distill_for_node_groups`, `_input_ids_to_messages`), and fresh-query DB helpers
+in `core/fresh_query.py`. The workflow module re-exports the batch-conversion helpers
+for backward compatibility.
+
+| Name                                 | Description                                                                                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `EpisodeRunResult`                   | Dataclass wrapping an episode result with `task_id` and `raw_messages` from the TPFC backend                                              |
+| `_wrap_leaf_super()`                 | Wrap a single-agent episode's Nodes in one leaf `SuperNode` so the unified store path is always exercised                                 |
+| `annotate_nodes_from_run()`          | Copy TPFC assistant-message metadata (task_id, entropy_stats, need_branch, branch_sandbox_id) onto Nodes by turn_idx                      |
+| `_with_episode_metadata()`           | Wrap an episode result in `EpisodeRunResult` if backend metadata is available                                                             |
+| `interactions_dict_to_nodes()`       | Convert `dict[str, InteractionWithTokenLogpReward]` to `list[Node]` (also handles proxy-deserialized data where `model_response` is None) |
+| `_result_to_nodes()`                 | Convert a single arun_episode result (dict or list) to `list[Node]` with episode metadata                                                 |
+| `_nodes_to_batched_tensor_dict()`    | Convert `list[Node]` to batched tensor dict via `concat_padded_tensors`                                                                   |
+| `_retry_episode()`                   | Retry a failed episode with exponential backoff                                                                                           |
+| `_prepare_distill_for_episode()`     | Diagnose one episode and compute position-level teacher rewards (with diagnosis retry and cached guidance reuse)                          |
+| `_prepare_distill_for_node_groups()` | Apply distillation to multiple episode groups with error handling                                                                         |
+| `_group_nodes_by_episode()`          | Group a flat list of Nodes by `episode_id`                                                                                                |
 
 **Methods:**
 
-| Method                              | Description                                                                                  |
-| ----------------------------------- | -------------------------------------------------------------------------------------------- |
-| `_run_fresh_episode()`              | Run a single fresh episode, deciding between scratch and branch sampling                     |
-| `_prepare_branch_task()`            | Create a TPFC branch task from a branch candidate node                                       |
-| `_cleanup_branch()`                 | Delete branch sandbox and mark node as branched to prevent re-use                            |
-| `_get_tokenizer()`                  | Lazy-load and cache HF tokenizer (shared across episodes via class-level cache)              |
-| `_get_tokenizer_unconditional()`    | Lazy-load tokenizer for critic paths even when `loss_mode=GRPO`                              |
-| `_annotate_judge_process_rewards()` | Score each episode with the judge and store per-node process credit                          |
-| `_annotate_critic_values()`         | Compute rollout-time generative-critic values and variances on Nodes                         |
-| `_attach_critic_train_data()`       | Attach critic soft-regression samples consumed by the patched actor update                   |
-| `_setup_distill_provider()`         | Build `ExternalDiagnoseProvider` + `TeacherClient` with external or engine provider settings |
+| Method                        | Description                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `_generate_initial_round()`   | Shared initial round for the fixed/dynamic paths: fresh generation + cached-episode loading  |
+| `_run_fresh_episode()`        | Run a single fresh episode from scratch                                                      |
+| `_select_fresh_query_data()`  | Select an eligible fresh-query row without claiming it (fresh query mode)                    |
+| `_claim_fresh_query()`        | Claim the selected query only after a usable batch exists                                    |
+| `_get_tokenizer()`            | Lazy-load and cache HF tokenizer (per-instance cache)                                        |
+| `_annotate_critic_values()`   | Compute rollout-time generative-critic values and variances on Nodes                         |
+| `_attach_critic_train_data()` | Attach critic soft-regression samples consumed by the patched actor update                   |
+| `_setup_distill_provider()`   | Build `ExternalDiagnoseProvider` + `TeacherClient` with external or engine provider settings |
 
 `multica_dag_enabled` and `multica_dag_client` are accepted and stored, but the live
 coordinator dispatch is not wired in this workflow yet. Today the live rollout path is
@@ -896,6 +887,14 @@ computation:
 
 ## Branch Sampling
 
+> **Status: legacy design, not wired.** This chapter describes the original
+> branch-sampling design. The wired `TreeSearchGroupedRolloutWorkflow` always generates
+> fresh episodes from scratch — branching lives in the env-dispatch runner model. The
+> helpers described below (`choose_sample_source`, `select_branch_candidate`,
+> `build_branch_task`) have been removed from `core/customized_grouped_workflow.py`;
+> `sample_source`/`branch_probability` in `Config` are currently reserved no-ops on this
+> path.
+
 When `sample_source` is `BRANCH` or `MIXED`, the workflow can reuse cached trajectories
 as starting points for new episodes instead of always starting from scratch. This
 leverages TPFC backend infrastructure to create branch tasks from existing sandboxes.
@@ -1034,7 +1033,7 @@ Validation in `Config.__post_init__`:
 
 - `fresh_query_table` must be non-empty when `use_fresh_query=True` (falls back to
   `FRESH_QUERY_TABLE` env var, then raises `ValueError` if still empty).
-- `TRAIN_ID` env var must be set at runtime (checked in `_load_fresh_query_data`).
+- `TRAIN_ID` env var must be set at runtime (checked in `_select_fresh_query_data`).
 - `total_train_steps` must be set in the training config (checked in
   `CustomizedPPOTrainer.__init__`).
 - `total_train_steps // total_train_epochs >= 1` (at least one step per epoch).
@@ -1077,42 +1076,49 @@ to this array when it claims a row, preventing other runs from picking the same 
 1. **Workflow side** — At the start of each `arun_episode` call, if
    `use_fresh_query=True`:
 
-   - Calls `_load_fresh_query_data(data)` which fetches an eligible row from
-     `fresh_query_table` and atomically claims it.
+   - Calls `_select_fresh_query_data(data)` which fetches an eligible row from
+     `fresh_query_table` WITHOUT claiming it, and remembers it in a per-process
+     in-flight set so concurrent `arun_episode` calls skip it.
    - If no eligible row is found, returns `None` (episode skipped).
-   - The claimed row's fields overwrite the placeholder data dict.
+   - The selected row's fields overwrite the placeholder data dict.
+   - Only after the rollout produced a usable training batch does
+     `_claim_fresh_query(query_id, train_id)` append `TRAIN_ID` to `used4train`. Failed
+     rollouts and zero-variance-discarded queries are therefore NOT consumed and stay
+     eligible for later steps/runs.
 
-1. **Claim flow** (`_load_fresh_query_data`):
+1. **Select/claim flow** (`_select_fresh_query_data` + `_claim_fresh_query`):
 
    ```mermaid
    flowchart TD
-       START["_load_fresh_query_data(data)"]
+       START["_select_fresh_query_data(data)"]
        ENV["Get TRAIN_ID from env<br/>(raise ValueError if missing)"]
        CLIENT["Get Supabase client<br/>via DBConnection"]
        SELECT["SELECT query_id, query, gold_answer,<br/>evaluation_rubric, used4train<br/>FROM fresh_query_table<br/>LIMIT 100"]
        FILTER["Filter: used4train NOT CONTAINS TRAIN_ID"]
        ROWS["Iterate returned rows"]
-       SKIP{"train_id in<br/>used4train?"}
-       CLAIM["UPDATE used4train = [..., train_id]<br/>WHERE query_id = row.query_id"]
-       RACE{"Affected rows >= 1?"}
-       WIN["Claimed! Return merged data"]
-       LOSE["Lost race → try next row"]
+       SKIP{"train_id in used4train<br/>or in-flight?"}
+       PICK["Mark in-flight.<br/>Return merged data + (query_id, train_id)"]
        EXHAUSTED["No eligible rows found → return None"]
+       ROLL["Run rollout (fixed/dynamic)"]
+       OK{"Usable batch?"}
+       CLAIM["_claim_fresh_query:<br/>re-read used4train,<br/>UPDATE used4train = [..., train_id]<br/>WHERE query_id = row.query_id<br/>(guarded by not_.contains)"]
+       FREE["Release in-flight mark.<br/>Query stays eligible"]
 
        START --> ENV --> CLIENT --> SELECT --> FILTER --> ROWS
        ROWS --> SKIP
        SKIP -- Yes --> ROWS
-       SKIP -- No --> CLAIM --> RACE
-       RACE -- Yes --> WIN
-       RACE -- No --> LOSE --> ROWS
+       SKIP -- No --> PICK --> ROLL --> OK
        ROWS -- exhausted --> EXHAUSTED
+       OK -- Yes --> CLAIM
+       OK -- No --> FREE
    ```
 
-   The claim is **optimistic**: the `not_.contains("used4train", [train_id])` filter
-   excludes already-claimed rows at select time, and the update-result row-count check
-   handles concurrent races. If two workers select the same row simultaneously, only one
-   update succeeds (the other sees `< 1` affected rows) and the loser retries with the
-   next row.
+   The claim is **deferred and optimistic**: the
+   `not_.contains("used4train", [train_id])` filter excludes already-claimed rows at
+   select time, the in-flight set deduplicates within the process, and
+   `_claim_fresh_query` re-reads `used4train` before updating so concurrent claims by
+   other runs are preserved. A lost race at claim time is logged (the rollout may be
+   re-used), never raised.
 
 1. **Data merge** (`_apply_fresh_query_row`): The claimed row's fields overwrite the
    placeholder data:

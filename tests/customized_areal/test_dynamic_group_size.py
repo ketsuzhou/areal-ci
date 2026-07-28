@@ -153,15 +153,17 @@ class TestWorkflowConstructorDynamicFields:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=16,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=8,
-            max_group_size=32,
-            uncertainty_threshold=0.1,
-            reward_type="continuous",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=8,
+                max_group_size=32,
+                uncertainty_threshold=0.1,
+                reward_type="continuous",
+            ),
         )
         assert wf.dynamic_group_size is True
         assert wf.initial_group_size == 8
@@ -170,7 +172,7 @@ class TestWorkflowConstructorDynamicFields:
         assert wf.reward_type == "continuous"
         assert wf.group_size == 8
 
-    def test_fallback_initial_from_group_size(self):
+    def test_dynamic_default_initial_group_size(self):
         from unittest.mock import MagicMock
 
         from customized_areal.tree_search.config import (
@@ -186,14 +188,18 @@ class TestWorkflowConstructorDynamicFields:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=16,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+            ),
         )
-        assert wf.initial_group_size == 16
-        assert wf.group_size == 16
+        # No group_size fallback anymore: the Config default initial_group_size
+        # (4) wins and overrides the workflow's group_size in dynamic mode.
+        assert wf.initial_group_size == 4
+        assert wf.group_size == 4
 
     def test_no_dynamic_backward_compat(self):
         from unittest.mock import MagicMock
@@ -211,10 +217,12 @@ class TestWorkflowConstructorDynamicFields:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=16,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
         assert wf.dynamic_group_size is False
         assert wf.group_size == 16
@@ -232,16 +240,19 @@ class TestWorkflowConstructorDynamicFields:
         )
 
         with pytest.raises(ValueError, match="max_group_size"):
+            # Config.__post_init__ raises before the workflow is constructed.
             TreeSearchGroupedRolloutWorkflow(
                 MagicMock(),
                 group_size=4,
-                checkpoint_dir="/tmp/test_ckpt",
-                advantage_mode=AdvantageMode.TREE,
-                loss_mode=LossMode.GRPO,
-                cache_mode=CacheMode.OFF,
-                dynamic_group_size=True,
-                initial_group_size=8,
-                max_group_size=4,
+                config=Config(
+                    checkpoint_dir="/tmp/test_ckpt",
+                    advantage_mode=AdvantageMode.TREE,
+                    loss_mode=LossMode.GRPO,
+                    mode=CacheMode.OFF,
+                    dynamic_group_size=True,
+                    initial_group_size=8,
+                    max_group_size=4,
+                ),
             )
 
     def test_dynamic_constructor_rejects_invalid_reward_type(self):
@@ -257,15 +268,18 @@ class TestWorkflowConstructorDynamicFields:
         )
 
         with pytest.raises(ValueError, match="reward_type"):
+            # Config.__post_init__ raises before the workflow is constructed.
             TreeSearchGroupedRolloutWorkflow(
                 MagicMock(),
                 group_size=4,
-                checkpoint_dir="/tmp/test_ckpt",
-                advantage_mode=AdvantageMode.TREE,
-                loss_mode=LossMode.GRPO,
-                cache_mode=CacheMode.OFF,
-                dynamic_group_size=True,
-                reward_type="unknown",
+                config=Config(
+                    checkpoint_dir="/tmp/test_ckpt",
+                    advantage_mode=AdvantageMode.TREE,
+                    loss_mode=LossMode.GRPO,
+                    mode=CacheMode.OFF,
+                    dynamic_group_size=True,
+                    reward_type="unknown",
+                ),
             )
 
 
@@ -294,10 +308,12 @@ class TestWorkflowFailureHandling:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=1,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         result = await wf._retry_episode(MagicMock(), {}, group_idx=0, max_retries=2)
@@ -323,13 +339,15 @@ class TestWorkflowFailureHandling:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.DISTILL,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=4,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.DISTILL,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=4,
+            ),
         )
 
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_distill_empty"})
@@ -357,10 +375,12 @@ class TestWorkflowFailureHandling:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         def make_nodes(result, query_id, group_idx):
@@ -387,8 +407,9 @@ class TestWorkflowFailureHandling:
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_convert_fail"})
         assert result is None
         assert wf.tree_store.get_untrained_episode_count("q_convert_fail") == 2
-        for node in wf.tree_store.trajectories["q_convert_fail"]:
-            assert node.train_id == ""
+        for super_node in wf.tree_store.trajectories["q_convert_fail"]:
+            for node in super_node.nodes:
+                assert node.train_id == ""
 
 
 class TestZeroVarianceDiscard:
@@ -413,10 +434,12 @@ class TestZeroVarianceDiscard:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         def make_nodes(result, query_id, group_idx):
@@ -452,6 +475,7 @@ class TestZeroVarianceDiscard:
         )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
             TreeSearchGroupedRolloutWorkflow,
+            _wrap_leaf_super,
         )
         from customized_areal.tree_search.core.tree_store import Node
 
@@ -461,10 +485,12 @@ class TestZeroVarianceDiscard:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         cached_nodes = []
@@ -482,7 +508,9 @@ class TestZeroVarianceDiscard:
                     turn_idx=turn_idx + 1,
                 )
                 cached_nodes.append(node)
-        wf.tree_store.insert_batch(cached_nodes)
+        wf.tree_store.insert_super_batch(
+            [_wrap_leaf_super(cached_nodes)], query_id="q_cached_discard"
+        )
 
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_cached_discard"})
         assert result is None
@@ -512,10 +540,12 @@ class TestZeroVarianceDiscard:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         call_count = 0
@@ -565,10 +595,12 @@ class TestZeroVarianceDiscard:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=1,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         def make_nodes(result, query_id, group_idx):
@@ -612,15 +644,17 @@ class TestDynamicSamplingLoop:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=10,
-            uncertainty_threshold=0.5,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=10,
+                uncertainty_threshold=0.5,
+                reward_type="binary",
+            ),
         )
 
         episode_count = 0
@@ -674,15 +708,17 @@ class TestDynamicSamplingLoop:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=4,
-            uncertainty_threshold=1e-12,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=4,
+                uncertainty_threshold=1e-12,
+                reward_type="binary",
+            ),
         )
 
         episode_count = 0
@@ -735,15 +771,17 @@ class TestDynamicSamplingLoop:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=6,
-            uncertainty_threshold=1e-12,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=6,
+                uncertainty_threshold=1e-12,
+                reward_type="binary",
+            ),
         )
 
         episode_count = 0
@@ -786,27 +824,32 @@ class TestDynamicSamplingLoop:
             LossMode,
         )
         from customized_areal.tree_search.core.customized_grouped_workflow import (
+            _MAX_CONSECUTIVE_FAILED_ADDITIONS,
             TreeSearchGroupedRolloutWorkflow,
         )
 
         wf = TreeSearchGroupedRolloutWorkflow(
             MagicMock(),
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=1,
-            max_group_size=4,
-            uncertainty_threshold=0.0,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=1,
+                max_group_size=4,
+                uncertainty_threshold=0.0,
+                reward_type="binary",
+            ),
         )
         wf._run_fresh_episode = AsyncMock(return_value=None)
 
         result = await wf.arun_episode(MagicMock(), {"query_id": "q_fail_cap"})
         assert result is None
-        assert wf._run_fresh_episode.await_count == 1 + max(3, wf.max_group_size)
+        assert (
+            wf._run_fresh_episode.await_count == 1 + _MAX_CONSECUTIVE_FAILED_ADDITIONS
+        )
 
 
 class TestPrecomputedAdvantages:
@@ -900,10 +943,12 @@ class TestEndToEndWorkflow:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.GAE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.GAE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         call_count = 0
@@ -954,15 +999,17 @@ class TestEndToEndWorkflow:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=8,
-            uncertainty_threshold=0.5,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=8,
+                uncertainty_threshold=0.5,
+                reward_type="binary",
+            ),
         )
 
         episode_count = 0
@@ -1013,15 +1060,17 @@ class TestEndToEndWorkflow:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=8,
-            uncertainty_threshold=0.5,
-            reward_type="continuous",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=8,
+                uncertainty_threshold=0.5,
+                reward_type="continuous",
+            ),
         )
 
         episode_count = 0
@@ -1072,15 +1121,17 @@ class TestEndToEndWorkflow:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=4,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
-            dynamic_group_size=True,
-            initial_group_size=2,
-            max_group_size=4,
-            uncertainty_threshold=0.001,
-            reward_type="binary",
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+                dynamic_group_size=True,
+                initial_group_size=2,
+                max_group_size=4,
+                uncertainty_threshold=0.001,
+                reward_type="binary",
+            ),
         )
 
         def make_nodes(result, query_id, group_idx):
@@ -1126,10 +1177,12 @@ class TestEndToEndWorkflow:
         wf = TreeSearchGroupedRolloutWorkflow(
             base,
             group_size=2,
-            checkpoint_dir="/tmp/test_ckpt",
-            advantage_mode=AdvantageMode.TREE,
-            loss_mode=LossMode.GRPO,
-            cache_mode=CacheMode.OFF,
+            config=Config(
+                checkpoint_dir="/tmp/test_ckpt",
+                advantage_mode=AdvantageMode.TREE,
+                loss_mode=LossMode.GRPO,
+                mode=CacheMode.OFF,
+            ),
         )
 
         call_count = 0

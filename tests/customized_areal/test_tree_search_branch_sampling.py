@@ -8,12 +8,9 @@ from customized_areal.db_service.messages import (
     truncate_messages_before_turn,
 )
 from customized_areal.tpfc.tpfc_agent import TPFCAgentResult
-from customized_areal.tree_search.config import SampleSource
 from customized_areal.tree_search.core.customized_grouped_workflow import (
     TreeSearchGroupedRolloutWorkflow,
     annotate_nodes_from_run,
-    choose_sample_source,
-    select_branch_candidate,
 )
 from customized_areal.tree_search.core.tree_store import Node
 
@@ -250,115 +247,6 @@ def test_annotate_nodes_from_run_skips_invalid_turn_idx():
     assert node.entropy_stats is None
     assert node.need_branch is False
     assert node.env_id is None
-
-
-def test_choose_sample_source_modes():
-    assert (
-        choose_sample_source(
-            SampleSource.SCRATCH,
-            branch_probability=1.0,
-            has_candidate=True,
-            random_value=0.0,
-        )
-        == SampleSource.SCRATCH
-    )
-    assert (
-        choose_sample_source(
-            SampleSource.BRANCH,
-            branch_probability=0.0,
-            has_candidate=True,
-            random_value=1.0,
-        )
-        == SampleSource.BRANCH
-    )
-    assert (
-        choose_sample_source(
-            SampleSource.BRANCH,
-            branch_probability=1.0,
-            has_candidate=False,
-            random_value=0.0,
-        )
-        == SampleSource.SCRATCH
-    )
-    assert (
-        choose_sample_source(
-            SampleSource.MIXED,
-            branch_probability=0.5,
-            has_candidate=True,
-            random_value=0.4,
-        )
-        == SampleSource.BRANCH
-    )
-    assert (
-        choose_sample_source(
-            SampleSource.MIXED,
-            branch_probability=0.5,
-            has_candidate=True,
-            random_value=0.6,
-        )
-        == SampleSource.SCRATCH
-    )
-
-
-def test_select_branch_candidate_prefers_max_entropy():
-    low = _node(1)
-    low.query_id = "q"
-    low.task_id = "task-low"
-    low.need_branch = True
-    low.entropy_stats = {"max_entropy": 2.5}
-
-    high = _node(2)
-    high.query_id = "q"
-    high.task_id = "task-high"
-    high.need_branch = True
-    high.entropy_stats = {"max_entropy": 4.0}
-
-    assert select_branch_candidate([low, high], "q") is high
-
-
-def test_select_branch_candidate_filters_invalid_nodes_and_tolerates_bad_entropy():
-    wrong_query = _node(1)
-    wrong_query.query_id = "other"
-    wrong_query.task_id = "task-wrong"
-    wrong_query.need_branch = True
-    wrong_query.entropy_stats = {"max_entropy": 99.0}
-
-    missing_task = _node(2)
-    missing_task.query_id = "q"
-    missing_task.need_branch = True
-    missing_task.entropy_stats = {"max_entropy": 98.0}
-
-    no_branch = _node(3)
-    no_branch.query_id = "q"
-    no_branch.task_id = "task-no-branch"
-    no_branch.need_branch = False
-    no_branch.entropy_stats = {"max_entropy": 96.0}
-
-    candidate = _node(4)
-    candidate.query_id = "q"
-    candidate.task_id = "task-candidate"
-    candidate.need_branch = True
-    candidate.entropy_stats = {"max_entropy": "not numeric"}
-
-    assert (
-        select_branch_candidate(
-            [wrong_query, missing_task, no_branch, candidate],
-            "q",
-        )
-        is candidate
-    )
-    assert select_branch_candidate([wrong_query, missing_task], "q") is None
-
-
-def test_select_branch_candidate_ignores_non_branch_node():
-    """A node whose need_branch flag is False is never a branch candidate."""
-    node = _node(2)
-    node.query_id = "q"
-    node.task_id = "task-cleaned"
-    node.need_branch = False
-    node.entropy_stats = {"max_entropy": 5.0}
-
-    assert select_branch_candidate([node], "q") is None
 
 
 @pytest.mark.asyncio

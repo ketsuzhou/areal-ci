@@ -140,7 +140,7 @@ def test_config_has_distill_defaults():
 
 def test_both_mode_keeps_episode_after_distill_failure():
     from customized_areal.tree_search.config import LossMode
-    from customized_areal.tree_search.core.customized_grouped_workflow import (
+    from customized_areal.tree_search.core.distill_prep import (
         _filter_distill_episode_failure,
     )
 
@@ -157,7 +157,7 @@ def test_both_mode_keeps_episode_after_distill_failure():
 
 def test_distill_mode_drops_episode_after_distill_failure():
     from customized_areal.tree_search.config import LossMode
-    from customized_areal.tree_search.core.customized_grouped_workflow import (
+    from customized_areal.tree_search.core.distill_prep import (
         _filter_distill_episode_failure,
     )
 
@@ -170,37 +170,6 @@ def test_distill_mode_drops_episode_after_distill_failure():
     )
 
     assert _filter_distill_episode_failure([node], LossMode.DISTILL) == []
-
-
-def test_set_position_reward_sample_indices_uses_final_node_order():
-    from customized_areal.tree_search.core.customized_grouped_workflow import (
-        _set_position_reward_sample_indices,
-    )
-
-    node_a = Node(
-        input_ids=[1],
-        loss_mask=[1],
-        logprobs=[-0.1],
-        versions=[0],
-        node_id="a",
-    )
-    node_b = Node(
-        input_ids=[2],
-        loss_mask=[1],
-        logprobs=[-0.2],
-        versions=[0],
-        node_id="b",
-    )
-    rewards_by_node_id = {
-        "b": [PositionRewardInfo(position=0, teacher_logprobs=[-0.5])],
-    }
-
-    all_rewards = _set_position_reward_sample_indices(
-        [node_a, node_b], rewards_by_node_id
-    )
-
-    assert len(all_rewards) == 1
-    assert all_rewards[0].sample_index == 1
 
 
 def test_parse_episode_diagnosis_keeps_only_selected_turns():
