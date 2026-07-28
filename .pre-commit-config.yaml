@@ -42,7 +42,9 @@ repos:
           - mdformat-gfm
           - mdformat-tables
           - mdformat-frontmatter
-        exclude: ^(docs/(en|zh)/algorithms/.*\.md|docs/(en|zh)/best_practices/algo_perf\.md)$
+        # Comet writes machine-checked handoff artifacts whose `- Source: <path>`
+        # lines must stay on one line; --wrap=88 breaks paths longer than that.
+        exclude: ^(docs/(en|zh)/algorithms/.*\.md|docs/(en|zh)/best_practices/algo_perf\.md|openspec/changes/[^/]+/\.comet/.*)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
