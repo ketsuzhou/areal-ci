@@ -50,14 +50,18 @@ scheduler:
 
 rollout:
   _version: v2
-  # Must equal the Multica server AREAL_ADMIN_API_KEY: Multica authenticates
-  # its /rl/start_session callback with that value as a bearer token.
+  # Shared with the Multica server AREAL_ADMIN_API_KEY: Multica sends it as the
+  # bearer token on its /rl/start_session callback and the gateway compares it
+  # against this value, so both sides must read the same secret.
   admin_api_key: ${oc.env:AREAL_ADMIN_API_KEY,areal-admin-5058bdacf2a9ae2ea4d00ada0de399ff2516af047f8d117f}
   backend: sglang:d1
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
+  # Chain-validation run: each episode books its own Multica sandbox VM, so
+  # sandboxes in flight = max_concurrent_rollouts * gconfig.n_samples. Keeping
+  # this at 1 caps the Cube footprint at one query group at a time.
   max_concurrent_rollouts: 1
   queue_size: 256
   consumer_batch_size: ${train_dataset.batch_size}
@@ -76,6 +80,7 @@ rollout:
     engine_max_tokens: 15000
 
 gconfig:
+  # 2 is the smallest group that still gives GRPO a within-group contrast.
   n_samples: 2
   min_new_tokens: 0
   max_new_tokens: 1024
@@ -184,6 +189,8 @@ vllm:
 # TPFC dataset configuration - uses generated_training_final.parquet
 # NOTE: All samples have ~1034-1366 tokens due to long system prompts
 train_dataset:
+  # Also drives rollout.consumer_batch_size: how much the trainer waits for
+  # before stepping. Kept tiny so one query group reaches a training step.
   batch_size: 2
   shuffle: false
   pin_memory: true

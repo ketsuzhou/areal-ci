@@ -15,3 +15,15 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/env-checkpoint-resume-trigger/.comet/handoff/design-context.json
 handoff_hash: d2619b9ec16f6183d1d6310fecd46265540c03ce8c937cd2aa041b1cb493c019
+language: null
+context_compression: null
+subagent_dispatch: null
+tdd_mode: null
+review_mode: null
+auto_transition: null
+verify_failures: 0
+archive_confirmation: null
+direct_override: null
+classic_profile: full
+classic_migration: 1
+run_id: ff95a190-9e61-414c-ab07-28f5acd28ad6

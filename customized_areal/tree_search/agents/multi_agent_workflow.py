@@ -83,13 +83,6 @@ class MultiAgentEnvDispatchWorkflow(RolloutWorkflow):
         # RL datasets name the user turn "query" (see tpfc_dataset); "message" is
         # accepted for callers that already pass a ready dispatch message.
         message = data.get("message") or data.get("query")
-        if not getattr(self, "_logged_data_keys", False):
-            self._logged_data_keys = True
-            logger.warning(
-                "DBG env-dispatch data: keys=%s preview=%s",
-                sorted(data.keys()),
-                {k: str(v)[:100] for k, v in list(data.items())[:15]},
-            )
         handle = await self._dispatch.create_env_dispatch(
             mode="scratch",
             env_id=self.base_env_id,

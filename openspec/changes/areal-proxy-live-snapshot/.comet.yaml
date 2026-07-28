@@ -20,3 +20,10 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/areal-proxy-live-snapshot/.comet/handoff/design-context.json
 handoff_hash: f08334ae257ed4894ee913b108a7d35fd91f1b75d8490ff88c9cae9b829c98aa
+language: null
+verify_failures: 0
+archive_confirmation: null
+direct_override: null
+classic_profile: full
+classic_migration: 1
+run_id: daa9aadb-9f90-4557-943f-485f699fd44b

@@ -61,7 +61,12 @@ class SessionCredentials(BaseModel):
 
 
 class StartSessionResponse(BaseModel):
-    """Response from start_session — always a list of session credentials."""
+    """Response from start_session — always a list of session credentials.
+
+    ``session_id``/``api_key`` repeat the credentials of the first session so
+    that flat-shape callers (the Multica arealrl client through db_bridge) can
+    decode the same response the grouped callers read.
+    """
 
     group_id: str
     sessions: list[SessionCredentials]

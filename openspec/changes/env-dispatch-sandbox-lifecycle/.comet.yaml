@@ -15,5 +15,15 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/env-dispatch-sandbox-lifecycle/.comet/handoff/design-context.json
 handoff_hash: 5d7ab380e062213c7b0ae39ed7f2e223954bb0342874c782824f11225facd1c4
-build_command: cd multica/server && go build ./...
-verify_command: cd multica/server && go test ./internal/service ./internal/handler -count=1
+language: null
+context_compression: null
+subagent_dispatch: null
+tdd_mode: null
+review_mode: null
+auto_transition: null
+verify_failures: 0
+archive_confirmation: null
+direct_override: null
+classic_profile: full
+classic_migration: 1
+run_id: d1cb287e-ecb9-4336-bd01-0d16fccdcccf

@@ -17,3 +17,13 @@ handoff_context: openspec/changes/multica-v2-segment-dag-recording-assembly/.com
 handoff_hash: 33ed0b5706d26b36ae279f9d0584d986da3644fdbf2c9ea19187665122526e59
 subagent_dispatch: confirmed
 tdd_mode: direct
+language: null
+context_compression: null
+review_mode: null
+auto_transition: null
+verify_failures: 0
+archive_confirmation: null
+direct_override: null
+classic_profile: full
+classic_migration: 1
+run_id: e7847d68-5479-416f-9cfa-27fd9c0be0bd

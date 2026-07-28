@@ -777,7 +777,7 @@ def create_app(config: DataProxyConfig) -> FastAPI:
                 if body.trajectory_id is not None:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"trajectory_id {body.trajectory_id} not found in session {sid}"
+                        detail=f"trajectory_id {body.trajectory_id} not found in session {sid}",
                     )
                 continue
 

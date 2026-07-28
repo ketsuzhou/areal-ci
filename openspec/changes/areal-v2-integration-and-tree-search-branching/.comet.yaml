@@ -15,3 +15,15 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/areal-v2-integration-and-tree-search-branching/.comet/handoff/design-context.json
 handoff_hash: 3f5e84fa04564799a675123b42df957e2b84b3c9212055fc4cff6af10ccb6729
+language: null
+context_compression: null
+subagent_dispatch: null
+tdd_mode: null
+review_mode: null
+auto_transition: null
+verify_failures: 0
+archive_confirmation: null
+direct_override: null
+classic_profile: full
+classic_migration: 1
+run_id: 7941f24d-4a0c-44eb-9443-250dc694dd7e
