@@ -87,14 +87,17 @@ mutation-checked.
 
 ## 3. Fan-out resume
 
-- [ ] 3.1 Add a requested lane count and a lane key to the resume request, service
-  signature, and result
+- [x] 3.1 Add a requested lane count and a lane key to the resume request, service
+  signature, and result — the HTTP body is optional, so a caller sending none still gets
+  one lane anchored on the checkpoint id, and `lanes` is `omitempty` so a pause-in-place
+  response is unchanged
 - [ ] 3.2 Materialize one sandbox instance per lane from the checkpoint's savepoint,
   taking no additional snapshot of the source
 - [ ] 3.3 Give each lane its own copy of the captured project subtree and its own agent
   runtime
-- [ ] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
-  its single-instance resume unchanged
+- [x] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
+  its single-instance resume unchanged — a checkpoint with an empty `save_mode` is a
+  pre-change row and is refused fan-out on the same grounds
 - [x] 3.5 Migration and queries for `env_checkpoint_lane`:
   `UNIQUE (checkpoint_id, lane_key)`, a `provisioning` / `ready` / `failed` status,
   per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion —
@@ -106,9 +109,12 @@ mutation-checked.
 - [ ] 3.7 Derive lane keys from an anchor that is stable across retries of the same
   branch request, and pin the chosen anchor against the dispatch record's actual stable
   id
-- [ ] 3.8 Reject a requested lane count of zero as invalid input
-- [ ] 3.9 Reject a checkpoint whose save status is not complete with a typed
-  non-resumable error distinguishable from transient errors
+- [x] 3.8 Reject a requested lane count of zero as invalid input — validated before the
+  checkpoint is loaded, so a bad count cannot have a side effect
+- [x] 3.9 Reject a checkpoint whose save status is not complete with a typed
+  non-resumable error distinguishable from transient errors —
+  `ErrCheckpointNotResumable` maps to 409 and `ErrLaneCountInvalid` to 400, since one is
+  permanent and the other is worth retrying with a corrected request
 - [ ] 3.10 Fail a lane with a typed error when its savepoint's underlying snapshot is
   gone, and mark the savepoint failed so later resumes fail fast
 - [ ] 3.11 Report failure when every requested lane fails, rather than success with an
