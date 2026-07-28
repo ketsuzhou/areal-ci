@@ -91,10 +91,13 @@ mutation-checked.
   signature, and result — the HTTP body is optional, so a caller sending none still gets
   one lane anchored on the checkpoint id, and `lanes` is `omitempty` so a pause-in-place
   response is unchanged
-- [ ] 3.2 Materialize one sandbox instance per lane from the checkpoint's savepoint,
+- [x] 3.2 Materialize one sandbox instance per lane from the checkpoint's savepoint,
   taking no additional snapshot of the source
-- [ ] 3.3 Give each lane its own copy of the captured project subtree and its own agent
-  runtime
+- [x] 3.3 Give each lane its own copy of the captured project subtree and its own agent
+  runtime — and its own conversation (channel, chat session, source message), because
+  the enqueue path requires all three and lanes sharing a channel would not be
+  independent; migration 245 gained those columns so an interrupted lane does not copy a
+  second channel on recovery
 - [x] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
   its single-instance resume unchanged — a checkpoint with an empty `save_mode` is a
   pre-change row and is refused fan-out on the same grounds
@@ -103,7 +106,7 @@ mutation-checked.
   per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion —
   the claim derives `workspace_id` from the checkpoint rather than accepting it, so a
   lane cannot escape its checkpoint's workspace
-- [ ] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
+- [x] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
   existing row's status when the insert loses: return a `ready` lane, continue a stale
   `provisioning` lane from its first incomplete step, surface a `failed` lane
 - [ ] 3.7 Derive lane keys from an anchor that is stable across retries of the same
@@ -115,12 +118,13 @@ mutation-checked.
   non-resumable error distinguishable from transient errors —
   `ErrCheckpointNotResumable` maps to 409 and `ErrLaneCountInvalid` to 400, since one is
   permanent and the other is worth retrying with a corrected request
-- [ ] 3.10 Fail a lane with a typed error when its savepoint's underlying snapshot is
+- [x] 3.10 Fail a lane with a typed error when its savepoint's underlying snapshot is
   gone, and mark the savepoint failed so later resumes fail fast
-- [ ] 3.11 Report failure when every requested lane fails, rather than success with an
-  empty lane set
+- [x] 3.11 Report failure when every requested lane fails, rather than success with an
+  empty lane set — the first lane's cause is wrapped so a typed failure stays
+  recognizable through the summary error
 - [ ] 3.12 Add a sweeper for lanes stuck in `provisioning`
-- [ ] 3.13 Service tests: three lanes trigger exactly one snapshot per source instance
+- [x] 3.13 Service tests: three lanes trigger exactly one snapshot per source instance
   (assert the savepoint creator's call count, not the lane count); a new lane key
   re-expands the frontier without creating a second checkpoint; pause-in-place fan-out
   rejected; timed-out checkpoint rejected; zero lane count rejected; all-lanes-failed
