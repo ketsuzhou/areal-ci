@@ -140,6 +140,12 @@ Consequences that every schema and query task below must respect:
   self-skip when `DATABASE_URL` is unset, exactly like
   `TestInteractionDAGQueries_Integration`. They are **not executed here**. Do not report
   them as passing.
+- **Whole packages silently run nothing.** `internal/handler`, `cmd/server`,
+  `internal/workgraph`, and `pkg/agent` each have a `TestMain` that prints
+  `Skipping tests: database not reachable` and calls `os.Exit(0)`, so `go test` on them
+  prints `ok` with zero tests executed. Never cite `ok` from those packages as evidence
+  here; only their compilation was checked. `internal/service` and `internal/migrations`
+  have no such gate, so put the load-bearing tests there whenever there is a choice.
 - Therefore the acceptance evidence available in this environment is: `sqlc generate`,
   `go build ./...`, `go vet ./...`, the fake-injected unit tests, and file-content
   assertions on migrations and queries in the style of

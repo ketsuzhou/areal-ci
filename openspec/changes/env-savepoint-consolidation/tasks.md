@@ -19,6 +19,14 @@ environment. The `*_Integration` query tests are written but self-skip without
 stay unverified until run against a real database — this is the primary open risk to
 carry into verification.
 
+The cost is larger than skipped integration tests, and silently so: `internal/handler`,
+`cmd/server`, `internal/workgraph`, and `pkg/agent` each have a `TestMain` that calls
+`os.Exit(0)` when Postgres is unreachable, so `go test` on those packages prints `ok`
+while executing **no tests at all**. Any `ok` from them in this environment is
+worthless; only compilation was checked. Every HTTP-boundary test in this change is
+therefore unverified. `internal/service` and `internal/migrations` have no such gate and
+do really run, so they carry the real evidence.
+
 `sqlc` **is** usable (v1.31.1, matching the version that generated the checked-in code;
 it reads the schema from `migrations/` statically and needs no database), so column
 order in generated code is derived rather than guessed. It cannot simply be run, though:
@@ -63,15 +71,19 @@ mutation-checked.
   the deferred verification above.
 - [x] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
   list a checkpoint's savepoints
-- [ ] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
+- [x] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
   through the existing `create_template` job, wait for the snapshot record to reach
-  ready, and leave every source instance running
-- [ ] 2.5 Fail the checkpoint save when a savepoint's snapshot record reaches a failed
+  ready, and leave every source instance running — the service drives this through the
+  `SavepointCreator` seam; the production adapter that actually enqueues
+  `create_template` arrives with Phase 6, so snapshot mode is refused as unconfigured
+  until then rather than downgraded
+- [x] 2.5 Fail the checkpoint save when a savepoint's snapshot record reaches a failed
   state; keep the existing `save_timeout_ms` to timed-out path intact
-- [ ] 2.6 Keep `pause_in_place` create on exactly its current code path
-- [ ] 2.7 Query tests for the new column and savepoint ownership; service tests for
+- [x] 2.6 Keep `pause_in_place` create on exactly its current code path
+- [x] 2.7 Query tests for the new column and savepoint ownership; service tests for
   snapshot-mode create (savepoint owned and ready, source still running),
-  failed-savepoint handling, and unchanged pause-in-place create
+  failed-savepoint handling, and unchanged pause-in-place create — service tests really
+  run; the query tests are the skipped integration test noted above
 
 ## 3. Fan-out resume
 
