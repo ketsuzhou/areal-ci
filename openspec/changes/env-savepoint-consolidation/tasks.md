@@ -172,7 +172,13 @@ mutation-checked.
 - [ ] 4.1 Serve branch-mode env dispatch by creating or reusing a `snapshot` checkpoint
   at the requested env and resuming it with the requested lane count
 - [ ] 4.2 Keep the dispatch request and response contract, including rollout handles,
-  byte-compatible with the pre-existing branch contract
+  byte-compatible with the pre-existing branch contract — the pin now exists
+  (`internal/apicontract`, byte-level plus the four fields the AReaL client hard-depends
+  on: `project_id`, `channel_id`, `rollouts[0].env_id`, and the absence of
+  `rollouts[].error` on success; mutation-checked). Left unticked because the pin only
+  proves compatibility once 4.1 has actually rerouted the path. Note the pin
+  deliberately does **not** live in `internal/handler`, whose `TestMain` exits 0 without
+  Postgres and would leave it silently unexecuted here
 - [ ] 4.3 Remove the now-dead direct branch provisioning path
 - [ ] 4.4 Tests: branch dispatch contract unchanged; source env keeps running with its
   task undisturbed; each lane has its own runtime and subtree
