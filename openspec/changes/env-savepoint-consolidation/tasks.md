@@ -156,7 +156,11 @@ mutation-checked.
   (assert the savepoint creator's call count, not the lane count); a new lane key
   re-expands the frontier without creating a second checkpoint; pause-in-place fan-out
   rejected; timed-out checkpoint rejected; zero lane count rejected; all-lanes-failed
-  reported as failure
+  reported as failure. Closed out with `TestSnapshotCheckpointRoundTripRunningToLanes`,
+  which is the only one of these that walks capture and resume together: it feeds resume
+  the savepoints capture actually produced, so a disagreement over ids or over
+  `save_mode` fails here instead of in production (mutation-checked by making capture
+  drop `save_mode`)
 - [ ] 3.14 Query tests against the real unique index: concurrent claims of one lane key
   create one lane; an interrupted lane is continued rather than duplicated — written as
   `TestEnvCheckpointLaneUniqueIndex_Integration`, but left unchecked because it has
