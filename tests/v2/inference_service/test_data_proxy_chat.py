@@ -440,6 +440,38 @@ async def test_chat_completions_passes_sampling_params(client, mock_areal_client
     assert kw["max_tokens"] == 100
 
 
+@pytest.mark.asyncio
+async def test_chat_completions_session_overrides_store_false(
+    client, mock_areal_client
+):
+    """A session request must be recorded even when the caller sends store=false.
+
+    Agent SDKs send store=false routinely; honouring it left the session empty
+    and made close_segment fail with "No interactions in session".
+    """
+    resp = await client.post(
+        "/rl/start_session",
+        json={"task_id": "store-test"},
+        headers=admin_headers(),
+    )
+    api_key = resp.json()["sessions"][0]["session_api_key"]
+
+    resp = await client.post(
+        "/chat/completions",
+        json={
+            "model": "sglang",
+            "messages": [{"role": "user", "content": "hi"}],
+            "store": False,
+        },
+        headers=session_headers(api_key),
+    )
+    assert resp.status_code == 200
+
+    call_kwargs = mock_areal_client.chat.completions.create.call_args
+    kw = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
+    assert kw["store"] is True
+
+
 # =============================================================================
 # Endpoint tests: /rl/set_reward
 # =============================================================================

@@ -688,6 +688,14 @@ def create_app(config: DataProxyConfig) -> FastAPI:
         # Remove model (ArealOpenAI ignores it)
         kwargs.pop("model", None)
 
+        # An RL session exists to capture the trajectory, so the caller does not
+        # get to opt out of recording: ArealOpenAI skips the cache on an explicit
+        # store=false, and agent SDKs send it routinely (the OpenAI JS client pi
+        # runs in the sandbox always does). That left every session empty and made
+        # close_segment fail with "No interactions in session".
+        if areal_cache is not None:
+            kwargs["store"] = True
+
         # Determine streaming
         is_streaming = kwargs.get("stream", False) or False
 
