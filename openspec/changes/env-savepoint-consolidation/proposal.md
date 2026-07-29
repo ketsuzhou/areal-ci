@@ -75,11 +75,37 @@ continuation decisions in one place to judge the per-mode session policy.
 
 ### Modified Capabilities
 
-<!-- None. The capabilities this change touches (`env-checkpoint-resume`,
-     `env-checkpoint-resume-trigger`, `env-dispatch-sandbox-lifecycle`) exist only as delta
-     specs in sibling changes that are not yet archived into `openspec/specs/`, so their
-     requirement changes are stated in the new capabilities above and reconciled with those
-     deltas at archive time. -->
+The capabilities this change touches exist only as delta specs in sibling changes that
+are not yet archived into `openspec/specs/`, so there is no main spec to write a
+`## MODIFIED Requirements` block against. Reconciled below instead, one row per sibling
+requirement. Note that `env-checkpoint-resume` is not its own change: its spec lives
+under `openspec/changes/env-dispatch-sandbox-lifecycle/specs/env-checkpoint-resume/`.
+
+**Two requirements are contradicted outright** and must be corrected when those siblings
+archive, because both explicitly ruled out the primitive this change adds:
+
+| Sibling requirement                                                             | Statement now false                                                                                                                                                              | Replaced by                                                                                                                                                  |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `env-checkpoint-resume` → Resume from checkpoint                                | "Resume ... MUST not expose immutable branch/fork semantics"                                                                                                                     | `env-savepoint-fanout`: snapshot-mode checkpoints own immutable savepoints, and resume materializes lanes from them                                          |
+| `env-dispatch-sandbox-lifecycle` → Env-dispatch sandbox_instance backend bridge | "Branch ... SHALL create fresh sandbox_instances from the source env's template rather than a live fork" and "True live-state fork of a sandbox_instance is out of scope for v1" | `env-savepoint-fanout`: branch dispatch is served by savepoint-backed create, so a lane does carry the source's live state (Cube snapshots are memory-level) |
+
+The rest are preserved or extended rather than replaced:
+
+| Sibling requirement                                                                            | Disposition                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-checkpoint-resume` → Pause-in-place checkpoint creation                                   | **Extended.** Still the default and still a synchronous wait, but the wait is now per save mode: `pause_in_place` waits for sandboxd stop, `snapshot` waits for each savepoint to reach ready and leaves the source running. Pre-existing rows resolve to `pause_in_place`. |
+| `env-checkpoint-resume` → Checkpoint listing and retrieval                                     | **Preserved**, including the cross-workspace refusal. Deletion is added alongside it; the sibling specified none.                                                                                                                                                           |
+| `env-checkpoint-resume` → Resume from checkpoint (naming scenario)                             | **Preserved.** The API is still resume-from-checkpoint; branch dispatch is routed *through* it internally rather than renamed.                                                                                                                                              |
+| `env-checkpoint-resume` → AReaL checkpoint client integration                                  | **Extended.** `lane_count` and `lane_key` are optional and omitted when absent, so a caller that sends no body still gets its single-lane resume.                                                                                                                           |
+| `env-checkpoint-resume-trigger` → Resume-trigger captured at checkpoint create                 | **Preserved** unchanged, descriptor and server-side resolution included.                                                                                                                                                                                                    |
+| `env-checkpoint-resume-trigger` → Resume-agent-run primitive re-engages in-flight task         | **Preserved, moved behind a seam.** It is now the `pause_in_place` strategy of the continuation seam. Its guarantees are unchanged: same task row, no new row, terminal tasks rejected rather than double-run.                                                              |
+| `env-checkpoint-resume-trigger` → Resume-from-checkpoint executes trigger after sandbox resume | **Extended.** The typed partial-resume result now also covers a fan-out where some lanes materialized and others failed, rather than only "sandbox up, agent not re-engaged".                                                                                               |
+| `env-checkpoint-resume-trigger` → Legacy checkpoint without trigger degrades gracefully        | **Preserved.** An empty trigger still resumes sandbox-only.                                                                                                                                                                                                                 |
+| `env-dispatch-sandbox-lifecycle` → Sandbox lifecycle service reuse                             | **Narrowed, not contradicted.** The requirement enumerates create, save, resume, delete, and reconfigure; `CloneSandboxInstance` was never among them, so retiring it leaves the requirement intact.                                                                        |
+| `env-dispatch-sandbox-lifecycle` → Env-dispatch sandbox-instance lifecycle handles             | **Untouched.**                                                                                                                                                                                                                                                              |
+| `env-dispatch-sandbox-lifecycle` → Per-agent environment intent                                | **Untouched.**                                                                                                                                                                                                                                                              |
+| `critic-driven-training-signal` → Entropy recording from proxied LLM traffic                   | **Untouched.**                                                                                                                                                                                                                                                              |
+| `training-session-lifecycle` → Session-open on trained-member task creation                    | **Untouched.** A lane's session is opened by its own task creation on the existing path.                                                                                                                                                                                    |
 
 ## Impact
 

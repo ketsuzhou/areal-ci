@@ -3498,14 +3498,13 @@ ______________________________________________________________________
   ordering.
 - `savepointReleaserAdapter` takes narrow `savepointReleaseQueries` and
   `snapshotTemplateDeletionScheduler` interfaces rather than `*Handler`, so its state
-  handling (gone / deleting / creating / no template) is testable without a database.
-  It still lives in `internal/handler`, so those tests only run in CI.
+  handling (gone / deleting / creating / no template) is testable without a database. It
+  still lives in `internal/handler`, so those tests only run in CI.
 - `sqlc generate` again wrote three untracked files (`agent_skill_suggestion.sql.go`,
   `evolution.sql.go`, `team_knowledge.sql.go`) that duplicate declarations in the
   hand-maintained `_manual.sql.go` files. `git checkout pkg/db/generated/` does not
-  remove untracked files, so they have to be deleted explicitly before the build
-  passes. Worth remembering for the next transplant.
-
+  remove untracked files, so they have to be deleted explicitly before the build passes.
+  Worth remembering for the next transplant.
 
 ## Task 17: `[multica]` Warm session for `pause_in_place`, cold sessions for lanes
 
@@ -3660,9 +3659,9 @@ ______________________________________________________________________
 **Outcome (deviations from the steps above):**
 
 - **No `GetResumedTaskOwnSession` query.** The claim path already holds the
-  `agent_inbox_event` row (`event.SessionID`, `event.WorkDir`, `event.RuntimeID`), so the
-  fix is a pure function over it: `service.OwnPinnedSession`. That removes a query, a
-  sqlc transplant, and -- more usefully -- moves the policy into `internal/service`,
+  `agent_inbox_event` row (`event.SessionID`, `event.WorkDir`, `event.RuntimeID`), so
+  the fix is a pure function over it: `service.OwnPinnedSession`. That removes a query,
+  a sqlc transplant, and -- more usefully -- moves the policy into `internal/service`,
   where tests run without Postgres. The DB-backed handler tests the steps called for
   would have been CI-only.
 - **Verified the premise before coding.** `agent_inbox_event.status` is one of
@@ -3671,17 +3670,16 @@ ______________________________________________________________________
   and the sweepers move `draining` to terminal rather than back to `pending`. So a
   `pending` row carrying a `session_id` can only be a checkpoint-resumed task.
 - **Two guards the steps did not name.** Terminal rows are excluded, because the
-  cross-task lookups filter poisoned outcomes (`iteration_limit`,
-  `api_invalid_request`, ...) and reading a terminal row's session directly would bypass
-  that filter. And `force_fresh_session` beats the row's own session, or a manual rerun
-  would replay the state the user rejected.
+  cross-task lookups filter poisoned outcomes (`iteration_limit`, `api_invalid_request`,
+  ...) and reading a terminal row's session directly would bypass that filter. And
+  `force_fresh_session` beats the row's own session, or a manual rerun would replay the
+  state the user rejected.
 - **The chat path needed a parameter.** `populateAgentInboxChatContext` had no claiming
   runtime, only the row's own, and comparing that against itself would have made the
   runtime guard a no-op. It now takes `claimingRuntimeID`.
 - **The `pkill` comment already said it.** `buildStartRuntimeInCubeCode`'s doc comment
   already explained the identity reset as correctness, so instead of adding a redundant
   line it gained the fan-out case: several lanes restore the same frozen `daemon.id`.
-
 
 ## Task 18: `[multica]` Measure snapshot duration at realistic SWE scale
 
@@ -3727,19 +3725,18 @@ git commit -m "docs(openspec): record SWE-scale snapshot latency measurement"
 ______________________________________________________________________
 
 **Outcome:** Step 1 could not run -- no Cube base URL or credential exists in this
-environment and the Cube API is unreachable, so 8.1 stays unticked and needs an operator.
-`.comet/snapshot-latency.md` records the procedure and a table to fill in.
+environment and the Cube API is unreachable, so 8.1 stays unticked and needs an
+operator. `.comet/snapshot-latency.md` records the procedure and a table to fill in.
 
 The useful result is a threshold the plan did not name. The binding limit is **not** the
 server's 15-minute `branchSavepointSaveTimeout`; it is the AReaL client's 120s `httpx`
 timeout (`MulticaEnvDispatchClient` defaults `timeout=120.0`; the server sets no
 `WriteTimeout`), multiplied by capture being serial -- `EnvCheckpointService.Create`
-iterates `SandboxRefs` one at a time and eager-all hands it the whole roster. The passing
-condition is therefore `per_snapshot_duration × roster_size < 120s`, and crossing it
-produces a dispatch that looks failed to AReaL while the server still creates the
-checkpoint and its lanes. Parallelizing the loop is the first mitigation, deliberately
-left unimplemented while the evidence says 1.2s.
-
+iterates `SandboxRefs` one at a time and eager-all hands it the whole roster. The
+passing condition is therefore `per_snapshot_duration × roster_size < 120s`, and
+crossing it produces a dispatch that looks failed to AReaL while the server still
+creates the checkpoint and its lanes. Parallelizing the loop is the first mitigation,
+deliberately left unimplemented while the evidence says 1.2s.
 
 ## Task 19: `[areal]` Reconcile with the unarchived sibling delta specs
 
@@ -3754,14 +3751,14 @@ left unimplemented while the evidence says 1.2s.
   `openspec/changes/env-checkpoint-resume-trigger/specs/**`,
   `openspec/changes/env-dispatch-sandbox-lifecycle/specs/**`
 
-- [ ] **Step 1: List the requirements this change supersedes**
+- [x] **Step 1: List the requirements this change supersedes**
 
 ```bash
 cd /workspaces/leagent/backend/areal
 rg -n "^### Requirement:" openspec/changes/env-checkpoint-resume/specs openspec/changes/env-checkpoint-resume-trigger/specs openspec/changes/env-dispatch-sandbox-lifecycle/specs
 ```
 
-- [ ] **Step 2: Write the reconciliation table into `proposal.md`**
+- [x] **Step 2: Write the reconciliation table into `proposal.md`**
 
 Replace the commented-out **Modified Capabilities** block with a real table: one row per
 sibling requirement, and for each, whether this change **supersedes** it (with the
@@ -3771,7 +3768,7 @@ over `sandbox_refs` (superseded by "Resume materializes a requested number of la
 the resume-trigger descriptor and `TriggerStatus` (preserved, now behind the seam), and
 `CloneSandboxInstance`'s live-fork deferral (fulfilled by this change).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /workspaces/leagent/backend/areal
@@ -3780,6 +3777,21 @@ git commit -m "docs(openspec): reconcile savepoint consolidation with sibling de
 ```
 
 ______________________________________________________________________
+
+**Outcome:** the table is in `proposal.md`. Two corrections to this task's framing:
+
+- `env-checkpoint-resume` has no change directory of its own; its spec lives under
+  `env-dispatch-sandbox-lifecycle/specs/env-checkpoint-resume/`, so the Step 1 command
+  errors on a missing path.
+- The task expected "supersedes / preserves / untouched". Two requirements are stronger
+  than superseded -- they are **contradicted**: "Resume ... MUST not expose immutable
+  branch/fork semantics" and the bridge's "Branch ... rather than a live fork" plus
+  "True live-state fork ... out of scope for v1". Those sentences become false when this
+  change ships and have to be corrected at sibling archive time, not merely layered
+  over.
+
+Also recorded: retiring `CloneSandboxInstance` does not contradict "Sandbox lifecycle
+service reuse", which enumerates create, save, resume, delete, and reconfigure.
 
 ## Task 20: `[areal]` Update the multica environment protocol document
 

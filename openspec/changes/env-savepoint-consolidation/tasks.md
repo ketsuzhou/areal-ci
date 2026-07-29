@@ -389,8 +389,8 @@ sandboxd.
   Scope addition: there was no deletion path to hook into. `env_checkpoint.go` exposed
   only create, get, list, and resume, and `env_checkpoint.sql` had no `DELETE`, so this
   task creates `DeleteEnvCheckpoint` (query, repository method, `Delete` on the service,
-  and `DELETE /api/v1/env-checkpoints/{checkpointID}`). Expiry is still absent -- nothing
-  schedules deletion on a clock, so this covers the explicit delete only.
+  and `DELETE /api/v1/env-checkpoints/{checkpointID}`). Expiry is still absent --
+  nothing schedules deletion on a clock, so this covers the explicit delete only.
 
   Savepoints are released *before* the row is deleted. The row is the only record that
   the templates exist, so deleting it first would leak them on a failed release with
@@ -447,15 +447,15 @@ sandboxd.
   both `populateAgentInboxWorkContext` and `populateAgentInboxChatContext`.
 
   Deviation: the planned `GetResumedTaskOwnSession` query was not needed. The claim path
-  already holds the `agent_inbox_event` row, so this is a pure function over it -- no new
-  query, no sqlc transplant, and the policy lives in `internal/service` where tests
+  already holds the `agent_inbox_event` row, so this is a pure function over it -- no
+  new query, no sqlc transplant, and the policy lives in `internal/service` where tests
   actually run. The chat path had to take the claiming runtime as a parameter, since it
   only had the row's own runtime and comparing that against itself would have made the
   runtime guard a no-op.
 
   Three guards, each mutation-checked: terminal rows are left to the filtered lookups
-  (which exclude poisoned outcomes such as `iteration_limit` and `api_invalid_request` --
-  a filter this must not bypass), the claiming runtime must match, and
+  (which exclude poisoned outcomes such as `iteration_limit` and `api_invalid_request`
+  -- a filter this must not bypass), the claiming runtime must match, and
   `force_fresh_session` still wins.
 
 - [x] 7.2 Keep forked lanes on fresh sessions, and keep the snapshot-restored daemon
@@ -489,26 +489,43 @@ sandboxd.
   procedure, a table to fill in, and what to do if it comes back slow.
 
   What the investigation *did* settle is the threshold, which the plan did not state.
-  The binding limit is not the server's 15-minute `branchSavepointSaveTimeout`; it is the
-  AReaL client's 120s `httpx` timeout (`MulticaEnvDispatchClient` defaults
+  The binding limit is not the server's 15-minute `branchSavepointSaveTimeout`; it is
+  the AReaL client's 120s `httpx` timeout (`MulticaEnvDispatchClient` defaults
   `timeout=120.0`, and the server sets no `WriteTimeout`), combined with capture being
   serial -- `EnvCheckpointService.Create` loops over `SandboxRefs` one at a time, and
   eager-all captures the whole roster. So the passing condition is
-  `per_snapshot_duration × roster_size < 120s`, and exceeding it produces a dispatch that
-  looks failed to AReaL while the server still creates the checkpoint and lanes.
+  `per_snapshot_duration × roster_size < 120s`, and exceeding it produces a dispatch
+  that looks failed to AReaL while the server still creates the checkpoint and lanes.
 
   Parallelizing the capture loop is the first mitigation if the measurement is slow, and
   is deliberately not implemented ahead of it: at the measured 1.2s it buys nothing and
   adds concurrent snapshot load plus cross-lane error aggregation.
-- [ ] 8.2 Reconcile this change's capabilities with the unarchived sibling delta specs
+
+- [x] 8.2 Reconcile this change's capabilities with the unarchived sibling delta specs
   (`env-checkpoint-resume`, `env-checkpoint-resume-trigger`,
   `env-dispatch-sandbox-lifecycle`) before archive
+
+  Table in `proposal.md`, one row per sibling requirement. Correction to the task's
+  premise: `env-checkpoint-resume` is not its own change -- its spec lives under
+  `env-dispatch-sandbox-lifecycle/specs/env-checkpoint-resume/`.
+
+  Two sibling requirements are contradicted outright rather than extended, and both need
+  correcting when those siblings archive: "Resume ... MUST not expose immutable
+  branch/fork semantics" and the bridge requirement's "Branch ... rather than a live
+  fork" plus "True live-state fork ... out of scope for v1". This change adds exactly
+  the primitive both ruled out.
+
+  One near-miss worth recording: retiring `CloneSandboxInstance` does *not* contradict
+  "Sandbox lifecycle service reuse", which enumerates create, save, resume, delete, and
+  reconfigure -- clone was never in it.
+
 - [x] 8.3 Update the multica environment protocol document so branch is described as a
   fan-out of checkpoint resume, and correct its statement that the API provides no
   snapshot or fork semantics. The `idempotency_key` row records the client contract
   honestly: lane keys derive from it, but the server does not yet reject a branch
   dispatch without one (task 3.7), so the row says so rather than promising enforcement
   that is not there
+
 - [x] 8.4 Record the intra-turn fork finding (a restored clone carries live processes)
   as explicitly out of scope, with the runtime-identity and duplicated-request reasons,
   and note that the `pkill` in `buildStartRuntimeInCubeCode` is therefore load-bearing
