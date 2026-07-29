@@ -189,18 +189,21 @@ by tests that actually execute here. Design D9/D14.
   survives the write, a legacy row without one resolves to `pause_in_place` (both
   mutation-checked), every query is workspace-scoped, and a malformed id is refused
   before it can reach the database as a zero UUID
+
 - [x] 3b.2 `SavepointCreator` adapter reusing the existing `create_template` path
   (`CreateSandboxSnapshotTemplate` already persists a `sandbox_snapshot` row, enqueues
   the job, and has its `cube_snapshot_id` filled in on completion). Binds the snapshot
   to its owning checkpoint before the job runs, leaves the source running, waits for a
   terminal status, and fails a row whose job was lost rather than leaving it `creating`
   forever. The ownership binding and the wait are both mutation-checked
+
 - [x] 3b.3 `SavepointReader` and `EnvCheckpointLaneRepository` adapters over the queries
   from 2.x/3.5. Two properties the interfaces only describe are pinned by
   mutation-checked tests: a lost claim is an ordinary outcome rather than an error, and
   an unrecorded step reaches the database as NULL so `COALESCE` keeps what an earlier
   step wrote
-- [ ] 3b.4 `LaneMaterializer` adapter. Blocked during the first attempt: the interface
+
+- [x] 3b.4 `LaneMaterializer` adapter. Blocked during the first attempt: the interface
   gave `ProvisionLaneAgent` no way to find the source conversation, and
   `CopyProjectSubtree` copies issues and chat sessions but not channels, so it cannot be
   derived. Resolved by design D6 (the branch path keeps owning env/project/channel and
@@ -208,17 +211,76 @@ by tests that actually execute here. Design D9/D14.
   conversation, shipping with standalone fan-out). This task now covers only the
   branch-path shape: create the lane instance from the savepoint's Cube template and
   provision the lane's runtime and chat session, reusing the existing env-dispatch
-  provisioning helpers
-- [ ] 3b.5 Construct the service in the handler (per-request, matching how
+  provisioning helpers.
+
+  Landed as `internal/service/lane_materializer.go` behind a four-method
+  `LaneMaterializerDeps`. Two guards carry the weight and were mutation-checked:
+  creating with an empty Cube template would succeed against the node default and hand
+  back a healthy-looking sandbox that lost the captured state, so an empty or non-ready
+  savepoint is refused as `ErrSavepointGone`; and a lane with no channel is refused as
+  `ErrLaneConversationUnavailable` rather than reusing the source's, which would
+  collapse independent continuations into one thread. `LaneRuntimeInput` gained the
+  lane's recorded project/env/channel so the runtime step acts on the pre-seeded
+  conversation (D6) instead of minting a second one.
+
+  Two things the adapter deliberately does not solve, both landing with D8's fan-out
+  columns rather than here: `CopyLaneProjectSubtree` creates the lane env with no parent
+  and in the self-play domain because a checkpoint does not record the env it was taken
+  from (branch dispatch never reaches this step, so only standalone fan-out is
+  affected); and `ProvisionLaneAgentRuntime` needs a per-lane env-dispatch binding row
+  plus a lane channel, so the handler-side implementation is a typed refusal for now,
+  which 3b.6 makes unreachable from the API
+
+- [x] 3b.5 Construct the service in the handler (per-request, matching how
   `EnvDispatchService` and the lifecycle service are built) while keeping the injected
-  fake as the test escape hatch, and record what the feature flag now gates
-- [ ] 3b.6 Refuse `lane_count > 1` against a checkpoint that recorded no source
+  fake as the test escape hatch, and record what the feature flag now gates.
+
+  Most seams turned out to already have production implementations, which is why this
+  landed smaller than feared: `*db.Queries` satisfies `InFlightTaskResetter`,
+  `envDispatchDepsAdapter` satisfies `ForkedRuntimeEnqueuer`, the daemon hub satisfies
+  `TaskWakeupNotifier`, `ListInFlightTasksForProject` already existed as a query, and
+  `envSandboxLifecycleDepsAdapter` already enqueues sandbox jobs. Two seams were
+  genuinely new and are tested in `internal/service`: `NewProjectSnapshotReader`
+  (captures the same subtree `CopyProjectSubtree` copies -- issues, chat sessions, and
+  each session's messages -- in a versioned envelope whose collections are `[]` not
+  `null`, since the snapshot is handed straight back over the API) and
+  `NewInFlightTaskResolver` (drops rows that could never be triggered, because
+  continuation resets by task+runtime and a captured trigger missing either only fails
+  once someone tries to resume it). Thin saver/resumer adapters over the lifecycle
+  service propagate the error that records a checkpoint failed or timed out.
+
+  Two traps worth naming. A nil `*daemonws.Hub` stored in a `TaskWakeupNotifier` would
+  be a non-nil interface and the wake fast-path would call through a nil receiver, so
+  the hub is only installed when present. And `ENV_CHECKPOINTS_ENABLED` now gates a
+  service that is actually reachable -- before this the endpoints were dead even with
+  the flag on, because nothing ever set the field. No existing test asserts the "not
+  configured" 503 through `handler.New`, so nothing regresses on that path.
+
+  Verification: `go build ./...`, `go vet ./internal/... ./cmd/...`, and the new
+  `internal/service` tests with mutation checks on the workspace filter, the message
+  capture, and the untriggerable-row skip. The construction itself is unverifiable here
+  -- `internal/handler` has no runnable tests without Postgres
+
+- [x] 3b.6 Refuse `lane_count > 1` against a checkpoint that recorded no source
   conversation, with a typed error. Design D8/D13: the service-level fan-out from phase
   3 is complete, but a bare checkpoint cannot name the conversation its lanes should
   continue, and serving it from the source's own channel would make the lanes share one
   — the exact opposite of independent continuations. The migration that records the
   source conversation ships with the standalone fan-out capability, so no release
-  advertises a fan-out it cannot serve
+  advertises a fan-out it cannot serve.
+
+  Implemented in `resumeSnapshotLanes` as `ErrCheckpointNotResumable` (409): the request
+  is fine, the checkpoint is what cannot serve it. A single lane is exempt because its
+  caller supplies the conversation -- branch dispatch pre-seeds the lane row (D6) -- so
+  the branch path is unaffected.
+
+  The rule reads `cp.SourceChannelID`, a field with no column yet, rather than an
+  unconditional refusal. Every checkpoint written today therefore reports none and
+  fan-out is refused, and the capability arrives by populating the field when D8's
+  migration lands, with no temporary guard for someone to remember to remove. The
+  round-trip test sets the field on its stored checkpoint to keep exercising the state
+  machine behind the boundary, which is also the one place the dependency is visible.
+  Mutation-checked by removing the refusal
 
 ## 4. Route branch dispatch through resume
 
