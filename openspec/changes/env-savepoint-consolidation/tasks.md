@@ -167,6 +167,37 @@ mutation-checked.
   never run: without Postgres it self-skips, and a claim race is precisely what no fake
   can demonstrate
 
+## 3b. Production wiring
+
+Added during build, by user decision, after discovering the plan never wired any of
+phases 1–3 into production. Every `NewEnvCheckpointService` call in the plan is a test;
+`Handler.EnvCheckpointService` is assigned nowhere outside `env_checkpoint_test.go`, and
+the routes are gated off by `ENV_CHECKPOINTS_ENABLED`. Without this phase the change
+lands as fully-tested unreachable machinery, and phase 5's `clone` retirement would
+break the only live branch path, whose replacement sits behind the unwired service.
+
+Everything here is DB-backed adapter code, so in this environment it is verifiable only
+by compilation, interface satisfaction, and pure-helper unit tests —
+`internal/handler`'s `TestMain` exits 0 without Postgres. This is the phase whose
+deferred verification carries the most risk.
+
+- [ ] 3b.1 `EnvCheckpointRepository` adapter over the checkpoint queries, with row
+  mapping covered by pure unit tests in a package that actually runs
+- [ ] 3b.2 `SavepointCreator` adapter reusing the existing `create_template` path
+  (`CreateSandboxSnapshotTemplate` already persists a `sandbox_snapshot` row, enqueues
+  the job, and has its `cube_snapshot_id` filled in on completion), blocking until the
+  snapshot row reaches a terminal state, with the terminal-state decision extracted as a
+  testable helper
+- [ ] 3b.3 `SavepointReader` and `EnvCheckpointLaneRepository` adapters over the queries
+  from 2.x/3.5
+- [ ] 3b.4 `LaneMaterializer` adapter — the substantial one: create the lane instance
+  from the savepoint's Cube template, copy the project subtree, and provision the lane's
+  own channel, chat session and derived agent, reusing the existing env-dispatch
+  provisioning helpers rather than duplicating them
+- [ ] 3b.5 Construct the service in the handler (per-request, matching how
+  `EnvDispatchService` and the lifecycle service are built) while keeping the injected
+  fake as the test escape hatch, and record what the feature flag now gates
+
 ## 4. Route branch dispatch through resume
 
 - [ ] 4.1 Serve branch-mode env dispatch by creating or reusing a `snapshot` checkpoint
