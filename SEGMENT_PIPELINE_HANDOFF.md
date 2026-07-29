@@ -384,21 +384,37 @@ exported")→ session 被回收 → 随后的 `SetReward` 撞 400 `No interactio
 
 每一轮 rollout 都会泄漏**五种**资源:cube 沙箱、`sandbox_instance` 行、`agent_runtime` 行、env-dispatch
 克隆出来的派生 agent(`env-<uuid>`)、以及 `environment_agent_sandbox` 绑定行。上一轮 26 分钟就攒出 909 个沙箱、1036
-个 runtime。两个**互相独立**的缺陷:
+个 runtime。**三个互相独立的缺陷,缺一个都清不干净**,现已全部修掉:
 
 1. **AReaL 侧从不释放 dispatch。** `multi_agent_workflow.arun_episode` 调了
    `create_env_dispatch` 却从不调 `cleanup_env_dispatch`,DagTimeout / 空 DAG / 成功 三条 return
    路径全泄漏。已改成 `try/finally` + 永不抛出的 `_release_dispatch`。
-1. **就算调了,那个端点也不回收资源。** `deleteEnvDispatchChannelRollout` 先 `markDeleting` 把绑定从 `ready`
-   刷成 `deleting`,紧接着回收循环的条件是 `if b.Status != "ready" { continue }` ——
-   **整段回收是死代码**;函数随后删掉 channel/绑定/env,于是沙箱、runtime、派生 agent 变成再也找不到的孤儿。已让循环同时接受
+1. **就算调了,那个端点的回收段是死代码。** `deleteEnvDispatchChannelRollout` 先 `markDeleting` 把绑定从
+   `ready` 刷成 `deleting`,紧接着回收循环的条件是 `if b.Status != "ready" { continue }` ——
+   整段回收从不执行;函数随后删掉 channel/绑定/env,于是沙箱、runtime、派生 agent 变成再也找不到的孤儿。已让循环同时接受
    `deleting`,并补上"硬删已归档 agent 再删 runtime"(否则 `agent.runtime_id` 的 RESTRICT 让 runtime
    永远删不掉,而那个错误原本被 `_ =` 吞掉,所以泄漏一直不可见)。
+1. **循环真跑起来后,删沙箱这步又必然失败。** 同一函数把 `lifecycle.Delete` 的 actor 硬编码成 `""`,而
+   `sandbox_job.initiator_user_id` 是 NOT NULL,入队必报 `parse actor_user_id`; `Delete`
+   只在**节点不可用**时才回退到强删,节点在线时 cube 沙箱原样留着。已把 `DeleteEnvDispatchChannel` 里本来就被 `_` 丢掉的
+   `requireUserID` 结果接到这一步。
 
-原有测试用的是 `pending` 绑定,压根进不了那个循环,所以从没发现。新增
-`TestChannelCleanupReclaimsReadyBindingOwnedResources` 用 `ready` 绑定钉住。
+原有测试用的是 `pending` 绑定,压根进不了那个循环,所以前两个缺陷从没被发现;第三个是新回归测试
+`TestChannelCleanupReclaimsReadyBindingOwnedResources`(用 `ready` 绑定)跑起来后才暴露的。
 
-### 第三个缺陷(未修,清理时必须知道)
+### 同类缺陷:通用终结钩子也删不掉沙箱(已修)
+
+`ephemeralSandboxCleanerAdapter.DeleteSandboxInstance`(`env_sandbox_lifecycle_adapter.go`)同样传
+`""` 当 actor,所以 `cleanup_on_terminal` 那条通用路径在节点在线时也一样删不掉沙箱。AReaL 不走这条(env-dispatch
+显式把该钩子关掉了),但其它临时沙箱任务都走 —— 泄漏面比训练链路更大。
+
+actor 只能就地解出来:调用点 `maybeCleanupEphemeralSandbox` 拿到的 `db.AgentInboxEvent`
+**没有任何用户字段**。好在该适配器为了拿 node/template 本来就要先调一次 `GetSandboxInstanceRef`,而
+`sandbox_instance.creator_user_id` 是 NOT NULL 且已被填进
+`SandboxInstanceRef.CreatorUserID`,所以改用**沙箱创建者**当 actor 即可 —— 不动接口、不加迁移、不多查一次库。回归测试:
+`TestEphemeralSandboxCleanerEnqueuesDeleteWithSandboxCreatorAsInitiator`。
+
+### 另一个未修缺陷(清理时必须知道)
 
 沙箱内 daemon 注册出来的 runtime,`owner_id` 是 **NULL**,而 `canDeleteRuntime` 要求
 `OwnerID.Valid && owner == 调用者`(没有 owner/admin 兜底)。 **这类 runtime 永远无法通过 API 删除**,只能走
