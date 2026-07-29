@@ -266,15 +266,9 @@ def _supernodes_to_batched_tensor_dict(
 ) -> dict[str, Any] | None:
     """Convert multica SuperNodes to a batched tensor dict.
 
-    The multica parallel of :func:`_nodes_to_batched_tensor_dict`: each SuperNode
-    is one segment whose resolved tensors live in ``metadata["tensors"]``
-    (torch-free lists: ``input_ids`` / ``loss_mask`` / ``logprobs`` /
-    ``versions``). The per-segment scalar advantage from
-    :func:`assemble_node_advantages` is broadcast to the response span (where
-    ``loss_mask == 1``), mirroring the per-token advantage the Node path
-    carries. ``topk_ids`` is a -1 sentinel (the trainer fills it) and
-    ``teacher_logp`` is zeros when ``loss_mode != "grpo"`` -- distillation is a
-    Change 2 concern and is not sourced from the segment tensors here.
+    The diagnosed path materializes one training Node per assistant turn and
+    uses its Node-level advantage. An unscored legacy segment falls back to its
+    resolved tensors in ``metadata["tensors"]``.
 
     Returns ``None`` if ``super_nodes`` is empty.
     """
@@ -290,38 +284,50 @@ def _supernodes_to_batched_tensor_dict(
     torch = _lazy_torch()
     tensor_dicts: list[dict[str, Any]] = []
     for sn in super_nodes:
-        t = sn.metadata.get("tensors") or {}
-        input_ids = list(t.get("input_ids", []))
-        loss_mask = list(t.get("loss_mask", []))
-        logprobs = list(t.get("logprobs", []))
-        versions = list(t.get("versions", []))
-        if max_tokens > 0 and len(input_ids) > max_tokens:
-            cut = len(input_ids) - max_tokens
-            input_ids = input_ids[cut:]
-            loss_mask = loss_mask[cut:]
-            logprobs = logprobs[cut:]
-            versions = versions[cut:]
-        seq_len = len(input_ids)
-        resp_start, resp_end = _response_span(loss_mask)
-        resp_len = max(0, resp_end - resp_start)
-        adv = (
-            float(advantages.advantages.get(sn.node_id, 0.0))
-            if advantages is not None
-            else 0.0
-        )
-        traj: dict[str, Any] = {
-            "input_ids": torch.tensor(input_ids, dtype=torch.int32).unsqueeze(0),
-            "loss_mask": torch.tensor(loss_mask, dtype=torch.int32).unsqueeze(0),
-            "logprobs": torch.tensor(logprobs, dtype=torch.float32).unsqueeze(0),
-            "versions": torch.tensor(versions, dtype=torch.int32).unsqueeze(0),
-            "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
-            "rewards": torch.tensor(
-                float(sn.outcome_reward), dtype=torch.float32
-            ).unsqueeze(0),
-            "topk_ids": torch.full((1, resp_len, 1), -1, dtype=torch.int32),
-            "advantages": torch.full((1, resp_len), adv, dtype=torch.float32),
-        }
-        if loss_mode != "grpo":
-            traj["teacher_logp"] = torch.zeros(1, resp_len, 1, dtype=torch.float32)
-        tensor_dicts.append(traj)
+        entries = sn.nodes or [None]
+        for node in entries:
+            if node is None:
+                tensors = sn.metadata.get("tensors") or {}
+                input_ids = list(tensors.get("input_ids", []))
+                loss_mask = list(tensors.get("loss_mask", []))
+                logprobs = list(tensors.get("logprobs", []))
+                versions = list(tensors.get("versions", []))
+            else:
+                input_ids = list(node.input_ids)
+                loss_mask = list(node.loss_mask)
+                logprobs = list(node.logprobs)
+                versions = list(node.versions)
+            entry_id = sn.node_id if node is None else node.node_id
+            outcome_reward = sn.outcome_reward if node is None else node.outcome_reward
+            if max_tokens > 0 and len(input_ids) > max_tokens:
+                cut = len(input_ids) - max_tokens
+                input_ids = input_ids[cut:]
+                loss_mask = loss_mask[cut:]
+                logprobs = logprobs[cut:]
+                versions = versions[cut:]
+            seq_len = len(input_ids)
+            resp_start, resp_end = _response_span(loss_mask)
+            resp_len = max(0, resp_end - resp_start)
+            adv = (
+                float(advantages.advantages.get(entry_id, 0.0))
+                if advantages is not None
+                else 0.0
+            )
+            traj: dict[str, Any] = {
+                "input_ids": torch.tensor(input_ids, dtype=torch.int32).unsqueeze(0),
+                "loss_mask": torch.tensor(loss_mask, dtype=torch.int32).unsqueeze(0),
+                "logprobs": torch.tensor(logprobs, dtype=torch.float32).unsqueeze(0),
+                "versions": torch.tensor(versions, dtype=torch.int32).unsqueeze(0),
+                "attention_mask": torch.ones(1, seq_len, dtype=torch.bool),
+                "rewards": torch.tensor(
+                    float(outcome_reward), dtype=torch.float32
+                ).unsqueeze(0),
+                "topk_ids": torch.full((1, resp_len, 1), -1, dtype=torch.int32),
+                "advantages": torch.full((1, resp_len), adv, dtype=torch.float32),
+            }
+            if loss_mode != "grpo":
+                traj["teacher_logp"] = torch.zeros(
+                    1, resp_len, 1, dtype=torch.float32
+                )
+            tensor_dicts.append(traj)
     return concat_padded_tensors(tensor_dicts)

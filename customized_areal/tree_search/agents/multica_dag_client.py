@@ -69,6 +69,10 @@ class SegmentSpec:
     trajectory_source: str = "areal_tensor"
     trainable: bool = True
     trajectory: list = field(default_factory=list)
+    # Immutable assistant message sequences frozen by MultiCA before diagnosis.
+    # The final DAG echoes them so exact score coverage can be verified without
+    # guessing from counts or a numeric message range.
+    assistant_turn_seqs: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -91,7 +95,8 @@ class StepReward:
     Emitted by the Multica Pi diagnosis agent at collaborative-task terminal and
     served via ``/dag`` ``step_rewards[]``. ``score`` is an integer in
     ``[0, score_max]`` (clamped by the diagnosis runner). AReaL normalizes the
-    per-turn scores into a per-segment ``SuperNode.process_reward``.
+    per-turn scores stay attached to training Nodes; SuperNodes retain only DAG
+    topology and resolved tensor ownership.
     """
 
     segment_id: str
@@ -169,6 +174,37 @@ class AssembledDag:
             raise DagError("assembled DAG contains duplicate segment_id values")
 
         known_segments = set(segment_ids)
+        # Assistant targets are frozen by MultiCA. Their order is part of the
+        # contract, so downstream Node mapping can use the exact `(segment, seq)`
+        # identity rather than a count-derived approximation.
+        for segment in segments:
+            targets = segment.assistant_turn_seqs
+            if not isinstance(targets, list) or any(
+                not isinstance(seq, int) or seq <= 0 for seq in targets
+            ):
+                raise DagError(
+                    f"segment {segment.segment_id!r} has invalid assistant_turn_seqs"
+                )
+            if targets != sorted(set(targets)):
+                raise DagError(
+                    f"segment {segment.segment_id!r} assistant_turn_seqs "
+                    "must be unique and sorted"
+                )
+        targets_by_segment = {
+            segment.segment_id: set(segment.assistant_turn_seqs)
+            for segment in segments
+        }
+        for reward in step_rewards:
+            if reward.segment_id not in known_segments:
+                raise DagError(
+                    f"step reward references unknown segment {reward.segment_id!r}"
+                )
+            if reward.seq not in targets_by_segment[reward.segment_id]:
+                raise DagError(
+                    f"step reward seq {reward.seq} is not an assistant target "
+                    f"for segment {reward.segment_id!r}"
+                )
+
         adjacency = {segment_id: [] for segment_id in segment_ids}
         indegree = {segment_id: 0 for segment_id in segment_ids}
         for edge in edges:
@@ -213,6 +249,47 @@ class AssembledDag:
             step_rewards=step_rewards,
             score_max=d.get("score_max", 0),
         )
+
+    def validate_diagnosis_coverage(self) -> None:
+        """Require exactly one persisted score for every frozen assistant turn.
+
+        This is called only after an opt-in diagnosis request has completed. It
+        deliberately does not invent missing rewards for unscored ordinary DAGs.
+        """
+        targets_by_segment = {
+            segment.segment_id: set(segment.assistant_turn_seqs)
+            for segment in self.segments
+        }
+        if any(targets_by_segment.values()) and self.score_max <= 0:
+            raise DagError(
+                "diagnosis DAG has assistant targets but score_max is not positive"
+            )
+        rewards_by_segment: dict[str, set[int]] = {
+            segment_id: set() for segment_id in targets_by_segment
+        }
+        for reward in self.step_rewards:
+            if reward.segment_id not in rewards_by_segment:
+                raise DagError(
+                    f"step reward references unknown segment {reward.segment_id!r}"
+                )
+            if reward.seq not in targets_by_segment[reward.segment_id]:
+                raise DagError(
+                    f"step reward seq {reward.seq} is not an assistant target "
+                    f"for segment {reward.segment_id!r}"
+                )
+            if reward.seq in rewards_by_segment[reward.segment_id]:
+                raise DagError(
+                    f"duplicate diagnosis score for segment {reward.segment_id!r} "
+                    f"seq {reward.seq}"
+                )
+            rewards_by_segment[reward.segment_id].add(reward.seq)
+        for segment_id, targets in targets_by_segment.items():
+            missing = sorted(targets - rewards_by_segment[segment_id])
+            if missing:
+                raise DagError(
+                    f"missing diagnosis score for segment {segment_id!r} "
+                    f"assistant seqs {missing}"
+                )
 
 
 class MulticaDagClient:

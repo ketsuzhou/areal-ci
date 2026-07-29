@@ -80,6 +80,34 @@ def test_get_dag_polls_until_200():
     assert calls["n"] == 2
 
 
+def test_assembled_dag_rejects_missing_diagnosis_turn_score():
+    payload = _dag_payload()
+    payload["segments"][0]["assistant_turn_seqs"] = [2, 7]
+    payload["segments"][1]["assistant_turn_seqs"] = []
+    payload["step_rewards"] = [
+        {"segment_id": "seg-1", "seq": 2, "score": 8, "rationale": "good"},
+    ]
+    payload["score_max"] = 10
+
+    dag = AssembledDag.from_dict(payload)
+    with pytest.raises(DagError, match="missing diagnosis score"):
+        dag.validate_diagnosis_coverage()
+
+
+def test_assembled_dag_accepts_exact_diagnosis_turn_scores():
+    payload = _dag_payload()
+    payload["segments"][0]["assistant_turn_seqs"] = [2, 7]
+    payload["segments"][1]["assistant_turn_seqs"] = []
+    payload["step_rewards"] = [
+        {"segment_id": "seg-1", "seq": 2, "score": 8, "rationale": "good"},
+        {"segment_id": "seg-1", "seq": 7, "score": 5, "rationale": "partial"},
+    ]
+    payload["score_max"] = 10
+
+    dag = AssembledDag.from_dict(payload)
+    dag.validate_diagnosis_coverage()
+
+
 def test_get_dag_repolls_200_with_no_segments_yet():
     # multica marks the root task terminal a couple of seconds before
     # CloseSegmentForEvent inserts the segment row. A 200 served in that window

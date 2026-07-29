@@ -157,6 +157,34 @@ def test_create_env_dispatch_message_returns_channel_first_handle():
     ]
 
 
+def test_diagnose_env_dispatch_uses_dispatch_scoped_post_route():
+    seen: list[tuple[str, str]] = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path))
+        assert request.headers["authorization"] == "Bearer mul_test"
+        return httpx.Response(
+            200,
+            json={
+                "run_id": "diag-1",
+                "completed_segments": 2,
+                "total_segments": 2,
+                "status": "completed",
+            },
+        )
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://x", transport=_transport(handler)
+    )
+    report = asyncio.run(
+        client.diagnose_env_dispatch(
+            handle=EnvDispatchHandle("c1", "p1", "e1", "message")
+        )
+    )
+    assert report["status"] == "completed"
+    assert seen == [("POST", "/api/v1/env-dispatch/channels/c1/diagnosis")]
+
+
 def test_create_env_dispatch_message_missing_channel_id_raises():
     def handler(req):
         # Message dispatch response without channel_id is a contract violation.

@@ -1334,14 +1334,16 @@ class TreeSearchGroupedRolloutWorkflow(RolloutWorkflow):
         # per assembled DAG. A single global pass would chain independent
         # episodes -- GAE propagates backward, so a later episode's reward would
         # contaminate an earlier episode's advantages.
-        per_episode: dict[int, list[SuperNode]] = {}
+        per_episode: dict[int, list] = {}
         order: list[int] = []
         for sn in super_nodes:
             gi = sn.metadata.get("group_idx", 0)
             if gi not in per_episode:
                 per_episode[gi] = []
                 order.append(gi)
-            per_episode[gi].append(sn)
+            # Diagnosis materializes assistant turns as training Nodes. Keep a
+            # SuperNode-only fallback for old, unscored assembled DAGs.
+            per_episode[gi].extend(sn.nodes or [sn])
         adv: dict[str, float] = {}
         returns: dict[str, float] = {}
         baselines: dict[str, float] = {}

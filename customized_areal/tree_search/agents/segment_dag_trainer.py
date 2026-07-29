@@ -232,7 +232,15 @@ def run_segment_dag_training_step(
     # Empty trajectory (assembler returns None for a dag with no segments):
     # no nodes to compute GAE over -> empty advantages. Cleanup below still
     # runs (no shards to clear; any orphaned sessions are revoked).
-    ordered = [] if edag is None else edag.topological_order()
+    ordered = (
+        []
+        if edag is None
+        else [
+            node
+            for super_node in edag.topological_order()
+            for node in (super_node.nodes or [super_node])
+        ]
+    )
     advantages = assemble_node_advantages(
         ordered, initial_value=0.0, gamma=gamma, lam=lam
     )

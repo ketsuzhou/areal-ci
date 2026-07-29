@@ -24,7 +24,6 @@ Node.parent_node_id IS set in place (Step 5's contract). All failures raise DAGE
 
 from __future__ import annotations
 
-import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -35,10 +34,11 @@ from customized_areal.tree_search.agents.execution_dag import (
     ExecutionDAG,
     SuperNode,
 )
-from customized_areal.tree_search.agents.multica_dag_client import AssembledDag
-
-logger = logging.getLogger("SuperNodeAssembler")
-
+from customized_areal.tree_search.agents.multica_dag_client import (
+    AssembledDag,
+    SegmentSpec as AssembledSegmentSpec,
+)
+from customized_areal.tree_search.core.tree_store import Node, _find_turn_boundaries
 
 @dataclass(frozen=True)
 class SegmentSpec:
@@ -105,19 +105,58 @@ class TensorResolver(Protocol):
     def resolve(self, tensor_ref: dict[str, Any]) -> dict[str, Any]: ...
 
 
-def _aggregate_process_reward(scores: list[int], score_max: int) -> float:
-    """Normalized mean of a segment's diagnosis step scores -> ``[0, 1]``.
+def normalize_diagnosis_node_rewards(nodes: list[Node]) -> None:
+    """Normalize mean per-episode diagnosis scores over all scored DAG Nodes."""
+    scored = [node for node in nodes if node.episode_scores]
+    if not scored:
+        return
+    means = {
+        node.node_id: sum(node.episode_scores.values()) / len(node.episode_scores)
+        for node in scored
+    }
+    total = sum(means.values())
+    if total == 0.0:
+        reward = 1.0 / len(scored)
+        for node in scored:
+            node.process_reward = reward
+        return
+    for node in scored:
+        node.process_reward = means[node.node_id] / total
 
-    The diagnosis agent scores each LLM output (turn) in ``[0, score_max]``;
-    the v2 GAE consumes a per-segment ``SuperNode.process_reward`` (one GAE
-    step per segment), so the per-turn scores are aggregated to a segment
-    reward. Returns 0.0 when the segment was not scored (sparse - diagnosis
-    did not run / did not cover it) or when ``score_max`` is 0 (diagnosis
-    scoring not configured). Absence stays 0.0 - never a fabricated reward.
-    """
-    if not scores or score_max <= 0:
-        return 0.0
-    return (sum(scores) / len(scores)) / score_max
+
+def _nodes_from_segment_tensors(
+    seg: AssembledSegmentSpec, tensors: dict[str, Any]
+) -> list[Node]:
+    """Materialize one training Node per frozen assistant turn."""
+    if not seg.assistant_turn_seqs:
+        return []
+    input_ids = list(tensors.get("input_ids", []))
+    loss_mask = list(tensors.get("loss_mask", []))
+    logprobs = list(tensors.get("logprobs", []))
+    versions = list(tensors.get("versions", []))
+    starts, ends = _find_turn_boundaries(loss_mask)
+    if len(starts) != len(seg.assistant_turn_seqs):
+        raise DAGError(
+            f"segment {seg.segment_id!r} response spans ({len(starts)}) do not match "
+            f"frozen assistant targets ({len(seg.assistant_turn_seqs)})"
+        )
+    if not (len(input_ids) == len(loss_mask) == len(logprobs) == len(versions)):
+        raise DAGError(f"segment {seg.segment_id!r} has inconsistent resolved tensors")
+    episode_id = f"trajectory:{seg.trajectory_id}"
+    return [
+        Node(
+            input_ids=input_ids[:end],
+            loss_mask=loss_mask[:end],
+            logprobs=logprobs[:end],
+            versions=versions[:end],
+            node_id=f"{seg.segment_id}:{seq}",
+            episode_id=episode_id,
+            turn_idx=turn_index,
+        )
+        for turn_index, (seq, end) in enumerate(
+            zip(seg.assistant_turn_seqs, ends), start=1
+        )
+    ]
 
 
 class SuperNodeAssembler:
@@ -170,24 +209,11 @@ class SuperNodeAssembler:
             for session_id, agent_run_id in dag.session_to_agent_run.items()
         }
 
-        # Index diagnosis step rewards by segment_id so each SuperNode's
-        # process_reward can be the normalized mean of its per-turn scores.
-        # score_max (served by /dag) is the diagnosis agent's scoring scale; 0
-        # means diagnosis scoring was not configured -> sparse (0.0). Rewards
-        # whose segment_id has no matching segment are dropped + logged (never
-        # applied to a wrong SuperNode, never fatal).
-        segment_ids = {seg.segment_id for seg in dag.segments}
-        scores_by_segment: dict[str, list[int]] = {}
-        for sr in dag.step_rewards:
-            if sr.segment_id not in segment_ids:
-                logger.warning(
-                    "dropping step reward for unknown segment %r (seq=%d); "
-                    "no matching SuperNode",
-                    sr.segment_id,
-                    sr.seq,
-                )
-                continue
-            scores_by_segment.setdefault(sr.segment_id, []).append(sr.score)
+        rewards_by_turn = {
+            (reward.segment_id, reward.seq): reward.score
+            for reward in dag.step_rewards
+        }
+        scored_nodes: list[Node] = []
 
         edag = ExecutionDAG()
         for seg in dag.segments:
@@ -198,6 +224,15 @@ class SuperNodeAssembler:
                 tensors = resolver.resolve(seg.tensor_ref)
             else:
                 tensors = {}
+            nodes = _nodes_from_segment_tensors(seg, tensors)
+            turn_to_node = {
+                seq: node for seq, node in zip(seg.assistant_turn_seqs, nodes)
+            }
+            for seq, node in turn_to_node.items():
+                score = rewards_by_turn.get((seg.segment_id, seq))
+                if score is not None:
+                    node.episode_scores = {node.episode_id: float(score)}
+                    scored_nodes.append(node)
             env = seg.env_snapshot or {}
             closing_event = (
                 EdgeType(seg.closing_event) if seg.closing_event else None
@@ -212,7 +247,7 @@ class SuperNodeAssembler:
                 sandbox_ids=list(env.get("sandbox_ids", [])),
                 issue_snapshot_id=env.get("issue_snapshot_id"),
                 env_state=dict(env.get("env_state", {})),
-                nodes=[],
+                nodes=nodes,
                 metadata={
                     "segment_id": seg.segment_id,
                     "trajectory_id": seg.trajectory_id,
@@ -220,15 +255,14 @@ class SuperNodeAssembler:
                     "trajectory_source": seg.trajectory_source,
                     "trainable": seg.trainable,
                     "trajectory": seg.trajectory,
+                    "assistant_turn_nodes": {
+                        str(seq): node.node_id for seq, node in turn_to_node.items()
+                    },
                 },
             )
             edag.add_event(super_node)
-            # Aggregate the segment's per-turn diagnosis scores into the
-            # per-segment GAE reward (events_from_nodes consumes
-            # super_node.process_reward). 0.0 when unscored or score_max is 0.
-            super_node.process_reward = _aggregate_process_reward(
-                scores_by_segment.get(seg.segment_id, []), dag.score_max
-            )
+
+        normalize_diagnosis_node_rewards(scored_nodes)
 
         for edge in dag.edges:
             edag.add_edge(
@@ -253,6 +287,21 @@ class SuperNodeAssembler:
             super_node.outgoing_edges = tuple(
                 (e.dst, e.type) for e in edag.edges if e.src == super_node.node_id
             )
+        # The SuperNode remains topology-only, but Node parent links preserve
+        # turn-level causality for backup and trajectory-level statistics.
+        for super_node in edag.events:
+            for index in range(1, len(super_node.nodes)):
+                super_node.nodes[index].parent_node_id = super_node.nodes[
+                    index - 1
+                ].node_id
+        for edge in edag.edges:
+            if edge.type not in (EdgeType.DELEGATION, EdgeType.COMPLETION):
+                continue
+            source = edag.get(edge.src)
+            destination = edag.get(edge.dst)
+            if not source or not destination or not source.nodes or not destination.nodes:
+                continue
+            destination.nodes[0].parent_node_id = source.nodes[-1].node_id
         return edag
 
     def assemble(
@@ -485,4 +534,5 @@ __all__ = [
     "SegmentSpec",
     "SuperNodeAssembler",
     "TeamEnvSnapshot",
+    "normalize_diagnosis_node_rewards",
 ]

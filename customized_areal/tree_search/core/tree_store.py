@@ -14,7 +14,7 @@ discarded when it only stored assistant marker tokens as prompt_tokens.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from customized_areal.tree_search.agents.execution_dag import SuperNode
@@ -102,6 +102,10 @@ class Node:
 
     # Reward
     outcome_reward: float = 0.0
+    # Diagnosis process reward. MultiCA scores are retained per episode in
+    # ``episode_scores``; this field is the globally normalized Node mean.
+    process_reward: float = 0.0
+    episode_scores: dict[str, float] = field(default_factory=dict)
 
     # Per-node credit from DAG reward backup (Phase 3). When set (not None),
     # TreeAdvantageComputer uses this for per-node GRPO normalization instead

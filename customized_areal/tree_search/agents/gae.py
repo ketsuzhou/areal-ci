@@ -105,35 +105,18 @@ def compute_global_gae(
 def events_from_nodes(ordered_nodes: list) -> list[GlobalEvent]:
     """Build the global event sequence from DAG nodes in completion order.
 
-    Thin projection over the canonical :class:`SuperNode`: each node becomes a
-    ``SuperNode`` (edges/messages irrelevant to GAE are left empty), then is
-    projected to a :class:`GlobalEvent` with ``value`` (``V_{t+1}``; 0.0 if
-    unscored) and a step reward of ``process_reward + outcome_reward`` -- so the
-    verifier terminal reward (on ``outcome_reward``) flows in as ``r_t``.
-
-    Duck-typed against ``SuperNode``; identity fields are read defensively so
-    minimal node-likes still work (they do not affect the projection).
+    Duck-typed against training ``Node`` objects (with a compatibility fallback
+    for older SuperNode-only callers). Diagnosis process rewards are attached to
+    Nodes; SuperNodes are topology-only.
     """
-    from customized_areal.tree_search.agents.execution_dag import SuperNode
-
     events: list[GlobalEvent] = []
-    for idx, node in enumerate(ordered_nodes):
-        super_node = SuperNode(
-            node_id=node.node_id,
-            agent_id=getattr(node, "agent_id", ""),
-            issue_id=getattr(node, "issue_id", ""),
-            task_id=getattr(node, "task_id", ""),
-            completion_index=idx,
-            value=getattr(node, "value", None),
-            process_reward=float(node.process_reward),
-            outcome_reward=float(node.outcome_reward),
-        )
+    for node in ordered_nodes:
         events.append(
             GlobalEvent(
-                node_id=super_node.node_id,
-                value=float(super_node.value) if super_node.value is not None else 0.0,
-                reward=float(super_node.process_reward)
-                + float(super_node.outcome_reward),
+                node_id=node.node_id,
+                value=float(getattr(node, "value", 0.0) or 0.0),
+                reward=float(getattr(node, "process_reward", 0.0))
+                + float(getattr(node, "outcome_reward", 0.0)),
             )
         )
     return events

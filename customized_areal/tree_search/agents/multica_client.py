@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -392,6 +393,28 @@ class MulticaEnvDispatchClient:
             headers=self._headers(),
         )
 
+    async def diagnose_env_dispatch(self, *, handle: EnvDispatchHandle) -> dict:
+        """Run the opt-in diagnosis agent for an already terminal dispatch."""
+        resp = await self._request(
+            "diagnose_env_dispatch",
+            "POST",
+            f"{self._dispatch_lifecycle_prefix(handle)}/diagnosis",
+            headers=self._headers(),
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(self._failure_message("diagnose_env_dispatch", resp))
+        try:
+            report = resp.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                "diagnose_env_dispatch failed: invalid JSON report"
+            ) from exc
+        if not isinstance(report, dict) or report.get("status") != "completed":
+            raise RuntimeError(
+                "diagnose_env_dispatch failed: diagnosis did not complete"
+            )
+        return report
+
     async def create_checkpoint(
         self,
         *,
@@ -504,7 +527,7 @@ async def _poll_dag(
     handle: EnvDispatchHandle,
     timeout: float,
     interval: float,
-) -> None:
+) -> dict:
     """Periodically GET the DAG endpoint and print each response.
 
     Stops on a 200 (assembled) or any terminal status (404/403/401/...); keeps
@@ -526,7 +549,7 @@ async def _poll_dag(
             except (DagError, TypeError, ValueError) as exc:
                 raise RuntimeError(f"invalid assembled DAG: {exc}") from exc
             print("dag assembled")
-            return
+            return resp.json()
         if resp.status_code not in (202, 502, 503, 504):
             raise RuntimeError(
                 f"DAG polling failed: status={resp.status_code} "
@@ -629,7 +652,25 @@ async def _debug_run(args: argparse.Namespace) -> int:
         )
         print(f"created handle: {handle}")
 
-        await _poll_dag(client, handle, args.dag_timeout, args.dag_poll_interval)
+        final_dag = await _poll_dag(
+            client, handle, args.dag_timeout, args.dag_poll_interval
+        )
+        if args.diagnose:
+            report = await client.diagnose_env_dispatch(handle=handle)
+            print(f"diagnosis completed: {report}")
+            final_dag = await _poll_dag(
+                client, handle, args.dag_timeout, args.dag_poll_interval
+            )
+            from customized_areal.tree_search.agents.multica_dag_client import (
+                AssembledDag,
+            )
+
+            AssembledDag.from_dict(final_dag).validate_diagnosis_coverage()
+        if args.dag_out:
+            Path(args.dag_out).write_text(
+                json.dumps(final_dag, indent=2), encoding="utf-8"
+            )
+            print(f"wrote dag: {args.dag_out}")
 
         # list_checkpoints is diagnostic only. An env-checkpoints-disabled server
         # answers 404 here; that must not skip cleanup of the real dispatch.
@@ -746,6 +787,16 @@ def build_debug_parser() -> argparse.ArgumentParser:
         type=float,
         default=3.0,
         help="seconds between DAG polls (default: 3)",
+    )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="run opt-in MultiCA diagnosis after the dispatch becomes terminal",
+    )
+    parser.add_argument(
+        "--dag-out",
+        default=None,
+        help="optional path for the final assembled DAG JSON",
     )
     return parser
 
