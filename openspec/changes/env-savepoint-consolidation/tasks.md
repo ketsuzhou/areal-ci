@@ -16,8 +16,16 @@ Verification limit, decided explicitly: Postgres is **not** installed in the bui
 environment. The `*_Integration` query tests are written but self-skip without
 `DATABASE_URL` and must not be reported as passing. Migrations 244/245/246, the
 `UNIQUE (checkpoint_id, lane_key)` claim race, and the `ON DELETE CASCADE` reclamation
-stay unverified until run against a real database — this is the primary open risk to
-carry into verification.
+stay unverified until run against a real database.
+
+That risk is now discharged through CI rather than carried to the end: `multica`'s
+`.github/workflows/ci.yml` runs a `backend` job with real Postgres and Redis that
+applies the migrations (`cmd/migrate up`) and runs `go test -p 1 ./...`, so the four
+packages that execute nothing locally do execute there. It triggers on `pull_request` to
+`dev` only — pushing to `dev` reaches the deploy workflow, not this one — so
+verification runs on a draft PR against `dev` while the change is incomplete. Opened as
+LRM-Teams/multica#1370, from a branch on `lrm` rather than a fork, since the frontend
+job fetches `origin dev`.
 
 The cost is larger than skipped integration tests, and silently so: `internal/handler`,
 `cmd/server`, `internal/workgraph`, and `pkg/agent` each have a `TestMain` that calls

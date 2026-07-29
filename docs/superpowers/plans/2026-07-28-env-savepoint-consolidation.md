@@ -156,6 +156,25 @@ Consequences that every schema and query task below must respect:
   `UNIQUE (checkpoint_id, lane_key)` claim race and the `ON DELETE CASCADE` reclamation)
   live in the database rather than in Go.
 
+#### The database verification channel: CI on a pull request
+
+The gap above is closable after all, just not locally.
+`multica/.github/workflows/ci.yml` runs a `backend` job with a `pgvector/pgvector:pg17`
+service plus Redis, and it does exactly the two things this environment cannot:
+`go run ./cmd/migrate up` applies the migrations against real Postgres, and
+`go test -p 1 ./...` runs every package — so the four packages whose `TestMain` exits 0
+here actually execute their tests there.
+
+It triggers on `pull_request` to `dev` only (`on: pull_request: branches: [dev]`).
+Pushing to `dev` directly does **not** run it; that path only reaches the deploy
+workflow. So the way to get database verification is a pull request against `dev`,
+opened as a draft while the change is incomplete. Branch pushed to `lrm` rather than a
+fork, because the frontend job does `git fetch origin dev` and a fork has no `dev`.
+
+Rebase onto current `upstream/dev` before opening it, and re-check the migration numbers
+after rebasing: a colliding number is the one conflict that a clean `git rebase` will
+not report, since the two migrations are different files.
+
 ### Go test conventions `[multica]`
 
 Read `multica/server/internal/service/env_checkpoint_test.go` and
