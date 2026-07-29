@@ -115,24 +115,30 @@ mutation-checked.
   signature, and result — the HTTP body is optional, so a caller sending none still gets
   one lane anchored on the checkpoint id, and `lanes` is `omitempty` so a pause-in-place
   response is unchanged
+
 - [x] 3.2 Materialize one sandbox instance per lane from the checkpoint's savepoint,
   taking no additional snapshot of the source
+
 - [x] 3.3 Give each lane its own copy of the captured project subtree and its own agent
   runtime — and its own conversation (channel, chat session, source message), because
   the enqueue path requires all three and lanes sharing a channel would not be
   independent; migration 247 gained those columns so an interrupted lane does not copy a
   second channel on recovery
+
 - [x] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
   its single-instance resume unchanged — a checkpoint with an empty `save_mode` is a
   pre-change row and is refused fan-out on the same grounds
+
 - [x] 3.5 Migration and queries for `env_checkpoint_lane`:
   `UNIQUE (checkpoint_id, lane_key)`, a `provisioning` / `ready` / `failed` status,
   per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion —
   the claim derives `workspace_id` from the checkpoint rather than accepting it, so a
   lane cannot escape its checkpoint's workspace
+
 - [x] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
   existing row's status when the insert loses: return a `ready` lane, continue a stale
   `provisioning` lane from its first incomplete step, surface a `failed` lane
+
 - [x] 3.7 Derive lane keys from an anchor that is stable across retries of the same
   branch request, and pin the chosen anchor against the dispatch record's actual stable
   id — anchor is `env_dispatch_request.idempotency_key` (a request-body field the
@@ -151,17 +157,22 @@ mutation-checked.
   (task 8.3) when it lands. `TestBranchDispatchStillAcceptsAKeylessRequest` is the
   tripwire guarding the deferral; it was mutation-checked and fails the moment the
   validation is added
+
 - [x] 3.8 Reject a requested lane count of zero as invalid input — validated before the
   checkpoint is loaded, so a bad count cannot have a side effect
+
 - [x] 3.9 Reject a checkpoint whose save status is not complete with a typed
   non-resumable error distinguishable from transient errors —
   `ErrCheckpointNotResumable` maps to 409 and `ErrLaneCountInvalid` to 400, since one is
   permanent and the other is worth retrying with a corrected request
+
 - [x] 3.10 Fail a lane with a typed error when its savepoint's underlying snapshot is
   gone, and mark the savepoint failed so later resumes fail fast
+
 - [x] 3.11 Report failure when every requested lane fails, rather than success with an
   empty lane set — the first lane's cause is wrapped so a typed failure stays
   recognizable through the summary error
+
 - [x] 3.12 Add a sweeper for lanes stuck in `provisioning` — global scheduler job on a
   5-minute cadence, failing lanes 15 minutes past their last progress. Deviates from the
   plan in one respect: the plan's `ListStaleProvisioningEnvCheckpointLanes` +
@@ -176,6 +187,7 @@ mutation-checked.
   and the recorded error says so — reclamation is 6.x's job. Note `sqlc` statically
   caught an ambiguous `updated_at` between the UPDATE target and its candidate subquery,
   which is the class of error this environment otherwise could not catch
+
 - [x] 3.13 Service tests: three lanes trigger exactly one snapshot per source instance
   (assert the savepoint creator's call count, not the lane count); a new lane key
   re-expands the frontier without creating a second checkpoint; pause-in-place fan-out
@@ -185,11 +197,21 @@ mutation-checked.
   the savepoints capture actually produced, so a disagreement over ids or over
   `save_mode` fails here instead of in production (mutation-checked by making capture
   drop `save_mode`)
-- [ ] 3.14 Query tests against the real unique index: concurrent claims of one lane key
+
+- [x] 3.14 Query tests against the real unique index: concurrent claims of one lane key
   create one lane; an interrupted lane is continued rather than duplicated — written as
-  `TestEnvCheckpointLaneUniqueIndex_Integration`, but left unchecked because it has
-  never run: without Postgres it self-skips, and a claim race is precisely what no fake
-  can demonstrate
+  `TestEnvCheckpointLaneUniqueIndex_Integration`
+
+  Ticked on CI evidence, and the evidence is decisive rather than inferred. A green run
+  only proves the package compiled and nothing failed -- a self-skipping test also
+  reports `ok` -- so the test body was confirmed to execute by breaking one assertion on
+  purpose (`require.Len(t, lanes, 1)` -> `99`) and pushing it. CI run 30425009029 failed
+  with `--- FAIL: TestEnvCheckpointLaneUniqueIndex_Integration` at
+  `env_checkpoint_lane_query_test.go:82`, which is inside the transaction after the two
+  competing claims. The probe commit was then removed from the branch.
+
+  So the claim race, the `UNIQUE (checkpoint_id, lane_key)` index, and the
+  interrupted-lane continuation are verified against a real Postgres, not asserted.
 
 ## 3b. Production wiring
 

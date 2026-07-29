@@ -3898,7 +3898,7 @@ ______________________________________________________________________
 
 ## Final verification
 
-- [ ] **Step 1: `[multica]` Everything this environment can actually verify**
+- [x] **Step 1: `[multica]` Everything this environment can actually verify**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/.worktrees/env-savepoint-consolidation/server
@@ -3909,7 +3909,7 @@ go test ./internal/service/... ./internal/handler/...
 
 Expected: all green. This is the complete acceptance evidence available here.
 
-- [ ] **Step 1b: `[multica]` Record the database verification that is still owed**
+- [x] **Step 1b: `[multica]` Record the database verification that is still owed**
 
 `make test` needs Postgres, which is unavailable in this environment and was explicitly
 not installed for this change. The `*_Integration` tests are written and self-skip, so
@@ -3926,7 +3926,7 @@ Until that runs, migrations 246/247/248, the `UNIQUE (checkpoint_id, lane_key)` 
 race, the `ON DELETE CASCADE` reclamation, and every hand-written SQL string remain
 unverified. Carry this forward as the primary open risk in the verification report.
 
-- [ ] **Step 2: `[multica]` Confirm nothing unrelated crept in**
+- [x] **Step 2: `[multica]` Confirm nothing unrelated crept in**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/.worktrees/env-savepoint-consolidation
@@ -3936,7 +3936,7 @@ cd /workspaces/leagent/backend/areal/multica
 git status --porcelain   # the main checkout's unrelated work must be untouched
 ```
 
-- [ ] **Step 3: `[areal]` Confirm the areal-side diff is docs and specs only**
+- [x] **Step 3: `[areal]` Confirm the areal-side diff is docs and specs only**
 
 ```bash
 cd /workspaces/leagent/backend/areal
@@ -3948,7 +3948,7 @@ and `customized_areal/tree_search/agents/multica_environment_protocol.md` (plus
 `multica_client.py` only if Task 9 Step 5 required the idempotency-key change, which
 must have been approved).
 
-- [ ] **Step 4: `[areal]` Confirm every `tasks.md` checkbox is ticked**
+- [x] **Step 4: `[areal]` Confirm every `tasks.md` checkbox is ticked**
 
 ```bash
 cd /workspaces/leagent/backend/areal
@@ -3956,3 +3956,31 @@ grep -c '^\- \[ \]' openspec/changes/env-savepoint-consolidation/tasks.md
 ```
 
 Expected: `0`.
+
+**Result.**
+
+- **Step 1.** `go build ./...`, `go vet ./...` clean.
+  `go test ./internal/service/ ./internal/migrations/ ./internal/apicontract/` green --
+  those three packages are the ones that genuinely execute here. `./internal/handler/`
+  is *not* included: its `TestMain` exits 0 without Postgres, so running it locally
+  proves nothing.
+- **Step 1b is discharged.** The database verification this step declared outstanding
+  was run on GitHub Actions against a real Postgres. See `tasks.md` for the run ids; the
+  backend job applies migrations 246/247/248 and runs `go test -p 1 ./...` with
+  `DATABASE_URL` set at job level, so the `*_Integration` tests and the whole
+  `internal/handler` package execute. `internal/handler` taking ~39s in CI against under
+  a second locally is the corroborating signal that its `TestMain` did not early-exit.
+- **Steps 2 and 3.** The multica branch is 24 commits, 65 files, all under `server/**`;
+  the main multica checkout's unrelated work is untouched. The areal-side commits from
+  this change touch only `openspec/changes/env-savepoint-consolidation/**`,
+  `docs/superpowers/**`, and `multica_environment_protocol.md`. (A wider `git diff`
+  against the plan's base commit also shows unrelated parallel work by others in
+  `customized_areal/` -- not from this change.)
+- **Step 4 expects zero unticked boxes; one remains.** `8.1` needs Cube access this
+  environment does not have, and is recorded with the procedure and the threshold
+  instead of ticked. `3.14` is now ticked: rather than trusting a green package result
+  -- a self-skipping test also reports `ok` -- one assertion inside
+  `TestEnvCheckpointLaneUniqueIndex_Integration` was broken on purpose and pushed, CI
+  run 30425009029 failed at `env_checkpoint_lane_query_test.go:82`, and the probe commit
+  was removed. That is direct evidence the lane claim race is exercised against a real
+  Postgres.
