@@ -222,6 +222,31 @@ Rollback: steps 1, 4, and 5 revert independently. Step 3 reverts by restoring th
 branch provisioning path, which step 2 leaves intact. Step 2's columns are additive and
 default to current behavior, so reverting code without dropping columns is safe.
 
+Corrected during build: steps 3 and 4 ship together. Step 3 removed the last producer of
+`clone`, and step 4 removes the type, so there is no intermediate state worth releasing
+— and step 3 cannot fall back to `clone` anyway, since branch dispatch refuses when the
+savepoint seam is absent rather than cloning.
+
+### Deployment ordering for the `clone` retirement
+
+Retiring the `clone` job type is the only step in this change that breaks a
+cross-process contract, so the server, the migration and `sandboxd` roll out in this
+order:
+
+1. Deploy the server build that no longer enqueues `clone` jobs. Branch provisioning now
+   creates sandboxes from a checkpoint-owned savepoint, so nothing produces the type.
+1. Drain any in-flight `clone` jobs:
+   `SELECT status, count(*) FROM sandbox_job WHERE type='clone' GROUP BY 1;` — wait for
+   no `queued`/`dispatched`/`running` rows.
+1. Apply migration 246, which drops `clone` from `sandbox_job_type_check`.
+1. Roll out the `sandboxd` build whose capability list no longer advertises `clone` and
+   whose job dispatch no longer handles it.
+
+Rolling out `sandboxd` first leaves a window where a server still enqueues a job type no
+node can execute. Applying migration 246 before the drain rejects the insert for an
+in-flight retry. The down migration restores the `clone` value, so a rollback needs the
+old `sandboxd` build back as well — schema rollback alone does not restore the handler.
+
 ## Open Questions
 
 - Snapshot duration for a realistic SWE sandbox (large repository, larger memory). Does

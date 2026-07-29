@@ -300,35 +300,66 @@ of the direct path removes the only production caller of `CloneSandboxInstance`,
 phase 5 retires, so 4.x and 5.x are one change released server → migration 246 →
 sandboxd.
 
-- [ ] 4.1 Serve branch-mode env dispatch from a `snapshot` checkpoint at the requested
+- [x] 4.1 Serve branch-mode env dispatch from a `snapshot` checkpoint at the requested
   env: claim a lane, pre-seed it with the env, project and channel the reset phase
   created, and build the sandbox from the checkpoint's savepoint instead of a live
   filesystem clone. Creating or reusing the checkpoint is keyed on `env_id`, so
-  re-expansion is a new lane key on the same checkpoint (D2)
-- [ ] 4.2 Keep the dispatch request and response contract, including rollout handles,
+  re-expansion is a new lane key on the same checkpoint (D2). Capture runs once for the
+  whole group **before** the reset fan-out, not per rollout: rollouts reset and dispatch
+  concurrently (`sem`/`wg` in `Dispatch`), so per-rollout capture would snapshot the
+  same source once per rollout and race on creating the owning checkpoint, and capture
+  is the only step that fails for the whole group at once, so failing early avoids
+  rolling back N envs/projects/channels. The seam is required, not optional — without it
+  branch dispatch refuses rather than falling back to the clone that 5.x removes
+- [x] 4.2 Keep the dispatch request and response contract, including rollout handles,
   byte-compatible with the pre-existing branch contract — the pin now exists
   (`internal/apicontract`, byte-level plus the four fields the AReaL client hard-depends
   on: `project_id`, `channel_id`, `rollouts[0].env_id`, and the absence of
   `rollouts[].error` on success; mutation-checked). Left unticked because the pin only
   proves compatibility once 4.1 has actually rerouted the path. Note the pin
   deliberately does **not** live in `internal/handler`, whose `TestMain` exits 0 without
-  Postgres and would leave it silently unexecuted here
-- [ ] 4.3 Remove the now-dead direct branch provisioning path
-- [ ] 4.4 Tests: branch dispatch contract unchanged; source env keeps running with its
-  task undisturbed; each lane has its own runtime and subtree
-- [ ] 4.5 Confirm no AReaL client change is required, and that `create_checkpoint` still
-  returns a terminal save status synchronously
+  Postgres and would leave it silently unexecuted here. Ticked now that 4.1 reroutes the
+  path: the pin still passes byte-for-byte
+- [x] 4.3 Remove the now-dead direct branch provisioning path (`CloneSandboxInstance`,
+  its input type and tests; `provisionEnvDispatchAgentBranch` now calls
+  `lifecycle.Create` with the savepoint template)
+- [x] 4.4 Tests: branch dispatch contract unchanged; source env keeps running with its
+  task undisturbed; each lane has its own runtime and subtree. In
+  `env_dispatch_branch_savepoint_test.go` and `branch_savepoint_provider_test.go`,
+  mutation-checked: dropping the template pass-through, the fail-closed guard, the lane
+  pre-seed, the failure settle, moving capture after the fan-out, skipping the channel's
+  peers, reusing an unfinished capture, and treating a missing savepoint as an empty
+  template all fail a test
+- [x] 4.5 Confirm no AReaL client change is required, and that `create_checkpoint` still
+  returns a terminal save status synchronously. Confirmed: the request/response pin in
+  `internal/apicontract` is unchanged, and `EnvCheckpointService.Create` still blocks to
+  a terminal `save_status`, which is what the branch capture path depends on to know the
+  savepoint is usable. Server-side `idempotency_key` enforcement stays deferred (task
+  3.7) — the tripwire test remains
 
 ## 5. Retire the `clone` job type
 
-- [ ] 5.1 Replace the sandboxd `clone` handler with `create_template` plus one `create`
-  per lane
-- [ ] 5.2 Remove `CloneSandboxInstance` and its remaining callers
-- [ ] 5.3 Migration: drop `clone` from `sandbox_job_type_check`, with a down migration
-  restoring it
-- [ ] 5.4 Tests: lane creation from a savepoint template; no `clone` job is enqueued by
-  any path
-- [ ] 5.5 Note the release order in the deployment plan. Corrected by design D7/D12: the
+- [x] 5.1 Replace the sandboxd `clone` handler with `create_template` plus one `create`
+  per lane. Per D7/D12 `create_template` already existed end to end, so this removed
+  `cloneCubeSandbox`, its dispatch case, the `clone` capability, and the
+  `source_external_id`/`create_payload` payload fields only clone used
+- [x] 5.2 Remove `CloneSandboxInstance` and its remaining callers. The second caller the
+  plan had missed: copying a branch channel copies every roster member's binding with
+  its source sandbox (`env_dispatch_channel_copy.go`), so a peer mentioned later in the
+  branch also cloned — on the mention path, under a 5s `waitCtx`, which cannot fit a
+  snapshot. Resolved by capturing every ready sandbox in the source channel at dispatch
+  time and having the mention path look one up. Also removed a stale
+  `case "create", "clone"` job-completion branch in `internal/handler/sandbox.go`
+- [x] 5.3 Migration: drop `clone` from `sandbox_job_type_check`, with a down migration
+  restoring it (`246_sandbox_job_retire_clone`). The up migration keeps
+  `create_template`/`delete_template`/`exec`/`message`, which is the mistake migration
+  187 existed to repair, and the test asserts that
+- [x] 5.4 Tests: lane creation from a savepoint template; no `clone` job is enqueued by
+  any path. `TestNoPathEnqueuesOrHandlesACloneJob` walks the server tree for the two
+  shapes that carry a job type (the enqueue argument and sandboxd's dispatch switch)
+  rather than the bare word, which also appears in `git clone`; it found the stale
+  handler branch above, and a mutation restoring the sandboxd case fails it
+- [x] 5.5 Note the release order in the deployment plan. Corrected by design D7/D12: the
   replacement (`create_template`) already exists end to end, so this phase only removes
   `clone`, and the order is server (stops enqueueing) → migration 246 (drops the CHECK
   value) → sandboxd (drops the handler and capability). Lockstep is not required;
