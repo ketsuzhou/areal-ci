@@ -7,13 +7,13 @@ small protocols only; it does not import a sandbox-vendor SDK.
 
 ## Actors
 
-| Actor                                 | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AReaL trainer / tree-search agents    | Starts rollout groups, consumes RL `session_id`s produced by Multica, records trajectories, selects branch points, asks Multica to materialize branches via env-dispatch, verifies rewards, and cleans up.                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Multica API                           | Owns the unified env-dispatch primitive: base env boot, scratch/branch dispatch, issue/chat/task orchestration, agent-run startup, and the mapping from rollout lanes to projects/issues/sandboxes. On a source agent's first address it provisions a sandbox (shared `EnvSandboxLifecycleService`), discovers the daemon-registered runtime, clones a **derived global agent** bound to it, and calls `db_bridge.start_session(session_ref=<binding-ID>)` to register the RL session and obtain a scoped `api_key`. Server-side owns sandbox snapshot/fork/issue-subtree-copy as part of `mode="branch"`. |
-| db_bridge                             | AReaL-hosted control-plane + model-serving bridge. Exposes `start_session` (returns `session_id` + scoped `api_key`), `set_reward`, `end_session`, `export_trajectories`, and the AReaL-served model endpoint. Multica and the agent runtime call it over HTTP; AReaL never imports its internals.                                                                                                                                                                                                                                                                                                         |
-| Remote sandbox server / cloud runtime | Owns live sandbox lifecycle behind Multica's env-dispatch endpoints. Multica calls this service; AReaL talks to it only through `ForkableEnvironment` providers when an explicit injection path is wired.                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Agent runtime                         | Runs inside the allocated sandbox, calls the AReaL-served model via db_bridge using the `api_key` Multica handed it (provider `areal`), emits messages/interactions, and carries RL session metadata used by AReaL.                                                                                                                                                                                                                                                                                                                                                                                        |
+| Actor                                 | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AReaL trainer / tree-search agents    | Starts rollout groups, consumes RL `session_id`s produced by Multica, records trajectories, selects branch points, asks Multica to materialize branches via env-dispatch, verifies rewards, and cleans up.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Multica API                           | Owns the unified env-dispatch primitive: base env boot, scratch/branch dispatch, issue/chat/task orchestration, agent-run startup, and the mapping from rollout lanes to projects/issues/sandboxes. On a source agent's first address it provisions a sandbox (shared `EnvSandboxLifecycleService`), discovers the daemon-registered runtime, clones a **derived global agent** bound to it, and calls `db_bridge.start_session(session_ref=<binding-ID>)` to register the RL session and obtain a scoped `api_key`. Server-side owns sandbox snapshot/fork/issue-subtree-copy as part of `mode="branch"`; the fork is now an immutable savepoint shared by N lanes rather than a per-dispatch disposable snapshot. |
+| db_bridge                             | AReaL-hosted control-plane + model-serving bridge. Exposes `start_session` (returns `session_id` + scoped `api_key`), `set_reward`, `end_session`, `export_trajectories`, and the AReaL-served model endpoint. Multica and the agent runtime call it over HTTP; AReaL never imports its internals.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Remote sandbox server / cloud runtime | Owns live sandbox lifecycle behind Multica's env-dispatch endpoints. Multica calls this service; AReaL talks to it only through `ForkableEnvironment` providers when an explicit injection path is wired.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Agent runtime                         | Runs inside the allocated sandbox, calls the AReaL-served model via db_bridge using the `api_key` Multica handed it (provider `areal`), emits messages/interactions, and carries RL session metadata used by AReaL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Design Boundaries
 
@@ -41,9 +41,12 @@ small protocols only; it does not import a sandbox-vendor SDK.
   `_BranchDriver` Protocol parameter is named `sandbox_id` only for structural
   compatibility with the runner — the value passed in is the source `env_id`.
 - Fresh rollout state is created by `env_dispatch(mode="scratch", ...)`; branch state is
-  created by `env_dispatch(mode="branch", env_id=<source>)`; resume-from-checkpoint is
-  created by `env_dispatch(mode="resume", env_id=<checkpoint_id>)` (the sandbox
-  instances are resumed in place, not forked; see "Env Checkpoint Semantics").
+  created by `env_dispatch(mode="branch", env_id=<source>)`, which the server serves by
+  creating or reusing a `snapshot` checkpoint at the source env and resuming it into
+  lanes; resume-from-checkpoint is created by
+  `env_dispatch(mode="resume", env_id=<checkpoint_id>)`, and for a `pause_in_place`
+  checkpoint that is still an in-place resume of the same instances (see "Env Checkpoint
+  Semantics").
 - The verifier writes rewards before trajectory harvest so AReaL never trains on an
   unrewarded terminal trajectory.
 - Cleanup flows through Multica env-dispatch; `404` means the resource is already gone
@@ -499,19 +502,20 @@ sequenceDiagram
 
 `create_env_dispatch` accepts these key fields:
 
-| Field               | Meaning                                                                                                                                                                                                                                                                                              |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`              | `scratch` (fresh env, booted by the dispatch itself), `branch` (fork a source env; `env_id` = source env), or `resume` (resume from a checkpoint; `env_id` = checkpoint id). There is no separate env-boot or checkpoint-resume endpoint.                                                            |
-| `env_id`            | Source env for `branch`; checkpoint id for `resume`; optional for `scratch` (only valid to omit when `domain=self_play` and the workspace has a configured default base env).                                                                                                                        |
-| `dispatch_type`     | `issue` for SWE-Lego or `message` for self-play.                                                                                                                                                                                                                                                     |
-| `agent_id`          | Agent/template to run in each lane. For a single-agent dispatch the client resolves `MULTICA_AGENT_ID` (from `customized_areal/.env`) when omitted; squad dispatches (`squad_id` set) intentionally omit `agent_id` — the squad supplies its members, so the env default does not apply (spec §4.1). |
-| `squad_id`          | Optional squad identifier for team rollouts.                                                                                                                                                                                                                                                         |
-| `group_size`        | Number of rollout lanes to create. Defaults to `1`; branch dispatches use `1`.                                                                                                                                                                                                                       |
-| `domain`            | Optional domain label such as `swe_lego` or `self_play`.                                                                                                                                                                                                                                             |
-| `train_agent_id`    | The single trainable target (spec §4.1): the named agent is trainable, all other agents in the dispatch are not. Empty means no training session. For a single-agent dispatch it must equal `agent_id`; for a squad dispatch it must be a squad member. The server enforces these in `validate()`.   |
-| `per_agent_env`     | Optional per-agent runtime-policy override (e.g. an external `{provider, base_url, api_key, model}` runtime for non-training debug dispatch). Mutually exclusive with `train_agent_id`.                                                                                                              |
-| `training_mode`     | Boolean training-mode flag (default `false`); set to enable training session semantics.                                                                                                                                                                                                              |
-| `issue` / `message` | Domain payload. Exactly one is usually populated by the runner.                                                                                                                                                                                                                                      |
+| Field               | Meaning                                                                                                                                                                                                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`              | `scratch` (fresh env, booted by the dispatch itself), `branch` (fork a source env; `env_id` = source env), or `resume` (resume from a checkpoint; `env_id` = checkpoint id). There is no separate env-boot or checkpoint-resume endpoint.                                                                                    |
+| `env_id`            | Source env for `branch`; checkpoint id for `resume`; optional for `scratch` (only valid to omit when `domain=self_play` and the workspace has a configured default base env).                                                                                                                                                |
+| `dispatch_type`     | `issue` for SWE-Lego or `message` for self-play.                                                                                                                                                                                                                                                                             |
+| `agent_id`          | Agent/template to run in each lane. For a single-agent dispatch the client resolves `MULTICA_AGENT_ID` (from `customized_areal/.env`) when omitted; squad dispatches (`squad_id` set) intentionally omit `agent_id` — the squad supplies its members, so the env default does not apply (spec §4.1).                         |
+| `squad_id`          | Optional squad identifier for team rollouts.                                                                                                                                                                                                                                                                                 |
+| `group_size`        | Number of rollout lanes to create. Defaults to `1`. For a branch dispatch this is the requested lane count: the server captures one savepoint of the source and materializes `group_size` lanes from it.                                                                                                                     |
+| `idempotency_key`   | Stable per-dispatch id. Lane keys are derived from it, so retrying a branch dispatch with the same key returns the existing lanes instead of expanding the frontier again. Not yet enforced server-side: a branch dispatch without one currently derives lane keys from the rollout env, which is not stable across retries. |
+| `domain`            | Optional domain label such as `swe_lego` or `self_play`.                                                                                                                                                                                                                                                                     |
+| `train_agent_id`    | The single trainable target (spec §4.1): the named agent is trainable, all other agents in the dispatch are not. Empty means no training session. For a single-agent dispatch it must equal `agent_id`; for a squad dispatch it must be a squad member. The server enforces these in `validate()`.                           |
+| `per_agent_env`     | Optional per-agent runtime-policy override (e.g. an external `{provider, base_url, api_key, model}` runtime for non-training debug dispatch). Mutually exclusive with `train_agent_id`.                                                                                                                                      |
+| `training_mode`     | Boolean training-mode flag (default `false`); set to enable training session semantics.                                                                                                                                                                                                                                      |
+| `issue` / `message` | Domain payload. Exactly one is usually populated by the runner.                                                                                                                                                                                                                                                              |
 
 The response is normalized into `SweLegoSetup(rollouts=[...])` — a list with one entry
 per lane (so a `group_size=N` scratch dispatch returns N rollouts, and a branch dispatch
@@ -817,11 +821,29 @@ coordinator needs it.
 
 ## Env Checkpoint Semantics
 
-Env checkpoint creation is pause-in-place. Multica synchronously waits for sandboxd
-stop/Cube pause up to the configured timeout and stores the project subtree inline as
-JSONB. A completed checkpoint can be resumed through resume-from-checkpoint, which
-resumes the same sandbox instances. The API does not provide immutable fork, branch,
-snapshot, or copy-on-write semantics.
+Env checkpoint creation has two save modes.
+
+`pause_in_place` (the default, and what every pre-existing checkpoint resolves to)
+suspends the source sandbox instances and records no savepoint. Multica synchronously
+waits for sandboxd stop / Cube pause up to the configured timeout and stores the project
+subtree inline as JSONB. Resume returns the same sandbox instances and re-activates the
+same task row, continuing the interrupted CLI session rather than starting cold.
+`pause_in_place` rejects a lane count greater than one.
+
+`snapshot` records an immutable savepoint per source instance (a `sandbox_snapshot` row
+backed by a Cube snapshot template) and leaves every source instance **running**, with
+its in-flight task undisturbed. Resume accepts a lane count and materializes that many
+sandbox instances from the checkpoint's savepoint — **one snapshot per source instance,
+not one per lane** — each with its own copied project subtree, its own agent runtime,
+and a fresh CLI session. Every resume carries a lane key: repeating a key returns the
+existing lane, while a new key expands the same frontier again without creating a second
+checkpoint.
+
+A savepoint is owned by exactly one checkpoint and is released when that checkpoint is
+deleted, so it outlives its first use. Cube snapshots are memory-level
+checkpoint/restore, not filesystem copies: a snapshot completes in ~1.2s, leaves the
+source running, and a sandbox created from the resulting template comes up with the
+source's processes still live.
 
 ### Endpoints
 
@@ -862,6 +884,24 @@ propagate as `MulticaCheckpointError` so the caller can decide whether to retry 
 continue. `maybe_create_entropy_checkpoint` is the rollout-loop entry point; it creates
 checkpoints with `checkpoint_kind="entropy_gated"` and forwards an optional
 `save_timeout_ms`.
+
+### Out of scope: forking inside a turn
+
+A sandbox restored from a Cube snapshot carries live processes, including a mid-turn
+agent — the prerequisite experiment observed the same PID and the same
+append-in-progress log file continuing on the clone. Intra-turn forking is therefore
+technically possible but deliberately out of scope, for two reasons:
+
+- **Runtime identity.** N clones would share one `daemon.id` frozen into
+  `~/.multica/daemon.id`, so each lane could re-register as the source sandbox's runtime
+  and steal its row.
+- **Duplicated in-flight requests.** Each clone would resume the source's in-flight
+  model request, producing N duplicated calls for one logical turn.
+
+Both are exactly what the `pkill` of the snapshot-restored daemon in
+`buildStartRuntimeInCubeCode` avoids, which makes that `pkill` load-bearing correctness
+rather than hygiene. Revisit only if intra-turn branch points prove valuable for tree
+search.
 
 ## Channel-first message dispatch & branch collaboration
 

@@ -403,8 +403,13 @@ sandboxd.
 - [ ] 8.2 Reconcile this change's capabilities with the unarchived sibling delta specs
   (`env-checkpoint-resume`, `env-checkpoint-resume-trigger`,
   `env-dispatch-sandbox-lifecycle`) before archive
-- [ ] 8.3 Update the multica environment protocol document so branch is described as a
+- [x] 8.3 Update the multica environment protocol document so branch is described as a
   fan-out of checkpoint resume, and correct its statement that the API provides no
-  snapshot or fork semantics
-- [ ] 8.4 Record the intra-turn fork finding (a restored clone carries live processes)
-  as explicitly out of scope, with the runtime-identity and duplicated-request reasons
+  snapshot or fork semantics. The `idempotency_key` row records the client contract
+  honestly: lane keys derive from it, but the server does not yet reject a branch
+  dispatch without one (task 3.7), so the row says so rather than promising enforcement
+  that is not there
+- [x] 8.4 Record the intra-turn fork finding (a restored clone carries live processes)
+  as explicitly out of scope, with the runtime-identity and duplicated-request reasons,
+  and note that the `pkill` in `buildStartRuntimeInCubeCode` is therefore load-bearing
+  correctness rather than hygiene
