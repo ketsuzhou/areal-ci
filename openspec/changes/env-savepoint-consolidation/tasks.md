@@ -482,6 +482,24 @@ sandboxd.
 - [ ] 8.1 Measure snapshot duration for a realistic SWE sandbox (large repository,
   larger memory) and record the result against the ~1.2s figure from the prerequisite
   experiment
+
+  **Left unticked deliberately: needs a human operator with Cube access.** This
+  environment has no Cube base URL or credential and cannot reach the Cube API, so there
+  is no honest way to produce the number. `.comet/snapshot-latency.md` carries the
+  procedure, a table to fill in, and what to do if it comes back slow.
+
+  What the investigation *did* settle is the threshold, which the plan did not state.
+  The binding limit is not the server's 15-minute `branchSavepointSaveTimeout`; it is the
+  AReaL client's 120s `httpx` timeout (`MulticaEnvDispatchClient` defaults
+  `timeout=120.0`, and the server sets no `WriteTimeout`), combined with capture being
+  serial -- `EnvCheckpointService.Create` loops over `SandboxRefs` one at a time, and
+  eager-all captures the whole roster. So the passing condition is
+  `per_snapshot_duration × roster_size < 120s`, and exceeding it produces a dispatch that
+  looks failed to AReaL while the server still creates the checkpoint and lanes.
+
+  Parallelizing the capture loop is the first mitigation if the measurement is slow, and
+  is deliberately not implemented ahead of it: at the measured 1.2s it buys nothing and
+  adds concurrent snapshot load plus cross-lane error aggregation.
 - [ ] 8.2 Reconcile this change's capabilities with the unarchived sibling delta specs
   (`env-checkpoint-resume`, `env-checkpoint-resume-trigger`,
   `env-dispatch-sandbox-lifecycle`) before archive

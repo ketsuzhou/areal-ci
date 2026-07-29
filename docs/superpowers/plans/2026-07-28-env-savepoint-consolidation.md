@@ -3707,7 +3707,7 @@ time curl -sS -X POST "$CUBE_URL/sandboxes/$SBX/snapshots" -H 'content-type: app
 curl -sS "$CUBE_URL/sandboxes/$SBX" | jq -r .state    # expect: running
 ```
 
-- [ ] **Step 2: Record the result against the ~1.2s baseline**
+- [x] **Step 2: Record the result against the ~1.2s baseline**
 
 Write `snapshot-latency.md` with: sandbox memory size, repository size, working-set
 size, wall-clock snapshot duration, the source's post-snapshot `state`, and whether the
@@ -3716,7 +3716,7 @@ the synchronous-save decision (design D8). If the sandbox cannot be reached from
 environment, say so explicitly and mark 8.1 as requiring a human operator with Cube
 access — do not fabricate a number.
 
-- [ ] **Step 3: Commit `[areal]`**
+- [x] **Step 3: Commit `[areal]`**
 
 ```bash
 cd /workspaces/leagent/backend/areal
@@ -3725,6 +3725,21 @@ git commit -m "docs(openspec): record SWE-scale snapshot latency measurement"
 ```
 
 ______________________________________________________________________
+
+**Outcome:** Step 1 could not run -- no Cube base URL or credential exists in this
+environment and the Cube API is unreachable, so 8.1 stays unticked and needs an operator.
+`.comet/snapshot-latency.md` records the procedure and a table to fill in.
+
+The useful result is a threshold the plan did not name. The binding limit is **not** the
+server's 15-minute `branchSavepointSaveTimeout`; it is the AReaL client's 120s `httpx`
+timeout (`MulticaEnvDispatchClient` defaults `timeout=120.0`; the server sets no
+`WriteTimeout`), multiplied by capture being serial -- `EnvCheckpointService.Create`
+iterates `SandboxRefs` one at a time and eager-all hands it the whole roster. The passing
+condition is therefore `per_snapshot_duration × roster_size < 120s`, and crossing it
+produces a dispatch that looks failed to AReaL while the server still creates the
+checkpoint and its lanes. Parallelizing the loop is the first mitigation, deliberately
+left unimplemented while the evidence says 1.2s.
+
 
 ## Task 19: `[areal]` Reconcile with the unarchived sibling delta specs
 
