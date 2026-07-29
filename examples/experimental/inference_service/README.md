@@ -1,7 +1,7 @@
 # AReaL Inference Service Examples
 
 This directory contains two examples that use the AReaL Inference Service
-(`GatewayInferenceController`) — an experimental rollout backend that exposes an
+(`RolloutControllerV2`) — an experimental rollout backend that exposes an
 OpenAI-compatible proxy gateway so any external agent runtime can submit chat requests
 and receive RL training data.
 
@@ -20,7 +20,7 @@ debugging agent behaviour.
 #### AReaL
 
 Follow the
-[AReaL installation guide](https://inclusionai.github.io/AReaL/en/tutorial/installation.html).
+[AReaL installation guide](https://areal-project.github.io/AReaL/en/tutorial/installation.html).
 
 #### Tau2
 
@@ -96,7 +96,7 @@ following procedure:
 ### Prerequisites
 
 - **AReaL installed** — follow the
-  [installation guide](https://inclusionai.github.io/AReaL/en/tutorial/installation.html).
+  [installation guide](https://areal-project.github.io/AReaL/en/tutorial/installation.html).
 - **zeroclaw installed** — any OpenAI-compatible CLI that supports
   `--session-state-file` can be substituted; the demo uses zeroclaw for convenience.
 - **A zeroclaw config at `~/.zeroclaw/config.toml`** with at least a `default_provider`
@@ -113,13 +113,16 @@ python3 examples/experimental/inference_service/human_in_the_loop_demo.py
 
 Key CLI arguments:
 
-| Argument            | Default               | Description                                                           |
-| ------------------- | --------------------- | --------------------------------------------------------------------- |
-| `--actor-path`      | `Qwen/Qwen3-0.6B`     | Path to the HuggingFace model weights                                 |
-| `--admin-key`       | `sk-test123456`       | Admin API key (must match `rollout.openai.admin_api_key` in the YAML) |
-| `--request-timeout` | `3600`                | Per-request timeout in seconds                                        |
-| `--gateway-wait`    | `600`                 | Seconds to wait for the gateway to become ready                       |
-| `--question`        | *strawberry question* | Question posed in every HITL round                                    |
+| Argument             | Default               | Description                                                          |
+| -------------------- | --------------------- | -------------------------------------------------------------------- |
+| `--actor-path`       | `Qwen/Qwen3-0.6B`     | Path to the HuggingFace model weights                                |
+| `--admin-key`        | `sk-test123456`       | Admin API key (must match `rollout.agent.admin_api_key` in the YAML) |
+| `--request-timeout`  | `3600`                | Per-request timeout in seconds                                       |
+| `--gateway-wait`     | `600`                 | Seconds to wait for the gateway to become ready                      |
+| `--question`         | *strawberry question* | Question posed in every HITL round                                   |
+| `--external-url`     | `None`                | External API URL (enables external model mode)                       |
+| `--external-api-key` | `None`                | API key for the external provider                                    |
+| `--external-model`   | `None`                | Model name sent to the external API                                  |
 
 You can override the model path without editing the script:
 
@@ -127,6 +130,22 @@ You can override the model path without editing the script:
 python3 examples/experimental/inference_service/human_in_the_loop_demo.py \
     --actor-path /path/to/your/model
 ```
+
+### External Model Mode (optional)
+
+Example 2 can also run HITL with an external OpenAI-compatible provider instead of the
+local rollout model. Pass the external flags through `human_in_the_loop_demo.py`; they
+are forwarded to `online_rollout.py`:
+
+```bash
+python3 examples/experimental/inference_service/human_in_the_loop_demo.py \
+    --external-url https://api.openai.com/v1 \
+    --external-api-key sk-... \
+    --external-model gpt-4o
+```
+
+When `--external-url` is set, the controller enables external model mode and routes chat
+traffic through the unified `/chat/completions` + `/export_trajectories` external flow.
 
 ### Running a Manual HITL Session
 

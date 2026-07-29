@@ -29,6 +29,7 @@ gconfig:
   temperature: 1.0
 
 rollout:
+  _version: v2
   backend: "sglang:d2"
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
@@ -40,7 +41,8 @@ rollout:
   fileroot: ${cluster.fileroot}
   tokenizer_path: ${tokenizer_path}
   dump_to_file: false
-  openai:
+  admin_api_key: rollout-admin
+  agent:
     mode: inline
     tool_call_parser: qwen25
     reasoning_parser: qwen3
@@ -54,7 +56,7 @@ rollout:
       gpu: 1
       cpu: 2
       mem: 16
-      cmd: python3 -m areal.experimental.inference_service.guard
+      cmd: python3 -m areal.v2.inference_service.guard
       env_vars:
         AREAL_PROXY_WARN_ONCE: "1"
 

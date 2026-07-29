@@ -1089,8 +1089,15 @@ class RolloutControllerV2:
         task_id: int | None = None,
         is_eval: bool = False,
         group_size: int = 1,
+        reward_normalization: bool = False,
+        drop_incomplete_group: bool = False,
     ) -> int:
         self._ensure_initialized()
+        if reward_normalization or drop_incomplete_group:
+            raise ValueError(
+                "RolloutControllerV2 does not support reward_normalization or "
+                "drop_incomplete_group yet."
+            )
         resolved_workflow = self._resolve_workflow(
             workflow,
             workflow_kwargs,
@@ -1136,6 +1143,8 @@ class RolloutControllerV2:
         should_accept_fn: Any = None,
         group_size: int = 1,
         batch_size: int | None = None,
+        reward_normalization: bool = False,
+        drop_incomplete_group: bool = False,
     ) -> list[dict[str, Any]]:
         """Submit a batch of data items and wait for all results.
 
@@ -1168,6 +1177,11 @@ class RolloutControllerV2:
             A list of trajectory dicts (one per completed rollout).
         """
         self._ensure_initialized()
+        if reward_normalization or drop_incomplete_group:
+            raise ValueError(
+                "RolloutControllerV2 does not support reward_normalization or "
+                "drop_incomplete_group yet."
+            )
         if not self._gateway_addr:
             raise RuntimeError("RolloutControllerV2.initialize() must be called first")
         if data is None:
@@ -1205,6 +1219,8 @@ class RolloutControllerV2:
         group_size: int = 1,
         dynamic_bs: bool = False,
         batch_size: int | None = None,
+        reward_normalization: bool = False,
+        drop_incomplete_group: bool = False,
     ) -> list[dict[str, Any]]:
         """Prepare a full training batch by consuming data from a dataloader.
 
@@ -1238,6 +1254,11 @@ class RolloutControllerV2:
             A list of trajectory dicts (matching ``RolloutController`` API).
         """
         self._ensure_initialized()
+        if reward_normalization or drop_incomplete_group:
+            raise ValueError(
+                "RolloutControllerV2 does not support reward_normalization or "
+                "drop_incomplete_group yet."
+            )
         if not self._gateway_addr:
             raise RuntimeError("RolloutControllerV2.initialize() must be called first")
         if dataloader is None:
