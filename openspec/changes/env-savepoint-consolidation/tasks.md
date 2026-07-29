@@ -433,14 +433,49 @@ sandboxd.
 
 ## 7. Session continuation policy
 
-- [ ] 7.1 Resolve the prior session for a `pause_in_place` resume from the resumed task
+- [x] 7.1 Resolve the prior session for a `pause_in_place` resume from the resumed task
   row's own recorded session, so an interrupted session continues instead of starting
   cold
-- [ ] 7.2 Keep forked lanes on fresh sessions, and keep the snapshot-restored daemon
+
+  Root cause confirmed against the schema: `ResetInFlightTaskForResume` moves the row
+  `draining` -> `pending` and clears only `started_at`/`dispatched_at`/`claimed_at`, so
+  `session_id` survives on the same row; `GetLastTaskSession` and
+  `GetLastChatTaskSession` match only terminal rows (`acked`, or `suppressed` with
+  `followup_interrupt`), so neither can see it.
+
+  `service.OwnPinnedSession` reads it, consulted ahead of the cross-task fallbacks in
+  both `populateAgentInboxWorkContext` and `populateAgentInboxChatContext`.
+
+  Deviation: the planned `GetResumedTaskOwnSession` query was not needed. The claim path
+  already holds the `agent_inbox_event` row, so this is a pure function over it -- no new
+  query, no sqlc transplant, and the policy lives in `internal/service` where tests
+  actually run. The chat path had to take the claiming runtime as a parameter, since it
+  only had the row's own runtime and comparing that against itself would have made the
+  runtime guard a no-op.
+
+  Three guards, each mutation-checked: terminal rows are left to the filtered lookups
+  (which exclude poisoned outcomes such as `iteration_limit` and `api_invalid_request` --
+  a filter this must not bypass), the claiming runtime must match, and
+  `force_fresh_session` still wins.
+
+- [x] 7.2 Keep forked lanes on fresh sessions, and keep the snapshot-restored daemon
   stop and runtime identity reset that makes lane identity correct
-- [ ] 7.3 Tests: a task with a mid-flight recorded session continues that session after
+
+  Lanes stay cold by construction: a lane's task row is new with no `session_id` and its
+  own runtime, so neither the own-row read nor the cross-task lookups can hand it the
+  source's session. `buildStartRuntimeInCubeCode`'s `pkill` plus `daemon.id` rewrite is
+  unchanged; its comment now records that fan-out sharpens it, since several lanes
+  restore the same frozen `daemon.id` from one savepoint and would otherwise register as
+  one runtime.
+
+- [x] 7.3 Tests: a task with a mid-flight recorded session continues that session after
   pause-in-place resume; multiple lanes each start a fresh session and no two continue
   the same recorded session
+
+  `internal/service/session_continuation_test.go`, which runs locally. Dropping any of
+  the three guards fails a test. The "no two lanes share a session" property is covered
+  as the cross-runtime refusal plus the empty-session lane case rather than by spinning
+  up N rows, since the runtime guard is what makes it true.
 
 ## 8. Verification and documentation
 

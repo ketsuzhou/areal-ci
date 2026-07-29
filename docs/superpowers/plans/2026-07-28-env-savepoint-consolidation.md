@@ -3534,7 +3534,7 @@ ______________________________________________________________________
   `Queries.GetResumedTaskOwnSession(ctx, taskID pgtype.UUID) (GetResumedTaskOwnSessionRow, error)`
   returning `session_id`, `work_dir`, `runtime_id`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `multica/server/internal/handler/agent_inbox_resumed_session_test.go` following
 the `t.Skip("database not available")` pattern used throughout
@@ -3570,7 +3570,7 @@ Fill both bodies using the fixture helpers already present in
 `internal/handler/handler_test.go` (it builds real rows against `DATABASE_URL`); do not
 invent a new harness.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/server
@@ -3579,7 +3579,7 @@ DATABASE_URL="$DATABASE_URL" go test ./internal/handler/ -run 'TestResumedTaskCo
 
 Expected: FAIL — the resumed task reports an empty `PriorSessionID`.
 
-- [ ] **Step 3: Add the query**
+- [x] **Step 3: Add the query**
 
 Append to `pkg/db/queries/agent.sql`:
 
@@ -3597,7 +3597,7 @@ WHERE id = @task_id AND session_id IS NOT NULL;
 
 Regenerate.
 
-- [ ] **Step 4: Consult it first on both claim paths**
+- [x] **Step 4: Consult it first on both claim paths**
 
 In `agent_inbox.go`'s issue path, inside the existing `if !event.ForceFreshSession {`
 block at line 2275, put the task's own session ahead of the cross-task lookup:
@@ -3641,7 +3641,7 @@ rewrite (`cmd_sandboxd.go:960-991`) is the other half of that guarantee — leav
 exactly as is and add a one-line comment above the `pkill` noting it is load-bearing
 correctness for lane runtime identity, not hygiene.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/server
@@ -3656,6 +3656,32 @@ Then in `[areal]`, tick `tasks.md` 7.1–7.3.
 ______________________________________________________________________
 
 # Phase 8 — Verification and documentation
+
+**Outcome (deviations from the steps above):**
+
+- **No `GetResumedTaskOwnSession` query.** The claim path already holds the
+  `agent_inbox_event` row (`event.SessionID`, `event.WorkDir`, `event.RuntimeID`), so the
+  fix is a pure function over it: `service.OwnPinnedSession`. That removes a query, a
+  sqlc transplant, and -- more usefully -- moves the policy into `internal/service`,
+  where tests run without Postgres. The DB-backed handler tests the steps called for
+  would have been CI-only.
+- **Verified the premise before coding.** `agent_inbox_event.status` is one of
+  `pending / draining / acked / failed / suppressed` (migration 160), `draining` being
+  in-flight; `ResetInFlightTaskForResume` is the *only* query that clears `started_at`,
+  and the sweepers move `draining` to terminal rather than back to `pending`. So a
+  `pending` row carrying a `session_id` can only be a checkpoint-resumed task.
+- **Two guards the steps did not name.** Terminal rows are excluded, because the
+  cross-task lookups filter poisoned outcomes (`iteration_limit`,
+  `api_invalid_request`, ...) and reading a terminal row's session directly would bypass
+  that filter. And `force_fresh_session` beats the row's own session, or a manual rerun
+  would replay the state the user rejected.
+- **The chat path needed a parameter.** `populateAgentInboxChatContext` had no claiming
+  runtime, only the row's own, and comparing that against itself would have made the
+  runtime guard a no-op. It now takes `claimingRuntimeID`.
+- **The `pkill` comment already said it.** `buildStartRuntimeInCubeCode`'s doc comment
+  already explained the identity reset as correctness, so instead of adding a redundant
+  line it gained the fan-out case: several lanes restore the same frozen `daemon.id`.
+
 
 ## Task 18: `[multica]` Measure snapshot duration at realistic SWE scale
 
