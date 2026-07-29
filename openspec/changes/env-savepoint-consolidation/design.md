@@ -154,6 +154,31 @@ batches well-defined.
 idempotency onto the caller and makes retries destructive; single-shot (409 on
 re-resume) gives up frontier re-expansion, which is a primary goal.
 
+### D10–D14 — Seam inputs, settled during build
+
+D1–D9 above fix the model; they left open what each seam actually receives, and
+implementation hit five missing inputs. The resolutions are recorded as D5–D9 in the
+deep Design Doc
+(`docs/superpowers/specs/2026-07-28-env-savepoint-consolidation-design.md`) and
+summarized here so this document is not read as complete without them:
+
+- **D10 (deep D5)** — a lane's channel, chat session and source message are minted with
+  its runtime as one binding, and recorded on the lane row, because `ResumeTrigger`
+  carries no conversation and lanes must not share the source's.
+- **D11 (deep D6)** — on the branch path the rollout keeps owning the env, project and
+  channel its reset phase already creates; the lane row is pre-seeded with those ids and
+  materialization runs only the unfilled steps. Only the sandbox moves from a live clone
+  to a savepoint-backed create.
+- **D12 (deep D7)** — `create_template` already exists end to end, so phase 5 only
+  retires `clone`; since `CloneSandboxInstance`'s single production caller is the branch
+  path, phase 4 and phase 5 land together, released server → migration 246 → sandboxd.
+- **D13 (deep D8)** — the checkpoint records its source conversation, so fan-out needs
+  no caller context. Not required by the live branch path under D11, so it ships with
+  the standalone fan-out capability rather than with the branch wiring.
+- **D14 (deep D9)** — the production adapters and the construction that assembles them
+  are in scope. Without them the change lands unreachable, which is what the plan would
+  otherwise have produced.
+
 ## Risks / Trade-offs
 
 - Snapshot latency at real SWE scale is unmeasured (the experiment used a 2 GB sandbox
@@ -167,9 +192,10 @@ re-resume) gives up frontier re-expansion, which is a primary goal.
   switch, each behavior-preserving on its own.
 - `pause_in_place` is the mode with a shipped, tested resume-trigger path → it must stay
   on exactly that code path; the schema work defaults existing rows to it.
-- Retiring `clone` changes a sandboxd job contract → sandboxd and server deploy
-  together, and the replacement jobs (`create_template`, `create`) already exist and are
-  exercised.
+- Retiring `clone` changes a sandboxd job contract → the replacement jobs
+  (`create_template`, `create`) already exist and are exercised, and D12 sets the
+  release order: server first, then migration 246, then sandboxd. Deploying in lockstep
+  is not required; deploying the migration or sandboxd first is what breaks.
 
 ## Migration Plan
 

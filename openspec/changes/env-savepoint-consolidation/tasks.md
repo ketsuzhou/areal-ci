@@ -181,27 +181,60 @@ by compilation, interface satisfaction, and pure-helper unit tests —
 `internal/handler`'s `TestMain` exits 0 without Postgres. This is the phase whose
 deferred verification carries the most risk.
 
-- [ ] 3b.1 `EnvCheckpointRepository` adapter over the checkpoint queries, with row
-  mapping covered by pure unit tests in a package that actually runs
-- [ ] 3b.2 `SavepointCreator` adapter reusing the existing `create_template` path
+The adapters live in `internal/service` behind narrow generated-query interfaces (the
+`diagnosisStateQueries` precedent), not in `internal/handler`, so their logic is covered
+by tests that actually execute here. Design D9/D14.
+
+- [x] 3b.1 `EnvCheckpointRepository` adapter over the checkpoint queries — `save_mode`
+  survives the write, a legacy row without one resolves to `pause_in_place` (both
+  mutation-checked), every query is workspace-scoped, and a malformed id is refused
+  before it can reach the database as a zero UUID
+- [x] 3b.2 `SavepointCreator` adapter reusing the existing `create_template` path
   (`CreateSandboxSnapshotTemplate` already persists a `sandbox_snapshot` row, enqueues
-  the job, and has its `cube_snapshot_id` filled in on completion), blocking until the
-  snapshot row reaches a terminal state, with the terminal-state decision extracted as a
-  testable helper
-- [ ] 3b.3 `SavepointReader` and `EnvCheckpointLaneRepository` adapters over the queries
-  from 2.x/3.5
-- [ ] 3b.4 `LaneMaterializer` adapter — the substantial one: create the lane instance
-  from the savepoint's Cube template, copy the project subtree, and provision the lane's
-  own channel, chat session and derived agent, reusing the existing env-dispatch
-  provisioning helpers rather than duplicating them
+  the job, and has its `cube_snapshot_id` filled in on completion). Binds the snapshot
+  to its owning checkpoint before the job runs, leaves the source running, waits for a
+  terminal status, and fails a row whose job was lost rather than leaving it `creating`
+  forever. The ownership binding and the wait are both mutation-checked
+- [x] 3b.3 `SavepointReader` and `EnvCheckpointLaneRepository` adapters over the queries
+  from 2.x/3.5. Two properties the interfaces only describe are pinned by
+  mutation-checked tests: a lost claim is an ordinary outcome rather than an error, and
+  an unrecorded step reaches the database as NULL so `COALESCE` keeps what an earlier
+  step wrote
+- [ ] 3b.4 `LaneMaterializer` adapter. Blocked during the first attempt: the interface
+  gave `ProvisionLaneAgent` no way to find the source conversation, and
+  `CopyProjectSubtree` copies issues and chat sessions but not channels, so it cannot be
+  derived. Resolved by design D6 (the branch path keeps owning env/project/channel and
+  the lane row is pre-seeded with them) and D8 (a checkpoint records its source
+  conversation, shipping with standalone fan-out). This task now covers only the
+  branch-path shape: create the lane instance from the savepoint's Cube template and
+  provision the lane's runtime and chat session, reusing the existing env-dispatch
+  provisioning helpers
 - [ ] 3b.5 Construct the service in the handler (per-request, matching how
   `EnvDispatchService` and the lifecycle service are built) while keeping the injected
   fake as the test escape hatch, and record what the feature flag now gates
+- [ ] 3b.6 Refuse `lane_count > 1` against a checkpoint that recorded no source
+  conversation, with a typed error. Design D8/D13: the service-level fan-out from phase
+  3 is complete, but a bare checkpoint cannot name the conversation its lanes should
+  continue, and serving it from the source's own channel would make the lanes share one
+  — the exact opposite of independent continuations. The migration that records the
+  source conversation ships with the standalone fan-out capability, so no release
+  advertises a fan-out it cannot serve
 
 ## 4. Route branch dispatch through resume
 
-- [ ] 4.1 Serve branch-mode env dispatch by creating or reusing a `snapshot` checkpoint
-  at the requested env and resuming it with the requested lane count
+Re-scoped by design D6/D11 and D7/D12. As originally written, 4.1 would have overwritten
+the env and project the reset phase already created, orphaning both and leaving the
+copied channel attached to the abandoned project — the copied conversation is the entire
+point of branch+message, so that is not a reroute but a duplication. And 4.3's deletion
+of the direct path removes the only production caller of `CloneSandboxInstance`, which
+phase 5 retires, so 4.x and 5.x are one change released server → migration 246 →
+sandboxd.
+
+- [ ] 4.1 Serve branch-mode env dispatch from a `snapshot` checkpoint at the requested
+  env: claim a lane, pre-seed it with the env, project and channel the reset phase
+  created, and build the sandbox from the checkpoint's savepoint instead of a live
+  filesystem clone. Creating or reusing the checkpoint is keyed on `env_id`, so
+  re-expansion is a new lane key on the same checkpoint (D2)
 - [ ] 4.2 Keep the dispatch request and response contract, including rollout handles,
   byte-compatible with the pre-existing branch contract — the pin now exists
   (`internal/apicontract`, byte-level plus the four fields the AReaL client hard-depends
@@ -225,8 +258,11 @@ deferred verification carries the most risk.
   restoring it
 - [ ] 5.4 Tests: lane creation from a savepoint template; no `clone` job is enqueued by
   any path
-- [ ] 5.5 Note in the deployment plan that sandboxd and server must roll out together
-  for this phase
+- [ ] 5.5 Note the release order in the deployment plan. Corrected by design D7/D12: the
+  replacement (`create_template`) already exists end to end, so this phase only removes
+  `clone`, and the order is server (stops enqueueing) → migration 246 (drops the CHECK
+  value) → sandboxd (drops the handler and capability). Lockstep is not required;
+  landing the migration or sandboxd first is what breaks
 
 ## 6. Savepoint reclamation
 

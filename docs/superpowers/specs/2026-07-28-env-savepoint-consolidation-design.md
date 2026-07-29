@@ -129,6 +129,122 @@ to prevent. Deletion is refused until no lane is `provisioning`. This closes the
 window instead of creating a permanent orphan-reaping obligation, at the cost of
 deletion being briefly unavailable.
 
+## Revision after build feedback (D5–D9)
+
+D1–D4 settled where lane state lives, how long a savepoint lives, how lane keys are
+derived, and when deletion is refused. They did not say what each seam *receives*, and
+implementation hit four missing inputs in a row: the lane binding had no conversation,
+the branch path already owned the rows a lane was supposed to create, phase 5 turned out
+to supply nothing phase 4 needed, and fan-out had no way to find the source
+conversation. A fifth gap sat above all of them — nothing constructed the service that
+owns any of it.
+
+The decisions below close those gaps. They are recorded here rather than patched
+task-by-task because each one is a fork in the design, not a plan typo.
+
+### D5 — A lane's conversation is minted with its runtime, and recorded on the lane
+
+`ResumeTrigger` identifies the agent to re-engage but carries no conversation, while the
+enqueue path (`EnqueueEnvDispatchChannelRun`) requires a channel, a chat session and a
+source message. Lanes cannot share the source's: two lanes posting into one channel
+would not be independent continuations, which is the whole point of fanning out.
+
+So the runtime step produces the lane's execution identity *and* its conversation
+together, as one `LaneBinding` (runtime, daemon, agent, channel, chat session, source
+message), and all three conversation ids are recorded on the lane row alongside the
+per-step ids from D1.
+
+Recording rather than deriving is what makes interruption safe: a lane that died between
+copying its channel and starting its run would otherwise copy a second channel on
+recovery. Splitting the runtime and the conversation into separate steps was rejected
+for the same reason — it adds a crash window whose only cure is another recorded id.
+
+### D6 — On the branch path the rollout owns env/project/channel; the lane row records them
+
+Branch dispatch already builds most of a lane before dispatch begins. Its reset phase
+creates the env (deliberately with no sandboxes, for message dispatch), copies the
+project subtree, and creates the channel with the copied conversation. Only the sandbox,
+runtime and chat session are built during dispatch, and the sandbox is built by a live
+filesystem clone.
+
+Ownership stays there. The lane row is claimed and *pre-seeded* with the ids the reset
+phase already produced, and materialization then runs only the steps whose ids are still
+empty — which is exactly D1's "continue from the first unfilled step" rule, not an
+exception to it.
+
+Moving ownership into lane materialization was rejected:
+
+- `resetOne` is shared with scratch dispatch, so carving branch out of it puts the live
+  scratch path at risk for no gain.
+- `rollbackRollout` is written against reset owning those rows; ownership cannot move
+  without moving unwind too.
+- The dispatch response contract (pinned before any of this changed) reports the env,
+  project and channel that reset created, and the dispatch phase is best-effort by
+  design — per-rollout errors, no rollback. A lane that owned those rows would have to
+  unwind rows the response already promised.
+
+What actually changes on this path is the sandbox: a live clone becomes a create from
+the checkpoint's savepoint. That is where the design's benefit lives (a durable
+savepoint, and N lanes sharing one snapshot instead of N fused clones), and it is the
+only part that needs to move.
+
+### D7 — Phases 4 and 5 are one server change, and `create_template` already exists
+
+Phase 5 was written as though it introduced the savepoint-creating capability. It does
+not: `create_template` is already a sandboxd capability, an allowed `sandbox_job` type,
+and a server path that persists a `sandbox_snapshot` row and fills in its
+`cube_snapshot_id` on completion. Phase 5's actual content is retiring `clone`.
+
+That inverts the dependency the plan assumed. `CloneSandboxInstance` has exactly one
+production caller — the branch trigger provisioning path — so removing `clone` without
+switching that caller in the same change breaks the only live branch path. The two land
+together.
+
+It also means the rollout is ordered, not simultaneous:
+
+1. The server stops enqueueing `clone` (branch provisioning switches to savepoint-backed
+   create).
+1. Migration 246 drops `'clone'` from the `sandbox_job` type CHECK. Landing this first
+   would make a still-enqueueing server fail its inserts.
+1. sandboxd drops the `clone` handler and capability. A sandboxd that still advertises
+   `clone` while the server no longer sends it is harmless, so sandboxd goes last rather
+   than in lockstep.
+
+### D8 — A checkpoint records its source conversation
+
+Fan-out from a checkpoint id alone has no way to find the conversation to continue.
+`CopyProjectSubtree` copies issues and chat sessions but not channels — channels are
+created separately with a roster — so a lane cannot derive one from the copied subtree.
+
+The checkpoint therefore records the source conversation (channel plus the roster needed
+to rebuild per-lane bindings), alongside the `env_id_map`, `sandbox_refs`, `db_snapshot`
+and `resume_trigger` it already records. Requiring the caller to re-supply it was
+rejected: a checkpoint that cannot be materialized from its id alone is not a savepoint
+that outlives first use, which contradicts D2 and the re-expansion goal it exists to
+serve.
+
+Under D6 the live branch path does not need this, since its conversation comes from the
+dispatch. So this is what standalone fan-out (`lane_count > 1` against a bare
+checkpoint) requires, and it is scheduled with that capability rather than with the
+branch wiring — the migration and the capability land together or not at all, so no
+release advertises a fan-out it cannot serve.
+
+### D9 — Production wiring is part of this change
+
+The change as planned would have finished with every seam implemented, fully covered by
+fakes, and unreachable: `EnvCheckpointService` was constructed nowhere outside tests,
+the routes were gated off, and the handler field was never assigned. "Wiring the
+automatic `CheckpointTrigger`" was already out of scope, which made it easy to miss that
+*all* the wiring was.
+
+The adapters are in scope: checkpoint repository, savepoint creator (over the existing
+`create_template` path), savepoint reader, lane repository, lane materializer, and the
+construction that assembles them. They live in `internal/service` behind narrow
+generated-query interfaces, following the `diagnosisStateQueries` precedent, so they are
+covered by unit tests in a package whose tests actually run — rather than in
+`internal/handler`, whose `TestMain` exits successfully without a database and would
+leave adapter tests silently unexecuted.
+
 ## Edge cases
 
 | Case                                                           | Behavior                                                                                                                                           |
@@ -142,6 +258,9 @@ deletion being briefly unavailable.
 | `pause_in_place` resumed twice                                 | Existing `draining` guard already rejects the second (`ErrTriggerTaskNotResumable`). Unchanged                                                     |
 | Snapshot-mode create when the source instance is already gone  | Typed error at create; no partial checkpoint row left behind                                                                                       |
 | Checkpoint deleted while a lane is `provisioning`              | Refused (D4)                                                                                                                                       |
+| Branch dispatch retried after its rollout rows exist           | The lane claim loses, the existing row is read, and the pre-seeded ids (D6) mean no second env, project or channel is created                      |
+| Lane interrupted between minting its channel and its run       | The recorded conversation ids (D5) are reused; recovery never copies a second channel                                                              |
+| Fan-out requested against a checkpoint captured before D8      | Refused with a typed error rather than served with the source's own conversation, which would make lanes share a channel                           |
 
 ## Testing strategy
 
@@ -182,8 +301,16 @@ two new fakes: a savepoint creator and a lane repository.
 - **Cube template quota growth**, since savepoints now outlive first use → D2 cascade
   reclamation, partly offset by N lanes sharing one snapshot instead of taking N.
 - **Phase 4 touches a live tree-search path** → phases 1 through 3 are
-  behavior-preserving and land first, so the routing switch is the only behavioral step
-  and can be staged alone.
+  behavior-preserving and land first, so the routing switch is the only behavioral step.
+  It cannot be staged entirely alone, though: D7 binds it to the `clone` retirement, so
+  the smallest behavioral unit is "branch provisioning switches to a savepoint *and*
+  `clone` goes away", released in the order D7 sets out.
+- **Adapter behavior is unverifiable in the build environment** (no Postgres, and the
+  packages that would host DB-backed tests exit successfully without one) → the adapters
+  are written behind narrow query interfaces so their logic is unit-tested with fakes,
+  but every statement's interaction with the real schema is deferred to an environment
+  with a database. This is the change's largest open risk and belongs in the
+  verification record.
 - **One extra table plus a sweeper** for stale `provisioning` lanes → accepted in
   exchange for removing an application lock and making orphans discoverable.
 
@@ -195,7 +322,9 @@ two new fakes: a savepoint creator and a lane repository.
   requests — precisely what the existing `pkill` avoids. Worth separate exploration if
   intra-turn branch points prove valuable.
 - Savepoint deduplication across checkpoints (D2 migration path is additive).
-- Wiring the automatic `CheckpointTrigger`; it remains `nil` in production.
+- Wiring the automatic `CheckpointTrigger`; it remains `nil` in production. Note that
+  everything *else* about wiring is in scope — see D9, which exists because this line
+  was once the only mention of wiring and made a much larger gap easy to miss.
 - Fleet-backed env checkpointing (still a typed error).
 - AReaL frontier selection policy.
 - Squad / multi-runtime trigger fan-out beyond the existing single-descriptor shape.
