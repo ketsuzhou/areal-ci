@@ -41,7 +41,7 @@ def _seg(segment_id="seg1", agent_run_id="r1", shard_id=None):
 class _FakeDispatch:
     """Returns a preconfigured EnvDispatchHandle from create_env_dispatch."""
 
-    def __init__(self, project_id="p1", channel_id="c1"):
+    def __init__(self, project_id="p1", channel_id="c1", *, cleanup_error=None):
         self._handle = EnvDispatchHandle(
             channel_id=channel_id,
             project_id=project_id,
@@ -49,10 +49,17 @@ class _FakeDispatch:
             dispatch_type="message",
         )
         self.dispatch_env_ids: list[str | None] = []
+        self.cleaned_up: list[EnvDispatchHandle] = []
+        self._cleanup_error = cleanup_error
 
     async def create_env_dispatch(self, **kw):
         self.dispatch_env_ids.append(kw.get("env_id"))
         return self._handle
+
+    async def cleanup_env_dispatch(self, *, handle):
+        self.cleaned_up.append(handle)
+        if self._cleanup_error is not None:
+            raise self._cleanup_error
 
 
 class _FakeDagClient:
@@ -257,6 +264,75 @@ async def test_arun_episode_assembly_failure_skips_cleanup_and_propagates():
         await wf.arun_episode(engine=None, data={"query_id": "q1"})
     assert resolver.cleared == []
     assert sr.removed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dag_client",
+    [
+        _FakeDagClient(
+            AssembledDag(segments=[_seg()], edges=[], session_to_agent_run={"s": "r1"})
+        ),
+        _FakeDagClient(raises=DagTimeout("dag not ready")),
+        _FakeDagClient(AssembledDag(segments=[], edges=[], session_to_agent_run={})),
+    ],
+    ids=["success", "dag_timeout", "empty_trajectory"],
+)
+async def test_arun_episode_releases_env_dispatch_on_every_returning_path(dag_client):
+    # The dispatch owns a sandbox + runtime + derived agent. A retry always
+    # re-dispatches rather than re-polling the same DAG, so those resources are
+    # dead the moment the episode returns - on the success path just as much as
+    # on a timeout or an empty trajectory. Leaving any of them behind orphans
+    # the sandbox: multica's terminal-cleanup hook is disabled for
+    # channel-dispatched sandboxes precisely because this DELETE owns them.
+    dispatch = _FakeDispatch("p1")
+    wf = _make_workflow(dispatch=dispatch, dag_client=dag_client)
+    await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert len(dispatch.cleaned_up) == 1
+    assert dispatch.cleaned_up[0].channel_id == "c1"
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_releases_env_dispatch_when_episode_raises():
+    # Propagating errors must not skip the dispatch release either: unlike
+    # shards and sessions (kept alive for a retry), the dispatch cannot be
+    # reused by one.
+    class _FailingAssembler:
+        def assemble_from_refs(self, dag, resolver):  # sync
+            raise DAGError("cycle detected")
+
+    dispatch = _FakeDispatch("p1")
+    wf = _make_workflow(
+        dispatch=dispatch,
+        dag_client=_FakeDagClient(
+            AssembledDag(
+                segments=[_seg()], edges=[], session_to_agent_run={"sess1": "r1"}
+            )
+        ),
+        assembler=_FailingAssembler(),
+    )
+    with pytest.raises(DAGError):
+        await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert len(dispatch.cleaned_up) == 1
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_survives_env_dispatch_cleanup_failure():
+    # A failed release is logged, not raised: the assembled episode is still
+    # valid training data, and raising from the release would also mask the
+    # episode's own exception on the error paths.
+    dispatch = _FakeDispatch("p1", cleanup_error=RuntimeError("multica 503"))
+    wf = _make_workflow(
+        dispatch=dispatch,
+        dag_client=_FakeDagClient(
+            AssembledDag(
+                segments=[_seg()], edges=[], session_to_agent_run={"sess1": "r1"}
+            )
+        ),
+    )
+    out = await wf.arun_episode(engine=None, data={"query_id": "q1"})
+    assert out is not None
+    assert len(dispatch.cleaned_up) == 1
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,56 @@ def test_get_dag_polls_until_200():
     assert calls["n"] == 2
 
 
+def test_get_dag_repolls_200_with_no_segments_yet():
+    # multica marks the root task terminal a couple of seconds before
+    # CloseSegmentForEvent inserts the segment row. A 200 served in that window
+    # carries an empty segments list; it must be re-polled, not treated as a
+    # permanently segment-less DAG.
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(200, json={"segments": [], "edges": []})
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient("http://multica", _transport=httpx.MockTransport(handler))
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)
+    assert calls["n"] == 3
+
+
+def test_get_dag_repolls_200_status_failed():
+    # A terminal root task whose session coverage is not yet dense is reported
+    # as 200 {"status": "failed"}; coverage can still complete, so re-poll.
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            return httpx.Response(200, json={"status": "failed"})
+        return httpx.Response(200, json=_dag_payload())
+
+    client = MulticaDagClient("http://multica", _transport=httpx.MockTransport(handler))
+    dag = client.get_dag("proj-1", timeout=5.0, interval=0.0)
+    assert isinstance(dag, AssembledDag)
+    assert calls["n"] == 2
+
+
+def test_get_dag_incomplete_until_deadline_raises_timeout():
+    # When the DAG never completes, the failure must name the incompleteness
+    # rather than surfacing as a structural "no segment" validation error.
+    client = MulticaDagClient(
+        "http://multica",
+        _transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"status": "failed"})
+        ),
+    )
+    with pytest.raises(DagTimeout) as excinfo:
+        client.get_dag("proj-1", timeout=0.05, interval=0.0)
+    assert "status=failed" in str(excinfo.value)
+
+
 def test_get_dag_404_raises():
     client = MulticaDagClient(
         "http://multica",
@@ -117,10 +167,18 @@ def test_get_dag_other_status_raises_dag_error():
     assert "500" in str(exc_info.value)
 
 
+def test_from_dict_still_rejects_empty_segments():
+    # get_dag now re-polls an empty-segments 200 (it means "not assembled yet"),
+    # so the structural guarantee is asserted on the validator directly.
+    with pytest.raises(DagError, match="at least one segment"):
+        AssembledDag.from_dict(
+            {"segments": [], "edges": [], "session_to_agent_run": {}}
+        )
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        ({"segments": [], "edges": [], "session_to_agent_run": {}}, "segment"),
         (
             {
                 "segments": _dag_payload()["segments"],
@@ -427,9 +485,7 @@ def _mixed_dag_payload() -> dict:
                 },
                 "trajectory_source": "task_messages",
                 "trainable": False,
-                "trajectory": [
-                    {"sequence": 1, "type": "user", "content": "hello"}
-                ],
+                "trajectory": [{"sequence": 1, "type": "user", "content": "hello"}],
             },
         ],
         "edges": [
@@ -471,9 +527,7 @@ def test_mixed_dag_parses_dual_source_segments():
     assert local_seg.trainable is False
     assert local_seg.trajectory_id is None
     assert local_seg.tensor_ref is None
-    assert local_seg.trajectory == [
-        {"sequence": 1, "type": "user", "content": "hello"}
-    ]
+    assert local_seg.trajectory == [{"sequence": 1, "type": "user", "content": "hello"}]
 
     # edges preserved
     assert len(dag.edges) == 1
@@ -488,9 +542,7 @@ def test_areal_tensor_segment_missing_trajectory_id_raises():
 
     client = MulticaDagClient(
         "http://multica",
-        _transport=httpx.MockTransport(
-            lambda r: httpx.Response(200, json=payload)
-        ),
+        _transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)),
     )
     with pytest.raises(DagError, match="missing trajectory_id"):
         client.get_dag("proj-1", timeout=5.0, interval=0.0)
@@ -503,9 +555,7 @@ def test_areal_tensor_segment_missing_tensor_ref_raises():
 
     client = MulticaDagClient(
         "http://multica",
-        _transport=httpx.MockTransport(
-            lambda r: httpx.Response(200, json=payload)
-        ),
+        _transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)),
     )
     with pytest.raises(DagError, match="missing tensor_ref"):
         client.get_dag("proj-1", timeout=5.0, interval=0.0)
@@ -518,9 +568,7 @@ def test_task_messages_segment_with_unexpected_ids_raises():
 
     client = MulticaDagClient(
         "http://multica",
-        _transport=httpx.MockTransport(
-            lambda r: httpx.Response(200, json=payload)
-        ),
+        _transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)),
     )
     with pytest.raises(DagError, match="unexpected trajectory_id"):
         client.get_dag("proj-1", timeout=5.0, interval=0.0)
@@ -533,9 +581,7 @@ def test_task_messages_segment_with_unexpected_tensor_ref_raises():
 
     client = MulticaDagClient(
         "http://multica",
-        _transport=httpx.MockTransport(
-            lambda r: httpx.Response(200, json=payload)
-        ),
+        _transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)),
     )
     with pytest.raises(DagError, match="unexpected tensor_ref"):
         client.get_dag("proj-1", timeout=5.0, interval=0.0)

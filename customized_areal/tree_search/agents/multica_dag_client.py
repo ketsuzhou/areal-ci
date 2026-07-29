@@ -274,6 +274,27 @@ class MulticaDagClient:
             return {"workspace_id": self._workspace_id}
         return {}
 
+    @staticmethod
+    def _incomplete_reason(payload: Any) -> str | None:
+        """Describe why a 200 payload is not an assembled DAG yet, else None.
+
+        A 200 does not guarantee a complete DAG. multica marks the root task
+        terminal before ``CloseSegmentForEvent`` inserts the segment row, and
+        reports a terminal-but-not-yet-dense dispatch as ``{"status": ...}``.
+        Both windows are transient, so they are re-polled to the deadline
+        instead of failing the episode with a misleading structural error.
+        Non-dict payloads fall through to ``from_dict`` for a precise message.
+        """
+        if not isinstance(payload, dict):
+            return None
+        segments = payload.get("segments")
+        if isinstance(segments, list) and segments:
+            return None
+        status = payload.get("status")
+        if isinstance(status, str) and status:
+            return f"status={status}"
+        return "no segments yet"
+
     def get_dag(
         self,
         handle: EnvDispatchHandle | str | None = None,
@@ -324,27 +345,36 @@ class MulticaDagClient:
         if self._transport is not None:
             client_kwargs["transport"] = self._transport
         current_interval = poll_interval
+        not_ready_reason = "not ready"
         with httpx.Client(**client_kwargs) as client:
             while True:
                 request_succeeded = False
                 try:
-                    resp = client.get(
-                        url, headers=headers, params=self._params()
-                    )
+                    resp = client.get(url, headers=headers, params=self._params())
                 except httpx.RequestError:
                     pass
                 else:
                     request_succeeded = True
                 if not request_succeeded:
                     raise DagError("MultiCA DAG network request failed")
+                retryable = False
                 if resp.status_code == 200:
-                    return AssembledDag.from_dict(resp.json())
+                    payload = resp.json()
+                    incomplete = self._incomplete_reason(payload)
+                    if incomplete is None:
+                        return AssembledDag.from_dict(payload)
+                    not_ready_reason = incomplete
+                    retryable = True
                 # 202 = not ready yet; gateway-like 502/503/504 responses are
                 # transient. All are re-polled to the wall-clock deadline.
-                if resp.status_code in (202, 502, 503, 504):
+                elif resp.status_code in (202, 502, 503, 504):
+                    not_ready_reason = f"http {resp.status_code}"
+                    retryable = True
+                if retryable:
                     if time.monotonic() >= deadline:
                         raise DagTimeout(
-                            f"dag for {label} not ready in {poll_timeout}s"
+                            f"dag for {label} not ready in {poll_timeout}s "
+                            f"({not_ready_reason})"
                         )
                     time.sleep(current_interval)
                     # Backoff: grow the poll interval up to the configured cap so

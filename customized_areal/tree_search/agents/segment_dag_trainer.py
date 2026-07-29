@@ -59,11 +59,31 @@ class SessionRemover(Protocol):
     def remove(self, session_id: str) -> None: ...
 
 
+def _canonical_field(value: Any) -> Any:
+    """Flatten one resolved shard to the flat sequence consumers expect.
+
+    The data_proxy stores each field as the trainer-facing batched tensor
+    (leading singleton batch dim), while the consumer contract is a flat
+    per-token sequence: ``_supernodes_to_batched_tensor_dict`` reads ``len()``
+    as the token count, scans ``loss_mask`` for the response span, and
+    re-adds the batch dim itself. Canonicalizing here keeps that single shape
+    true for every consumer instead of each one re-deriving it. Values that
+    are not sequences (and multi-row batches, which a single segment never
+    produces) pass through untouched.
+    """
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    while isinstance(value, list) and len(value) == 1 and isinstance(value[0], list):
+        value = value[0]
+    return value
+
+
 class DataProxyTensorResolver:
     """Resolves tensor_refs via the v2 data_proxy ``/data/*`` endpoints.
 
-    ``resolve`` GETs ``/data/<shard_id>`` and deserializes the shard (the
-    data_proxy stores ``orjson.dumps(serialize_value(tensor))``); ``clear``
+    ``resolve`` GETs ``/data/<shard_id>``, deserializes the shard (the
+    data_proxy stores ``orjson.dumps(serialize_value(tensor))``) and
+    canonicalizes it via :func:`_canonical_field`; ``clear``
     DELETEs ``/data/clear`` with the consumed shard ids. ``httpx``-based with
     an injectable transport for tests.
     """
@@ -111,7 +131,9 @@ class DataProxyTensorResolver:
                     raise RuntimeError(
                         f"unexpected {resp.status_code} resolving shard {shard_id}: {resp.text}"
                     )
-                tensors[field] = deserialize_value(orjson.loads(resp.content))
+                tensors[field] = _canonical_field(
+                    deserialize_value(orjson.loads(resp.content))
+                )
         return tensors
 
     def clear(self, shard_ids: list[str]) -> None:
@@ -204,9 +226,7 @@ def run_segment_dag_training_step(
         DagError: If the DAG is not ready in time, or is missing/forbidden.
         DAGError: If the assembled graph contains a cycle or a dangling edge.
     """
-    dag = client.get_dag(
-        project_id, timeout=poll_timeout, interval=poll_interval
-    )
+    dag = client.get_dag(project_id, timeout=poll_timeout, interval=poll_interval)
     asm = assembler or SuperNodeAssembler()
     edag = asm.assemble_from_refs(dag, resolver)
     # Empty trajectory (assembler returns None for a dag with no segments):

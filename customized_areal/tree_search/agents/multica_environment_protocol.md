@@ -408,11 +408,17 @@ empty/duplicate `segment_id`, every edge references a known segment, no cycles, 
 every mapped agent run exists - raising `DagError` on any violation so an
 incomplete/malformed DAG can never train as a valid one (ARE-5 AC-7/AC-8). Transient
 `202`/`502`/`503`/`504` are re-polled up to the wall-clock deadline, then `DagTimeout`
-is raised; `404` maps to `DagNotFound`, `403` to `DagForbidden`, `401` reports the
-explicit login command without exposing the PAT, and any other status raises `DagError`.
-The debug helper `_poll_dag` (in `multica_client.py`) mirrors this: it validates the
-assembled DAG and raises on non-transient status or deadline instead of silently
-returning.
+is raised. A `200` that is not an assembled DAG yet - no `segments`, or a
+`{"status": ...}` body - is also transient and re-polled: multica flips the root task to
+terminal a couple of seconds before `CloseSegmentForEvent` inserts the segment row, and
+reports terminal-but-not-yet-dense coverage as `200 {"status": "failed"}`. Treating
+either as final surfaced the race as a structural `must contain at least one segment`
+error and killed the episode while the segment was still in flight; the deadline is now
+the only thing that ends the wait, and `DagTimeout` names the last-seen reason. `404`
+maps to `DagNotFound`, `403` to `DagForbidden`, `401` reports the explicit login command
+without exposing the PAT, and any other status raises `DagError`. The debug helper
+`_poll_dag` (in `multica_client.py`) mirrors this: it validates the assembled DAG and
+raises on non-transient status or deadline instead of silently returning.
 
 ### Segment close (no reward) via the gateway group
 
