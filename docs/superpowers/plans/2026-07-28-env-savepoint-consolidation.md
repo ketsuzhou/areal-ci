@@ -79,8 +79,8 @@ commits that cannot land.
   Numbers 230, 231, and 232 each have multiple files, so collisions are tolerated
   historically — but this plan uses fresh sequential numbers above the highest to keep
   ordering unambiguous:
-  - **244** — `244_env_checkpoint_save_mode.{up,down}.sql` (Phase 2)
-  - **245** — `245_env_checkpoint_lane.{up,down}.sql` (Phase 3)
+  - **244** — `246_env_checkpoint_save_mode.{up,down}.sql` (Phase 2)
+  - **245** — `247_env_checkpoint_lane.{up,down}.sql` (Phase 3)
   - **246** — `246_sandbox_job_drop_clone.{up,down}.sql` (Phase 5)
 - Before writing each migration, re-run
   `ls server/migrations | grep -oP '^\d+' | sort -n -u | tail -5` in the worktree —
@@ -922,14 +922,14 @@ ______________________________________________________________________
 
 # Phase 2 — Savepoint schema and snapshot save mode
 
-## Task 3: `[multica]` Migration 244 — `save_mode` and checkpoint-owned savepoints
+## Task 3: `[multica]` Migration 246 — `save_mode` and checkpoint-owned savepoints
 
 **tasks.md:** 2.1, 2.2
 
 **Files:**
 
-- Create: `multica/server/migrations/244_env_checkpoint_save_mode.up.sql`
-- Create: `multica/server/migrations/244_env_checkpoint_save_mode.down.sql`
+- Create: `multica/server/migrations/246_env_checkpoint_save_mode.up.sql`
+- Create: `multica/server/migrations/246_env_checkpoint_save_mode.down.sql`
 
 **Interfaces:**
 
@@ -950,7 +950,7 @@ the rest of this plan.
 
 - [ ] **Step 2: Write the up migration**
 
-`multica/server/migrations/244_env_checkpoint_save_mode.up.sql`:
+`multica/server/migrations/246_env_checkpoint_save_mode.up.sql`:
 
 ```sql
 -- save_mode distinguishes the two first-class checkpoint modes.
@@ -979,7 +979,7 @@ CREATE INDEX IF NOT EXISTS sandbox_snapshot_checkpoint_idx
 
 - [ ] **Step 3: Write the down migration**
 
-`multica/server/migrations/244_env_checkpoint_save_mode.down.sql`:
+`multica/server/migrations/246_env_checkpoint_save_mode.down.sql`:
 
 ```sql
 DROP INDEX IF EXISTS sandbox_snapshot_checkpoint_idx;
@@ -1020,7 +1020,7 @@ Expected: both succeed with no error.
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica
-git add server/migrations/244_env_checkpoint_save_mode.up.sql server/migrations/244_env_checkpoint_save_mode.down.sql
+git add server/migrations/246_env_checkpoint_save_mode.up.sql server/migrations/246_env_checkpoint_save_mode.down.sql
 git commit -m "feat(db): add env_checkpoint.save_mode and checkpoint-owned savepoints"
 ```
 
@@ -1379,7 +1379,7 @@ func envCheckpointTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// TestEnvCheckpointSaveModeQueries_Integration proves migration 244's column,
+// TestEnvCheckpointSaveModeQueries_Integration proves migration 246's column,
 // its CHECK constraint, and savepoint ownership cascade against a real
 // Postgres. Runs inside a rolled-back transaction so it is hermetic.
 func TestEnvCheckpointSaveModeQueries_Integration(t *testing.T) {
@@ -1418,14 +1418,14 @@ ______________________________________________________________________
 
 # Phase 3 — Fan-out resume
 
-## Task 6: `[multica]` Migration 245 and queries for `env_checkpoint_lane`
+## Task 6: `[multica]` Migration 247 and queries for `env_checkpoint_lane`
 
 **tasks.md:** 3.5
 
 **Files:**
 
-- Create: `multica/server/migrations/245_env_checkpoint_lane.up.sql`
-- Create: `multica/server/migrations/245_env_checkpoint_lane.down.sql`
+- Create: `multica/server/migrations/247_env_checkpoint_lane.up.sql`
+- Create: `multica/server/migrations/247_env_checkpoint_lane.down.sql`
 - Create: `multica/server/pkg/db/queries/env_checkpoint_lane.sql`
 - Modify (generated): `multica/server/pkg/db/generated/env_checkpoint_lane.sql.go`,
   `models.go`
@@ -1439,7 +1439,7 @@ ______________________________________________________________________
 
 - [ ] **Step 1: Write the up migration**
 
-`multica/server/migrations/245_env_checkpoint_lane.up.sql`:
+`multica/server/migrations/247_env_checkpoint_lane.up.sql`:
 
 ```sql
 -- env_checkpoint_lane serves both per-lane idempotency and lane-provisioning
@@ -1473,7 +1473,7 @@ CREATE INDEX IF NOT EXISTS env_checkpoint_lane_provisioning_idx
 
 - [ ] **Step 2: Write the down migration**
 
-`multica/server/migrations/245_env_checkpoint_lane.down.sql`:
+`multica/server/migrations/247_env_checkpoint_lane.down.sql`:
 
 ```sql
 DROP INDEX IF EXISTS env_checkpoint_lane_provisioning_idx;
@@ -1659,7 +1659,7 @@ func TestEnvCheckpointLaneUniqueIndex_Integration(t *testing.T) {
 ```bash
 cd /workspaces/leagent/backend/areal/multica/server
 DATABASE_URL="$DATABASE_URL" go test ./internal/service/ -run TestEnvCheckpointLaneUniqueIndex_Integration -v
-cd .. && git add server/migrations/245_env_checkpoint_lane.up.sql server/migrations/245_env_checkpoint_lane.down.sql server/pkg/db/queries/env_checkpoint_lane.sql server/pkg/db/generated server/internal/service/env_checkpoint_lane_query_test.go
+cd .. && git add server/migrations/247_env_checkpoint_lane.up.sql server/migrations/247_env_checkpoint_lane.down.sql server/pkg/db/queries/env_checkpoint_lane.sql server/pkg/db/generated server/internal/service/env_checkpoint_lane_query_test.go
 git commit -m "feat(db): add env_checkpoint_lane for per-lane idempotency and recovery"
 ```
 
@@ -3175,7 +3175,7 @@ grep -rn "CloneSandboxInstance\|\"clone\"" --include=*.go . | grep -v _test.go
 Expected: no output. In `handler/sandbox.go`, change `case "create", "clone":` to
 `case "create":` in `CompleteSandboxJob`.
 
-- [ ] **Step 5: Write migration 246**
+- [ ] **Step 5: Write migration 248**
 
 `246_sandbox_job_drop_clone.up.sql`:
 
@@ -3258,12 +3258,12 @@ contract, so `sandboxd` and the server must roll out together:
 2. Drain any in-flight `clone` jobs — check
    `SELECT status, count(*) FROM sandbox_job WHERE type='clone' GROUP BY 1;`
    and wait for no `queued`/`dispatched`/`running` rows.
-3. Apply migration 246, which drops `clone` from `sandbox_job_type_check`.
+3. Apply migration 248, which drops `clone` from `sandbox_job_type_check`.
 4. Roll out the `sandboxd` build whose capability list no longer advertises
    `clone`.
 
 Rolling out `sandboxd` first leaves a window where a server still enqueues a job
-type no node can execute; applying migration 246 before step 2 rejects the
+type no node can execute; applying migration 248 before step 2 rejects the
 insert for an in-flight retry. The down migration restores the `clone` value, so
 a rollback needs the old `sandboxd` build back as well.
 ```
@@ -3392,8 +3392,8 @@ Append to `pkg/db/queries/env_checkpoint.sql`:
 
 ```sql
 -- name: DeleteEnvCheckpoint :exec
--- Cascades sandbox_snapshot.checkpoint_id ownership rows (migration 244) and
--- env_checkpoint_lane rows (migration 245). The Cube template itself is
+-- Cascades sandbox_snapshot.checkpoint_id ownership rows (migration 246) and
+-- env_checkpoint_lane rows (migration 247). The Cube template itself is
 -- released by a delete_template job before this runs.
 DELETE FROM env_checkpoint
 WHERE id = @id AND workspace_id = @workspace_id;
@@ -3848,7 +3848,7 @@ make test
 cd server && DATABASE_URL="$DATABASE_URL" go test ./internal/service/ ./internal/handler/ -run '_Integration' -v
 ```
 
-Until that runs, migrations 244/245/246, the `UNIQUE (checkpoint_id, lane_key)` claim
+Until that runs, migrations 246/247/248, the `UNIQUE (checkpoint_id, lane_key)` claim
 race, the `ON DELETE CASCADE` reclamation, and every hand-written SQL string remain
 unverified. Carry this forward as the primary open risk in the verification report.
 

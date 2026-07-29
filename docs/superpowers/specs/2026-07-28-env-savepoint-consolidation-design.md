@@ -204,7 +204,7 @@ It also means the rollout is ordered, not simultaneous:
 
 1. The server stops enqueueing `clone` (branch provisioning switches to savepoint-backed
    create).
-1. Migration 246 drops `'clone'` from the `sandbox_job` type CHECK. Landing this first
+1. Migration 248 drops `'clone'` from the `sandbox_job` type CHECK. Landing this first
    would make a still-enqueueing server fail its inserts.
 1. sandboxd drops the `clone` handler and capability. A sandboxd that still advertises
    `clone` while the server no longer sends it is harmless, so sandboxd goes last rather

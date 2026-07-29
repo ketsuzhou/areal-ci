@@ -12,9 +12,18 @@ Build configuration for this change: `isolation: worktree` (multica worktree on 
 review is skipped at the user's explicit request; the per-phase Go tests named in each
 task below remain the acceptance evidence.
 
+Migration numbers were 244/245/246 until a rebase onto `upstream/dev` brought in
+`244_research_fleet` and `245_research_fleet_agent_indexes`. Git does not report that as
+a conflict, since the filenames differ, so a colliding version number survives a clean
+rebase and only surfaces when the runner sees two migrations claiming one version. Any
+further rebase during this change has to re-check the highest number and, because
+`248_sandbox_job_retire_clone` rewrites `sandbox_job_type_check`, whether an incoming
+migration redefined that constraint — dropping values another migration added is the
+mistake 186 made and 187 repaired.
+
 Verification limit, decided explicitly: Postgres is **not** installed in the build
 environment. The `*_Integration` query tests are written but self-skip without
-`DATABASE_URL` and must not be reported as passing. Migrations 244/245/246, the
+`DATABASE_URL` and must not be reported as passing. Migrations 246/247/248, the
 `UNIQUE (checkpoint_id, lane_key)` claim race, and the `ON DELETE CASCADE` reclamation
 stay unverified until run against a real database.
 
@@ -74,7 +83,7 @@ mutation-checked.
   owned savepoint and need no backfill — guaranteed by the DDL itself
   (`ADD COLUMN ... NOT NULL DEFAULT 'pause_in_place'` fills every existing row, and a
   new nullable `checkpoint_id` leaves every existing snapshot unowned), and asserted by
-  `TestMigration244AddsSaveModeAndCheckpointOwnedSavepoints`, which fails if any
+  `TestMigration246AddsSaveModeAndCheckpointOwnedSavepoints`, which fails if any
   backfill statement appears. Applying the migration against a live database is part of
   the deferred verification above.
 - [x] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
@@ -104,7 +113,7 @@ mutation-checked.
 - [x] 3.3 Give each lane its own copy of the captured project subtree and its own agent
   runtime — and its own conversation (channel, chat session, source message), because
   the enqueue path requires all three and lanes sharing a channel would not be
-  independent; migration 245 gained those columns so an interrupted lane does not copy a
+  independent; migration 247 gained those columns so an interrupted lane does not copy a
   second channel on recovery
 - [x] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
   its single-instance resume unchanged — a checkpoint with an empty `save_mode` is a
@@ -297,7 +306,7 @@ the env and project the reset phase already created, orphaning both and leaving 
 copied channel attached to the abandoned project — the copied conversation is the entire
 point of branch+message, so that is not a reroute but a duplication. And 4.3's deletion
 of the direct path removes the only production caller of `CloneSandboxInstance`, which
-phase 5 retires, so 4.x and 5.x are one change released server → migration 246 →
+phase 5 retires, so 4.x and 5.x are one change released server → migration 248 →
 sandboxd.
 
 - [x] 4.1 Serve branch-mode env dispatch from a `snapshot` checkpoint at the requested
@@ -351,7 +360,7 @@ sandboxd.
   time and having the mention path look one up. Also removed a stale
   `case "create", "clone"` job-completion branch in `internal/handler/sandbox.go`
 - [x] 5.3 Migration: drop `clone` from `sandbox_job_type_check`, with a down migration
-  restoring it (`246_sandbox_job_retire_clone`). The up migration keeps
+  restoring it (`248_sandbox_job_retire_clone`). The up migration keeps
   `create_template`/`delete_template`/`exec`/`message`, which is the mistake migration
   187 existed to repair, and the test asserts that
 - [x] 5.4 Tests: lane creation from a savepoint template; no `clone` job is enqueued by
@@ -361,7 +370,7 @@ sandboxd.
   handler branch above, and a mutation restoring the sandboxd case fails it
 - [x] 5.5 Note the release order in the deployment plan. Corrected by design D7/D12: the
   replacement (`create_template`) already exists end to end, so this phase only removes
-  `clone`, and the order is server (stops enqueueing) → migration 246 (drops the CHECK
+  `clone`, and the order is server (stops enqueueing) → migration 248 (drops the CHECK
   value) → sandboxd (drops the handler and capability). Lockstep is not required;
   landing the migration or sandboxd first is what breaks
 

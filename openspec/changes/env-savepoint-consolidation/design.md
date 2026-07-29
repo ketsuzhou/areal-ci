@@ -171,7 +171,7 @@ summarized here so this document is not read as complete without them:
   to a savepoint-backed create.
 - **D12 (deep D7)** — `create_template` already exists end to end, so phase 5 only
   retires `clone`; since `CloneSandboxInstance`'s single production caller is the branch
-  path, phase 4 and phase 5 land together, released server → migration 246 → sandboxd.
+  path, phase 4 and phase 5 land together, released server → migration 248 → sandboxd.
 - **D13 (deep D8)** — the checkpoint records its source conversation, so fan-out needs
   no caller context. Not required by the live branch path under D11, so it ships with
   the standalone fan-out capability rather than with the branch wiring.
@@ -194,7 +194,7 @@ summarized here so this document is not read as complete without them:
   on exactly that code path; the schema work defaults existing rows to it.
 - Retiring `clone` changes a sandboxd job contract → the replacement jobs
   (`create_template`, `create`) already exist and are exercised, and D12 sets the
-  release order: server first, then migration 246, then sandboxd. Deploying in lockstep
+  release order: server first, then migration 248, then sandboxd. Deploying in lockstep
   is not required; deploying the migration or sandboxd first is what breaks.
 
 ## Migration Plan
@@ -238,12 +238,12 @@ order:
 1. Drain any in-flight `clone` jobs:
    `SELECT status, count(*) FROM sandbox_job WHERE type='clone' GROUP BY 1;` — wait for
    no `queued`/`dispatched`/`running` rows.
-1. Apply migration 246, which drops `clone` from `sandbox_job_type_check`.
+1. Apply migration 248, which drops `clone` from `sandbox_job_type_check`.
 1. Roll out the `sandboxd` build whose capability list no longer advertises `clone` and
    whose job dispatch no longer handles it.
 
 Rolling out `sandboxd` first leaves a window where a server still enqueues a job type no
-node can execute. Applying migration 246 before the drain rejects the insert for an
+node can execute. Applying migration 248 before the drain rejects the insert for an
 in-flight retry. The down migration restores the `clone` value, so a rollback needs the
 old `sandboxd` build back as well — schema rollback alone does not restore the handler.
 
