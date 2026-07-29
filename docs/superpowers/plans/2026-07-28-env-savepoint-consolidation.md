@@ -3309,7 +3309,7 @@ ______________________________________________________________________
   `ErrCheckpointHasProvisioningLanes`; `Handler.DeleteEnvCheckpoint` on
   `DELETE /api/v1/env-checkpoints/{checkpointID}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```go
 type fakeSavepointReleaser struct {
@@ -3376,7 +3376,7 @@ func TestDeleteCheckpointRefusedWhileLaneProvisioning(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/server
@@ -3386,7 +3386,7 @@ go test ./internal/service/ -run TestDeleteCheckpoint -v
 Expected: FAIL to compile — `Delete`, `WithSavepointReleaser`,
 `ErrCheckpointHasProvisioningLanes` undefined.
 
-- [ ] **Step 3: Add the query**
+- [x] **Step 3: Add the query**
 
 Append to `pkg/db/queries/env_checkpoint.sql`:
 
@@ -3401,7 +3401,7 @@ WHERE id = @id AND workspace_id = @workspace_id;
 
 Regenerate (`make sqlc`, or hand-write per the constraint above).
 
-- [ ] **Step 4: Implement the service delete**
+- [x] **Step 4: Implement the service delete**
 
 ```go
 var ErrCheckpointHasProvisioningLanes = errors.New("checkpoint_has_provisioning_lanes")
@@ -3454,7 +3454,7 @@ func (s *EnvCheckpointService) Delete(ctx context.Context, workspaceID, checkpoi
 Add `DeleteCheckpoint(ctx context.Context, checkpointID, workspaceID string) error` to
 `EnvCheckpointRepository` and to `fakeCheckpointRepo`.
 
-- [ ] **Step 5: Add the HTTP route**
+- [x] **Step 5: Add the HTTP route**
 
 Add `Delete(ctx context.Context, workspaceID, checkpointID, actorUserID string) error`
 to `EnvCheckpointServiceAPI`, a `Handler.DeleteEnvCheckpoint` following the shape of
@@ -3471,7 +3471,7 @@ The production `SavepointReleaser` reuses the existing `delete_template` machine
 `handler/sandbox.go:1444-1477`. Factor that block into a shared helper rather than
 duplicating it.
 
-- [ ] **Step 6: Run and commit**
+- [x] **Step 6: Run and commit**
 
 ```bash
 cd /workspaces/leagent/backend/areal/multica/server
@@ -3485,6 +3485,27 @@ Then in `[areal]`, tick `tasks.md` 6.1–6.3.
 ______________________________________________________________________
 
 # Phase 7 — Session continuation policy
+
+**Outcome (deviations from the steps above):**
+
+- The tests moved to their own file, `internal/service/env_checkpoint_delete_test.go`,
+  and cover four cases the steps did not: terminal lanes must *not* block, a failed
+  release must keep the row, `pause_in_place` needs no releaser, and a snapshot
+  checkpoint that owns savepoints with no releaser installed is refused rather than
+  deleted (deleting it would leak every template it owns).
+- `releaseSavepoints` was factored out of `Delete`, since "which savepoints does this
+  checkpoint own and who can release them" is a separate question from the delete
+  ordering.
+- `savepointReleaserAdapter` takes narrow `savepointReleaseQueries` and
+  `snapshotTemplateDeletionScheduler` interfaces rather than `*Handler`, so its state
+  handling (gone / deleting / creating / no template) is testable without a database.
+  It still lives in `internal/handler`, so those tests only run in CI.
+- `sqlc generate` again wrote three untracked files (`agent_skill_suggestion.sql.go`,
+  `evolution.sql.go`, `team_knowledge.sql.go`) that duplicate declarations in the
+  hand-maintained `_manual.sql.go` files. `git checkout pkg/db/generated/` does not
+  remove untracked files, so they have to be deleted explicitly before the build
+  passes. Worth remembering for the next transplant.
+
 
 ## Task 17: `[multica]` Warm session for `pause_in_place`, cold sessions for lanes
 

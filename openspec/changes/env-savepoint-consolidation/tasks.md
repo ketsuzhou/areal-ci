@@ -383,13 +383,53 @@ sandboxd.
 
 ## 6. Savepoint reclamation
 
-- [ ] 6.1 Release a savepoint through the existing template deletion job when its owning
+- [x] 6.1 Release a savepoint through the existing template deletion job when its owning
   checkpoint is deleted or expires
-- [ ] 6.2 Refuse to delete a checkpoint while any of its lanes is still `provisioning`,
+
+  Scope addition: there was no deletion path to hook into. `env_checkpoint.go` exposed
+  only create, get, list, and resume, and `env_checkpoint.sql` had no `DELETE`, so this
+  task creates `DeleteEnvCheckpoint` (query, repository method, `Delete` on the service,
+  and `DELETE /api/v1/env-checkpoints/{checkpointID}`). Expiry is still absent -- nothing
+  schedules deletion on a clock, so this covers the explicit delete only.
+
+  Savepoints are released *before* the row is deleted. The row is the only record that
+  the templates exist, so deleting it first would leak them on a failed release with
+  nothing left to retry from. Releasing reuses the `delete_template` job that
+  `DeleteSandboxSnapshot` already enqueues, extracted into
+  `Handler.scheduleSnapshotTemplateDeletion` rather than duplicated: a savepoint is an
+  ordinary `sandbox_snapshot` with an owning checkpoint, so there is one reclamation
+  path. `savepointReleaserAdapter` handles the states that path can find a savepoint in
+  -- already gone succeeds (failing would pin the checkpoint on a savepoint that no
+  longer exists), already `deleting` is not re-queued, `creating` is refused rather than
+  raced, and one that never reached Cube has its row dropped instead of queuing a job
+  for a template that was never made.
+
+  A snapshot checkpoint that owns savepoints and has no releaser installed is refused,
+  not deleted, since deleting it would leak every template it owns. `pause_in_place`
+  owns none and needs no releaser.
+
+- [x] 6.2 Refuse to delete a checkpoint while any of its lanes is still `provisioning`,
   with a typed error
-- [ ] 6.3 Tests: deleting the owning checkpoint schedules savepoint deletion and removes
+
+  `ErrCheckpointHasProvisioningLanes`, mapped to 409 rather than 4xx-permanent: retrying
+  once the lanes settle succeeds. Terminal lanes do not block -- a ready lane's sandbox
+  belongs to its env and a failed lane's was already reclaimed.
+
+- [x] 6.3 Tests: deleting the owning checkpoint schedules savepoint deletion and removes
   its lane records; deletion is refused while a lane is `provisioning` and leaves the
   savepoint, lane, and sandbox intact
+
+  `internal/service/env_checkpoint_delete_test.go` runs locally and carries four
+  mutation-checked assertions: skipping the provisioning-lane guard, deleting the row
+  before releasing, silently deleting without a releaser, and treating terminal lanes as
+  blocking all fail their test. `env_checkpoint_repo_test.go` pins that the delete
+  carries the workspace, so a checkpoint id from another workspace cannot cascade
+  someone else's lanes away.
+
+  The endpoint tests (`internal/handler/env_checkpoint_test.go`) and the releaser-state
+  tests (`internal/handler/env_checkpoint_release_test.go`) sit in `internal/handler`,
+  whose `TestMain` exits without Postgres, so they are CI-verified rather than locally
+  verified -- see the verification note above.
 
 ## 7. Session continuation policy
 
