@@ -23,7 +23,7 @@ archive_confirmation: null
 archived: false
 direct_override: null
 handoff_context: openspec/changes/env-savepoint-consolidation/.comet/handoff/design-context.json
-handoff_hash: 77a920bea7b2705abee150d1449d4413a3c1f416b27e60e989c55fcfd93ee589
+handoff_hash: a05d1c1f73d5ae1495026c2956e6a06ed31244fb0597f12cfd45e397121a6f01
 classic_profile: full
 classic_migration: 1
 run_id: 30ac1ab9-d394-4c64-a9da-75d6613a5078

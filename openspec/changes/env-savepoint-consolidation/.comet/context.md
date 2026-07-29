@@ -3,12 +3,11 @@
 - Change: env-savepoint-consolidation
 - Phase: design
 - Mode: compact
-- Context hash: 77a920bea7b2705abee150d1449d4413a3c1f416b27e60e989c55fcfd93ee589
+- Context hash: a05d1c1f73d5ae1495026c2956e6a06ed31244fb0597f12cfd45e397121a6f01
 
 Generated-by: comet-handoff.sh
 
-OpenSpec remains the canonical capability spec. This handoff is a deterministic,
-source-traceable context pack, not an agent-authored summary.
+OpenSpec remains the canonical capability spec. This handoff is a deterministic, source-traceable context pack, not an agent-authored summary.
 
 ## openspec/changes/env-savepoint-consolidation/proposal.md
 
@@ -16,7 +15,7 @@ source-traceable context pack, not an agent-authored summary.
 - Lines: 1-101
 - SHA256: b3d691ab6b2c636412d8f8d1f705b0397792663ac8668d0278725a8d14e3dc5e
 
-\[TRUNCATED\]
+[TRUNCATED]
 
 ```md
 ## Why
@@ -107,10 +106,10 @@ Full source: openspec/changes/env-savepoint-consolidation/proposal.md
 ## openspec/changes/env-savepoint-consolidation/design.md
 
 - Source: openspec/changes/env-savepoint-consolidation/design.md
-- Lines: 1-211
-- SHA256: 68341ac75ee3d6fd908b7800ec3ede88d0d595f892e91692d2dee83f57e22e40
+- Lines: 1-237
+- SHA256: ec256f0a00bb07bb19bc41cd9f104be5a775dcfac7272ac681ea3927e24d1dd9
 
-\[TRUNCATED\]
+[TRUNCATED]
 
 ```md
 ## Context
@@ -201,10 +200,10 @@ Full source: openspec/changes/env-savepoint-consolidation/design.md
 ## openspec/changes/env-savepoint-consolidation/tasks.md
 
 - Source: openspec/changes/env-savepoint-consolidation/tasks.md
-- Lines: 1-151
-- SHA256: d1b3988c0123deb4a51d75c2a8cea969a5284b413390e1b1080f0a6be5b45737
+- Lines: 1-300
+- SHA256: 1496ab6d67bc2d967b3d58bad43e89124f62c6707a7a2fbf969e7d7c44df5832
 
-\[TRUNCATED\]
+[TRUNCATED]
 
 ```md
 ## 0. Ground rules
@@ -222,71 +221,71 @@ review is skipped at the user's explicit request; the per-phase Go tests named i
 task below remain the acceptance evidence.
 
 Verification limit, decided explicitly: Postgres is **not** installed in the build
-environment, and `sqlc` is unavailable, so generated query code is hand-written. The
-`*_Integration` query tests are written but self-skip without `DATABASE_URL` and must
-not be reported as passing. Migrations 244/245/246, the
-`UNIQUE (checkpoint_id, lane_key)` claim race, the `ON DELETE CASCADE` reclamation, and
-every hand-written SQL string stay unverified until run against a real database — this
-is the primary open risk to carry into verification.
+environment. The `*_Integration` query tests are written but self-skip without
+`DATABASE_URL` and must not be reported as passing. Migrations 244/245/246, the
+`UNIQUE (checkpoint_id, lane_key)` claim race, and the `ON DELETE CASCADE` reclamation
+stay unverified until run against a real database — this is the primary open risk to
+carry into verification.
+
+The cost is larger than skipped integration tests, and silently so: `internal/handler`,
+`cmd/server`, `internal/workgraph`, and `pkg/agent` each have a `TestMain` that calls
+`os.Exit(0)` when Postgres is unreachable, so `go test` on those packages prints `ok`
+while executing **no tests at all**. Any `ok` from them in this environment is
+worthless; only compilation was checked. Every HTTP-boundary test in this change is
+therefore unverified. `internal/service` and `internal/migrations` have no such gate and
+do really run, so they carry the real evidence.
+
+`sqlc` **is** usable (v1.31.1, matching the version that generated the checked-in code;
+it reads the schema from `migrations/` statically and needs no database), so column
+order in generated code is derived rather than guessed. It cannot simply be run, though:
+the checked-in generated code is hand-maintained — `sandbox.sql.go` routes all
+`sandbox_snapshot` reads through one hand-written scan helper, and files are laid out in
+query-file order instead of the alphabetical order sqlc v1.31.1 emits — so a wholesale
+regeneration rewrites roughly 20 unrelated files. The working method is to regenerate,
+transplant only the hunks belonging to this change, and revert the rest. Because a
+scan/column misalignment there is invisible to the compiler and to every non-database
+test, `TestGeneratedSnapshotScanMatchesSelectedColumns` guards it and was
+mutation-checked.
 
 ## 1. Continuation seam extraction (behavior-preserving)
 
-- [ ] 1.1 Introduce two named strategies behind the existing `ResumeAgentRunner` seam: a
+- [x] 1.1 Introduce two named strategies behind the existing `ResumeAgentRunner` seam: a
   same-runtime strategy wrapping today's `taskResumeRunner`, and a forked-runtime
   strategy interface
-- [ ] 1.2 Select the strategy from the checkpoint's save mode at resume time, defaulting
+- [x] 1.2 Select the strategy from the checkpoint's save mode at resume time, defaulting
   to same-runtime for existing rows
-- [ ] 1.3 Move the per-lane task enqueue currently inline in
+- [x] 1.3 Move the per-lane task enqueue currently inline in
   `provisionEnvDispatchAgentBranch` behind the forked-runtime strategy without changing
-  its behavior
-- [ ] 1.4 Report the continuation outcome (executed, skipped, failed) uniformly from
+  its behavior (the enqueue is actually in `dispatchBranchChannelMessage`, not
+  `provisionEnvDispatchAgentBranch`, which never enqueues)
+- [x] 1.4 Report the continuation outcome (executed, skipped, failed) uniformly from
   both strategies, keeping a failed continuation after a successful restore visible as a
   partial resume
-- [ ] 1.5 Service tests: strategy selection by save mode; branch continuation routed
+- [x] 1.5 Service tests: strategy selection by save mode; branch continuation routed
   through the seam; terminal-task and runtime-mismatch rejections still hold; skipped
   outcome when no continuation descriptor exists
 
 ## 2. Savepoint schema and snapshot save mode
 
-- [ ] 2.1 Migration: add `save_mode` (default `pause_in_place`) to `env_checkpoint`;
+- [x] 2.1 Migration: add `save_mode` (default `pause_in_place`) to `env_checkpoint`;
   give `sandbox_snapshot` a single owning checkpoint reference that cascades on
   checkpoint deletion; write the matching down migration
-- [ ] 2.2 Verify existing `env_checkpoint` rows resolve to `pause_in_place` with no
-  owned savepoint and need no backfill
-- [ ] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
+- [x] 2.2 Verify existing `env_checkpoint` rows resolve to `pause_in_place` with no
+  owned savepoint and need no backfill — guaranteed by the DDL itself
+  (`ADD COLUMN ... NOT NULL DEFAULT 'pause_in_place'` fills every existing row, and a
+  new nullable `checkpoint_id` leaves every existing snapshot unowned), and asserted by
+  `TestMigration244AddsSaveModeAndCheckpointOwnedSavepoints`, which fails if any
+  backfill statement appears. Applying the migration against a live database is part of
+  the deferred verification above.
+- [x] 2.3 Queries: read/write `save_mode`; attach a savepoint to its owning checkpoint;
   list a checkpoint's savepoints
-- [ ] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
+- [x] 2.4 Checkpoint create in `snapshot` mode: create one savepoint per sandbox ref
   through the existing `create_template` job, wait for the snapshot record to reach
-  ready, and leave every source instance running
-- [ ] 2.5 Fail the checkpoint save when a savepoint's snapshot record reaches a failed
-  state; keep the existing `save_timeout_ms` to timed-out path intact
-- [ ] 2.6 Keep `pause_in_place` create on exactly its current code path
-- [ ] 2.7 Query tests for the new column and savepoint ownership; service tests for
-  snapshot-mode create (savepoint owned and ready, source still running),
-  failed-savepoint handling, and unchanged pause-in-place create
-
-## 3. Fan-out resume
-
-- [ ] 3.1 Add a requested lane count and a lane key to the resume request, service
-  signature, and result
-- [ ] 3.2 Materialize one sandbox instance per lane from the checkpoint's savepoint,
-  taking no additional snapshot of the source
-- [ ] 3.3 Give each lane its own copy of the captured project subtree and its own agent
-  runtime
-- [ ] 3.4 Reject a requested lane count greater than one for `pause_in_place`, and keep
-  its single-instance resume unchanged
-- [ ] 3.5 Migration and queries for `env_checkpoint_lane`:
-  `UNIQUE (checkpoint_id, lane_key)`, a `provisioning` / `ready` / `failed` status,
-  per-step ids (instance, project, runtime, task), and cascade on checkpoint deletion
-- [ ] 3.6 Claim a lane by inserting with `ON CONFLICT DO NOTHING`, and branch on the
-  existing row's status when the insert loses: return a `ready` lane, continue a stale
-  `provisioning` lane from its first incomplete step, surface a `failed` lane
-- [ ] 3.7 Derive lane keys from an anchor that is stable across retries of the same
-  branch request, and pin the chosen anchor against the dispatch record's actual stable
-  id
-- [ ] 3.8 Reject a requested lane count of zero as invalid input
-- [ ] 3.9 Reject a checkpoint whose save status is not complete with a typed
-  non-resumable error distinguishable from transient errors
+  ready, and leave every source instance running — the service drives this through the
+  `SavepointCreator` seam; the production adapter that actually enqueues
+  `create_template` arrives with Phase 6, so snapshot mode is refused as unconfigured
+  until then rather than downgraded
+- [x] 2.5 Fail the checkpoint save when a savepoint's snapshot record reaches a failed
 
 ```
 
@@ -294,12 +293,11 @@ Full source: openspec/changes/env-savepoint-consolidation/tasks.md
 
 ## openspec/changes/env-savepoint-consolidation/specs/agent-continuation-seam/spec.md
 
-- Source:
-  openspec/changes/env-savepoint-consolidation/specs/agent-continuation-seam/spec.md
+- Source: openspec/changes/env-savepoint-consolidation/specs/agent-continuation-seam/spec.md
 - Lines: 1-119
 - SHA256: f391d216be9e8c951ae0e77ca23e9cba8acdf6a0c9afeac9e78f3b153fdfebcf
 
-\[TRUNCATED\]
+[TRUNCATED]
 
 ```md
 ## ADDED Requirements
@@ -385,17 +383,15 @@ resume rather than as success.
 
 ```
 
-Full source:
-openspec/changes/env-savepoint-consolidation/specs/agent-continuation-seam/spec.md
+Full source: openspec/changes/env-savepoint-consolidation/specs/agent-continuation-seam/spec.md
 
 ## openspec/changes/env-savepoint-consolidation/specs/env-savepoint-fanout/spec.md
 
-- Source:
-  openspec/changes/env-savepoint-consolidation/specs/env-savepoint-fanout/spec.md
+- Source: openspec/changes/env-savepoint-consolidation/specs/env-savepoint-fanout/spec.md
 - Lines: 1-190
 - SHA256: 96872a6c51d098815d4d3d9db2e899810d15d45a9c484df218ddb669744b450c
 
-\[TRUNCATED\]
+[TRUNCATED]
 
 ```md
 ## ADDED Requirements
@@ -481,5 +477,4 @@ copy of the captured project subtree and its own agent runtime.
 
 ```
 
-Full source:
-openspec/changes/env-savepoint-consolidation/specs/env-savepoint-fanout/spec.md
+Full source: openspec/changes/env-savepoint-consolidation/specs/env-savepoint-fanout/spec.md
