@@ -185,6 +185,28 @@ def test_diagnose_env_dispatch_uses_dispatch_scoped_post_route():
     assert seen == [("POST", "/api/v1/env-dispatch/channels/c1/diagnosis")]
 
 
+@pytest.mark.parametrize("status", ["running", "failed"])
+def test_diagnose_env_dispatch_rejects_noncompleted_report_status(status):
+    seen: list[tuple[str, str]] = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path))
+        return httpx.Response(200, json={"status": status})
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://x", transport=_transport(handler)
+    )
+
+    with pytest.raises(RuntimeError, match="diagnosis did not complete"):
+        asyncio.run(
+            client.diagnose_env_dispatch(
+                handle=EnvDispatchHandle("c1", "p1", "e1", "message")
+            )
+        )
+
+    assert seen == [("POST", "/api/v1/env-dispatch/channels/c1/diagnosis")]
+
+
 def test_debug_flow_without_diagnose_never_posts_diagnosis(monkeypatch):
     seen: list[tuple[str, str]] = []
 
