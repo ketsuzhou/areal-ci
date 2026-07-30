@@ -30,6 +30,11 @@ client keeps `--diagnose` as its sole opt-in action.
 - Never trigger diagnosis from a training event; only the authenticated
   diagnosis POST may create a diagnosis run.
 
+**Execution order:** Execute Task 2 before Task 1. Task 2 removes the legacy
+training dependency that currently references `DiagnosisAgentEnabled`; this
+keeps every intermediate commit compilable while Task 1 subsequently deletes
+the configuration field and route gate. Execute Tasks 3 and 4 afterward.
+
 ---
 
 ### Task 1: Remove configuration gates from the non-training diagnosis route
