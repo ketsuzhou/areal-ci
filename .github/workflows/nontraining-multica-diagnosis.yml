@@ -1,0 +1,26 @@
+name: Non-training MultiCA diagnosis
+
+on:
+  pull_request:
+    paths:
+      - "customized_areal/tree_search/**"
+      - ".github/workflows/nontraining-multica-diagnosis.yml"
+
+jobs:
+  diagnosis-contract:
+    name: Diagnosis client and DAG contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install targeted test dependencies
+        run: python -m pip install pytest httpx
+      - name: Test diagnosis route, turn coverage, and node reward normalization
+        run: >-
+          python -m pytest -q
+          customized_areal/tree_search/tests/test_env_dispatch_client.py::test_diagnose_env_dispatch_uses_dispatch_scoped_post_route
+          customized_areal/tree_search/tests/test_multica_dag_client.py::test_assembled_dag_rejects_missing_diagnosis_turn_score
+          customized_areal/tree_search/tests/test_multica_dag_client.py::test_assembled_dag_accepts_exact_diagnosis_turn_scores
+          customized_areal/tree_search/tests/test_multica_node_rewards.py
