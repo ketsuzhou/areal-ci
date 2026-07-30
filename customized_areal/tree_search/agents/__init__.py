@@ -70,9 +70,6 @@ from customized_areal.tree_search.agents.harvest import (
 from customized_areal.tree_search.agents.integration import (
     finalize_with_verifier,
 )
-from customized_areal.tree_search.agents.multi_agent_workflow import (
-    MultiAgentEnvDispatchWorkflow,
-)
 from customized_areal.tree_search.agents.rl_session import (
     RLBridgeClient,
     RLSessionRewardWriter,
@@ -89,6 +86,22 @@ from customized_areal.tree_search.agents.verifier import (
     Verifier,
     VerifierResult,
 )
+
+
+def __getattr__(name: str):
+    """Load the training workflow only for callers that request it.
+
+    The non-training MultiCA clients live in this package too, but do not need
+    AReaL's full rollout runtime. Keeping this import lazy makes those client
+    modules usable in lightweight tooling and contract tests.
+    """
+    if name == "MultiAgentEnvDispatchWorkflow":
+        from customized_areal.tree_search.agents.multi_agent_workflow import (
+            MultiAgentEnvDispatchWorkflow,
+        )
+
+        return MultiAgentEnvDispatchWorkflow
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # execution_dag
