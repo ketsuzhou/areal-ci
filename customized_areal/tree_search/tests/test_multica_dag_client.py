@@ -402,6 +402,7 @@ def test_get_dag_requires_base_url_or_env(monkeypatch):
 
 def test_assembled_dag_from_dict_parses_step_rewards_and_score_max():
     payload = _dag_payload()
+    payload["segments"][0]["assistant_turn_seqs"] = [1, 2]
     payload["step_rewards"] = [
         {"segment_id": "seg-1", "seq": 1, "score": 8, "rationale": "good"},
         {"segment_id": "seg-1", "seq": 2, "score": 6, "rationale": "ok"},
