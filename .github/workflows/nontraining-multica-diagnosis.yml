@@ -20,7 +20,6 @@ jobs:
       - name: Test diagnosis route, turn coverage, and node reward normalization
         run: >-
           python -m pytest -q
-          customized_areal/tree_search/tests/test_env_dispatch_client.py::test_diagnose_env_dispatch_uses_dispatch_scoped_post_route
-          customized_areal/tree_search/tests/test_multica_dag_client.py::test_assembled_dag_rejects_missing_diagnosis_turn_score
-          customized_areal/tree_search/tests/test_multica_dag_client.py::test_assembled_dag_accepts_exact_diagnosis_turn_scores
+          customized_areal/tree_search/tests/test_env_dispatch_client.py
+          customized_areal/tree_search/tests/test_multica_dag_client.py
           customized_areal/tree_search/tests/test_multica_node_rewards.py

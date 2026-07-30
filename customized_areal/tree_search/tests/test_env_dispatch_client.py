@@ -185,6 +185,84 @@ def test_diagnose_env_dispatch_uses_dispatch_scoped_post_route():
     assert seen == [("POST", "/api/v1/env-dispatch/channels/c1/diagnosis")]
 
 
+def test_debug_flow_without_diagnose_never_posts_diagnosis(monkeypatch):
+    seen: list[tuple[str, str]] = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path))
+        if request.method == "POST" and request.url.path == "/api/v1/env-dispatch":
+            return httpx.Response(201, json={"project_id": "proj-1"})
+        if (
+            request.method == "GET"
+            and request.url.path == "/api/v1/env-dispatch/proj-1/dag"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "segments": [
+                        {
+                            "segment_id": "segment-1",
+                            "agent_run_id": "agent-run-1",
+                            "issue_id": "issue-1",
+                            "trajectory_id": 0,
+                            "tensor_ref": {
+                                "shard_id": "shard-1",
+                                "node_addr": "http://dp",
+                            },
+                            "closing_event": None,
+                            "env_snapshot": {
+                                "sandbox_ids": [],
+                                "issue_snapshot_id": "issue-1",
+                                "env_state": {},
+                            },
+                        }
+                    ],
+                    "edges": [],
+                    "session_to_agent_run": {},
+                },
+            )
+        if (
+            request.method == "GET"
+            and request.url.path == "/api/v1/projects/proj-1/env-checkpoints"
+        ):
+            return httpx.Response(200, json={"checkpoints": []})
+        if (
+            request.method == "DELETE"
+            and request.url.path == "/api/v1/env-dispatch/proj-1"
+        ):
+            return httpx.Response(204)
+        if request.method == "POST" and request.url.path.endswith("/diagnosis"):
+            pytest.fail("debug flow posted diagnosis without --diagnose")
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    client = MulticaEnvDispatchClient(
+        base_url="http://x", transport=_transport(handler)
+    )
+    monkeypatch.setattr(
+        multica_client_module, "MulticaEnvDispatchClient", lambda **_kwargs: client
+    )
+    args = build_debug_parser().parse_args(
+        [
+            "--base-url",
+            "http://x",
+            "--workspace-id",
+            "workspace-1",
+            "--agent-id",
+            "agent-1",
+            "--dispatch-type",
+            "issue",
+            "--dag-timeout",
+            "0",
+            "--dag-poll-interval",
+            "0",
+        ]
+    )
+
+    assert args.diagnose is False
+    assert asyncio.run(multica_client_module._debug_run(args)) == 0
+    assert ("POST", "/api/v1/env-dispatch/proj-1/diagnosis") not in seen
+
+
 def test_create_env_dispatch_message_missing_channel_id_raises():
     def handler(req):
         # Message dispatch response without channel_id is a contract violation.
