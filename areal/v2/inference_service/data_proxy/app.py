@@ -93,6 +93,15 @@ class SetRewardResponse(BaseModel):
     ready_transition: bool
 
 
+class CloseSegmentResponse(BaseModel):
+    message: str
+    interaction_count: int
+    session_id: str
+    trajectory_id: int | None
+    trajectory_ready: bool
+    ready_transition: bool
+
+
 class RegisterModelResponse(BaseModel):
     status: str
     name: str
@@ -472,7 +481,7 @@ def create_app(config: DataProxyConfig) -> FastAPI:
         for i in range(group_size):
             try:
                 session_id, session_api_key = store.start_session(
-                    body.task_id, body.api_key if i == 0 else None
+                    body.canonical_session_ref, body.api_key if i == 0 else None
                 )
             except ValueError as e:
                 raise HTTPException(status_code=409, detail=str(e))
@@ -481,7 +490,12 @@ def create_app(config: DataProxyConfig) -> FastAPI:
                     session_id=session_id, session_api_key=session_api_key
                 )
             )
-        return StartSessionResponse(group_id=group_id, sessions=credentials)
+        return StartSessionResponse(
+            group_id=group_id,
+            sessions=credentials,
+            session_id=credentials[0].session_id,
+            api_key=credentials[0].session_api_key,
+        )
 
     @app.post("/rl/set_reward", response_model=SetRewardResponse)
     async def set_reward(body: SetRewardRequest, request: Request):
@@ -508,6 +522,28 @@ def create_app(config: DataProxyConfig) -> FastAPI:
             trajectory_id=reward_result.trajectory_id,
             trajectory_ready=reward_result.trajectory_id is not None,
             ready_transition=reward_result.ready_transition,
+        )
+
+    @app.post("/rl/close_segment", response_model=CloseSegmentResponse)
+    async def close_segment(request: Request):
+        store: SessionStore = app.state.session_store
+        token = _extract_bearer_token(request)
+        session = _resolve_session_from_token(token, store)
+        if session is None:
+            raise HTTPException(
+                status_code=401, detail="Invalid or expired session API key."
+            )
+        try:
+            result = session.close_segment()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return CloseSegmentResponse(
+            message="success",
+            interaction_count=result.interaction_count,
+            session_id=result.session_id,
+            trajectory_id=result.trajectory_id,
+            trajectory_ready=result.trajectory_id is not None,
+            ready_transition=result.ready_transition,
         )
 
     # =========================================================================
@@ -652,6 +688,14 @@ def create_app(config: DataProxyConfig) -> FastAPI:
         # Remove model (ArealOpenAI ignores it)
         kwargs.pop("model", None)
 
+        # An RL session exists to capture the trajectory, so the caller does not
+        # get to opt out of recording: ArealOpenAI skips the cache on an explicit
+        # store=false, and agent SDKs send it routinely (the OpenAI JS client pi
+        # runs in the sandbox always does). That left every session empty and made
+        # close_segment fail with "No interactions in session".
+        if areal_cache is not None:
+            kwargs["store"] = True
+
         # Determine streaming
         is_streaming = kwargs.get("stream", False) or False
 
@@ -745,6 +789,11 @@ def create_app(config: DataProxyConfig) -> FastAPI:
                 )
                 merged.update(interactions)
             except KeyError:
+                if body.trajectory_id is not None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"trajectory_id {body.trajectory_id} not found in session {sid}",
+                    )
                 continue
 
         if all(v.has_tensor_data for v in merged.values()):

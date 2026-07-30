@@ -12,7 +12,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from areal.experimental.openai.cache import InteractionCache
 from areal.experimental.openai.types import InteractionWithTokenLogpReward
@@ -34,9 +34,23 @@ class StartSessionRequest(BaseModel):
     list — single-session is just ``group_size=1``.
     """
 
-    task_id: str
+    session_ref: str | None = None
+    task_id: str | None = None
     api_key: str | None = None  # Reuse a previously-issued key (refresh)
     group_size: int = 1
+
+    @model_validator(mode="after")
+    def validate_session_reference(self) -> StartSessionRequest:
+        """Require one stable session namespace while retaining legacy clients."""
+        references = [ref for ref in (self.session_ref, self.task_id) if ref]
+        if len(references) != 1:
+            raise ValueError("exactly one of session_ref or task_id is required")
+        return self
+
+    @property
+    def canonical_session_ref(self) -> str:
+        """Return the new session reference or the legacy task identifier."""
+        return self.session_ref or self.task_id or ""
 
 
 class SessionCredentials(BaseModel):
@@ -47,10 +61,17 @@ class SessionCredentials(BaseModel):
 
 
 class StartSessionResponse(BaseModel):
-    """Response from start_session — always a list of session credentials."""
+    """Response from start_session — always a list of session credentials.
+
+    ``session_id``/``api_key`` repeat the credentials of the first session so
+    that flat-shape callers (the Multica arealrl client through db_bridge) can
+    decode the same response the grouped callers read.
+    """
 
     group_id: str
     sessions: list[SessionCredentials]
+    session_id: str
+    api_key: str
 
 
 class SetRewardRequest(BaseModel):
@@ -266,6 +287,39 @@ class SessionData:
                 trajectory_id=None,
                 interaction_count=len(completions),
                 ready_transition=False,
+            )
+
+    def close_segment(self) -> RewardResult:
+        """Close the active segment into a ready trajectory WITHOUT setting a reward.
+
+        Decouples the trajectory boundary from reward so each communication-bounded
+        segment is its own exportable trajectory. The segment's reward is assigned
+        later (AReaL-side; judge in change 2), not at close.
+        """
+        with self._lock:
+            now = time.time()
+            self._last_access_time = now
+            completions = self._active_completions
+            if len(completions) == 0:
+                raise ValueError("No interactions in session")
+            terminal_interaction_id = completions.last_interaction_id
+            trajectory_id = self._next_trajectory_id
+            self._next_trajectory_id += 1
+            ready = ReadyTrajectory(
+                trajectory_id=trajectory_id,
+                interaction_id=terminal_interaction_id,
+                completions=completions,
+                created_at=now,
+                needs_online_callback=False,
+            )
+            self._ready_trajectories[trajectory_id] = ready
+            self._active_completions = InteractionCache()
+            # Do NOT touch _last_reward_interaction_id / _last_set_reward_time.
+            return RewardResult(
+                session_id=self.session_id,
+                trajectory_id=trajectory_id,
+                interaction_count=len(completions),
+                ready_transition=True,
             )
 
     def finalize_if_reward_timeout_elapsed(

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-07-21
+goal: Require an explicit env-dispatch training_mode and return a complete
+  dual-source DAG containing both trained AReaL tensor trajectories and
+  non-trained Multica task-message trajectories

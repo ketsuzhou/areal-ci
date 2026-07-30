@@ -95,8 +95,34 @@ class GroupedRolloutWorkflow(RolloutWorkflow):
 
         valid_results = [r for r in results if r is not None]
 
+        # DEBUG: log what inner workflow returned
+        self.logger.warning(
+            "DEBUG GroupedRolloutWorkflow: group_size=%d, inner_results=%d, valid=%d, "
+            "first_type=%s, first_is_dict=%s",
+            self.group_size,
+            len(results),
+            len(valid_results),
+            type(valid_results[0]).__name__ if valid_results else "N/A",
+            isinstance(valid_results[0], dict) if valid_results else "N/A",
+        )
+        if valid_results and isinstance(valid_results[0], list) and valid_results[0]:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: first is list[%s] len=%d",
+                type(valid_results[0][0]).__name__,
+                len(valid_results[0]),
+            )
+        elif valid_results and isinstance(valid_results[0], dict) and valid_results[0]:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: first dict keys_sample=%s, val_types=%s",
+                list(valid_results[0].keys())[:3],
+                [type(v).__name__ for v in list(valid_results[0].values())[:3]],
+            )
+
         # All results None -> return None
         if not valid_results:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: all results None, returning None"
+            )
             return None
 
         # Some results None -> drop entire group if requested. Reward
@@ -133,10 +159,33 @@ class GroupedRolloutWorkflow(RolloutWorkflow):
             merged: dict[str, InteractionWithTokenLogpReward] = {}
             for result in valid_results:
                 merged.update(result)
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: returning merged dict with %d entries",
+                len(merged),
+            )
             return merged if merged else None
 
         # Otherwise, tensor dicts - concatenate
-        concatenated = concat_padded_tensors(valid_results)
+        self.logger.warning(
+            "DEBUG GroupedRolloutWorkflow: falling through to concat_padded_tensors, "
+            "valid_results[0] type=%s",
+            type(first).__name__,
+        )
+        try:
+            concatenated = concat_padded_tensors(valid_results)
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: concat_padded_tensors succeeded, "
+                "keys=%s",
+                list(concatenated.keys())
+                if isinstance(concatenated, dict)
+                else "not_dict",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "DEBUG GroupedRolloutWorkflow: concat_padded_tensors FAILED: %s",
+                exc,
+            )
+            raise
         return concatenated if concatenated else None
 
     def _normalize_group_rewards(
@@ -679,6 +728,16 @@ class RemoteInfEngine(InferenceEngine):
     ) -> RolloutWorkflow:
         resolved: RolloutWorkflow
 
+        # Extract tree_search_config from workflow_kwargs so it is not
+        # forwarded to inner workflow constructors (they don't accept it).
+        tree_search_cfg = None
+        max_tokens = 0
+        if workflow_kwargs is not None and "tree_search_config" in workflow_kwargs:
+            workflow_kwargs = dict(workflow_kwargs)
+            tree_search_cfg = workflow_kwargs.pop("tree_search_config")
+            max_tokens = workflow_kwargs.pop("max_tokens", 0)
+        use_tree_search = tree_search_cfg is not None and tree_search_cfg.enabled
+
         # 0. None workflow = online mode (config-driven)
         if workflow is None:
             agent_cfg = self.config.agent
@@ -690,7 +749,19 @@ class RemoteInfEngine(InferenceEngine):
             if proxy_addr is None:
                 raise ValueError("proxy_addr is required for online mode")
             resolved = self._wrap_openai_agent(None, proxy_addr=proxy_addr)
-            if group_size > 1:
+            if use_tree_search:
+                from customized_areal.tree_search.core.customized_grouped_workflow import (
+                    TreeSearchGroupedRolloutWorkflow,
+                )
+
+                resolved = TreeSearchGroupedRolloutWorkflow(
+                    resolved,
+                    group_size,
+                    config=tree_search_cfg,
+                    tokenizer_path=self.config.tokenizer_path,
+                    max_tokens=max_tokens,
+                )
+            elif group_size > 1:
                 resolved = GroupedRolloutWorkflow(
                     resolved,
                     group_size,
@@ -787,14 +858,30 @@ class RemoteInfEngine(InferenceEngine):
             resolved = self._wrap_openai_agent(workflow, proxy_addr=proxy_addr)
 
         # Wrap with GroupedRolloutWorkflow if group_size > 1
-        if group_size > 1:
-            resolved = GroupedRolloutWorkflow(
-                resolved,
-                group_size,
-                self.logger,
-                reward_normalization=reward_normalization,
-                drop_incomplete_group=drop_incomplete_group,
-            )
+        if group_size > 1 or use_tree_search:
+            if use_tree_search:
+                self.logger.warning("use TreeSearchGroupedRolloutWorkflow")
+
+                from customized_areal.tree_search.core.customized_grouped_workflow import (
+                    TreeSearchGroupedRolloutWorkflow,
+                )
+
+                resolved = TreeSearchGroupedRolloutWorkflow(
+                    resolved,
+                    group_size,
+                    config=tree_search_cfg,
+                    tokenizer_path=self.config.tokenizer_path,
+                    max_tokens=max_tokens,
+                )
+            else:
+                self.logger.warning("use GroupedRolloutWorkflow")
+                resolved = GroupedRolloutWorkflow(
+                    resolved,
+                    group_size,
+                    self.logger,
+                    reward_normalization=reward_normalization,
+                    drop_incomplete_group=drop_incomplete_group,
+                )
 
         return resolved
 
@@ -1178,6 +1265,13 @@ class RemoteInfEngine(InferenceEngine):
         reward_normalization: bool = False,
         drop_incomplete_group: bool = False,
     ) -> int:
+        self.logger.info(
+            "RemoteInfEngine.submit() called: task_id=%s, workflow=%s, group_size=%d, proxy_addr=%s",
+            task_id,
+            workflow,
+            group_size,
+            proxy_addr,
+        )
         """Submit a request to the inference engine and return immediately.
 
         Parameters
@@ -1212,6 +1306,7 @@ class RemoteInfEngine(InferenceEngine):
             self.workflow_executor.dispatcher.register_callback(task_id, callback_addr)
 
         # Resolve workflow to a RolloutWorkflow instance
+        self.logger.info("RemoteInfEngine.submit: calling _resolve_workflow...")
         resolved_workflow = self._resolve_workflow(
             workflow,
             workflow_kwargs,
@@ -1220,8 +1315,13 @@ class RemoteInfEngine(InferenceEngine):
             reward_normalization=reward_normalization,
             drop_incomplete_group=drop_incomplete_group,
         )
+        self.logger.info(
+            "RemoteInfEngine.submit: _resolve_workflow returned %s",
+            type(resolved_workflow).__name__,
+        )
         resolved_should_accept_fn = self._resolve_should_accept_fn(should_accept_fn)
 
+        self.logger.info("RemoteInfEngine.submit: calling workflow_executor.submit...")
         return self.workflow_executor.submit(
             data,
             workflow=resolved_workflow,

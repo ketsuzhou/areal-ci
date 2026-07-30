@@ -199,7 +199,21 @@ api_key.json
 *.swp
 
 .vscode/
+.worktrees/
 wandb/
 outputs/
 sympy/
 !/docs/figures/*
+*.whl
+tmp/*
+
+customized_areal/tpfc/data/tree_cache/mcts_trees/*
+customized_areal/db_service/.shared_auth_token.json
+customized_areal/tree_search/agents/credentials.json
+*.json
+customized_areal/.env
+customized_areal/commands.sh
+customized_areal/tpfc/scripts/call_sglang_teacher.py
+customized_areal/half_gpu.py
+customized_areal/dataset/*
+.agents/skills/*

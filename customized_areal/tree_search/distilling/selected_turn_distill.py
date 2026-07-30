@@ -1,0 +1,439 @@
+"""Selected-turn distillation builders for tree-search trajectories."""
+
+from __future__ import annotations
+
+import inspect
+import re
+from typing import Any
+from xml.etree import ElementTree
+
+from customized_areal.tree_search.core.tree_store import Node
+from customized_areal.tree_search.distilling.diagnose_provider import DiagnoseProvider
+from customized_areal.tree_search.distilling.distill_types import (
+    DiagnosisTurn,
+    EpisodeDiagnosis,
+    PositionRewardInfo,
+)
+
+from areal.utils import logging
+
+logger = logging.getLogger("SelectedTurnDistill")
+
+GUIDANCE_PROMPT_TEMPLATE = (
+    "\n\nImprove this selected assistant turn using this guidance:\n{guidance}\n\n"
+)
+
+_FENCE_RE = re.compile(r"```(?:xml)?\s*\n?(.*?)```", re.DOTALL)
+_DIAGNOSIS_XML_RE = re.compile(
+    r"<(?P<tag>diagnosis|turns)\b[^>]*>.*?</(?P=tag)>", re.DOTALL
+)
+# Find the last code fence marker
+_LAST_FENCE_RE = re.compile(r"```(?:xml)?\s*", re.DOTALL)
+
+
+def _is_parseable_xml(text: str) -> bool:
+    try:
+        ElementTree.fromstring(text)
+    except ElementTree.ParseError:
+        return False
+    return True
+
+
+def _diagnosis_xml_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+
+    for match in _FENCE_RE.finditer(text):
+        content = match.group(1).strip()
+        first = content.find("<")
+        if first >= 0:
+            candidates.append(content[first:].strip())
+
+    fence_markers = list(_LAST_FENCE_RE.finditer(text))
+    if fence_markers:
+        after_fence = text[fence_markers[-1].end() :]
+        xml_match = _DIAGNOSIS_XML_RE.search(after_fence)
+        if xml_match:
+            candidates.append(xml_match.group(0).strip())
+
+    for xml_match in _DIAGNOSIS_XML_RE.finditer(text):
+        candidates.append(xml_match.group(0).strip())
+
+    return candidates
+
+
+def _extract_xml_from_markdown(text: str) -> str:
+    """Extract XML content from markdown code fences or plain text.
+
+    Reasoning models often output chain-of-thought text before the XML.
+    Handles: complete fences, incomplete fences (no closing ```),
+    bare XML documents, and models that wrap output in thinking tags.
+    """
+    candidates = _diagnosis_xml_candidates(text)
+    for candidate in reversed(candidates):
+        if _is_parseable_xml(candidate):
+            return candidate
+    if candidates:
+        return candidates[-1]
+
+    # Try incomplete code fence — opening ``` exists but no closing ```
+    #    Take everything after the *last* opening fence marker.
+    fence_markers = list(_LAST_FENCE_RE.finditer(text))
+    if fence_markers:
+        after_fence = text[fence_markers[-1].end() :]
+    else:
+        after_fence = text
+
+    # Strip leading XML/thinking tags (</think>, </reasoning>, </analysis>)
+    after_fence = re.sub(
+        r"</(?:think|reasoning|analysis|thought)>", "", after_fence
+    ).strip()
+
+    # Search for XML diagnosis in remaining text
+    xml_match = _DIAGNOSIS_XML_RE.search(after_fence)
+    if xml_match:
+        return xml_match.group(0).strip()
+
+    # Fall back to original text for the bare-XML search
+    xml_match = _DIAGNOSIS_XML_RE.search(text)
+    if xml_match:
+        return xml_match.group(0).strip()
+
+    return text.strip()
+
+
+def _child_text(element: ElementTree.Element, tag: str) -> str | None:
+    child = element.find(tag)
+    if child is None:
+        return None
+    return "".join(child.itertext())
+
+
+def _parse_xml_bool(value: str | None, field_name: str) -> bool:
+    if value is None:
+        raise ValueError(f"{field_name} must be a boolean")
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError(f"{field_name} must be a boolean")
+
+
+def parse_episode_diagnosis(raw_text: str | None) -> EpisodeDiagnosis:
+    """Parse teacher diagnosis into an EpisodeDiagnosis.
+
+    Handles XML wrapped in markdown code fences and empty responses.
+    """
+    if not raw_text or not raw_text.strip():
+        raise ValueError("episode diagnosis is empty — the model returned no content")
+
+    cleaned = _extract_xml_from_markdown(raw_text)
+    try:
+        root = ElementTree.fromstring(cleaned)
+    except ElementTree.ParseError as exc:
+        tail = raw_text[-300:] if len(raw_text) > 600 else ""
+        logger.error(
+            "Failed to parse episode diagnosis as XML. "
+            "len=%d, first 300=%r, last 300=%r",
+            len(raw_text),
+            raw_text[:300],
+            tail,
+        )
+        raise ValueError("episode diagnosis must be valid XML") from exc
+
+    if root.tag == "diagnosis":
+        turns_parent = root.find("turns")
+    elif root.tag == "turns":
+        turns_parent = root
+    else:
+        raise ValueError("episode diagnosis must have a diagnosis root element")
+
+    if turns_parent is None:
+        raise ValueError("episode diagnosis must contain a top-level turns element")
+
+    turns: list[DiagnosisTurn] = []
+    for index, turn_payload in enumerate(turns_parent.findall("turn")):
+        turn_idx_text = _child_text(turn_payload, "turn_idx")
+        should_improve_text = _child_text(turn_payload, "should_improve")
+        guidance = _child_text(turn_payload, "guidance") or ""
+
+        try:
+            turn_idx = int(turn_idx_text.strip()) if turn_idx_text is not None else None
+        except ValueError as exc:
+            raise ValueError(f"turns[{index}].turn_idx must be an integer") from exc
+        if turn_idx is None:
+            raise ValueError(f"turns[{index}].turn_idx must be an integer")
+        should_improve = _parse_xml_bool(
+            should_improve_text, f"turns[{index}].should_improve"
+        )
+
+        turns.append(
+            DiagnosisTurn(
+                turn_idx=turn_idx,
+                should_improve=should_improve,
+                guidance=guidance,
+            )
+        )
+
+    return EpisodeDiagnosis(turns=tuple(turns))
+
+
+def response_token_span(loss_mask: list[int]) -> tuple[int, int]:
+    """Return the current selected response span in a loss mask.
+
+    In concat-mode multi-turn nodes, parent assistant spans are retained in
+    the node loss mask and the current turn is appended at the end. The
+    selected turn's generation is therefore the latest contiguous response
+    span, not the earliest one.
+    """
+    start: int | None = None
+    latest_span: tuple[int, int] | None = None
+    for index, value in enumerate(loss_mask):
+        if value == 1 and start is None:
+            start = index
+        elif value != 1 and start is not None:
+            latest_span = (start, index)
+            start = None
+    if start is not None:
+        latest_span = (start, len(loss_mask))
+    if latest_span is None:
+        return 0, 0
+    return latest_span
+
+
+def build_teacher_prompt_ids(
+    node: Node, guidance: str, tokenizer: Any
+) -> tuple[list[int], list[int]]:
+    """Build teacher prompt IDs and selected response IDs for a node."""
+    input_ids = _as_list(node.input_ids)
+    loss_mask = _as_list(node.loss_mask)
+    start, end = response_token_span(loss_mask)
+    prefix_ids = input_ids[:start]
+    generation_ids = input_ids[start:end]
+
+    if not guidance.strip():
+        return prefix_ids, generation_ids
+
+    guidance_text = GUIDANCE_PROMPT_TEMPLATE.format(guidance=guidance.strip())
+    guidance_ids = _encode(tokenizer, guidance_text)
+    return prefix_ids + guidance_ids, generation_ids
+
+
+async def selected_turn_to_position_rewards(
+    node: Node,
+    guidance: str,
+    tokenizer: Any,
+    provider: DiagnoseProvider,
+    sample_index: int,
+    topk_distill: bool,
+    engine: Any,
+    teacher_top_k: int,
+    max_distill_tokens: int = 0,
+) -> list[PositionRewardInfo]:
+    """Convert one selected turn into position-level distillation targets."""
+    prompt_ids, generation_ids = build_teacher_prompt_ids(node, guidance, tokenizer)
+    if not generation_ids:
+        return []
+
+    total_tokens = len(prompt_ids) + len(generation_ids)
+    token_limit = max_distill_tokens if max_distill_tokens > 0 else 10000
+    if total_tokens > token_limit:
+        logger.warning(
+            "Skipping distill: total_tokens=%d > %d (episode_id=%s turn_idx=%d)",
+            total_tokens,
+            token_limit,
+            node.episode_id,
+            node.turn_idx,
+        )
+        return []
+
+    logger.info(
+        "Distill node: episode_id=%s turn_idx=%s prompt_tokens=%d output_tokens=%d guidance_len=%d",
+        node.episode_id,
+        node.turn_idx,
+        len(prompt_ids),
+        len(generation_ids),
+        len(guidance),
+    )
+
+    loss_mask = _as_list(node.loss_mask)
+
+    if topk_distill:
+        if node.topk_ids is None:
+            candidate_token_ids = await _recompute_student_topk(
+                engine=engine,
+                node=node,
+                teacher_top_k=teacher_top_k,
+            )
+        else:
+            candidate_token_ids = _select_current_topk_ids(
+                topk_ids=node.topk_ids,
+                input_ids=_as_list(node.input_ids),
+                loss_mask=loss_mask,
+            )
+    else:
+        candidate_token_ids = [[token_id] for token_id in generation_ids]
+
+    candidate_token_ids = _ensure_generated_token_first(
+        candidate_token_ids,
+        generation_ids,
+    )
+
+    teacher_logprobs = await provider.get_logprobs_for_prompt(
+        prompt_ids=prompt_ids,
+        generation_ids=generation_ids,
+        candidate_token_ids=candidate_token_ids,
+    )
+
+    position_rewards: list[PositionRewardInfo] = []
+    for position, (candidate_ids, teacher_lps) in enumerate(
+        zip(candidate_token_ids, teacher_logprobs, strict=True)
+    ):
+        if len(candidate_ids) != len(teacher_lps):
+            raise ValueError(
+                "candidate token ids and teacher logprob lengths must match"
+            )
+        position_rewards.append(
+            PositionRewardInfo(
+                position=position,
+                candidates=[str(token_id) for token_id in candidate_ids],
+                candidate_token_ids=list(candidate_ids),
+                teacher_logprobs=list(teacher_lps),
+                chosen_index=0,
+                sample_index=sample_index,
+            )
+        )
+
+    return position_rewards
+
+
+def _ensure_generated_token_first(
+    candidate_token_ids: list[list[int]],
+    generation_ids: list[int],
+) -> list[list[int]]:
+    """Align candidate rows with chosen_index=0 by moving gold tokens first."""
+    aligned: list[list[int]] = []
+    for candidates, generated_token_id in zip(
+        candidate_token_ids, generation_ids, strict=True
+    ):
+        row = list(candidates)
+        if not row:
+            aligned.append([generated_token_id])
+            continue
+        if row[0] == generated_token_id:
+            aligned.append(row)
+            continue
+        try:
+            index = row.index(generated_token_id)
+        except ValueError:
+            aligned.append([generated_token_id, *row])
+            continue
+        aligned.append([generated_token_id, *row[:index], *row[index + 1 :]])
+    return aligned
+
+
+async def _recompute_student_topk(
+    engine: Any,
+    node: Node,
+    teacher_top_k: int,
+) -> list[list[int]]:
+    get_topk_logprobs = getattr(engine, "get_topk_logprobs", None)
+    if get_topk_logprobs is None or not callable(get_topk_logprobs):
+        raise NotImplementedError(
+            "topk_distill requires engine.get_topk_logprobs for missing student top-k"
+        )
+
+    maybe_topk = get_topk_logprobs(
+        input_ids=node.input_ids,
+        loss_mask=node.loss_mask,
+        top_k=teacher_top_k,
+    )
+    if not inspect.isawaitable(maybe_topk):
+        raise NotImplementedError(
+            "topk_distill requires awaitable engine.get_topk_logprobs for missing "
+            "student top-k"
+        )
+    topk_ids, topk_logp = await maybe_topk
+    selected_topk_ids, _ = _select_current_topk_rows(
+        topk_ids=topk_ids,
+        topk_logp=topk_logp,
+        input_ids=_as_list(node.input_ids),
+        loss_mask=_as_list(node.loss_mask),
+    )
+    node.topk_ids = selected_topk_ids
+    return selected_topk_ids
+
+
+def _select_current_topk_ids(
+    topk_ids: Any,
+    input_ids: list[int],
+    loss_mask: list[int],
+) -> list[list[int]]:
+    selected_topk_ids, _ = _select_current_topk_rows(
+        topk_ids=topk_ids,
+        topk_logp=[[0.0] * len(row) for row in _nested_list(topk_ids)],
+        input_ids=input_ids,
+        loss_mask=loss_mask,
+    )
+    return selected_topk_ids
+
+
+def _select_current_topk_rows(
+    topk_ids: Any,
+    topk_logp: Any,
+    input_ids: list[int],
+    loss_mask: list[int],
+) -> tuple[list[list[int]], list[list[float]]]:
+    ids_rows = _nested_list(topk_ids)
+    logp_rows = _nested_list(topk_logp)
+    start, end = response_token_span(loss_mask)
+    response_len = end - start
+
+    if len(ids_rows) != len(logp_rows):
+        raise ValueError("top-k id rows and logprob rows must use the same layout")
+
+    if len(ids_rows) == len(input_ids):
+        selected_ids = ids_rows[start:end]
+        selected_logp = logp_rows[start:end]
+    elif len(ids_rows) == response_len:
+        selected_ids = ids_rows
+        selected_logp = logp_rows
+    else:
+        total_response_len = sum(1 for value in loss_mask if value == 1)
+        if len(ids_rows) != total_response_len:
+            raise ValueError(
+                "top-k rows must be full-sequence, selected-response, or all-response aligned"
+            )
+        response_offset = sum(1 for value in loss_mask[:start] if value == 1)
+        selected_ids = ids_rows[response_offset : response_offset + response_len]
+        selected_logp = logp_rows[response_offset : response_offset + response_len]
+
+    if len(selected_ids) != response_len or len(selected_logp) != response_len:
+        raise ValueError("top-k rows must align with selected generation positions")
+    return selected_ids, selected_logp
+
+
+def _encode(tokenizer: Any, text: str) -> list[int]:
+    try:
+        encoded = tokenizer.encode(text, add_special_tokens=False)
+    except TypeError:
+        encoded = tokenizer.encode(text)
+    return list(encoded)
+
+
+def _as_list(values: Any) -> list:
+    if hasattr(values, "tolist"):
+        return values.tolist()
+    return list(values)
+
+
+def _nested_list(rows: Any) -> list[list[Any]]:
+    return [_as_list(row) for row in _as_list(rows)]
+
+
+__all__ = [
+    "build_teacher_prompt_ids",
+    "parse_episode_diagnosis",
+    "response_token_span",
+    "selected_turn_to_position_rewards",
+]

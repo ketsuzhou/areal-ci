@@ -1,0 +1,363 @@
+"""Tests for _finalize_episode multica branch + the SuperNode batch builder.
+
+The multica path finalizes ``list[SuperNode]`` (one assembled DAG): inserts via
+``insert_super_batch`` (not ``_wrap_leaf_super``), computes DAG GAE advantages,
+and builds a batched tensor dict from each segment's resolved
+``metadata["tensors"]``. Change 2 concerns (zero-variance discard, distillation,
+judge, critic V) are skipped on this path.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+import torch
+
+from customized_areal.tree_search.agents.dag_advantage import AssembledAdvantages
+from customized_areal.tree_search.agents.execution_dag import (
+    EdgeType,
+    ExecutionDAG,
+    SuperNode,
+)
+from customized_areal.tree_search.config import (
+    AdvantageMode,
+    CacheMode,
+    Config,
+    LossMode,
+)
+from customized_areal.tree_search.core.customized_grouped_workflow import (
+    TreeSearchGroupedRolloutWorkflow,
+    _supernodes_to_batched_tensor_dict,
+)
+
+
+def _tensors() -> dict:
+    """Resolved segment tensors (resp span = last 3 of 5 tokens)."""
+    return {
+        "input_ids": [10, 20, 30, 40, 50],
+        "loss_mask": [0, 0, 1, 1, 1],
+        "logprobs": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "versions": [0, 0, 1, 1, 1],
+    }
+
+
+def _seg(node_id: str) -> SuperNode:
+    """A one-segment SuperNode with resolved tensors (resp span = last 3 tokens)."""
+    return SuperNode(
+        node_id=node_id,
+        agent_id="r1",
+        issue_id="i1",
+        task_id="",
+        outcome_reward=0.0,
+        metadata={"tensors": _tensors()},
+    )
+
+
+def _advantages(**per_node: float) -> AssembledAdvantages:
+    return AssembledAdvantages(
+        advantages=dict(per_node),
+        returns={k: 0.0 for k in per_node},
+        baseline_values={k: 0.0 for k in per_node},
+    )
+
+
+def test_supernodes_to_batched_tensor_dict_broadcasts_scalar_advantages():
+    sn1 = _seg("seg1")
+    sn2 = _seg("seg2")
+    adv = _advantages(seg1=0.7, seg2=-0.3)
+
+    out = _supernodes_to_batched_tensor_dict([sn1, sn2], adv, loss_mode="grpo")
+
+    assert out is not None
+    # Batch of 2 sequences, seq_len 5 (no padding - equal lengths).
+    assert out["input_ids"].shape[0] == 2
+    # Per-segment scalar advantage broadcast to the response span (len 3).
+    assert out["advantages"].shape == (2, 3)
+    assert torch.allclose(out["advantages"][0], torch.full((3,), 0.7))
+    assert torch.allclose(out["advantages"][1], torch.full((3,), -0.3))
+    # topk_ids is the -1 sentinel (trainer fills it).
+    assert torch.all(out["topk_ids"] == -1)
+    # grpo loss_mode -> no teacher_logp key.
+    assert "teacher_logp" not in out
+
+
+def test_supernodes_to_batched_tensor_dict_empty_returns_none():
+    assert _supernodes_to_batched_tensor_dict([], None, loss_mode="grpo") is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_inserts_and_returns_batch(tmp_path):
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),  # dummy; the multica branch never calls it
+        group_size=1,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
+    )
+    sn1 = _seg("seg1")
+    sn2 = _seg("seg2")
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[sn1, sn2],
+        cached_nodes=[],
+        engine=None,
+        data={},
+        query_id="q1",
+    )
+
+    assert out is not None
+    assert out["input_ids"].shape[0] == 2
+    # SuperNodes inserted into the tree store under q1 (not wrapped in one leaf).
+    assert "q1" in wf.tree_store.trajectories
+    assert len(wf.tree_store.trajectories["q1"]) == 2
+    assert {sn.node_id for sn in wf.tree_store.trajectories["q1"]} == {
+        "seg1",
+        "seg2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_empty_returns_none(tmp_path):
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
+    )
+    out = await wf._finalize_episode(
+        fresh_nodes=[], cached_nodes=[], engine=None, data={}, query_id="q1"
+    )
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_m2_per_episode_advantages(tmp_path):
+    # Two episodes (group_idx 0, 1), one SuperNode each, distinct rewards.
+    # GAE (gamma=lam=1, V=0): per-episode advantage == reward. A single chained
+    # pass would give ep0 advantage = r0 + r1 (GAE propagates backward, so ep1's
+    # reward would contaminate ep0). Per-episode grouping must keep them
+    # independent: ep0 -> 1.0 (not 6.0), ep1 -> 5.0.
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
+    )
+    sn0 = SuperNode(
+        node_id="ep0_seg",
+        agent_id="r0",
+        issue_id="i0",
+        task_id="",
+        outcome_reward=1.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+    sn1 = SuperNode(
+        node_id="ep1_seg",
+        agent_id="r1",
+        issue_id="i1",
+        task_id="",
+        outcome_reward=5.0,
+        metadata={"group_idx": 1, "tensors": _tensors()},
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[sn0, sn1], cached_nodes=[], engine=None, data={}, query_id="q1"
+    )
+
+    assert out is not None
+    # Per-episode: ep0 advantage = 1.0 (NOT 6.0 chained), ep1 = 5.0.
+    assert torch.allclose(out["advantages"][0], torch.full((3,), 1.0))
+    assert torch.allclose(out["advantages"][1], torch.full((3,), 5.0))
+
+
+class _FakeBaseWorkflow:
+    """Returns a fresh 1-SuperNode ExecutionDag per arun_episode call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def arun_episode(self, engine, data):
+        self.calls += 1
+        sn = SuperNode(
+            node_id=f"seg{self.calls}",
+            agent_id="r",
+            issue_id="i",
+            task_id="",
+            metadata={"tensors": _tensors()},
+        )
+        edag = ExecutionDAG()
+        edag.add_event(sn)
+        return {"assembled_dag": None, "execution_dag": edag}
+
+
+@pytest.mark.asyncio
+async def test_arun_episode_fixed_m2_aggregates_parallel_rollouts(tmp_path):
+    # group_size=2 -> 2 parallel arun_episode calls on the base workflow, each
+    # returning a 1-SuperNode multica DAG; both are aggregated into one batch.
+    fake = _FakeBaseWorkflow()
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=fake,
+        group_size=2,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+        ),
+    )
+
+    out = await wf._arun_episode_fixed(engine=None, data={}, query_id="q1")
+
+    assert out is not None
+    assert fake.calls == 2  # M=2 parallel rollouts
+    assert out["input_ids"].shape[0] == 2  # 2 SuperNodes aggregated into the batch
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_branch_backup_propagates_to_parent(tmp_path):
+    # A BRANCH edge: parent (fork) -> child (branch). The child's terminal
+    # return (outcome_reward=1.0) propagates to the parent via branch_backup
+    # (gamma=1.0): parent.value = 1.0, parent.visit_count = 1.
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
+    )
+    parent = SuperNode(
+        node_id="parent",
+        agent_id="r1",
+        issue_id="i1",
+        task_id="",
+        outcome_reward=0.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("child", EdgeType.BRANCH),),
+    )
+    child = SuperNode(
+        node_id="child",
+        agent_id="r2",
+        issue_id="i2",
+        task_id="",
+        outcome_reward=1.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        incoming_edges=(("parent", EdgeType.BRANCH),),
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[parent, child],
+        cached_nodes=[],
+        engine=None,
+        data={},
+        query_id="q1",
+    )
+
+    assert out is not None
+    # branch_backup propagated the child's return to the parent (fork) segment.
+    assert parent.visit_count == 1
+    assert parent.value == 1.0
+    # The child (branch terminal) is not a fork point: no backup to it.
+    assert child.visit_count == 0
+
+
+@pytest.mark.asyncio
+async def test_finalize_episode_multica_two_level_branch_tree_aggregates(tmp_path):
+    # A 2-level branch tree: root forks b1 and b2 (fan-out); b1 forks c1, b2
+    # forks c2. branch_backup aggregates at each checkpoint:
+    #   b1.value = c1.outcome (0.8), b2.value = c2.outcome (0.2)
+    #   root.value = mean(b1.outcome, b2.outcome) = mean(0.4, 0.6) = 0.5
+    wf = TreeSearchGroupedRolloutWorkflow(
+        workflow=SimpleNamespace(),
+        group_size=1,
+        config=Config(
+            checkpoint_dir=str(tmp_path),
+            advantage_mode=AdvantageMode.TREE,
+            loss_mode=LossMode.GRPO,
+            mode=CacheMode.OFF,
+            critic_gamma=1.0,
+            critic_lambda=1.0,
+        ),
+    )
+    root = SuperNode(
+        node_id="root",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.0,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("b1", EdgeType.BRANCH), ("b2", EdgeType.BRANCH)),
+    )
+    b1 = SuperNode(
+        node_id="b1",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.4,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("c1", EdgeType.BRANCH),),
+    )
+    b2 = SuperNode(
+        node_id="b2",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.6,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+        outgoing_edges=(("c2", EdgeType.BRANCH),),
+    )
+    c1 = SuperNode(
+        node_id="c1",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.8,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+    c2 = SuperNode(
+        node_id="c2",
+        agent_id="r",
+        issue_id="i",
+        task_id="",
+        outcome_reward=0.2,
+        metadata={"group_idx": 0, "tensors": _tensors()},
+    )
+
+    out = await wf._finalize_episode(
+        fresh_nodes=[root, b1, b2, c1, c2],
+        cached_nodes=[],
+        engine=None,
+        data={},
+        query_id="q1",
+    )
+
+    assert out is not None
+    # Level-1 checkpoints aggregate their single branch's return.
+    assert b1.visit_count == 1
+    assert b1.value == 0.8
+    assert b2.visit_count == 1
+    assert b2.value == 0.2
+    # Root aggregates its two branches (running mean of 0.4 and 0.6).
+    assert root.visit_count == 2
+    assert root.value == 0.5
+    # Leaf branches are not fork points.
+    assert c1.visit_count == 0
+    assert c2.visit_count == 0

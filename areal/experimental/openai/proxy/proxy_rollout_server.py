@@ -439,7 +439,7 @@ def start_session(request: StartSessionRequest) -> StartSessionResponse:
     *active* (unfinished) session, the request is rejected with HTTP 409.
     """
     global _capacity
-    task_id = request.task_id
+    session_ref = request.canonical_session_ref
 
     with _lock:
         # Periodically cleanup stale sessions
@@ -453,7 +453,7 @@ def start_session(request: StartSessionRequest) -> StartSessionResponse:
 
         # Generate unique session ID
         idx = 0
-        while (session_id := f"{task_id}-{idx}") in _session_cache:
+        while (session_id := f"{session_ref}-{idx}") in _session_cache:
             idx += 1
 
         # Resolve session API key

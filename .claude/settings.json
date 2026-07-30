@@ -1,4 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash(git:*)",
+      "Bash(python3:*)",
+      "Bash(uv:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(pre-commit:*)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

@@ -717,7 +717,17 @@ class PPOTrainer:
                     args={"global_step": global_step},
                 ),
             ):
-                adv_batch = self.actor.compute_advantages(rollout_batch)
+                if rollout_batch and all(
+                    "advantages" in traj and "returns" in traj for traj in rollout_batch
+                ):
+                    logger.info(
+                        "Skipping compute_advantages: rollout already has "
+                        "precomputed advantages/returns (%d trajectories)",
+                        len(rollout_batch),
+                    )
+                    adv_batch = rollout_batch
+                else:
+                    adv_batch = self.actor.compute_advantages(rollout_batch)
                 self.actor.get_device_stats().log("compute advantages")
 
             # Wait for async checkpoint staging to complete before modifying parameters

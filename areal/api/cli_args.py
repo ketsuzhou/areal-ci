@@ -1323,7 +1323,7 @@ class TrainEngineConfig:
         metadata={"help": "Gateway setup timeout in seconds for controller v2."},
     )
     workers_ready_timeout: float = field(
-        default=30.0,
+        default=120.0,
         metadata={
             "help": "Timeout (seconds) for initialize() to wait for guards to be ready."
         },
@@ -2339,7 +2339,7 @@ class InferenceEngineConfig:
         },
     )
     workers_ready_timeout: float = field(
-        default=30.0,
+        default=120.0,
         metadata={
             "help": "Timeout (seconds) for initialize() to wait for guards to be ready."
         },

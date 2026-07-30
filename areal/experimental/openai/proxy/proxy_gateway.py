@@ -358,12 +358,12 @@ def create_proxy_gateway_app(
         raw_headers = dict(request.headers)
 
         parsed = json.loads(body) if body else {}
-        task_id = parsed.get("task_id", "?")
+        session_ref = parsed.get("session_ref") or parsed.get("task_id", "?")
         requested_key = parsed.get("api_key") or None
 
         logger.info(
-            "[start_session] Request received (task_id=%s, api_key=%s)",
-            task_id,
+            "[start_session] Request received (session_ref=%s, api_key=%s)",
+            session_ref,
             "reuse" if requested_key else "new",
         )
 

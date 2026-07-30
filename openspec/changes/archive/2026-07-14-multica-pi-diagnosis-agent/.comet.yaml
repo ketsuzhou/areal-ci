@@ -1,0 +1,18 @@
+workflow: full
+phase: archive
+build_mode: subagent-driven-development
+build_pause: null
+build_command: go -C /workspaces/leagent/backend/areal/multica/server build ./internal/service/ ./internal/handler/ && PYTHONPATH=. /workspaces/leagent/backend/areal/.venv-test/bin/python -m compileall -q customized_areal/tree_search
+isolation: worktree
+verify_mode: full
+base_ref: a6072e994522a295669e8deb756d242e1adb60ff
+design_doc: docs/superpowers/specs/2026-07-09-multica-pi-diagnosis-agent-design.md
+plan: docs/superpowers/plans/2026-07-09-multica-pi-diagnosis-agent.md
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-07-10-multica-pi-diagnosis-agent-verify.md
+branch_status: handled
+created_at: 2026-07-09
+verified_at: 2026-07-14
+archived: true
+handoff_context: openspec/changes/multica-pi-diagnosis-agent/.comet/handoff/design-context.json
+handoff_hash: 13e8460723ed0fd4e17e08dafcce38ac8e4f03f5c0e7c4c83b890bbbdeefc580

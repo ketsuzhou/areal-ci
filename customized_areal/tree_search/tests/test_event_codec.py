@@ -1,0 +1,314 @@
+"""Tests for the bidirectional DAG <-> linear SuperNode codec.
+
+The multi-lane fixture mirrors the worked example in CRITIC_GAE_INTEGRATION.md:
+    O0 --delegation--> R0 ; O0 --delegation--> C0 ; R0 --mention--> C0 ;
+    C0 --delegation--> T0 ; T0 --completion--> C1 ; R0 --completion--> O1 ;
+    C1 --completion--> O1
+Global completion order: O0, R0, C0, T0, C1, O1.
+
+Torch-free.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from types import SimpleNamespace
+
+import pytest
+
+from customized_areal.tree_search.agents.critic_observation import (
+    build_critic_observations,
+)
+from customized_areal.tree_search.agents.event_codec import (
+    dag_to_supernodes,
+    supernodes_to_dag,
+)
+from customized_areal.tree_search.agents.event_model import message_timeline
+from customized_areal.tree_search.agents.execution_dag import (
+    DAGError,
+    EdgeType,
+    ExecutionDAG,
+    SuperNode,
+)
+from customized_areal.tree_search.agents.gae import GlobalEvent, events_from_nodes
+
+ORDER = ["O0", "R0", "C0", "T0", "C1", "O1"]
+EDGES = [
+    ("O0", "R0", EdgeType.DELEGATION),
+    ("O0", "C0", EdgeType.DELEGATION),
+    ("R0", "C0", EdgeType.MENTION),
+    ("C0", "T0", EdgeType.DELEGATION),
+    ("T0", "C1", EdgeType.COMPLETION),
+    ("R0", "O1", EdgeType.COMPLETION),
+    ("C1", "O1", EdgeType.COMPLETION),
+]
+
+
+def _flat_messages(super_node) -> tuple[dict, ...]:
+    """Flatten a SuperNode's nodes[i].messages into a single tuple.
+
+    Mirrors ``event_model._extract_messages`` but returns a tuple for easy
+    equality comparison in tests.
+    """
+    out: list[dict] = []
+    for n in super_node.nodes:
+        for m in getattr(n, "messages", None) or ():
+            out.append(m)
+    return tuple(out)
+
+
+def _build_dag() -> ExecutionDAG:
+    dag = ExecutionDAG()
+    for i, nid in enumerate(ORDER):
+        node = SuperNode(
+            node_id=nid, agent_id=nid[0], issue_id=f"iss-{nid}", task_id=f"task-{nid}"
+        )
+        node.value = 0.1 * i
+        node.process_reward = 0.0
+        node.metadata = {
+            "nodes": [
+                SimpleNamespace(
+                    messages=[{"role": "assistant", "content": f"{nid}-out"}]
+                )
+            ],
+            "completion_time": float(i),
+        }
+        dag.add_event(node)
+    for src, dst, t in EDGES:
+        dag.add_edge(src, dst, t)
+    dag.get("O1").outcome_reward = 1.0
+    return dag
+
+
+def test_dag_to_supernodes_uses_explicit_ordering_and_dense_index() -> None:
+    dag = _build_dag()
+    events = dag_to_supernodes(dag, ordering=ORDER)
+    assert [e.node_id for e in events] == ORDER
+    assert [e.completion_index for e in events] == [0, 1, 2, 3, 4, 5]
+
+
+def test_dag_to_supernodes_fills_both_edge_directions() -> None:
+    dag = _build_dag()
+    events = {e.node_id: e for e in dag_to_supernodes(dag, ordering=ORDER)}
+    assert set(events["C0"].incoming_edges) == {
+        ("O0", EdgeType.DELEGATION),
+        ("R0", EdgeType.MENTION),
+    }
+    assert events["C0"].outgoing_edges == (("T0", EdgeType.DELEGATION),)
+    assert events["O0"].incoming_edges == ()
+    assert set(events["O0"].outgoing_edges) == {
+        ("R0", EdgeType.DELEGATION),
+        ("C0", EdgeType.DELEGATION),
+    }
+
+
+def test_dag_to_supernodes_copies_node_fields_and_messages() -> None:
+    dag = _build_dag()
+    events = {e.node_id: e for e in dag_to_supernodes(dag, ordering=ORDER)}
+    o1 = events["O1"]
+    assert o1.outcome_reward == 1.0
+    assert o1.value == pytest.approx(0.5)
+    assert o1.task_id == "task-O1"
+    assert _flat_messages(o1) == ({"role": "assistant", "content": "O1-out"},)
+    assert o1.completion_time == 5.0
+
+
+def test_dag_to_supernodes_falls_back_to_topological_order() -> None:
+    dag = _build_dag()
+    events = dag_to_supernodes(dag)
+    order = [e.node_id for e in events]
+    pos = {nid: i for i, nid in enumerate(order)}
+    for src, dst, _ in EDGES:
+        assert pos[src] < pos[dst]
+
+
+def test_dag_to_supernodes_rejects_non_permutation_ordering() -> None:
+    dag = _build_dag()
+    with pytest.raises(DAGError):
+        dag_to_supernodes(dag, ordering=["O0", "R0"])
+
+
+def test_dag_to_supernodes_rejects_non_topological_ordering() -> None:
+    dag = _build_dag()
+    bad = ["R0", "O0", "C0", "T0", "C1", "O1"]
+    with pytest.raises(DAGError):
+        dag_to_supernodes(dag, ordering=bad)
+
+
+def test_dag_to_supernodes_nodes_by_segment_overrides_metadata() -> None:
+    dag = _build_dag()
+    override = {
+        "O0": [SimpleNamespace(messages=[{"role": "assistant", "content": "override"}])]
+    }
+    events = {
+        e.node_id: e
+        for e in dag_to_supernodes(dag, ordering=ORDER, nodes_by_segment=override)
+    }
+    assert _flat_messages(events["O0"]) == (
+        {"role": "assistant", "content": "override"},
+    )
+    assert _flat_messages(events["R0"]) == ({"role": "assistant", "content": "R0-out"},)
+
+
+def test_supernodes_to_dag_round_trip_rebuilds_nodes_and_edges() -> None:
+    dag = _build_dag()
+    events = dag_to_supernodes(dag, ordering=ORDER)
+    rebuilt = supernodes_to_dag(events)
+    assert sorted(rebuilt.event_ids()) == sorted(ORDER)
+    orig = {(e.src, e.dst, e.type) for e in dag.edges}
+    back = {(e.src, e.dst, e.type) for e in rebuilt.edges}
+    assert back == orig
+    assert rebuilt.get("O1").outcome_reward == 1.0
+    assert rebuilt.get("C0").value == pytest.approx(0.2)
+
+
+def test_supernodes_to_dag_rejects_non_dense_index() -> None:
+    dag = _build_dag()
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
+    events[2] = replace(events[2], completion_index=0)
+    with pytest.raises(DAGError, match="dense"):
+        supernodes_to_dag(events)
+
+
+def test_supernodes_to_dag_rejects_duplicate_node_id() -> None:
+    dag = _build_dag()
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
+    # Reuse O0's node_id for R0 while keeping completion_index dense and unique
+    # so the duplicate-node_id branch fires (not the density check).
+    events[1] = replace(events[1], node_id=events[0].node_id)
+    with pytest.raises(DAGError, match="duplicate node_id"):
+        supernodes_to_dag(events)
+
+
+def test_supernodes_to_dag_rejects_asymmetric_edges() -> None:
+    dag = _build_dag()
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
+    events = [
+        replace(e, incoming_edges=(("R0", EdgeType.MENTION),))
+        if e.node_id == "C0"
+        else e
+        for e in events
+    ]
+    with pytest.raises(DAGError, match="symmetry mismatch"):
+        supernodes_to_dag(events)
+
+
+def test_supernodes_to_dag_rejects_non_topological_index() -> None:
+    dag = _build_dag()
+    events = list(dag_to_supernodes(dag, ordering=ORDER))
+    swapped = []
+    for e in events:
+        if e.node_id == "O0":
+            swapped.append(replace(e, completion_index=1))
+        elif e.node_id == "R0":
+            swapped.append(replace(e, completion_index=0))
+        else:
+            swapped.append(e)
+    with pytest.raises(DAGError, match="not topological"):
+        supernodes_to_dag(swapped)
+
+
+def test_supernodes_to_dag_empty_returns_empty_dag() -> None:
+    rebuilt = supernodes_to_dag([])
+    assert rebuilt.event_ids() == []
+
+
+def test_supernode_dict_round_trip_identity() -> None:
+    dag = _build_dag()
+    supers = dag_to_supernodes(dag, ordering=ORDER)
+    redecoded = [SuperNode.from_dict(s.to_dict()) for s in supers]
+    assert redecoded == supers
+    dag_a = supernodes_to_dag(supers)
+    dag_b = supernodes_to_dag(redecoded)
+    assert {(e.src, e.dst, e.type) for e in dag_a.edges} == {
+        (e.src, e.dst, e.type) for e in dag_b.edges
+    }
+    assert sorted(dag_a.event_ids()) == sorted(dag_b.event_ids())
+
+
+def test_supernode_env_id_round_trips_through_codec_and_dict() -> None:
+    dag = _build_dag()
+    dag.get("C1").env_id = "env-C1"
+    events = dag_to_supernodes(dag, ordering=ORDER)
+    by_id = {e.node_id: e for e in events}
+    assert by_id["C1"].env_id == "env-C1"
+    assert by_id["O0"].env_id is None
+    # SuperNode dict round-trip preserves env_id.
+    redecoded = {e.node_id: SuperNode.from_dict(e.to_dict()) for e in events}
+    assert redecoded["C1"].env_id == "env-C1"
+    assert redecoded["O0"].env_id is None
+    assert "branch_seq" not in by_id["C1"].to_dict()
+    assert "branch_issue_id" not in by_id["C1"].to_dict()
+    assert "branch_env_snapshot_id" not in by_id["C1"].to_dict()
+    # supernodes_to_dag preserves env_id.
+    rebuilt = supernodes_to_dag(events)
+    assert rebuilt.get("C1").env_id == "env-C1"
+    assert rebuilt.get("O0").env_id is None
+
+
+def _old_events_from_nodes(ordered_nodes):
+    """Snapshot of the pre-refactor logic, for parity comparison."""
+    out = []
+    for node in ordered_nodes:
+        value = getattr(node, "value", None)
+        out.append(
+            GlobalEvent(
+                node_id=node.node_id,
+                value=float(value) if value is not None else 0.0,
+                reward=float(node.process_reward) + float(node.outcome_reward),
+            )
+        )
+    return out
+
+
+def test_events_from_nodes_parity_with_old_logic() -> None:
+    dag = _build_dag()
+    nodes = [dag.get(nid) for nid in ORDER]
+    assert events_from_nodes(nodes) == _old_events_from_nodes(nodes)
+
+
+def test_events_from_nodes_unscored_value_is_zero() -> None:
+    node = SuperNode(node_id="n", agent_id="a", issue_id="i", task_id="t")
+    node.process_reward = 0.25
+    (ev,) = events_from_nodes([node])
+    assert ev == GlobalEvent(node_id="n", value=0.0, reward=0.25)
+
+
+def test_events_from_nodes_projects_supernode_to_global_event():
+    """gae.events_from_nodes must accept SuperNode (not Event) after the rename."""
+    from customized_areal.tree_search.agents.gae import events_from_nodes
+
+    dag = _build_dag()
+    nodes = [dag.get(nid) for nid in ORDER]
+    events = events_from_nodes(nodes)
+    assert [e.node_id for e in events] == ORDER
+    # O1 has outcome_reward=1.0; its reward field = process + outcome = 1.0
+    assert events[-1].reward == pytest.approx(1.0)
+
+
+def test_critic_observations_match_message_timeline_of_events() -> None:
+    dag = _build_dag()
+    events = dag_to_supernodes(dag, ordering=ORDER)
+    timeline_from_events = message_timeline(events)
+    obs_from_events = build_critic_observations(timeline_from_events)
+    hand_built = [
+        {"role": "assistant", "content": f"{nid}-out", "node_id": nid} for nid in ORDER
+    ]
+    obs_hand = build_critic_observations(hand_built)
+    assert [o.node_id for o in obs_from_events] == [o.node_id for o in obs_hand]
+    assert [o.value_index for o in obs_from_events] == [o.value_index for o in obs_hand]
+    assert obs_from_events[0].node_id is None
+    assert len(obs_from_events) == len(ORDER) + 1
+
+
+def test_public_exports_available_from_package() -> None:
+    import customized_areal.tree_search.agents as d
+
+    for name in (
+        "SuperNode",
+        "message_timeline",
+        "dag_to_supernodes",
+        "supernodes_to_dag",
+    ):
+        assert name in d.__all__, f"{name} missing from __all__"
+        assert hasattr(d, name), f"{name} not importable from package"

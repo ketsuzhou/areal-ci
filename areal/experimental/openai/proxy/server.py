@@ -7,7 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from areal.experimental.openai.cache import InteractionCache
 
@@ -26,8 +26,22 @@ SESSION_TIMEOUT_SECONDS = 3600
 class StartSessionRequest(BaseModel):
     """Request to start a new RL session."""
 
-    task_id: str
+    session_ref: str | None = None
+    task_id: str | None = None
     api_key: str | None = None  # Reuse a previously-issued key (refresh)
+
+    @model_validator(mode="after")
+    def validate_session_reference(self) -> StartSessionRequest:
+        """Require one stable session namespace while retaining legacy clients."""
+        references = [ref for ref in (self.session_ref, self.task_id) if ref]
+        if len(references) != 1:
+            raise ValueError("exactly one of session_ref or task_id is required")
+        return self
+
+    @property
+    def canonical_session_ref(self) -> str:
+        """Return the new session reference or the legacy task identifier."""
+        return self.session_ref or self.task_id or ""
 
 
 class StartSessionResponse(BaseModel):
