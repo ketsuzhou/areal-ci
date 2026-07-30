@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install targeted test dependencies
-        run: python -m pip install aiohttp pytest httpx
+        run: python -m pip install aiohttp colorlog pytest httpx
       - name: Test diagnosis route, turn coverage, and node reward normalization
         run: >-
           python -m pytest -q
